@@ -16,6 +16,14 @@ defmodule Geex.Buffer do
   so headless callers (an LLM, a test) inspect state without a renderer. They never
   write — the `dispatch/2` chokepoint stands (ADR-0003). The cursor is **not** here;
   it is view-local (`Geex.View`) and surfaces via `Geex.Session.snapshot/0`.
+
+  **File I/O.** A buffer started with a `:path` loads that file's contents (a missing
+  path is a fresh empty buffer — the file is created on first `save/1`); an explicit
+  `:text` overrides (in-memory/test buffers). `save/1` writes the current text back to
+  the path and clears `dirty`. Loading and saving are *not* recorded edit commands —
+  they are I/O lifecycle, like navigation (ADR-0003) — so `save/1` never enters the
+  undo history; only content edits (insert/delete/replace) do. `Doc` round-trips
+  through `\\n` split/join, so `load → save` is byte-stable for LF files.
   """
 
   use GenServer
@@ -23,12 +31,21 @@ defmodule Geex.Buffer do
   alias Geex.EditorState
 
   @doc """
-  Start a buffer. Options: `:path` (file path, may be `nil`) and `:text` (initial
-  contents, default `""`).
+  Start a buffer. Options: `:path` (file path; its contents are loaded if the file
+  exists, else a fresh empty buffer) and `:text` (explicit initial contents, overrides
+  loading — for in-memory/test buffers).
   """
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts)
   end
+
+  @doc """
+  Write the buffer's current text to its `:path` and clear `dirty`. Returns `:ok`,
+  `{:error, :no_path}` (buffer has no backing file), or `{:error, posix}`. Not an edit
+  — `save/1` does not touch the undo history.
+  """
+  @spec save(GenServer.server()) :: :ok | {:error, term()}
+  def save(server), do: GenServer.call(server, :save)
 
   @doc """
   Apply a provenance-stamped `command` to this buffer. Returns `{:ok, snapshot}`
@@ -52,9 +69,18 @@ defmodule Geex.Buffer do
 
   @impl true
   def init(opts) do
+    path = Keyword.get(opts, :path)
+
+    text =
+      cond do
+        Keyword.has_key?(opts, :text) -> Keyword.get(opts, :text)
+        is_binary(path) and File.regular?(path) -> File.read!(path)
+        true -> ""
+      end
+
     state = %{
-      path: Keyword.get(opts, :path),
-      editor: EditorState.new(Keyword.get(opts, :text, "")),
+      path: path,
+      editor: EditorState.new(text),
       # newest-first internally (O(1) prepend); exposed oldest-first via snapshot.
       history: [],
       dirty: false
@@ -81,6 +107,15 @@ defmodule Geex.Buffer do
 
   def handle_call(:history, _from, state),
     do: {:reply, Enum.reverse(state.history), state}
+
+  def handle_call(:save, _from, %{path: nil} = state), do: {:reply, {:error, :no_path}, state}
+
+  def handle_call(:save, _from, state) do
+    case File.write(state.path, EditorState.text(state.editor)) do
+      :ok -> {:reply, :ok, %{state | dirty: false}}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
 
   defp build_snapshot(state) do
     history = Enum.reverse(state.history)
