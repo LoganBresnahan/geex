@@ -29,6 +29,8 @@ Each ADR: **Status** · **Context** (the forces) · **Decision** · **Consequenc
 | [0011](0011-direction-b-balance-beam.md) | Direction B on balance_beam; drop instructor_ex | Accepted |
 | [0012](0012-trust-and-enforcement.md) | Trust & enforcement: cooperative vs enforced | Accepted |
 | [0013](0013-jido-deferred.md) | Jido deferred (not adopted for the command system) | Accepted |
+| [0014](0014-editor-state-and-dispatch-ownership.md) | Editor-state & dispatch ownership (EditorState; cursor view-local; `run/1` gather/scatter) | Accepted |
+| [0015](0015-clipboard-subsystem.md) | Clipboard as a sibling subsystem (registers + ring history) | Accepted |
 
 ## Adding one
 

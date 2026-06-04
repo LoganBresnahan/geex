@@ -331,14 +331,21 @@ source, a *neutral field-spec* entry (§3 below), from which we render:
 ```elixir
 command :copy do
   arg :range, :coord_range, description: "Source range, e.g. 'a1-g3'"
-  arg :name,  :atom, default: :default, description: "Clipboard entry name"
-  description "Copy a range to the internal clipboard"
+  arg :name,  :atom, default: :default, description: "Clipboard register name"
+  description "Copy a range to the clipboard"
   run %{range: range, name: name}, state do
-    content = Buffer.get_range(state.buffer, range)
-    put_in(state.clipboard[name], content)
+    Geex.Clipboard.push(name, EditorState.read_range(state, range))
+    {:ok, state}   # copy reads the doc; it does not mutate EditorState
   end
 end
 ```
+
+> The runner operates on the buffer's **`EditorState`** ([ADR-0014](adr/0014-editor-state-and-dispatch-ownership.md)),
+> not a bare `Doc`. `copy` is the one case that targets the **clipboard subsystem**
+> ([ADR-0015](adr/0015-clipboard-subsystem.md)) rather than the document, so it returns
+> the state unchanged — its ring push is applied by `Geex.Dispatch.run/1`'s scatter step;
+> `cut`/`paste` resolve into *recorded* edits. (`:coord_range` / `:atom` are v0.2 arg
+> types; v0.1 ships `:integer` / `:string`.)
 
 **The inversion of pharos's #1 documented bug:** in pharos a tool name appears in
 *four* hand-synced places (definition, allow-list, dispatch case, registry
@@ -567,7 +574,8 @@ struct; cheap now, expensive to retrofit.
 
 ```elixir
 %Command.Insert{
-  pos: 4,
+  line: 0,
+  col: 4,
   text: "foo do\n  :ok\nend",
   meta: %Geex.Command.Meta{
     actor: {:llm, "claude-opus-4-8"},   # | :human | {:agent, agent_id}
@@ -929,7 +937,7 @@ and the already-pure `Renderer.diff/2` discipline — *assert against the value
    handle_line/1` is a pure `String.t() -> {:reply|:noreply|:protocol_error}`
    function; unit-test it with plain JSON strings (pharos proves this is the
    single best thing to port). Same for the macro-generated `parse/1`, the pure
-   `Geex.Dispatcher` over `%Command{}`, and the §3a field-spec→JSON-Schema
+   `Geex.Dispatch` over `%Command{}`, and the §3a field-spec→JSON-Schema
    renderer (assert the projected schema as data).
 2. **Property + Dialyzer (§5 mandates this).** Property-test the JSON-RPC
    envelope (id-type echo, request-vs-notification, the three outcomes) and the

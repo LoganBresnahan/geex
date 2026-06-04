@@ -8,8 +8,10 @@ defmodule Geex.Session do
     * `:minibuffer` — `%{mode: :inactive | :command, input: binary, cursor: non_neg_integer()}`
     * `:layout`     — placeholder; meaningful in v0.3 when panes split
 
-  Dispatch lives in `Geex.Dispatcher` (a module of pure functions);
-  Session's `handle_call` will route command structs through it.
+  Dispatch lives in `Geex.Dispatch`. The per-buffer `Geex.Buffer` process owns the
+  `EditorState` and the one undo history and applies commands via `Geex.Dispatch.run/1`;
+  Session holds only cross-buffer state (active buffer, minibuffer input). The clipboard
+  moves to a sibling `Geex.Clipboard` subsystem. See `doc/adr/0014` and `doc/adr/0015`.
   """
 
   use GenServer

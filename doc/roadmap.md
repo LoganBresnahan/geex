@@ -10,14 +10,23 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ---
 
-## Where we are (2026-05)
+## Where we are (2026-06)
 
-The virtual screen exists and is tested: `Cell`, `Screen`, `Renderer` (pure `diff/2`),
-`Rect`, with `async: true` ExUnit tests. `TerminalIO` (prim_tty single-writer),
-`Application` (feature-gated child pattern), and an `Input.Parser` exist. `Buffer` is a
-v0.1 stub (no edit ops / `get_text`); `Session` references a `Geex.Dispatcher` not yet
-written. **No deps** (`mix.exs` is `deps: []`). Design is locked; implementation of the
-command system is the next real work.
+The command-system **core** is built, tested, and committed (`bc4e205`, purely additive,
+83 tests + 8 doctests green): `Geex.Command` (macro → struct + neutral field-spec +
+`parse/1` + `run`), `Command.{Meta,Field,Type}`, `Geex.Buffer.Doc` (pure text model),
+`Geex.Dispatch` (`run/3` + deterministic `replay/2`), `Geex.CommandRegistry`, and
+`Commands.{Insert,Delete}`. The virtual screen (`Cell`/`Screen`/`Renderer`/`Rect`),
+`TerminalIO`, and `Input.Parser` predate it. `Buffer`/`Session` are still stubs;
+`CommandRegistry` and a dispatch entry point are not yet in the supervision tree.
+**No deps** (`mix.exs` is `deps: []`).
+
+A 2026-06 vision-alignment audit confirmed the spine is sound and set the next
+increment's architecture: widen the dispatch "world" from `Doc` to **`EditorState`**,
+keep cursor (view-local) and clipboard (sibling subsystem) out of it, and add the public
+`Geex.Dispatch.run/1` gather → pure-run → scatter+record entry — see
+[adr/0014](adr/0014-editor-state-and-dispatch-ownership.md) and
+[adr/0015](adr/0015-clipboard-subsystem.md).
 
 ---
 

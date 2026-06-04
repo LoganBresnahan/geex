@@ -11,10 +11,14 @@ and the human's live in different worlds.
 
 ## Decision
 
-**All** input — human keystroke, LLM tool-call (MCP), in-pane agent, extension, remote
-collaborator — becomes a `%Command{}` ([ADR-0002](0002-commands-as-values.md)) and runs
-through **one** dispatcher (`Geex.Dispatch.run/1`) into **one** undo history. Nothing
-writes a buffer directly.
+**Every edit** — a mutating human keystroke, an LLM tool-call (MCP), an in-pane agent,
+an extension, a remote collaborator — becomes a `%Command{}`
+([ADR-0002](0002-commands-as-values.md)) and runs through **one** dispatcher
+(`Geex.Dispatch.run/1`) into **one** undo history. Nothing writes a buffer directly.
+*Navigation* (cursor / selection / scroll) is view-local and is **not** a command; a
+cursor-relative edit bakes the resolved coordinates into the command at dispatch, and
+the dispatchable state is the buffer's `EditorState`
+([ADR-0014](0014-editor-state-and-dispatch-ownership.md)).
 
 ## Consequences
 
@@ -30,4 +34,6 @@ writes a buffer directly.
 
 ## See
 
-[vision.md](../vision.md) §2, [mcp-ai-integration.md](../mcp-ai-integration.md) §2, §14.
+[vision.md](../vision.md) §2, [mcp-ai-integration.md](../mcp-ai-integration.md) §2, §14;
+the state model in [ADR-0014](0014-editor-state-and-dispatch-ownership.md), the clipboard
+in [ADR-0015](0015-clipboard-subsystem.md).

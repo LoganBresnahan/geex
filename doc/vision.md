@@ -13,9 +13,9 @@ Every other editor bolts AI on as a *plugin* or *extension*: a parallel path tha
 reaches into the editor alongside the human's. geex inverts that. Its one
 load-bearing property:
 
-> **One path.** No matter where input comes from — a human keystroke, an LLM
-> tool-call, an extension, a remote collaborator — it becomes the same `%Command{}`
-> value and runs through the same dispatcher into the same undo history.
+> **One path.** Every *edit* — a mutating human keystroke, an LLM tool-call, an
+> extension, a remote collaborator — becomes the same `%Command{}` value and runs
+> through the same dispatcher into the same undo history.
 
 From that single property we get, almost for free:
 
@@ -23,6 +23,13 @@ From that single property we get, almost for free:
 - **Replay** — a command sequence re-runs deterministically (the backbone of testing AI edits).
 - **Collaboration** — a command from a remote node is just another command.
 - **Provenance** — every command is tagged with *who* (human / llm / agent) authored it.
+
+*Navigation is not an edit.* Cursor, selection, and scroll are view-local and
+ephemeral — an LLM never navigates, it edits by coordinate, so the shared path is
+precisely the *edit* vocabulary. A cursor-relative edit resolves the cursor into
+absolute coordinates baked into the command at dispatch ([adr/0014](adr/0014-editor-state-and-dispatch-ownership.md));
+the clipboard is a sibling subsystem with its own ring history, not part of the
+recorded state ([adr/0015](adr/0015-clipboard-subsystem.md)).
 
 The BEAM is why this is cheap: process-per-everything, OTP supervision, isolation,
 distribution, and hot reload mean crash-recovery, security, and "edit my buffer from
