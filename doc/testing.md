@@ -1,0 +1,107 @@
+# geex — Testing & verification
+
+Two parts:
+
+1. **[Strategy](#strategy)** — how geex is tested and why it's testable (the short
+   version of [mcp-ai-integration.md](mcp-ai-integration.md) §15, which has the
+   rationale).
+2. **[Verification log](#verification-log)** — an **append-only, dated, commit-anchored
+   record of what was checked by hand and considered "good" at a point in time.** This
+   is history to refer back to, not a plan; never rewrite past entries.
+
+---
+
+## Strategy
+
+geex is testable bottom-up because its hot paths are **pure** and its write path is a
+**value** (a `%Command{}`), not a side effect. The discipline, everywhere: **assert
+against the value** — buffer text, cursor, the command history — *never against rendered
+bytes*.
+
+The pyramid (detail + rationale in §15a):
+
+1. **Pure unit** — the highest-value, most portable layer. The macro-generated
+   `parse/1`, `Geex.Dispatch.apply_command/2` and `replay/2` over an
+   `%EditorState{}`, `Geex.EditorState` ops, and (later) `MCP.Protocol.handle_line/1`
+   and the field-spec→JSON-Schema renderer. All pure `value -> value`.
+2. **Property + Dialyzer** (§5 mandates this) — the §1 round-trip the compiler can't
+   enforce: `minibuffer-string → %Command{}` and `MCP-args → %Command{}` must yield the
+   *same* struct; the JSON-RPC envelope (id echo, request-vs-notification, the three
+   outcomes). *Lands with the MCP projection (v0.2).*
+3. **Integration** — `Dispatch.run/1 → Buffer → undo history` with provenance present
+   and correct; feature-gated supervision subtrees start/stop cleanly (mirroring the
+   `terminal_io_child/0` gate).
+4. **End-to-end dogfood-replay** — §15b/§15c.
+
+### The two cassette layers (keep them separate — §15c)
+
+- **(ii) `%Command{}`-sequence cassette** — geex-native, the spine. A recorded command
+  list replayed through `Dispatch.replay/2`, **diffed against a recorded golden state**
+  (a *pair* — never against a state the same replay regenerated). Deterministic, free,
+  no key, no model. **Available now**; it is the v0.1 exit criterion. See
+  [`test/geex/cassette_test.exs`](../test/geex/cassette_test.exs) +
+  [`test/fixtures/cassettes/`](../test/fixtures/cassettes/).
+- **(i) LLM-response cassette** — records the model's `{prompt → response}` so
+  Direction B replays with no API key. *Post-0.5, gated on the balance_beam decision.*
+
+### Dogfooding — when it comes in
+
+- **Now:** replay-as-regression (the (ii) cassette) exercises the real write path with
+  no model. The `Session.snapshot/0` / `Buffer.get_text/1` read-only surface built this
+  increment is exactly what headless assertion needs.
+- **Next slice (unlocked by this increment):** the headless LLM loop — point claude-code
+  at `geex --mcp` and an LLM edits real buffers. Needs the thin MCP slice
+  (`Protocol.handle_line/1` + `tools/list` + `tools/call`), §15b.
+- **Post-0.5 milestone (not a gate):** "geex editing geex."
+
+---
+
+## Verification log
+
+> Each entry: what shipped, the automated suite state, what was driven **by hand** and
+> the **observed** result, honest gaps, and the commit it was blessed at. Append only.
+
+### 2026-06-04 — Wire the command system into the running app (ADR-0014)
+
+**Scope.** Widened the dispatch "world" from a bare `Doc` to `Geex.EditorState`; gave
+`Geex.Buffer` ownership of the `EditorState` + the one undo history; added the public
+`Geex.Dispatch.run/1` (resolve active buffer → gather → apply → scatter → record); added
+the read-only `Session.snapshot/0` / `Buffer.{snapshot,get_text,history}` surface; wired
+`Geex.CommandRegistry` (seeded with `Insert`/`Delete`) into the supervision tree.
+
+**Automated.** `mix test` → **8 doctests, 102 tests, 0 failures** (was 83+8).
+`mix compile --warnings-as-errors` clean. New tests: `editor_state_test`, `buffer_test`,
+`session_test`, `supervision_test`, `cassette_test`; `dispatch_test` rewritten to the
+`EditorState` shape. The §15c-ii golden-pair cassette replays and is asserted against an
+independently-authored golden (`["world"]`), not a replay-regenerated state.
+
+**Manual verification** — driven against the live OTP app, terminal off
+(`MIX_ENV=test mix run`), exercising the whole spine end-to-end through the real
+supervision tree. Observed:
+
+| Step | Observed |
+|---|---|
+| `CommandRegistry.all/0` (in-tree) | `:delete`, `:insert` present; `lookup(:insert) → {:ok, Geex.Commands.Insert}` |
+| Open buffer + `Session.set_active_buffer/1` | `Session.active_buffer/0 → {:ok, #PID<…>}` |
+| Human edit via `Dispatch.run/1` | text → `"hello"` |
+| **LLM edit via the SAME path** | text → `"hello world"` |
+| `Session.snapshot/0` | `text: "hello world"`, `cursor: {0, 0}` (view-local), `version: 2`, history actors `[:human, {:llm, "claude-opus-4-8"}]` |
+| Out-of-range edit | `{:error, :row_out_of_range}`; state unchanged `{"hello world", 2}`, **not recorded** |
+| `Dispatch.replay/2` (frozen `at`) | text → `"world"`; replaying twice is `==` (deterministic) |
+
+**Good as of:** the commit carrying this entry (2026-06-04). The one-path / one-history
+invariant holds for edits across human + LLM origins, with honest provenance, and the
+replay property is proven before any AI code exists.
+
+**Not tested / deferred (honest gaps):**
+
+- **Cursor-relative resolution at dispatch** (the *gather-the-cursor* step of Fork-1=A):
+  the architecture is in place (cursor is view-local on `Geex.View`, out of
+  `EditorState`/history, surfaced read-only by `snapshot/0`), but there is **no
+  cursor-relative command yet** to resolve, so no resolve step was built. Deferred to the
+  first real consumer (interactive TUI typing), per the named-consumer rule
+  ([vision.md](vision.md) §3) — building it now would be speculative.
+- **Clipboard subsystem** (`Geex.Clipboard`, copy/cut/paste) — ADR-0015, not yet started.
+- **Buffer load/save** — `Buffer` holds text in memory; no file I/O round-trip yet.
+- **Property tests + Dialyzer** — arrive with the MCP projection (v0.2, §15a-2).
+- **MCP headless slice** — the §15b dogfood loop is unlocked but not yet built.

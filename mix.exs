@@ -7,6 +7,8 @@ defmodule Geex.MixProject do
       version: "0.1.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
+      # Cassette fixtures are data loaded via Code.eval_file/1, not test modules.
+      test_ignore_filters: [&String.starts_with?(&1, "test/fixtures/")],
       deps: deps()
     ]
   end

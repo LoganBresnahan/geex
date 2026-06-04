@@ -7,6 +7,7 @@ defmodule Geex.Commands.Delete do
   use Geex.Command
 
   alias Geex.Buffer.Doc
+  alias Geex.EditorState
 
   command :delete do
     description "Delete count graphemes starting at a (line, col) position"
@@ -14,8 +15,8 @@ defmodule Geex.Commands.Delete do
     arg :col, :integer, description: "0-based column (grapheme) index"
     arg :count, :integer, default: 1, description: "Number of graphemes to delete"
 
-    run cmd, doc do
-      Doc.delete(doc, {cmd.line, cmd.col}, cmd.count)
+    run cmd, state do
+      EditorState.update_doc(state, &Doc.delete(&1, {cmd.line, cmd.col}, cmd.count))
     end
   end
 end

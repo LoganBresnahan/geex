@@ -1,54 +1,75 @@
 defmodule Geex.Dispatch do
   @moduledoc """
-  The single shared path (ADR-0003, mcp-ai-integration.md §2).
+  The single shared path (ADR-0003, mcp-ai-integration.md §2), in two layers
+  (ADR-0014).
 
-  Every command — from the minibuffer, an MCP tool-call, an in-pane agent, or a
-  remote peer — runs through `run/3` into the same buffer and the same undo
-  history. `run/3` stamps provenance (ADR-0005), invokes the command's `run/2`
-  against the document, and returns the document plus the provenance-stamped
-  command so the caller (a `Geex.Buffer` process) can record it in history.
+  **Pure inner layer.** `apply_command/2` runs one already-stamped `%Command{}`
+  against an `%Geex.EditorState{}` and returns `{:ok, state} | {:error, reason}`. It
+  does not stamp provenance and touches no process — the transport stamps the command
+  (via `Geex.Command.put_meta/2`) before it ever reaches here. `replay/2` folds a
+  recorded command list over it; because it re-runs the recorded values without
+  re-stamping (each command keeps its original `meta.at`), replay is deterministic —
+  the free, no-LLM regression backbone (§15c). Both functions are pure and are the
+  most valuable thing to unit-test.
 
-  `replay/2` re-applies a recorded command list to an initial document. It does
-  **not** re-stamp — recorded commands keep their original `meta` (including
-  `at`), so replay is deterministic (§15c). This is the free, no-LLM regression
-  test: record a `%Command{}` sequence, replay it, assert the document.
-
-  In v0.1 the document is passed in explicitly (`run/3` is pure over a `Doc`).
-  The process-resident entry point — `run(%Command{})` resolving the active
-  buffer — wires on top of this when `Geex.Session`/`Geex.Buffer` are connected.
+  **Impure outer layer.** `run/1` is the public entry every actor uses (minibuffer,
+  MCP tool-call, in-pane agent, remote peer). It takes a provenance-stamped command,
+  resolves the **active buffer** from `Geex.Session`, and asks that `Geex.Buffer`
+  process to **gather → apply → scatter → record**: gather its `EditorState`, apply
+  the command, scatter the new state back, and append the command to its one undo
+  history. The gather/scatter/record happens atomically inside the buffer process, so
+  distributed state never spreads the pure runner across processes (ADR-0014).
   """
 
-  alias Geex.Buffer.Doc
-  alias Geex.Command.Meta
+  alias Geex.EditorState
 
   @doc """
-  Run `command` against `doc`, stamping `meta`. Returns `{:ok, new_doc,
-  stamped_command}` (record the command in history) or `{:error, reason}`.
-  """
-  @spec run(struct(), Doc.t(), Meta.t()) ::
-          {:ok, Doc.t(), struct()} | {:error, term()}
-  def run(command, %Doc{} = doc, %Meta{} = meta) when is_struct(command) do
-    command = Geex.Command.put_meta(command, meta)
+  Apply one (already provenance-stamped) command to `state`. Pure.
 
-    case command.__struct__.run(command, doc) do
-      {:ok, %Doc{} = new_doc} -> {:ok, new_doc, command}
+  Returns `{:ok, state}` or `{:error, reason}`. A command whose `run/2` returns an
+  unexpected shape becomes `{:error, {:bad_run_return, other}}` rather than crashing
+  the caller.
+  """
+  @spec apply_command(struct(), EditorState.t()) :: {:ok, EditorState.t()} | {:error, term()}
+  def apply_command(command, %EditorState{} = state) when is_struct(command) do
+    case command.__struct__.run(command, state) do
+      {:ok, %EditorState{} = next} -> {:ok, next}
       {:error, reason} -> {:error, reason}
       other -> {:error, {:bad_run_return, other}}
     end
   end
 
   @doc """
-  Re-apply a recorded command list to `doc`, preserving each command's `meta`.
-  Returns `{:ok, doc}` or `{:error, {reason, command}}` for the first failure.
+  Re-apply a recorded command list to `state`, preserving each command's `meta`.
+
+  Returns `{:ok, state}` or `{:error, {reason, command}}` for the first failure.
+  Deterministic: it re-runs recorded values, it does not re-stamp them (§15c).
   """
-  @spec replay(Doc.t(), [struct()]) :: {:ok, Doc.t()} | {:error, {term(), struct()}}
-  def replay(%Doc{} = doc, commands) when is_list(commands) do
-    Enum.reduce_while(commands, {:ok, doc}, fn command, {:ok, acc} ->
-      case command.__struct__.run(command, acc) do
-        {:ok, %Doc{} = next} -> {:cont, {:ok, next}}
+  @spec replay(EditorState.t(), [struct()]) ::
+          {:ok, EditorState.t()} | {:error, {term(), struct()}}
+  def replay(%EditorState{} = state, commands) when is_list(commands) do
+    Enum.reduce_while(commands, {:ok, state}, fn command, {:ok, acc} ->
+      case apply_command(command, acc) do
+        {:ok, next} -> {:cont, {:ok, next}}
         {:error, reason} -> {:halt, {:error, {reason, command}}}
-        other -> {:halt, {:error, {{:bad_run_return, other}, command}}}
       end
     end)
+  end
+
+  @doc """
+  Run a provenance-stamped `command` against the active buffer's `EditorState`,
+  recording it in that buffer's one undo history. Returns `{:ok, snapshot}` (see
+  `Geex.Buffer.snapshot/1`) or `{:error, reason}` — `{:error, :no_active_buffer}`
+  if no buffer is active.
+
+  The transport is expected to have stamped provenance (`Geex.Command.put_meta/2`)
+  before calling this — `run/1` does not stamp.
+  """
+  @spec run(struct()) :: {:ok, map()} | {:error, term()}
+  def run(command) when is_struct(command) do
+    case Geex.Session.active_buffer() do
+      {:ok, pid} -> Geex.Buffer.dispatch(pid, command)
+      :error -> {:error, :no_active_buffer}
+    end
   end
 end

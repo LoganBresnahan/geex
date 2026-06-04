@@ -1,0 +1,22 @@
+defmodule Geex.SupervisionTest do
+  # Inspects the running application supervision tree — not parallel-safe.
+  use ExUnit.Case, async: false
+
+  alias Geex.CommandRegistry
+  alias Geex.Commands.{Delete, Insert}
+
+  test "CommandRegistry runs in the supervision tree, seeded with the built-ins" do
+    assert is_pid(Process.whereis(CommandRegistry))
+
+    names = CommandRegistry.all() |> Enum.map(& &1.name) |> Enum.sort()
+    assert names == [:delete, :insert]
+
+    assert CommandRegistry.lookup(:insert) == {:ok, Insert}
+    assert CommandRegistry.lookup(:delete) == {:ok, Delete}
+  end
+
+  test "Session and BufferSupervisor are up alongside it" do
+    assert is_pid(Process.whereis(Geex.Session))
+    assert is_pid(Process.whereis(Geex.BufferSupervisor))
+  end
+end

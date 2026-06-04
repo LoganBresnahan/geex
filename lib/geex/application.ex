@@ -7,7 +7,8 @@ defmodule Geex.Application do
   def start(_type, _args) do
     children =
       [
-        {Registry, keys: :unique, name: Geex.Registry}
+        {Registry, keys: :unique, name: Geex.Registry},
+        {Geex.CommandRegistry, commands: [Geex.Commands.Insert, Geex.Commands.Delete]}
       ] ++
         terminal_io_child() ++
         [

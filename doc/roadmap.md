@@ -12,21 +12,25 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-The command-system **core** is built, tested, and committed (`bc4e205`, purely additive,
-83 tests + 8 doctests green): `Geex.Command` (macro → struct + neutral field-spec +
-`parse/1` + `run`), `Command.{Meta,Field,Type}`, `Geex.Buffer.Doc` (pure text model),
-`Geex.Dispatch` (`run/3` + deterministic `replay/2`), `Geex.CommandRegistry`, and
-`Commands.{Insert,Delete}`. The virtual screen (`Cell`/`Screen`/`Renderer`/`Rect`),
-`TerminalIO`, and `Input.Parser` predate it. `Buffer`/`Session` are still stubs;
-`CommandRegistry` and a dispatch entry point are not yet in the supervision tree.
-**No deps** (`mix.exs` is `deps: []`).
+The command system is built **and wired into the running app** (ADR-0014). The
+dispatch "world" is `Geex.EditorState` (today `{doc}`); a command's pure runner is
+`run(command, %EditorState{})`. `Geex.Dispatch` has the pure inner layer
+(`apply_command/2` + deterministic `replay/2`) and the public `run/1` (resolve active
+buffer → gather → apply → scatter → record). `Geex.Buffer` owns the `EditorState` + the
+one undo history and exposes the read-only `snapshot/1` / `get_text/1` / `history/1`
+surface; `Geex.Session` owns the active-buffer pointer + the view-local cursor and
+exposes `snapshot/0` (§15b). `Geex.CommandRegistry` (seeded with `Insert`/`Delete`) is in
+the supervision tree. The macro (`Geex.Command`), `Command.{Meta,Field,Type}`,
+`Geex.Buffer.Doc`, the virtual screen (`Cell`/`Screen`/`Renderer`/`Rect`), `TerminalIO`,
+and `Input.Parser` round it out. **102 tests + 8 doctests green**, including the §15c-ii
+golden-pair cassette ([test/geex/cassette_test.exs](../test/geex/cassette_test.exs)) —
+the v0.1 replay exit criterion, proven with no LLM. **No deps** (`mix.exs` is
+`deps: []`). What's verified by hand is logged in [testing.md](testing.md).
 
-A 2026-06 vision-alignment audit confirmed the spine is sound and set the next
-increment's architecture: widen the dispatch "world" from `Doc` to **`EditorState`**,
-keep cursor (view-local) and clipboard (sibling subsystem) out of it, and add the public
-`Geex.Dispatch.run/1` gather → pure-run → scatter+record entry — see
-[adr/0014](adr/0014-editor-state-and-dispatch-ownership.md) and
-[adr/0015](adr/0015-clipboard-subsystem.md).
+Cursor-relative resolution and the `Geex.Clipboard` subsystem are designed
+([adr/0014](adr/0014-editor-state-and-dispatch-ownership.md),
+[adr/0015](adr/0015-clipboard-subsystem.md)) but deferred to their first real consumer
+(interactive TUI typing; copy/cut/paste) per the named-consumer rule.
 
 ---
 

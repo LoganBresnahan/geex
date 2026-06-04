@@ -14,13 +14,17 @@ defmodule Geex.Command do
     * `__command__/0` — `%{name, module, description}` for the registry;
     * `parse/1` — coerce an args map (string- or atom-keyed) into the struct,
       the **one parser** the minibuffer and an MCP tool-call both use (§1);
-    * `run/2` — the body from the `run` block, `run(command, doc) -> {:ok, doc}
-      | {:error, reason}`.
+    * `run/2` — the body from the `run` block, `run(command, %EditorState{}) ->
+      {:ok, state} | {:error, reason}` — the pure inner layer of dispatch
+      (ADR-0014). The command operates on the buffer's recorded `Geex.EditorState`,
+      not a bare `Doc`.
 
   ## Example
 
       defmodule Geex.Commands.Insert do
         use Geex.Command
+
+        alias Geex.{Buffer.Doc, EditorState}
 
         command :insert do
           description "Insert text at a position"
@@ -28,8 +32,8 @@ defmodule Geex.Command do
           arg :col,  :integer, description: "0-based column"
           arg :text, :string,  description: "Text to insert"
 
-          run cmd, doc do
-            Geex.Buffer.Doc.insert(doc, {cmd.line, cmd.col}, cmd.text)
+          run cmd, state do
+            EditorState.update_doc(state, &Doc.insert(&1, {cmd.line, cmd.col}, cmd.text))
           end
         end
       end
@@ -75,10 +79,15 @@ defmodule Geex.Command do
     quote do: @geex_command_desc(unquote(text))
   end
 
-  @doc "Define the runner: `run command_pattern, doc_pattern do ... end`."
-  defmacro run(cmd_pattern, doc_pattern, do: body) do
+  @doc """
+  Define the runner: `run command_pattern, state_pattern do ... end`.
+
+  The body receives the command and the buffer's `Geex.EditorState` and returns
+  `{:ok, state} | {:error, reason}` (ADR-0014).
+  """
+  defmacro run(cmd_pattern, state_pattern, do: body) do
     quote do
-      def run(unquote(cmd_pattern), unquote(doc_pattern)), do: unquote(body)
+      def run(unquote(cmd_pattern), unquote(state_pattern)), do: unquote(body)
     end
   end
 

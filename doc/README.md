@@ -12,6 +12,7 @@ If you read one thing, read **[vision.md](vision.md)**.
 | **[vision.md](vision.md)** | The north star — what geex is & is not, the one shared path, the world-vs-brain boundary | First. Always. |
 | **[roadmap.md](roadmap.md)** | Staged plan, v0.1 → v0.5 → beyond (editor core + AI layer) | You want to know what's next / what ships when |
 | **[mcp-ai-integration.md](mcp-ai-integration.md)** | The detailed AI-layer design: the two directions, transport layers, the MCP server, security, the extension/capability model, testing & dogfooding | You're building or changing the AI layer |
+| **[testing.md](testing.md)** | Test strategy (the pyramid) + the append-only **verification log** of what's been hand-checked and called "good", and when | You want the test approach, or the history of what's verified |
 | **[adr/](adr/)** | The decision ledger — every load-bearing decision, why, and its consequences | You're asking "why is it this way?" |
 | **[notes.md](notes.md)** | The original design-space exploration: why BEAM, extension substrates, frontend options, the command system, the AI loop, TTY fundamentals | You want the background reasoning / the road not taken |
 | **[research/](research/)** | Recovered background research (pharos-mcp study; AI-integration survey of Jido / balance_beam / instructor_ex / distributed Erlang) | You want the raw inputs behind a decision |
@@ -32,9 +33,12 @@ See [adr/0002](adr/0002-commands-as-values.md), [adr/0003](adr/0003-one-shared-p
 
 ## Status
 
-Design-locked; implementation of the command system (v0.1) is the next work. Virtual
-screen + renderer are built and tested. See [roadmap.md](roadmap.md) for the current
-stage and [mcp-ai-integration.md](mcp-ai-integration.md) §12 for AI-layer sequencing.
+v0.1 in progress: the command system is built **and wired into the running app** — every
+edit (human or LLM) flows through `Geex.Dispatch.run/1` into the buffer's one undo
+history with provenance, and the §15c replay property is proven (no LLM). Virtual screen
++ renderer predate it. See [roadmap.md](roadmap.md) for the current stage,
+[testing.md](testing.md) for what's verified, and
+[mcp-ai-integration.md](mcp-ai-integration.md) §12 for AI-layer sequencing.
 
 ## Conventions
 
