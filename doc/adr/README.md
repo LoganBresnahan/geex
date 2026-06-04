@@ -27,10 +27,13 @@ Each ADR: **Status** · **Context** (the forces) · **Decision** · **Consequenc
 | [0009](0009-three-tier-extension-model.md) | Three-tier extension / capability model | Accepted |
 | [0010](0010-disk-truth-lsp-v05.md) | Disk-truth-only LSP for v0.5 | Accepted |
 | [0011](0011-direction-b-balance-beam.md) | Direction B on balance_beam; drop instructor_ex | Accepted |
-| [0012](0012-trust-and-enforcement.md) | Trust & enforcement: cooperative vs enforced | Accepted |
+| [0012](0012-trust-and-enforcement.md) | Trust & enforcement: cooperative vs enforced | Accepted (amended by 0016/0017) |
 | [0013](0013-jido-deferred.md) | Jido deferred (not adopted for the command system) | Accepted |
 | [0014](0014-editor-state-and-dispatch-ownership.md) | Editor-state & dispatch ownership (EditorState; cursor view-local; `run/1` gather/scatter) | Accepted |
 | [0015](0015-clipboard-subsystem.md) | Clipboard as a sibling subsystem (registers + ring history) | Accepted |
+| [0016](0016-external-harness-integration.md) | External harness integration & the enforcement ladder (per-harness preset; OS-sandbox rung) | Accepted |
+| [0017](0017-reconcile-file-watch.md) | Reconcile: file-watch + `:external` provenance (the honest floor) | Accepted |
+| [0018](0018-mcp-transport-streamable-http.md) | MCP transport: Streamable HTTP, connect-first, dogfood == production | Accepted |
 
 ## Adding one
 

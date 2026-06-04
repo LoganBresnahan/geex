@@ -16,6 +16,7 @@ If you read one thing, read **[vision.md](vision.md)**.
 | **[adr/](adr/)** | The decision ledger — every load-bearing decision, why, and its consequences | You're asking "why is it this way?" |
 | **[notes.md](notes.md)** | The original design-space exploration: why BEAM, extension substrates, frontend options, the command system, the AI loop, TTY fundamentals | You want the background reasoning / the road not taken |
 | **[research/](research/)** | Recovered background research (pharos-mcp study; AI-integration survey of Jido / balance_beam / instructor_ex / distributed Erlang) | You want the raw inputs behind a decision |
+| **[evidence/](evidence/)** | Reproducible empirical evidence behind a decision (e.g. the Rung-2 OS-sandbox smoke test for [adr/0016](adr/0016-external-harness-integration.md)) | A decision cites a test/measurement |
 
 ## The one idea
 

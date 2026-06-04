@@ -2,6 +2,10 @@
 
 - **Status:** Accepted
 - **Date:** 2026-05-28
+- **Amended by:** [ADR-0016](0016-external-harness-integration.md) (the cooperative grant
+  becomes a concrete per-harness preset; the binary becomes a ladder; "enforced" splits
+  into Rung 2 OS-sandbox / Rung 3 WASM), [ADR-0017](0017-reconcile-file-watch.md) (reconcile
+  gets a module shape)
 
 ## Context
 
@@ -29,7 +33,11 @@ on a client. Two legitimate regimes:
 - Hard enforcement requires either scoping an external agent's tools **or** hosting the
   agent inside geex — a decision made *where the agent lives*.
 - WASM containment is for *code running in geex's VM*, not for wrapping an external CLI
-  (containerizing claude-code-the-Node-process is the wrong layer).
+  (containerizing claude-code-the-Node-process is the wrong layer). **An *OS* sandbox,
+  however, is the right layer for that same process** — see the ladder in
+  [ADR-0016](0016-external-harness-integration.md), which splits this ADR's single
+  "enforced" regime into Rung 2 (OS-sandbox, for external harnesses) and Rung 3 (WASM, for
+  geex's own in-VM guests).
 
 ## See
 

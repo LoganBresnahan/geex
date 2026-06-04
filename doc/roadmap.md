@@ -32,6 +32,13 @@ Cursor-relative resolution and the `Geex.Clipboard` subsystem are designed
 [adr/0015](adr/0015-clipboard-subsystem.md)) but deferred to their first real consumer
 (interactive TUI typing; copy/cut/paste) per the named-consumer rule.
 
+The v0.5 AI-layer shape is also now decided: how geex works with pre-built harnesses
+(per-harness presets + the enforcement ladder, [adr/0016](adr/0016-external-harness-integration.md)),
+the honest reconcile floor ([adr/0017](adr/0017-reconcile-file-watch.md)), and the MCP
+transport (loopback Streamable HTTP, dogfood == production,
+[adr/0018](adr/0018-mcp-transport-streamable-http.md)) — the OS-sandbox enforced rung is
+smoke-tested ([evidence](evidence/rung2-sandbox-smoke/)).
+
 ---
 
 ## v0.1 — The command system + a usable TUI (the foundation)
@@ -66,25 +73,37 @@ Exit criteria: every command auto-exports as an MCP tool schema with no hand-syn
 
 ## v0.5 — Direction A: the LLM drives geex (the headline)
 
-**Goal:** an external LLM edits real buffers through the same path a human does.
+**Goal:** an external harness edits real buffers through the same path a human does,
+by **attaching to the running geex** — dogfood == production.
 
 Ships:
-- **`Geex.MCP.{Protocol,Dispatch,Stdio,Writer,Supervisor}`** — the pharos-ported pure
-  core + the two Port gotchas ([adr/0006](adr/0006-elixir-not-gleam.md)), feature-gated
-  (`start_mcp`, default-off).
-- A **thin headless slice first** (`handle_line/1` + `tools/list` + `tools/call`, TUI
-  off) as the dogfood/test harness — point claude-code at `geex --mcp` and an LLM edits
-  buffers headlessly (§15b).
+- **`Geex.MCP.{Protocol,Dispatch,…}`** — the transport-agnostic protocol core first
+  (`handle_line/1`, `tools/list` from the field-spec, `tools/call → Dispatch.run/1`,
+  provenance), the pharos-ported pure-`handle_line` discipline
+  ([adr/0006](adr/0006-elixir-not-gleam.md)), feature-gated (default-off).
+- **Loopback Streamable HTTP transport (the live dogfood)** served from `geex --serve`
+  (`Bandit`+`Plug` — geex's first dep); a real harness *connects* and edits land in the
+  live session ([adr/0018](adr/0018-mcp-transport-streamable-http.md)). stdio is demoted
+  to a hermetic CI/conformance harness.
+- **Harness presets + the reconcile floor** — checked-in per-harness presets (deny
+  built-in writers, point MCP config at geex) and `Geex.Reconcile` (out-of-band disk
+  writes → `%Command{}` tagged `:external`, never silent)
+  ([adr/0016](adr/0016-external-harness-integration.md),
+  [adr/0017](adr/0017-reconcile-file-watch.md)).
 - **MCP-client connection to an external pharos** for LSP — **disk-truth only**; pharos
   is *not bundled* ([adr/0008](adr/0008-pharos-not-bundled.md),
   [adr/0010](adr/0010-disk-truth-lsp-v05.md)).
 
-Exit criteria: claude-code edits geex buffers via MCP tools; every edit is a
-provenance-tagged `%Command{}` in the shared undo history; sessions are replayable.
+Exit criteria: a real harness (claude-code first) connects to the running geex over
+loopback HTTP and edits buffers; every edit is a provenance-tagged `%Command{}` in the
+live shared undo history; out-of-band writes are reconciled as `:external`; sessions
+replay.
 
 v0.5 **non-goals** (deferred, [mcp-ai-integration.md](mcp-ai-integration.md) §12):
 unsaved-state LSP, WASM extension host, third-party extension API, distributed Erlang,
-HTTP/WS, multi-client, image/resource content blocks.
+*remote* HTTP / WS / TLS / multi-client (v0.5 HTTP is **loopback only**), image/resource
+content blocks, OS-sandbox *enforced* rung (lean on harnesses' own sandboxes; geex builds
+none — [adr/0016](adr/0016-external-harness-integration.md)).
 
 ## Post-0.5 — Direction B, extensions, distribution
 
@@ -96,11 +115,16 @@ Each gated on a **named consumer** (the brain/world test, [vision.md](vision.md)
   LLM-response cassettes (§15c-i) + eval ride on this.
 - **Editor-state contract / pharos co-location (§8)** — only if a feature needs
   unsaved-state answers *and* stdio warmup is a measured bottleneck.
+- **Enforcement ladder, upper rungs ([adr/0016](adr/0016-external-harness-integration.md))**
+  — Rung 2 *OS-sandbox enforced* config (lean on Codex/Claude Code shipped sandboxes;
+  optional geex bubblewrap wrapper for sandbox-less harnesses); Rung 3 *WASI-P2/wasmex*
+  for thin geex-authored guests only. Gated on a named consumer.
 - **Extension tiers 2–3 (§14)** — wasmex sandbox; Gleam typed extension API — when a
   real (untrusted / third-party) extension author exists.
-- **Layers 3–4** — distributed-Erlang collab; HTTP/WS+TLS — when a remote/browser
-  consumer + security model exist ([adr/0001](adr/0001-build-on-the-beam.md) gives the
-  primitive; the trust gate is the work).
+- **Layers 3–4 (remote)** — distributed-Erlang collab; *remote* HTTP/WS+TLS + multi-client
+  — when a remote/browser consumer + security model exist (v0.5 already ships loopback
+  HTTP, [adr/0018](adr/0018-mcp-transport-streamable-http.md); the trust gate for remote is
+  the work).
 
 ---
 

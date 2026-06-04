@@ -49,9 +49,13 @@ The pyramid (detail + rationale in §15a):
 - **Now:** replay-as-regression (the (ii) cassette) exercises the real write path with
   no model. The `Session.snapshot/0` / `Buffer.get_text/1` read-only surface built this
   increment is exactly what headless assertion needs.
-- **Next slice (unlocked by this increment):** the headless LLM loop — point claude-code
-  at `geex --mcp` and an LLM edits real buffers. Needs the thin MCP slice
-  (`Protocol.handle_line/1` + `tools/list` + `tools/call`), §15b.
+- **Next:** the real dogfood — a harness *connects* to the running geex over loopback
+  Streamable HTTP (`geex --serve`) and edits land in the live session, so **dogfood ==
+  production** ([adr/0018](adr/0018-mcp-transport-streamable-http.md)). Needs the
+  transport-agnostic protocol core (`Protocol.handle_line/1` + `tools/list` +
+  `tools/call`) then the HTTP transport; stdio is the hermetic CI harness, not the
+  dogfood (§15b). The `Session.snapshot/0` / `Buffer.get_text/1` surface built earlier is
+  what headless assertion needs.
 - **Post-0.5 milestone (not a gate):** "geex editing geex."
 
 ---

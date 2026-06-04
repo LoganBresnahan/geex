@@ -184,9 +184,15 @@ command arrived on. Add a transport only when a named consumer exists.
 | Layer | Transport | Consumer | When | Security |
 |---|---|---|---|---|
 | **1** | In-VM direct dispatch | minibuffer, in-pane AI, Gleam extension, co-located pharos | **now (free)** | process isolation; PID-as-capability |
-| **2** | stdio JSON-RPC (MCP) | external LLM (claude-code) | **v0.5** | local process, inherits user's trust |
+| **2** | stdio JSON-RPC (MCP) | Mode-1 headless tool; **CI / conformance harness** | **v0.5 (CI)** | local process, inherits user's trust |
 | **3** | Distributed Erlang (`:erpc`) | remote BEAM agents, multi-node collab | later | **capability/auth gate required** |
-| **4** | HTTP/WS + TLS | browser clients, remote-collab product | later | TLS + auth + origin validation |
+| **4** | HTTP (Streamable HTTP, MCP) | **external harness attaches to the running geex (Mode 2)**; browser/remote later | **v0.5 (loopback)** / remote later | loopback-bind + `Origin` (TLS+auth when remote) |
+
+> **Transport choice for harnesses — [adr/0018](adr/0018-mcp-transport-streamable-http.md):**
+> production = a harness *connects* to the long-running geex, so the v0.5 dogfood/production
+> transport is **loopback Streamable HTTP (Layer 4)**, *not* stdio. stdio (Layer 2) is
+> demoted to a hermetic CI/conformance harness. Both are adapters over the same pure
+> dispatcher — a transport-ordering change, not a spine change.
 
 ### Layer 1 — in-VM direct dispatch (the privileged path)
 
@@ -201,12 +207,15 @@ state into pharos. geex is a **first-party BEAM editor** — it delivers that sa
 state as native Erlang messages to a co-located pharos's LSP pool. We want the
 bridge's *semantic contract*, not its transport (§8).
 
-### Layer 2 — stdio JSON-RPC (the v0.5 AI feature)
+### Layer 2 — stdio JSON-RPC (the CI / conformance harness)
 
 A single-process, newline-delimited JSON-RPC server exposing commands as MCP
-tools to an external LLM. Port pharos's pure `handle_line/1` seam and its
-stdout-cleanliness discipline (§4, §7). This is the only transport with a
-concrete v0.5 consumer.
+tools. Port pharos's pure `handle_line/1` seam and its stdout-cleanliness
+discipline (§4, §7). This is **Mode 1** — the harness *spawns* a throwaway
+headless geex (§15b); useful as a hermetic CI/conformance + cassette-replay
+harness, **but it is not the production path** (it never attaches to the running
+editor's live session). Live dogfood uses Layer 4 — see
+[adr/0018](adr/0018-mcp-transport-streamable-http.md).
 
 ### Layer 3 — distributed Erlang (collab / remote agents)
 
@@ -220,12 +229,19 @@ The notes.md collab primitive — `{BufferPid, Node@host} ! {insert, Pos, Text}`
 works literally, but route it through `Geex.Dispatch` on the remote node so it
 inherits undo/provenance, rather than messaging buffer PIDs raw.
 
-### Layer 4 — HTTP/WS + TLS (only if remote/browser becomes a product)
+### Layer 4 — HTTP (MCP Streamable HTTP)
 
-Defer entirely. pharos shows it's a clean addition to the same pure core (its
-HTTP transport is `mist` + the same `handle_line`). Becomes relevant only if
-browser-based real-time collaboration becomes the *headline* feature — which
-notes.md flags as a meaningfully different product.
+**The v0.5 harness transport (loopback).** This is **Mode 2** — the harness
+*connects* to the long-running geex, so edits land in the live session with
+provenance ([adr/0018](adr/0018-mcp-transport-streamable-http.md)). It is a clean
+adapter over the same pure core (`handle_line/1`), served from a `Bandit`+`Plug`
+child (geex's first dependency — "own the technique, rent the transport",
+[adr/0011](adr/0011-direction-b-balance-beam.md)). v0.5 scope is **loopback only**
+(bind `127.0.0.1`, validate `Origin`, no auth); remote exposure, WS, TLS, and
+multi-client are deferred to when a browser/remote-collab consumer exists. The
+enforced-sandbox rung ([adr/0016](adr/0016-external-harness-integration.md))
+requires exactly this connect transport (geex outside the sandbox, harness
+connects in over loopback).
 
 > **The dual axis (§14):** these four layers are *inbound* — who reaches geex's
 > dispatcher. geex is also an MCP *client* that connects **outbound** to
@@ -578,7 +594,7 @@ struct; cheap now, expensive to retrofit.
   col: 4,
   text: "foo do\n  :ok\nend",
   meta: %Geex.Command.Meta{
-    actor: {:llm, "claude-opus-4-8"},   # | :human | {:agent, agent_id}
+    actor: {:llm, "claude-opus-4-8"},   # | :human | {:agent, id} | {:extension, id} | :external
     at:    ~U[2026-05-28 18:40:00Z],
     prompt_hash: "ab12…",               # nil for :human
     origin: %{turn_id: "t_7f3a", seq: 2} # links a sequence of commands to one
@@ -589,6 +605,11 @@ struct; cheap now, expensive to retrofit.
 `origin` (turn_id + seq) is what makes composite-agent edits revertable as a unit
 without a second ledger — see §13 "Provenance for composite commands". It rides on
 the value, so it survives remote dispatch (§3 layer 3) exactly as `actor` does.
+
+`:external` tags an edit geex did **not** mediate — an out-of-band disk write reconciled
+back into the buffer ([adr/0017](adr/0017-reconcile-file-watch.md)). geex never fabricates
+authorship it can't back: a write it didn't see through the door is `:external`, never
+`{:llm, _}` or `:human` ([adr/0012](adr/0012-trust-and-enforcement.md)).
 
 A history slice is then self-describing:
 
@@ -790,11 +811,14 @@ Aligned with notes.md (AI loop is v0.5+; design the command system now).
    consumes these. *This is the load-bearing work that must be right early.*
 2. **MCP tool export (the projection).** `tools_list/0` + JSON-Schema renderer
    over the field-spec. Free once the macro emits the neutral spec.
-3. **MCP server / Direction A (v0.5).** `Geex.MCP.{Protocol,Dispatch,Stdio,
-   Writer,Supervisor}`. Layers 1–2. The headline AI feature. *Refinement (§15b):*
-   a **thin headless slice** — `handle_line/1` + `tools/list` + `tools/call` over
-   stdio, TUI off — can land right after step 1 as the dogfood/test harness,
-   ahead of the full server. Same spine, reduced subset, not a reordering.
+3. **MCP server / Direction A (v0.5).** `Geex.MCP.{Protocol,Dispatch,…}` — the
+   transport-agnostic protocol core first (`handle_line/1`, `tools/list`,
+   `tools/call → Dispatch.run/1`, provenance), then the **loopback Streamable HTTP
+   transport** (Layer 4) as the live dogfood — a real harness *attaches* to the
+   running geex (Mode 2), so dogfood == production
+   ([adr/0018](adr/0018-mcp-transport-streamable-http.md)). The stdio slice (Layer
+   2, Mode 1) is demoted to a hermetic CI/conformance harness. Same spine, two
+   adapters; the live one is HTTP.
 4. **Direction B (post-0.5).** `Geex.AI` wrapping `instructor_ex`; in-editor AI
    features that emit commands through the Direction-A dispatcher. The
    balance_beam wrapper slice (`Geex.AI.BB.*`: supervised exec, replay/eval) is
@@ -811,7 +835,9 @@ Aligned with notes.md (AI loop is v0.5+; design the command system now).
 
 ### v0.5 explicit non-goals
 
-- No HTTP/WS transport, no sessions, no multi-client.
+- HTTP is **loopback Streamable HTTP only** (bind `127.0.0.1`, `Origin` check, no
+  auth) — no *remote* HTTP, no WS, no TLS, no multi-client sessions
+  ([adr/0018](adr/0018-mcp-transport-streamable-http.md)).
 - No distributed-Erlang exposure.
 - No cancellation `send_exit` (wire the registry; no-op the kill).
 - No `image`/`resource` content blocks.
@@ -881,9 +907,18 @@ Three tiers of extension/capability, all funnelling to the same dispatcher:
 **Invariant (unchanged):** no tier writes buffers. Each produces a
 schema-validated `%Command{}` value and runs it through the one dispatcher into
 the one undo history (§2, Decision 1, §7 provenance — `actor` distinguishes
-`{:extension, id}` / `{:llm, _}` / `:human`). The trust ladder gates *code
-execution*; the dispatcher gates *capability* — they compose (survey: wasmex host
-export bottoming out at `Dispatch.run/1`; dispatcher-as-chokepoint).
+`{:extension, id}` / `{:llm, _}` / `:human` / `:external`). The trust ladder gates
+*code execution*; the dispatcher gates *capability* — they compose (survey: wasmex
+host export bottoming out at `Dispatch.run/1`; dispatcher-as-chokepoint).
+
+> **An external pre-built harness (Claude Code, Codex, …) is *not* one of these
+> three tiers.** The tiers are capabilities geex hosts or connects *out* to; an
+> external CLI drives geex *inbound* as an MCP client and is governed by the
+> cooperative regime + enforcement ladder of
+> [adr/0012](adr/0012-trust-and-enforcement.md) / [adr/0016](adr/0016-external-harness-integration.md)
+> — scoped by a per-harness preset, optionally OS-sandboxed (Rung 2), with reconcile
+> as the floor. Do not file Claude Code as tier 1 (tier 1 is the *outbound* MCP-client
+> axis to pharos).
 
 ### geex as MCP client (the outbound axis, amends §3)
 
@@ -957,17 +992,28 @@ and the already-pure `Renderer.diff/2` discipline — *assert against the value
 
 Because geex **is** an MCP server (Direction A, §2/§4) and the write path is
 `Dispatch.run/%Command{}` into `Session`/`Buffer` (the renderer is downstream
-and optional), geex runs **headlessly**: the MCP server is simultaneously the
-v0.5 product feature *and* the integration/dogfood harness.
+and optional), geex is drivable by an external LLM. **There are two modes, and
+they are not the same dogfood** ([adr/0018](adr/0018-mcp-transport-streamable-http.md)):
 
-- **Minimal slice that unlocks dogfooding earliest** (refines §12 step 3): NOT
-  the full server — just `Protocol.handle_line/1` + `tools/list` + `tools/call`
-  over stdio, TUI tree **off** (`start_terminal: false, start_mcp: true`). Point
-  claude-code / any MCP host at it and an LLM edits real buffers. Lands as soon
-  as step 1's command system + provenance exist; no cancellation, no
-  `listChanged`, no HTTP (those are the full step-3/v0.5 server). The spine
-  ordering is unchanged — this is a reduced subset of step 3, pulled forward as
-  a dev tool, not a reordering.
+- **Mode 2 — the real dogfood (loopback HTTP).** A harness *connects* to the
+  **running** geex; edits land in the live session the human is looking at, with
+  provenance, in the real undo history. This is the production path, so **dogfood ==
+  production**. It is the Streamable HTTP transport (Layer 4) served from `geex
+  --serve`, and it is also the enforced-sandbox path
+  ([adr/0016](adr/0016-external-harness-integration.md)). Build the
+  transport-agnostic protocol core first (`handle_line/1` + `tools/list` +
+  `tools/call`), then this transport — ahead of stdio.
+- **Mode 1 — headless tool (stdio), demoted to CI.** The harness *spawns* a
+  throwaway headless geex (`start_terminal: false, start_mcp: true`). Hermetic,
+  single-client, dies with the client — great as a conformance + cassette-replay
+  harness, **but it never tests the live-session path**, so it is the regression
+  net, not the dogfood. No cancellation, no `listChanged`, loopback HTTP and
+  multi-client are out (§12).
+- **Do not build a geex-native stdio→HTTP shim.** All target harnesses speak HTTP
+  (connect directly); the two with flaky Streamable-HTTP builds (Cline, OpenCode)
+  are covered by co-hosting a legacy SSE endpoint and/or the off-the-shelf
+  `mcp-remote` proxy. A geex relay would just re-create the Mode-1 throwaway
+  topology ([adr/0018](adr/0018-mcp-transport-streamable-http.md)).
 - **Headless-buffer assertions without the renderer (the gotcha).** The LLM
   needs deterministic, inspectable buffer state. The `%Command{}` value
   invariant delivers it: add a thin **read-only** query surface
