@@ -82,7 +82,7 @@ defmodule Geex.MCP.ProtocolTest do
     test "lists the registered commands as MCP tools" do
       %{"result" => %{"tools" => tools}} = frame(request(1, "tools/list"))
       names = Enum.map(tools, & &1["name"]) |> Enum.sort()
-      assert names == ["delete", "insert"]
+      assert names == ["delete", "insert", "replace"]
       insert = Enum.find(tools, &(&1["name"] == "insert"))
       assert insert["inputSchema"]["required"] == ["line", "col", "text"]
     end
@@ -105,6 +105,16 @@ defmodule Geex.MCP.ProtocolTest do
       assert text == "hi"
       assert {:ok, %{text: "hi", history: [recorded]}} = Session.snapshot()
       assert recorded.meta.actor == {:llm, "unknown"}
+    end
+
+    test "a replace tool-call edits a range in the live buffer" do
+      request(1, "tools/call", %{"name" => "insert", "arguments" => %{"line" => 0, "col" => 0, "text" => "hello world"}})
+
+      replace = %{"name" => "replace", "arguments" => %{"start_line" => 0, "start_col" => 6, "end_line" => 0, "end_col" => 11, "text" => "there"}}
+      %{"result" => result} = frame(request(2, "tools/call", replace))
+
+      assert result["isError"] == false
+      assert [%{"text" => "hello there"}] = result["content"]
     end
 
     test "string-valued JSON args are coerced (insert with string coords)" do

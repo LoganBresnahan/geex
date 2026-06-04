@@ -64,4 +64,53 @@ defmodule Geex.Buffer.DocTest do
       assert {:error, :col_out_of_range} = Doc.delete(Doc.new("x"), {0, 9}, 1)
     end
   end
+
+  describe "replace/3 — the general range edit" do
+    test "replaces within a single line" do
+      assert {:ok, doc} = Doc.replace(Doc.new("hello world"), {{0, 6}, {0, 11}}, "there")
+      assert Doc.text(doc) == "hello there"
+    end
+
+    test "an empty range is a point insert" do
+      assert {:ok, doc} = Doc.replace(Doc.new("ac"), {{0, 1}, {0, 1}}, "b")
+      assert Doc.text(doc) == "abc"
+    end
+
+    test "an empty text deletes the range (multi-line)" do
+      assert {:ok, doc} = Doc.replace(Doc.new("aaa\nbbb\nccc"), {{0, 1}, {2, 1}}, "")
+      assert Doc.text(doc) == "acc"
+    end
+
+    test "replaces a multi-line range with multi-line text" do
+      assert {:ok, doc} = Doc.replace(Doc.new("one\ntwo\nthree"), {{0, 1}, {2, 2}}, "X\nY")
+      # "o" + "X\nY" + "ree"  →  "oX" / "Yree"
+      assert Doc.text(doc) == "oX\nYree"
+    end
+
+    test "collapses a multi-line range to one line when text has no newline" do
+      assert {:ok, doc} = Doc.replace(Doc.new("ab\ncd\nef"), {{0, 1}, {2, 1}}, "-")
+      assert Doc.text(doc) == "a-f"
+    end
+
+    test "replaces an entire single line" do
+      assert {:ok, doc} = Doc.replace(Doc.new("a\nb\nc"), {{1, 0}, {1, 1}}, "BBB")
+      assert Doc.text(doc) == "a\nBBB\nc"
+    end
+
+    test "is grapheme-aware (combining/multibyte)" do
+      assert {:ok, doc} = Doc.replace(Doc.new("café au lait"), {{0, 3}, {0, 4}}, "X")
+      assert Doc.text(doc) == "cafX au lait"
+    end
+
+    test "rejects a reversed range" do
+      assert {:error, :range_reversed} = Doc.replace(Doc.new("abc\ndef"), {{1, 0}, {0, 0}}, "x")
+      assert {:error, :range_reversed} = Doc.replace(Doc.new("abc"), {{0, 2}, {0, 1}}, "x")
+    end
+
+    test "rejects out-of-range rows and cols" do
+      assert {:error, :row_out_of_range} = Doc.replace(Doc.new("x"), {{0, 0}, {5, 0}}, "y")
+      assert {:error, :col_out_of_range} = Doc.replace(Doc.new("x"), {{0, 0}, {0, 9}}, "y")
+      assert {:error, :col_out_of_range} = Doc.replace(Doc.new("x"), {{0, 9}, {0, 9}}, "y")
+    end
+  end
 end

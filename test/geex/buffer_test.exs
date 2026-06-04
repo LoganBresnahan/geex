@@ -22,6 +22,19 @@ defmodule Geex.BufferTest do
     Command.put_meta(cmd, Meta.human())
   end
 
+  defp replace(sl, sc, el, ec, text) do
+    {:ok, cmd} =
+      Geex.Commands.Replace.parse(%{
+        start_line: sl,
+        start_col: sc,
+        end_line: el,
+        end_col: ec,
+        text: text
+      })
+
+    Command.put_meta(cmd, Meta.human())
+  end
+
   setup do
     %{buf: start_supervised!({Buffer, text: ""})}
   end
@@ -68,6 +81,14 @@ defmodule Geex.BufferTest do
     assert snap.path == nil
 
     assert [%Insert{}] = Buffer.history(buf)
+  end
+
+  test "a Replace command edits a multi-line range through the dispatcher", %{buf: buf} do
+    {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "one\ntwo\nthree"))
+    {:ok, snap} = Buffer.dispatch(buf, replace(0, 1, 2, 2, "X\nY"))
+    assert snap.text == "oX\nYree"
+    assert snap.version == 2
+    assert Enum.map(snap.history, & &1.__struct__) == [Geex.Commands.Insert, Geex.Commands.Replace]
   end
 
   test "a raising command is contained: buffer stays alive, state + history untouched", %{buf: buf} do

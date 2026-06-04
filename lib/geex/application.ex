@@ -8,7 +8,8 @@ defmodule Geex.Application do
     children =
       [
         {Registry, keys: :unique, name: Geex.Registry},
-        {Geex.CommandRegistry, commands: [Geex.Commands.Insert, Geex.Commands.Delete]}
+        {Geex.CommandRegistry,
+         commands: [Geex.Commands.Insert, Geex.Commands.Delete, Geex.Commands.Replace]}
       ] ++
         terminal_io_child() ++
         [

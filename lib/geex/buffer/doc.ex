@@ -79,7 +79,37 @@ defmodule Geex.Buffer.Doc do
     end
   end
 
+  @doc """
+  Replace the (grapheme-indexed, 0-based) range `{{r1, c1}, {r2, c2}}` with `text`,
+  which may be empty or contain newlines. The general range edit: an empty range is a
+  point insert, an empty `text` is a (multi-line) delete, otherwise an edit. Start must
+  not be after end. Returns `{:ok, doc}` or `{:error, :range_reversed |
+  :row_out_of_range | :col_out_of_range}`.
+  """
+  @spec replace(t(), {pos(), pos()}, String.t()) :: {:ok, t()} | {:error, atom()}
+  def replace(%__MODULE__{lines: lines} = doc, {{r1, c1} = from, {r2, c2} = to}, text)
+      when is_integer(r1) and is_integer(c1) and is_integer(r2) and is_integer(c2) and
+             is_binary(text) do
+    with :ok <- ordered(from, to),
+         {:ok, start_graphemes} <- fetch_graphemes(lines, r1),
+         {:ok, end_graphemes} <- fetch_graphemes(lines, r2),
+         true <- c1 >= 0 and c1 <= length(start_graphemes),
+         true <- c2 >= 0 and c2 <= length(end_graphemes) do
+      prefix = start_graphemes |> Enum.take(c1) |> Enum.join()
+      suffix = end_graphemes |> Enum.drop(c2) |> Enum.join()
+      middle = splice(String.split(text, "\n"), prefix, suffix)
+      replaced = Enum.take(lines, r1) ++ middle ++ Enum.drop(lines, r2 + 1)
+      {:ok, %__MODULE__{doc | lines: replaced}}
+    else
+      {:error, _} = e -> e
+      false -> {:error, :col_out_of_range}
+    end
+  end
+
   # --- helpers ---
+
+  defp ordered(from, to) when from <= to, do: :ok
+  defp ordered(_from, _to), do: {:error, :range_reversed}
 
   defp fetch_graphemes(lines, row) do
     case Enum.at(lines, row) do

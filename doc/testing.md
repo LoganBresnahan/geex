@@ -235,3 +235,34 @@ IPv6 (`::1`) binding (listener is IPv4-only; `::1` Origin allowed for forward-co
 remote HTTP / WS / TLS / auth (post-0.5). And the **write-tool surface** (only Insert/Delete
 today) must grow to create/edit/delete/rename before a harness's built-in writers can be
 denied (ADR-0016 coverage gate).
+
+### 2026-06-04 — Range edit primitive: `replace` (write-tool coverage, coordinate vocab)
+
+**Scope.** The general coordinate/range edit (decided vocabulary: coordinate primitives
+first). `Geex.Buffer.Doc.replace/3` replaces a grapheme-indexed `{{r1,c1},{r2,c2}}` range
+with text (empty or multi-line); `Geex.Commands.Replace` exposes it as a command/MCP tool.
+It **subsumes** multi-line delete (`text: ""`), point insert (empty range), and in-place
+edit — so the buffer-level write vocabulary is essentially complete for contiguous edits
+(the [ADR-0016](adr/0016-external-harness-integration.md) coverage gate, buffer half).
+Registered in the supervision tree alongside Insert/Delete. Still in-memory (file
+lifecycle + reconcile is the deliberate next increment).
+
+**Automated.** `mix test` → **163 tests, 8 doctests, 0 failures** (was 152+8).
+`warnings-as-errors` clean. New: exhaustive `Doc.replace/3` cases in
+[doc_test.exs](../test/geex/buffer/doc_test.exs) (single-line, empty-range insert,
+empty-text multi-line delete, multi-line→multi-line, collapse-to-one-line, whole-line,
+grapheme-aware, **reversed-range → error**, out-of-range row/col), a `Replace`-through-the-
+dispatcher test in `buffer_test`, a `tools/call replace` test in `protocol_test`, and the
+`tools/list`/registry assertions updated to include `replace`.
+
+**Manual verification** — over `handle_line/1` against a live buffer: `tools/list` →
+`["delete","insert","replace"]`; `tools/call insert "hello world"` then `tools/call replace`
+range `{0,0}`–`{0,5}` with `"goodbye"` → buffer `"goodbye world"` (`isError:false`).
+
+**Good as of:** the commit carrying this entry. An LLM can now insert, delete, and replace
+ranges in the live buffer over MCP. Buffer-level edit coverage is essentially complete.
+
+**Not tested / deferred:** named line-ops (sugar over `replace`, add if ergonomics warrant);
+a diff / search-replace tool (the harness-ergonomic layer that compiles to coordinate
+commands — reference: the user's DeepSeek-Moby diff work + hex diff libs); file lifecycle
+(open/create/save/rename + multi-buffer + path addressing), which pairs with reconcile.
