@@ -187,3 +187,51 @@ real connection.
 **Not tested / deferred:** the HTTP transport; connection-aware provenance (real `model`
 from `clientInfo` + `turn_id`, threaded by the session layer — today `{:llm,"unknown"}`);
 `error.data`; `tools/list` pagination; the `listChanged` emission path (§13).
+
+### 2026-06-04 — Loopback MCP HTTP transport (`Geex.MCP.HTTP`, ADR-0018 step 2) + adversarial review
+
+**Scope.** The **Mode 2** transport: a harness *connects* to the running geex over MCP
+Streamable HTTP (loopback), so edits land in the live session — dogfood == production.
+`Geex.MCP.HTTP` (a `Plug.Router`) adapts `POST /mcp` → `Protocol.handle_line/1`; a Bandit
+child bound to `127.0.0.1` is feature-gated in `Geex.Application` (`start_http_mcp`, default
+off). **geex's first dependency** (Bandit/Plug — "rent the transport"); JSON stays built-in.
+
+**Adversarial review.** A 3-agent workflow checked it against the live MCP Streamable HTTP
+spec + an HTTP security threat model. It **independently re-verified there is no Origin
+bypass** (the primary ask) and confirmed the status-code mapping, the `127.0.0.1` bind, and
+the body cap. Findings applied:
+
+- **MUST (spec):** validate the `MCP-Protocol-Version` header — present-but-unsupported →
+  **400** (2025-11-25 requires it); absent is allowed. Supported list now exposed via
+  `Protocol.supported_versions/0` (one source of truth for negotiation + the header check).
+- **Should-fix:** Origin host comparison is now **case-insensitive** (`http://LOCALHOST`
+  was wrongly rejected); a parse error (`:protocol_error`, no client id) now maps to **400**
+  (input the server can't accept) while a well-formed request whose *result* is a JSON-RPC
+  error still rides 200; non-POST methods on `/mcp` (GET/DELETE/…) → **405** (was 404).
+
+I also caught and fixed, while writing the live smoke, an **Origin prefix-match bypass**
+(`http://localhost.evil.com` would have passed) → exact-host via `URI.parse`.
+
+**Automated.** `mix test` → **152 tests, 8 doctests, 0 failures** (was 134+8).
+`warnings-as-errors` clean. New: [http_test.exs](../test/geex/mcp/http_test.exs) — outcome
+mapping (200/202/400), `initialize`, body-cap 413, Origin (loopback incl. uppercase, evil,
+look-alike-bypass, empty/null/absent asymmetry), the protocol-version header (400/200/absent),
+GET/DELETE → 405, 404, and a `tools/call` editing the live buffer.
+
+**Manual verification** — a real Bandit listener on `127.0.0.1:4599` driven over the socket
+with a raw `gen_tcp` HTTP/1.1 client: `initialize` → `200` (negotiated 2025-11-25) →
+`notifications/initialized` → `202` → `tools/call insert` → `200` (`"hello over http"`,
+`isError:false`) → `GET` → `405` → `Origin: https://evil.example.com` → `403`; the live
+buffer ended `"hello over http"`. *(`:httpc` hit an OTP `:http_util` quirk; `gen_tcp`
+proved the wire directly.)*
+
+**Good as of:** the commit carrying this entry. **A real harness can now connect to a
+running geex over loopback HTTP and edit the live shared buffer with provenance** — the
+dogfood == production path. The enforced-sandbox rung uses this same connect transport.
+
+**Not tested / deferred:** `geex --serve` CLI ergonomics (today: config `start_http_mcp:
+true`); sessions + connection-aware provenance (real model/turn — still `{:llm,"unknown"}`);
+IPv6 (`::1`) binding (listener is IPv4-only; `::1` Origin allowed for forward-compat);
+remote HTTP / WS / TLS / auth (post-0.5). And the **write-tool surface** (only Insert/Delete
+today) must grow to create/edit/delete/rename before a harness's built-in writers can be
+denied (ADR-0016 coverage gate).

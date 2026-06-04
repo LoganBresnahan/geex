@@ -21,6 +21,12 @@ defmodule Geex.MixProject do
   end
 
   defp deps do
-    []
+    [
+      # The HTTP MCP transport (ADR-0018) — geex's first dependency: own the
+      # dispatcher/provenance, rent the HTTP framing. Bandit + Plug are the
+      # BEAM-native stack; JSON stays the built-in module.
+      {:bandit, "~> 1.11"},
+      {:plug, "~> 1.16"}
+    ]
   end
 end

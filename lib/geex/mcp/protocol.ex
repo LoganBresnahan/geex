@@ -47,6 +47,10 @@ defmodule Geex.MCP.Protocol do
 
   @type outcome :: {:reply, iodata()} | :noreply | {:protocol_error, iodata()}
 
+  @doc "The MCP protocol revisions geex supports (preferred first). The single source of truth for both `initialize` negotiation and the transport's `MCP-Protocol-Version` header check."
+  @spec supported_versions() :: [String.t()]
+  def supported_versions, do: @supported_versions
+
   @doc "Handle one decoded JSON-RPC line. See the moduledoc for the three outcomes."
   @spec handle_line(String.t()) :: outcome()
   def handle_line(line) when is_binary(line) do

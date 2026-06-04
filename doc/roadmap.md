@@ -22,10 +22,19 @@ surface; `Geex.Session` owns the active-buffer pointer + the view-local cursor a
 exposes `snapshot/0` (§15b). `Geex.CommandRegistry` (seeded with `Insert`/`Delete`) is in
 the supervision tree. The macro (`Geex.Command`), `Command.{Meta,Field,Type}`,
 `Geex.Buffer.Doc`, the virtual screen (`Cell`/`Screen`/`Renderer`/`Rect`), `TerminalIO`,
-and `Input.Parser` round it out. **102 tests + 8 doctests green**, including the §15c-ii
-golden-pair cassette ([test/geex/cassette_test.exs](../test/geex/cassette_test.exs)) —
-the v0.1 replay exit criterion, proven with no LLM. **No deps** (`mix.exs` is
-`deps: []`). What's verified by hand is logged in [testing.md](testing.md).
+and `Input.Parser` round it out, plus the §15c-ii golden-pair cassette
+([test/geex/cassette_test.exs](../test/geex/cassette_test.exs)) — the v0.1 replay exit
+criterion, proven with no LLM.
+
+**The MCP layer (Direction A) is now building:** `Geex.MCP.Schema` (field-spec →
+JSON-Schema tool descriptors, the §3a/§4 free projection), `Geex.MCP.Protocol`
+(pure `handle_line/1` — JSON-RPC envelope, `initialize`/`tools/list`/`tools/call`/`ping`,
+provenance via `Dispatch.run/1`, version 2025-11-25), and `Geex.MCP.HTTP` (the **loopback
+Streamable HTTP transport** — a Bandit/Plug listener bound to `127.0.0.1`, feature-gated by
+`start_http_mcp`). A real harness can connect over loopback HTTP and edit the live buffer
+with provenance — dogfood == production ([adr/0018](adr/0018-mcp-transport-streamable-http.md)).
+**First dependency:** Bandit + Plug (JSON stays built-in). **152 tests + 8 doctests green.**
+What's verified by hand is logged in [testing.md](testing.md).
 
 Cursor-relative resolution and the `Geex.Clipboard` subsystem are designed
 ([adr/0014](adr/0014-editor-state-and-dispatch-ownership.md),
