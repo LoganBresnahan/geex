@@ -54,6 +54,32 @@ like the minibuffer or the MCP server.
   reconcile must not loop or mis-attribute. Diff→command reconstruction is lossy by nature
   (intent is not recoverable from a result).
 
+## Open question — attribution beyond `:external` (leaning **no**, 2026-06-04)
+
+Can a reconciled write be attributed to *who/what* authored it, rather than just
+`:external`? It can be *narrowed*, never (for free) to door-grade provenance — a disk
+write is a result stripped of intent; "which LLM / prompt / turn" only reaches geex
+through a channel geex is on. The spectrum, weakest → strongest:
+
+- **Session correlation** (cheap, circumstantial): "external write *during* harness X's
+  active turn." geex already has the session state.
+- **OS process attribution** (heavy, platform-specific): Linux `fanotify` reports the
+  writing PID (plain `inotify` does not) → `/proc` gives exe/ppid; macOS needs Endpoint
+  Security. Privileged, racy, and yields the *process* (`node`/`python`), not the agent
+  turn.
+- **Cooperative breadcrumbs**: a hook / sandbox-wrapper geex's preset installs tells geex
+  "about to shell out" — but that puts geex back *in the loop*.
+
+The deeper point: strong attribution comes from being **in the loop**, so the lever is the
+[ladder](0016-external-harness-integration.md) (Rung 2 makes the door the only egress and
+the writer self-identifies) — *shrink* `:external`, don't forensically decode it. Whatever
+is added, the [ADR-0012](0012-trust-and-enforcement.md) rule holds: never promote a guess
+to `actor`; hang any inference off a separate, confidence-tagged field
+(`external: %{inferred:, method:, confidence:}`).
+
+**Current lean: no.** Keep `:external` as the honest floor; revisit cheap session
+correlation if a concrete need (debugging / audit) appears.
+
 ## See
 
 [ADR-0012](0012-trust-and-enforcement.md), [ADR-0016](0016-external-harness-integration.md),
