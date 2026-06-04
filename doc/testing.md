@@ -109,3 +109,33 @@ replay property is proven before any AI code exists.
 - **Buffer load/save** — `Buffer` holds text in memory; no file I/O round-trip yet.
 - **Property tests + Dialyzer** — arrive with the MCP projection (v0.2, §15a-2).
 - **MCP headless slice** — the §15b dogfood loop is unlocked but not yet built.
+
+### 2026-06-04 — MCP tool-schema renderer (`Geex.MCP.Schema`, ADR-0018 step 1)
+
+**Scope.** First `Geex.MCP.*` module: project the neutral field-spec
+([Field](../lib/geex/command/field.ex)) → MCP tool descriptors (the `tools/list` payload)
+— the §3a/§4 "free projection." Pure and **dependency-free** (Elixir 1.19's built-in
+`JSON`); the first dep (Bandit/Plug) doesn't arrive until the HTTP transport.
+
+**Automated.** `mix test` → **112 tests, 8 doctests, 0 failures** (was 102+8).
+`warnings-as-errors` clean. New: [schema_test.exs](../test/geex/mcp/schema_test.exs) — real
+`Insert`/`Delete` plus synthetic field-specs for the edge cases (no-description omitted,
+empty-string description omitted, defaulted arg not required, declaration-order `required`,
+**unknown arg type raises** so Type↔Schema drift surfaces, and a JSON round-trip proving
+the schema is wire-stable).
+
+**Manual verification** — rendered the `tools/list` payload from the live
+`CommandRegistry`, encoded with built-in `JSON`. Observed:
+
+- `insert` → `required: [line, col, text]`; `text:string`, `line`/`col:integer`.
+- `delete` → `required: [line, col]` (`count` defaulted ⇒ optional); `count:integer`.
+- every `inputSchema` is `type:"object"`, `additionalProperties:false`, and round-trips
+  through `JSON.encode!/decode!`.
+
+**Good as of:** the commit carrying this entry. Adding a command now auto-exports its MCP
+tool schema with no hand-sync — the ADR-0004 promise, realized.
+
+**Not tested / deferred:** the JSON-RPC envelope (`Protocol.handle_line/1`), `tools/call`
+wiring (name → `parse/1` → provenance → `Dispatch.run/1`), and the loopback HTTP transport
+are the next steps; only `:string`/`:integer`/`:boolean` are mapped (richer editor types
+raise loudly until a row is added).
