@@ -139,3 +139,51 @@ tool schema with no hand-sync — the ADR-0004 promise, realized.
 wiring (name → `parse/1` → provenance → `Dispatch.run/1`), and the loopback HTTP transport
 are the next steps; only `:string`/`:integer`/`:boolean` are mapped (richer editor types
 raise loudly until a row is added).
+
+### 2026-06-04 — MCP protocol core (`Geex.MCP.Protocol`, ADR-0018 step 1) + adversarial review
+
+**Scope.** The pure JSON-RPC/MCP core: `handle_line/1` (the three outcomes), method
+routing (`initialize` with version negotiation, `tools/list` via `Schema`, `tools/call`,
+`ping`, the two notifications), and `tools/call` wiring (name → `parse/1` → `Meta.llm`
+provenance → `Dispatch.run/1`). Still **dependency-free** (built-in `JSON`).
+
+**Adversarial review.** A 3-agent workflow checked the implementation against the live MCP
+(2025-11-25) + JSON-RPC 2.0 specs. It **confirmed correct**: version negotiation, the
+`initialize`/`tools/list`/`tools/call` result shapes, error-code usage, `ping`,
+notification handling, parse/non-object/`-32600` classification, present-null-id =
+request, and the `isError` mechanism. It caught **two real, empirically-reproduced crash
+paths**, both now fixed:
+
+1. `handle_line/1` could **exit uncaught** when a dependency GenServer
+   (CommandRegistry/Session/Buffer) was down → now contained at the protocol boundary as
+   `-32603` (filling the §11 internal-error gap the code never produced).
+2. A command whose `run/2` **raises** crashed the shared `Geex.Buffer` → now contained in
+   `Dispatch.apply_command/2` as `{:error, {:command_crashed, _}}`; the buffer stays
+   alive, state/history untouched, and the tool-call returns `isError: true`.
+
+Also applied (review "should-fix"): bumped the preferred protocol version to **2025-11-25**
+(2025-06-18 still supported); per **SEP-1303**, a found tool's invalid arguments now return
+an `isError` result (model self-corrects) rather than `-32602` (reserved for unknown
+tool / malformed call). Reconciled the docs (§11 currency, §11/§13 `listChanged` —
+advertise only when emitted; v0.5 ships bare `{tools: {}}`).
+
+**Automated.** `mix test` → **134 tests, 8 doctests, 0 failures** (was 112+8).
+`warnings-as-errors` clean. New: [protocol_test.exs](../test/geex/mcp/protocol_test.exs)
+(envelope, id-echo, negotiation incl. back-compat, `tools/list`, `tools/call` incl.
+SEP-1303 `isError`, **dead-buffer → -32603**, one-parser round-trip) + crash-containment
+tests in `dispatch_test`/`buffer_test`.
+
+**Manual verification** — drove a full session through `handle_line/1` against a live
+buffer: `initialize` (negotiated 2025-11-25, advertised `tools: {}`) → `notifications/
+initialized` (no reply) → `tools/list` (projected schema) → two `tools/call` inserts
+(`hello` → `hello world`, `isError: false`); `Session.snapshot/0` showed the live edits
+with history actors `[{:llm,"unknown"}, {:llm,"unknown"}]`.
+
+**Good as of:** the commit carrying this entry. An LLM can drive the full MCP protocol
+(list + call) into the live shared undo history with provenance — over an in-memory call;
+the **loopback HTTP transport** (Bandit/Plug, first dep) is the next step and makes it a
+real connection.
+
+**Not tested / deferred:** the HTTP transport; connection-aware provenance (real `model`
+from `clientInfo` + `turn_id`, threaded by the session layer — today `{:llm,"unknown"}`);
+`error.data`; `tools/list` pagination; the `listChanged` emission path (§13).

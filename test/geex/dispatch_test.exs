@@ -1,3 +1,10 @@
+defmodule Geex.DispatchTest.Crashing do
+  @moduledoc false
+  # A command whose run/2 raises — used to prove crash containment.
+  defstruct [:meta]
+  def run(_command, _state), do: raise("boom")
+end
+
 defmodule Geex.DispatchTest do
   use ExUnit.Case, async: true
 
@@ -25,6 +32,13 @@ defmodule Geex.DispatchTest do
     test "propagates a command error without raising" do
       {:ok, cmd} = Insert.parse(%{line: 9, col: 0, text: "x"})
       assert {:error, :row_out_of_range} = Dispatch.apply_command(cmd, EditorState.new("x"))
+    end
+
+    test "contains a raising command as {:command_crashed, _} instead of propagating" do
+      assert {:error, {:command_crashed, info}} =
+               Dispatch.apply_command(%Geex.DispatchTest.Crashing{}, EditorState.new(""))
+
+      assert info =~ "boom"
     end
   end
 

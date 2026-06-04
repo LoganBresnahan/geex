@@ -27,8 +27,10 @@ defmodule Geex.Dispatch do
   Apply one (already provenance-stamped) command to `state`. Pure.
 
   Returns `{:ok, state}` or `{:error, reason}`. A command whose `run/2` returns an
-  unexpected shape becomes `{:error, {:bad_run_return, other}}` rather than crashing
-  the caller.
+  unexpected shape becomes `{:error, {:bad_run_return, other}}`, and one that **raises
+  or exits** is contained as `{:error, {:command_crashed, info}}` — so a buggy or
+  adversarial command can never crash the owning `Geex.Buffer` process or violate the
+  "a failing command leaves state and history untouched" invariant.
   """
   @spec apply_command(struct(), EditorState.t()) :: {:ok, EditorState.t()} | {:error, term()}
   def apply_command(command, %EditorState{} = state) when is_struct(command) do
@@ -37,6 +39,10 @@ defmodule Geex.Dispatch do
       {:error, reason} -> {:error, reason}
       other -> {:error, {:bad_run_return, other}}
     end
+  rescue
+    exception -> {:error, {:command_crashed, Exception.message(exception)}}
+  catch
+    kind, value -> {:error, {:command_crashed, inspect({kind, value})}}
   end
 
   @doc """

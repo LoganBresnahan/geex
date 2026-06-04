@@ -1,3 +1,9 @@
+defmodule Geex.BufferTest.Crashing do
+  @moduledoc false
+  defstruct [:meta]
+  def run(_command, _state), do: raise("boom")
+end
+
 defmodule Geex.BufferTest do
   use ExUnit.Case, async: true
 
@@ -62,6 +68,15 @@ defmodule Geex.BufferTest do
     assert snap.path == nil
 
     assert [%Insert{}] = Buffer.history(buf)
+  end
+
+  test "a raising command is contained: buffer stays alive, state + history untouched", %{buf: buf} do
+    {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "ok"))
+    assert {:error, {:command_crashed, _}} = Buffer.dispatch(buf, %Geex.BufferTest.Crashing{})
+    assert Process.alive?(buf)
+    snap = Buffer.snapshot(buf)
+    assert snap.text == "ok"
+    assert snap.version == 1
   end
 
   test "a fresh buffer is clean with empty history", %{buf: buf} do

@@ -776,9 +776,11 @@ Condensed from the research.
 ## 11. MCP spec compliance checklist
 
 - **Protocol version:** negotiate against the client's requested version; store
-  geex's supported version as a module attribute. (As of early 2026 the current
-  revision line is `2025-06-18`; `2025-03-26` removed JSON-RPC batching, which
-  geex doesn't need. pharos still advertises `2024-11-05`.)
+  geex's supported versions as a module attribute (echo a supported requested
+  version, else fall back to the preferred one). geex implements **`2025-11-25`
+  (current/preferred)** and keeps **`2025-06-18`** for back-compat. (`2025-03-26`
+  removed JSON-RPC batching, which geex doesn't need; pharos still advertises
+  `2024-11-05`.) *Implemented in `Geex.MCP.Protocol`.*
 - **Transport (stdio):** newline-delimited JSON (NDJSON), one message per `\n`,
   **no** `Content-Length` framing (that's LSP, not MCP). stdout reserved
   exclusively for frames; all logs to stderr.
@@ -789,15 +791,25 @@ Condensed from the research.
   returns `-32601`, a compliance gap geex should *not* copy),
   `notifications/cancelled` (no reply; cancel or no-op).
 - **Error codes:** `-32700` parse (id null) / `-32600` invalid request / `-32601`
-  method not found / `-32602` invalid params / `-32603` internal error. Support
-  the optional `error.data` field for structured validation errors (pharos omits
-  it).
+  method not found / `-32602` invalid params / `-32603` internal error. The
+  protocol boundary funnels **any handler fault** (a raise, or a dependency process
+  being down) to `-32603` so `handle_line/1` never crashes the process running it.
+  `error.data` (optional) is not yet emitted.
+- **Tool errors vs protocol errors (SEP-1303):** a *found* tool whose **arguments**
+  fail validation returns a **tool result with `isError: true`** (the model sees it
+  and self-corrects), *not* `-32602`. `-32602` is reserved for an **unknown tool** or
+  a **malformed call** (missing/non-string `name`, non-object `arguments`); a tool
+  that runs and fails (or crashes — contained via `Dispatch.apply_command/2`) is also
+  `isError: true`.
 - **Content blocks:** `{content: [block], isError}`; text block is
   `{type: "text", text}`. Model the block as a tagged struct so `image` /
   `resource` can be added later without reshaping the encoder. v0.5 needs text
   only.
-- **Capabilities:** advertise `{tools: {listChanged: true}}` and emit
-  `notifications/tools/list_changed` when the command registry changes.
+- **Capabilities:** advertise a capability **only when geex honors it**. v0.5 ships
+  bare `{tools: {}}` (tools supported; no `listChanged`), because the debounced
+  `notifications/tools/list_changed` emission (§13) is not yet wired — advertising
+  `listChanged: true` while never emitting it is worse than omitting it. Flip to
+  `{tools: {listChanged: true}}` in the same change that lands the emission.
 
 ---
 
@@ -857,7 +869,7 @@ baseline plus the precise trigger that should later force the call.
 
 - **Result-schema reuse — RESOLVED: separate by role; one optional shared leaf, deferred.** A Direction-B result schema (§6, Ecto/instructor_ex, *result* role) and a command param field-spec (§3a, macro, *input* role) **never share a renderer or schema abstraction** — that is the §1 trap (two schema *roles*, not one). Authorities differ (macro-DSL command-as-value vs Ecto schema), inputs differ (`:coord_range` vs Ecto types/embeds/enums), and dialects differ: §3a emits **accurate** `required[]`; instructor_ex's `from_ecto_schema/1` marks every field required and uses `$defs`/`$ref` — the divergence §6/§10 already say *not* to copy. Unifying them forces one role to own the other's source of truth, breaking either commands-as-value or §3a's single-authority guarantee. The pipelines overlap at exactly **one** point: both bottom out in JSON-Schema scalar atoms (`"string"`/`"integer"`/`"number"`/`"boolean"`). That — and only that — is a legitimate shared primitive: a pure, role-agnostic `jsonschema_scalar/1` leaf that knows nothing of fields, requiredness, nesting, or provenance, callable by the §3a renderer and by any geex-side mirror of instructor_ex's `for_type/1` without either becoming the other's authority. **Do not extract the leaf in v0.5** — §6 is post-0.5 (§12 step 4) with nothing yet to deduplicate. **Trigger to extract:** Direction B is built *and* its result-schema JSON-Schema is generated natively (not delegated wholesale to instructor_ex's emitter) *and* the §3a scalar table and that path hard-code the same atoms twice. Until then: separate, by role.
 
-- **`listChanged` granularity — RESOLVED: debounce, in the registry.** geex advertises `tools.listChanged: true` (§11) over a *dynamic* command set (§10), so bursty registration — the compile-time set at `Geex.Application` start, or a directory of plugins `Code.compile_file`'d in one load pass (notes.md "Macros for plugins") — must not fan out to one `notifications/tools/list_changed` per command. The notification is payload-free; its only meaning is "re-fetch via `tools/list`", so an un-debounced burst of N registrations is N redundant full re-lists through the single-writer `Writer` (§4). Decision: (1) `Geex.CommandRegistry` owns a monotonic `generation` counter and a trailing-window debounce (one re-armed `Process.send_after`, default ~250 ms, tunable); a burst bumps `generation` once and schedules at most one `{:registry_changed, generation}` broadcast. (2) The registry does **not** know about MCP — per §3 transport is an adapter over the pure core. The MCP server, when started (default-off, §4) and past `notifications/initialized`, *subscribes* to `{:registry_changed, _}` and emits `notifications/tools/list_changed` only when the broadcast generation differs from the one it last advertised; the counter makes the notification idempotent (a coalesced-away or duplicate emit self-heals on the host's next `tools/list`). (3) Emission is suppressed until Application start completes — the initial command set is the baseline that `initialize`/`tools/list` already answer, not a change. Cost: one timer field + one pub/sub topic, no dependency; the latency is irrelevant (registration is startup/plugin-load, never per-keystroke). The same generation-stamped event also serves any Layer-1/3 in-VM or remote agent (§3) without the registry learning about it. A per-bulk-load transaction bracket is deliberately deferred — it layers cleanly over this debounce if zero-spurious-notification precision is ever wanted.
+- **`listChanged` granularity — RESOLVED: debounce, in the registry.** geex *will* advertise `tools.listChanged: true` (§11) **once this emission path ships** — v0.5 advertises bare `tools: {}` until then — over a *dynamic* command set (§10), so bursty registration — the compile-time set at `Geex.Application` start, or a directory of plugins `Code.compile_file`'d in one load pass (notes.md "Macros for plugins") — must not fan out to one `notifications/tools/list_changed` per command. The notification is payload-free; its only meaning is "re-fetch via `tools/list`", so an un-debounced burst of N registrations is N redundant full re-lists through the single-writer `Writer` (§4). Decision: (1) `Geex.CommandRegistry` owns a monotonic `generation` counter and a trailing-window debounce (one re-armed `Process.send_after`, default ~250 ms, tunable); a burst bumps `generation` once and schedules at most one `{:registry_changed, generation}` broadcast. (2) The registry does **not** know about MCP — per §3 transport is an adapter over the pure core. The MCP server, when started (default-off, §4) and past `notifications/initialized`, *subscribes* to `{:registry_changed, _}` and emits `notifications/tools/list_changed` only when the broadcast generation differs from the one it last advertised; the counter makes the notification idempotent (a coalesced-away or duplicate emit self-heals on the host's next `tools/list`). (3) Emission is suppressed until Application start completes — the initial command set is the baseline that `initialize`/`tools/list` already answer, not a change. Cost: one timer field + one pub/sub topic, no dependency; the latency is irrelevant (registration is startup/plugin-load, never per-keystroke). The same generation-stamped event also serves any Layer-1/3 in-VM or remote agent (§3) without the registry learning about it. A per-bulk-load transaction bracket is deliberately deferred — it layers cleanly over this debounce if zero-spurious-notification precision is ever wanted.
 
 - **Provenance for composite commands — RESOLVED: both; one storage location.** When an agent emits a *sequence* of commands, provenance is **per-command *and* per-turn**, but the turn linkage lives **on `%Command.Meta{}`, not in a separate ledger** (Decision 1: one source, no drift). §7's `Meta` gains an `origin` field: `origin: %{turn_id: "t_7f3a", seq: 2}` (turn_id nil for ad-hoc human input), alongside `actor` / `at` / `prompt_hash`.
   - **What `turn_id` is keyed on:** one *agent turn*. In Direction A (§4) that is one `tools/call` — minted at the existing `put_provenance/2` seam in `tool_call/1`, so a single tool call is a degenerate one-command turn. In Direction B (§§2, 6) it is one feature invocation, which the `Geex.AI` boundary stamps before emitting its N `%Command{}` structs through the Direction-A dispatcher. `turn_id` generalizes over both directions; `seq` orders commands within a turn.
