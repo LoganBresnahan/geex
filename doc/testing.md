@@ -443,3 +443,108 @@ undo history, applied atomically or refused with guidance, never silently mis-lo
 contract in `Doc` (the edit tool preserves CRLF in tier 2, but `Doc` still treats `\r` as
 content model-wide); an `%Edit{}` in the §15c golden cassette (covered by a dedicated replay
 test instead).
+
+### 2026-06-05 — File-operation tools (create/delete/rename/close_file) + reconcile baseline (ADR-0019, amends ADR-0017)
+
+**Scope.** The four **operation tools** that complete the write surface (the ADR-0016
+coverage gate, so a harness's built-in writers can be denied): `create_file` (pure disk
+create — refuse if file *or* buffer exists), `delete_file` (rm + evict any open buffer),
+`rename_file` (disk rename + re-key the open buffer), `close_file` (free a buffer, disk
+untouched). Orchestration in the serialized `Geex.Session`; buffer re-keying + synchronous
+`unregister` in `Geex.Buffer`; `terminate/1` in `Geex.BufferSupervisor`. Operations are
+**not** recorded `%Command{}`s (ADR-0003/0019): they never enter a buffer's undo history.
+Invariants enforced: **refuse-never-clobber** (create/rename refuse an existing target);
+**never-silently-lose-work** (discarding a dirty buffer on close/delete is *reported*, never
+silent); **Registry/buffer consistency** (an evict unregisters synchronously so a re-open
+right after sees a clean registry, not the dying pid).
+
+**The rename × reconcile interaction → the buffer-baseline model (an ADR-0017 amendment).** A
+dirty `rename_file` is the operation whose post-op disk state can fool the always-on reconcile
+floor (ADR-0017): `File.rename` moves the OLD bytes to the new path while the buffer holds
+unsaved NEW text, so the destination's own file-watch event looked like an *external* change
+and reconcile adopted OLD back over the edits (an undoable `:external` revert, but a surprising
+one — and asymmetric with delete/create, which are deliberately reconcile-immune). We surveyed
+what mature editors do (VS Code / Emacs / JetBrains all re-key the buffer, preserve the dirty
+edits, and treat their *own* file ops as not-external) and landed on the **baseline** model:
+every `Geex.Buffer` now tracks a **`synced` baseline** — the disk content it is in sync with
+(set on load / `save/1` / `mark_synced/1`) — and `reconcile/2` compares disk against **that
+baseline, not the live (dirty) text**. An event whose disk still equals the baseline is no
+external change, so unsaved edits are never reverted; the re-keyed buffer carries its baseline
+along, so a rename echo-suppresses **for free** with zero rename-specific code. This
+*strengthens* the singular command pipeline (it removes a watcher-timing-dependent phantom
+`:external` command from history, improving replay determinism) and **subsumes a latent bug**:
+previously *any* dirty buffer could be reverted by a spurious event on an unchanged file (the
+core compared disk to current text); now it cannot. The root insight — reconcile must compare
+disk to a per-buffer *baseline*, the editor-standard model — is exactly how VS Code/Emacs/
+JetBrains decide "did the file change underneath me?".
+
+**Hardened by three adversarial review-workflow rounds** (multi-dimension finders →
+per-finding independent verification). **Round 1** (the operation tools, 5 dimensions, 10
+confirmed of 12): fixed ① **`drop_buffer` crash** — `Buffer.unregister` was an unguarded
+`GenServer.call`, so a buffer dying mid-evict crashed the whole serialized Session (its
+siblings `dirty?`/`buffer_status` already `catch :exit`; `evict/1` now does too); ②
+**scratch-buffer leak** — `terminate/1` returns `{:error, :not_found}` for a non-child
+(pathless) buffer, which was left *alive* while reported "closed (discarded unsaved edits)" —
+a double lie; `evict/1` now stops it directly; ③ **`rekey_buffer` crash** — `Buffer.rename`
+unguarded post-`File.rename`-commit (now `safe_rename/2`, degrading a buffer death to the
+logged stale-path branch); ④ **never-saved rename** — a buffer opened on a not-yet-saved path
+couldn't be renamed (`File.rename` → `:enoent`); now an in-memory re-key. **Round 2** (review
+of the fixes, 8 confirmed of 10) found the *first* echo-suppression design (a one-shot
+consumed on the first event) was itself buggy — a cross-directory rename whose dest dir isn't
+watched at move time never delivers the move event, leaking a stale mask that could later
+swallow a genuine write; a coalesced second event could still revert. **Redesigned to the
+standing-until-divergence rule above**, which tolerates the move event arriving late, twice,
+or never. **Round 3** (focused review of the redesign, 4 confirmed of 6): the standing rule
+is *correct* (the one "high" finding was a docstring **over-claim**, not a code bug — the low
+verifier confirmed no work is lost; suppression only fires when disk equals the moved bytes,
+i.e. no external *change*, and preserves the unsaved edits); narrowed the over-stated
+docstrings to be honest about the accepted save-granularity coarseness, and closed three test
+gaps including a **mutation-verified** deterministic test for the `safe_rename` crash-guard (a
+stand-in process that exits on the re-key call — removing the `catch` now reliably reddens it).
+
+The three rounds converged the rename suppression on a *correct* but workaround-shaped
+mechanism (a standing, content-keyed `expect_echo` mask in the reconcile transport). Round 3
+made clear it was patching one symptom of a deeper issue — the reconcile core compared disk to
+the buffer's **live text**, which is wrong for *any* dirty buffer — so **before commit we
+replaced the entire echo-suppression with the buffer-baseline model** above. Net effect: −~40
+lines of transport bookkeeping (`expect_echo`, the `expected` map, the rename-seed helpers),
++1 `Buffer` field and a one-line core comparison; late / duplicate / never-delivered events
+become non-issues (the comparison is stateless); and the general dirty-buffer revert is fixed
+too. Mutation-verified: reverting the core to compare current text instead of the baseline
+reddens 4 tests (the dirty-buffer and rename-preservation cases).
+
+**Automated.** `mix test` → **297 tests, 8 doctests, 0 failures** (was 284+8).
+`warnings-as-errors` clean; deterministic across seeds. New coverage: a **dirty buffer is not
+reverted** by an event for an unchanged file (`disk == synced` baseline) and **adopts** a
+genuine divergent change — at the `reconcile/2` core *and* through the watcher glue; `save/1`
+**moves the baseline** (the save echo is ignored, a later external change still caught) and an
+adopt **re-baselines** (a re-delivered identical event is ignored) — both mutation-verified;
+dirty-rename **not** reverted by the reconcile floor (injected `:moved_to`, repeated); a genuine
+divergent post-rename write **is** adopted as `:external` (never-miss half); an event for the
+unchanged backing file ignored even after further edits; the `safe_rename` crash-guard
+(mutation-verified); the scratch-buffer close (honest, no leak); `close_file` on a *dead*
+active buffer (clean result, no Session crash); never-saved-path rename.
+
+**Manual verification** — a live OTP tree driving `Geex.MCP.Protocol.handle_line/1`:
+`create_file` returned `isError:false "created …"` and refused a recreate with
+`isError:true "already exists: … (use open_file to edit an existing file)"`; `open_file` then
+an `insert` left the buffer dirty (`"X-hello\n"`); `rename_file` returned `isError:false` and
+**`snapshot.text` stayed `"X-hello\n"`** (unsaved edits preserved) while disk held the moved
+`"hello\n"`; `delete_file` reported `"deleted … (discarded unsaved edits)"` and cleared the
+active pointer; a missing-file delete refused `:enoent`; a never-saved `open_file` + `close_file`
+freed the buffer with the disk untouched.
+
+**Good as of:** the commit carrying this entry. A harness can now create/delete/rename/close
+files through geex with refuse-never-clobber + honest discard reporting, and a dirty buffer
+(renamed or not) is never reverted by the reconcile floor — it compares disk to each buffer's
+`synced` baseline, not its live text, so only a *genuine* change to the backing file is adopted.
+
+**Not tested / deferred:** reconcile is exercised by **injected** `:file_event`s, not a live
+`inotify` backend (`inotify-tools` is absent on this WSL box, so the watcher degrades to a
+logged no-op there); a live end-to-end watcher test awaits a host with the backend. Coalescing
+coarseness remains (a disk that flips away from and back to the baseline inside one coalesced
+event reads as unchanged — the transient is lost, but disk equals the baseline so there is no
+net change and the edits are preserved): the accepted ADR-0017 save-granularity behavior, not
+refined here. The `synced` baseline is whole-file (not yet a line-level diff anchor — the
+ADR-0020 myers work could refine the adopted `:external` command without touching the
+comparison).

@@ -4,7 +4,9 @@ defmodule Geex.ReconcileTest do
 
   import ExUnit.CaptureLog
 
-  alias Geex.{Buffer, Reconcile}
+  alias Geex.{Buffer, Command, Reconcile}
+  alias Geex.Command.Meta
+  alias Geex.Commands.Insert
 
   defp tmp_path do
     name = "geex_recon_#{System.unique_integer([:positive])}.txt"
@@ -27,7 +29,13 @@ defmodule Geex.ReconcileTest do
     pid
   end
 
-  describe "reconcile/2 — the core (echo-suppression + :external synthesis)" do
+  # Make `buf` dirty: dispatch one human edit so its text diverges from its `synced` baseline.
+  defp dirty_edit(buf, text) do
+    {:ok, cmd} = Insert.parse(%{line: 0, col: 0, text: text})
+    {:ok, _} = Buffer.dispatch(buf, Command.put_meta(cmd, Meta.human()))
+  end
+
+  describe "reconcile/2 — the core (baseline echo-suppression + :external synthesis)" do
     test "equal disk text is ignored (echo-suppression, no history change)" do
       buf = start_supervised!({Buffer, text: "same\n"})
       assert Reconcile.reconcile(buf, "same\n") == :ignored
@@ -46,6 +54,56 @@ defmodule Geex.ReconcileTest do
       assert snap.version == 1
       # the buffer now equals disk, so it is in sync — not dirty (geex-as-observer)
       assert snap.dirty == false
+    end
+
+    test "a dirty buffer is NOT reverted by an event for an unchanged file (disk == baseline)" do
+      # the heart of the baseline model: reconcile compares disk to the SYNCED baseline, not
+      # the live text. A dirty buffer's disk still equals its baseline, so an event for it is
+      # no external change — the unsaved edits survive (this is what geex's own rename relies on).
+      buf = start_supervised!({Buffer, text: "base\n"})
+      dirty_edit(buf, "EDIT-")
+      assert Buffer.snapshot(buf).dirty == true
+
+      assert Reconcile.reconcile(buf, "base\n") == :ignored
+      assert Buffer.get_text(buf) == "EDIT-base\n"
+      assert Enum.all?(Buffer.history(buf), &(&1.meta.actor != :external))
+    end
+
+    test "a dirty buffer adopts a genuine external change (disk diverges from baseline)" do
+      buf = start_supervised!({Buffer, text: "base\n"})
+      dirty_edit(buf, "EDIT-")
+
+      assert {:reconciled, snap} = Reconcile.reconcile(buf, "external\n")
+      assert snap.text == "external\n"
+      # the human edit is kept in history; the external change is appended and adopted
+      assert length(snap.history) == 2
+      assert List.last(snap.history).meta.actor == :external
+      assert snap.dirty == false
+    end
+
+    test "save/1 moves the baseline: the save echo is ignored, a later external change is caught" do
+      path = tmp_path()
+      File.write!(path, "v1\n")
+      buf = open_registered(path)
+      dirty_edit(buf, "EDIT-")
+      assert {:ok, _} = Buffer.save(buf)
+
+      # save wrote "EDIT-v1\n" to disk and re-baselined to it, so the save's own watch event
+      # (disk == the just-written bytes) is ignored — NOT re-ingested as an external change.
+      assert Reconcile.reconcile(buf, "EDIT-v1\n") == :ignored
+      # but a genuine external change *after* the save still diverges from the new baseline.
+      assert {:reconciled, snap} = Reconcile.reconcile(buf, "external\n")
+      assert snap.text == "external\n"
+    end
+
+    test "adopting an external change re-baselines: a re-delivered identical event is ignored" do
+      buf = start_supervised!({Buffer, text: "base\n"})
+      assert {:reconciled, _} = Reconcile.reconcile(buf, "adopted\n")
+
+      # mark_synced set the baseline to the adopted disk content, so the same disk arriving
+      # again (a settling/duplicate event) is ignored — not re-adopted as a second command.
+      assert Reconcile.reconcile(buf, "adopted\n") == :ignored
+      assert length(Buffer.history(buf)) == 1
     end
 
     test "a dead target buffer is contained, not a crash" do
@@ -153,6 +211,23 @@ defmodule Geex.ReconcileTest do
       # the buffer keeps its content; deletion isn't reconciled to empty
       assert Buffer.get_text(buf) == "present\n"
       assert Buffer.history(buf) == []
+    end
+
+    test "a dirty buffer is not reverted by an event for its unchanged backing file",
+         %{recon: recon} do
+      path = tmp_path()
+      File.write!(path, "base\n")
+      buf = open_registered(path)
+      dirty_edit(buf, "EDIT-")
+
+      # disk is unchanged from the buffer's baseline ("base\n"), so a spurious event must not
+      # revert the unsaved edits — the watcher-level analog of the baseline core test, and the
+      # exact path geex's own rename relies on (the re-keyed buffer keeps its baseline).
+      send(recon, {:file_event, self(), {path, [:modified]}})
+      sync(recon)
+
+      assert Buffer.get_text(buf) == "EDIT-base\n"
+      assert Enum.all?(Buffer.history(buf), &(&1.meta.actor != :external))
     end
 
     test "a :stop event and unknown messages are ignored without crashing", %{recon: recon} do

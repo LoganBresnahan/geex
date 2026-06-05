@@ -15,15 +15,19 @@ defmodule Geex.Reconcile do
   ## Two layers (like `Geex.MCP.Protocol`)
 
     * **The core — `reconcile/2`** (no watcher, directly testable): given a buffer
-      pid and the new disk text, **echo-suppress by content comparison** — disk text
-      equal to the buffer's `EditorState` means this was geex's own `save/1` (or a
-      no-op), so ignore it; otherwise synthesize a minimal `%Command{}` (a
-      whole-buffer `replace` to the disk content, tagged `actor: :external`),
-      dispatch it into *that* buffer's one undo history, and mark the buffer synced
-      (it now equals disk). Reconcile only reads disk and dispatches in-memory
-      commands — it never writes disk, so it cannot echo or loop. It contains a
-      `:exit` from a buffer that died under it, so one buffer's death never crashes
-      the reconciler.
+      pid and the new disk text, **echo-suppress by baseline comparison** — disk text
+      equal to the buffer's `synced` baseline (the content it last loaded / saved /
+      adopted) means the file is unchanged from geex's last sync — its own `save/1`, a
+      no-op, or unsaved edits sitting on top of an otherwise-unchanged file — so ignore
+      it; otherwise synthesize a minimal `%Command{}` (a whole-buffer `replace` to the
+      disk content, tagged `actor: :external`), dispatch it into *that* buffer's one undo
+      history, and re-baseline the buffer (it now equals disk). Comparing against the
+      baseline, not the live (possibly dirty) text, is what keeps an event for an
+      *unchanged* file from reverting unsaved edits — and it makes geex's own
+      `Geex.Session.rename_file/2` echo-suppress for free (the re-keyed buffer carries its
+      baseline). Reconcile only reads disk and dispatches in-memory commands — it never
+      writes disk, so it cannot echo or loop. It contains a `:exit` from a buffer that
+      died under it, so one buffer's death never crashes the reconciler.
 
     * **The watcher — the GenServer** watches the directory of each open buffer (via
       the `:file_system` library) and turns a `{:file_event, _, {path, _}}` into a
@@ -34,9 +38,12 @@ defmodule Geex.Reconcile do
       next open re-watches it. If the platform watch backend is unavailable
       (`inotify-tools` not installed) the watcher degrades to a logged no-op; the
       core is unaffected. (A burst of `:modified` events for one write reconciles once
-      then content-compares to `:ignored`; a non-atomic mid-write read is adopted as
+      then baseline-compares to `:ignored`; a non-atomic mid-write read is adopted as
       `:external` and corrected by the settling event — coarse but undoable, never
-      silently lost. Close-event filtering / debounce is a later refinement.)
+      silently lost. geex's *own* writes — a `save/1`, or a `Geex.Session.rename_file/2`
+      whose re-keyed buffer carries its baseline along — leave disk equal to that baseline,
+      so their events baseline-compare to `:ignored` with no rename-specific handling.
+      Close-event filtering / debounce is a later refinement.)
 
   ## Honesty (ADR-0012 / ADR-0017)
 
@@ -83,27 +90,36 @@ defmodule Geex.Reconcile do
 
   @doc """
   The reconcile **core** (directly testable, no watcher). Compares `disk_text` to the
-  buffer's current `EditorState`:
+  buffer's **`synced` baseline** — the disk content it is in sync with, *not* its live
+  (possibly dirty) text:
 
-    * **equal** → `:ignored` (echo-suppression: geex's own save or a no-op);
-    * **differ** → synthesize an `:external` whole-buffer `replace` and dispatch it
-      into `pid`'s history, returning `{:reconciled, snapshot}`;
+    * **equal** → `:ignored` (the file is unchanged from geex's last sync: its own
+      `save/1`, a no-op, or unsaved edits sitting on top of an otherwise-unchanged file);
+    * **differ** → a genuine external change: synthesize an `:external` whole-buffer
+      `replace` to `disk_text`, dispatch it into `pid`'s history (adopting over any unsaved
+      edits — the geex-as-observer posture), returning `{:reconciled, snapshot}`;
     * a dispatch failure → `{:error, reason}`.
+
+  Comparing against the baseline (not the live text) is what makes a dirty buffer's unsaved
+  edits survive an event for an *unchanged* file — including the destination event from
+  geex's own `Geex.Session.rename_file/2`, whose re-keyed buffer carries its baseline along,
+  so the move never looks like an external change (no rename-specific suppression needed).
   """
   @spec reconcile(pid(), String.t()) ::
           :ignored | {:reconciled, map()} | {:error, term()}
   def reconcile(pid, disk_text) when is_pid(pid) and is_binary(disk_text) do
     snapshot = Buffer.snapshot(pid)
 
-    if snapshot.text == disk_text do
+    if snapshot.synced == disk_text do
       :ignored
     else
       command = external_replace(snapshot, disk_text)
 
       case Buffer.dispatch(pid, command) do
         {:ok, _new_snapshot} ->
-          # The buffer now equals disk, so it is in sync — clear the dirty flag that
-          # dispatch/2 set (it can't know this command's result happens to match disk).
+          # The buffer now equals disk — re-baseline it (mark_synced sets `synced` to the
+          # current text and clears the dirty flag that dispatch/2 set; that text is the new
+          # on-disk truth).
           synced = Buffer.mark_synced(pid)
           Logger.info("geex reconcile: external change to #{snapshot.path || "buffer"}")
           {:reconciled, synced}
@@ -200,9 +216,12 @@ defmodule Geex.Reconcile do
     end
   end
 
-  # Read the changed file and reconcile its buffer — but only if that path is an open
-  # buffer (the Registry is the source of truth). A transient read error or a deletion
-  # (`:enoent`) is skipped rather than reconciled to empty.
+  # Read the changed file and reconcile its buffer — but only if that path is an open buffer
+  # (the Registry is the source of truth). A transient read error or a deletion (`:enoent`) is
+  # skipped rather than reconciled to empty. `reconcile/2` itself decides external-vs-echo by
+  # comparing disk against the buffer's `synced` baseline, so the watcher needs no per-event
+  # bookkeeping — an unchanged file (geex's own save/rename, or a spurious event) compares
+  # equal and is ignored without reverting any unsaved edits.
   defp on_disk_change(path) do
     with {:ok, pid} <- BufferSupervisor.whereis(path),
          {:ok, disk_text} <- File.read(path) do

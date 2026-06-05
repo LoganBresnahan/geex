@@ -39,11 +39,18 @@ like the minibuffer or the MCP server.
      live-reload uses it), low latency and overhead. This is geex's ~3rd dependency, after
      Bandit/Plug; a hand-rolled poller was the alternative and was rejected as a hack we'd
      replace. (`JSON` and diffing stay built-in.)
-   - **Echo-suppression by content comparison (decided 2026-06-04):** on a watch event,
-     read the disk and compare to the buffer's `EditorState`. **Equal → ignore** (this is
-     geex's own `save/1`, or a no-op); **differ → reconcile.** Comparing content means a
-     geex save never looks like an external edit, so no separate "I just wrote this"
-     bookkeeping is needed — echo-suppression falls out for free.
+   - **Echo-suppression by content comparison (decided 2026-06-04; amended 2026-06-05 →
+     compare to the *baseline*):** on a watch event, read the disk and compare to the
+     buffer's **`synced` baseline** — the disk content it last loaded / saved / adopted, *not*
+     its live (possibly dirty) `EditorState`. **Equal → ignore** (geex's own `save/1`, a
+     no-op, or unsaved edits sitting on top of an otherwise-unchanged file); **differ →
+     reconcile.** The original "compare to `EditorState`" rule was correct for clean buffers
+     but reverted a *dirty* buffer on any spurious event — and on geex's own `rename_file/2`,
+     whose moved bytes diverge from the unsaved text. Comparing to the baseline (the
+     editor-standard "did the file change underneath me?" test, as in VS Code / Emacs /
+     JetBrains) fixes both, and makes a rename echo-suppress for free (the re-keyed buffer
+     carries its baseline). Still no separate "I just wrote this" bookkeeping. See the
+     2026-06-05 [testing-log entry](../testing.md).
 2. **Out-of-band edits are tagged `actor: :external`**, never fabricated as `{:llm, _}` or
    `:human` (ADR-0012: "never fabricates provenance it can't back"). `:external` is added
    to the canonical `Geex.Command.Meta` actor enumeration (the code already carries it;

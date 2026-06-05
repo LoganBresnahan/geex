@@ -110,7 +110,20 @@ defmodule Geex.MCP.ProtocolTest do
     test "lists the registered edit commands plus the operation tools (ADR-0019)" do
       %{"result" => %{"tools" => tools}} = frame(request(1, "tools/list"))
       names = Enum.map(tools, & &1["name"]) |> Enum.sort()
-      assert names == ["delete", "edit", "insert", "open_file", "replace", "save_file"]
+
+      assert names == [
+               "close_file",
+               "create_file",
+               "delete",
+               "delete_file",
+               "edit",
+               "insert",
+               "open_file",
+               "rename_file",
+               "replace",
+               "save_file"
+             ]
+
       insert = Enum.find(tools, &(&1["name"] == "insert"))
       assert insert["inputSchema"]["required"] == ["line", "col", "text"]
     end
@@ -344,6 +357,57 @@ defmodule Geex.MCP.ProtocolTest do
       assert result["isError"] == true
       assert [%{"text" => text}] = result["content"]
       assert text =~ "Invalid arguments"
+    end
+
+    test "create_file → rename_file → delete_file route through the generic operation path" do
+      path = tmp_path()
+      moved = tmp_path()
+
+      %{"result" => created} =
+        frame(
+          request(1, "tools/call", %{
+            "name" => "create_file",
+            "arguments" => %{"path" => path, "content" => "x"}
+          })
+        )
+
+      assert created["isError"] == false
+      assert [%{"text" => create_msg}] = created["content"]
+      assert create_msg =~ "created "
+      assert File.read!(path) == "x"
+
+      %{"result" => renamed} =
+        frame(
+          request(2, "tools/call", %{
+            "name" => "rename_file",
+            "arguments" => %{"from" => path, "to" => moved}
+          })
+        )
+
+      assert renamed["isError"] == false
+      assert File.read!(moved) == "x"
+      refute File.exists?(path)
+
+      %{"result" => deleted} =
+        frame(
+          request(3, "tools/call", %{"name" => "delete_file", "arguments" => %{"path" => moved}})
+        )
+
+      assert deleted["isError"] == false
+      refute File.exists?(moved)
+    end
+
+    test "a clean operation failure (delete a missing file) rides isError, not a JSON-RPC error" do
+      path = tmp_path()
+
+      %{"result" => result} =
+        frame(
+          request(1, "tools/call", %{"name" => "delete_file", "arguments" => %{"path" => path}})
+        )
+
+      assert result["isError"] == true
+      assert [%{"text" => text}] = result["content"]
+      assert text =~ "enoent"
     end
   end
 

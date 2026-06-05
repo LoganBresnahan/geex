@@ -20,8 +20,9 @@ defmodule Geex.Session do
   """
 
   use GenServer
+  require Logger
 
-  alias Geex.{BufferSupervisor, View}
+  alias Geex.{Buffer, BufferSupervisor, View}
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -52,6 +53,68 @@ defmodule Geex.Session do
   @spec open_file(String.t()) :: {:ok, pid()} | {:error, term()}
   def open_file(path) when is_binary(path),
     do: GenServer.call(__MODULE__, {:open_file, path})
+
+  @doc """
+  Create a new file at `path` on disk with optional initial `content` (ADR-0019).
+
+  A pure **disk** operation: it does **not** open a buffer (call `open_file/1` to edit
+  through geex) and is not a recorded edit. Refuses if `path` already exists — either as
+  a file on disk *or* as an open buffer — returning `{:error, :eexist}` (use
+  `open_file` + edit + `save_file/0` to modify an existing file). Other failures surface
+  the raw posix reason (e.g. `{:error, :enoent}` when the parent directory is missing —
+  parents are not created). Returns `{:ok, expanded_path}`.
+  """
+  @spec create_file(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def create_file(path, content \\ "") when is_binary(path) and is_binary(content),
+    do: GenServer.call(__MODULE__, {:create_file, path, content})
+
+  @doc """
+  Delete `path` from disk and evict any open buffer for it (ADR-0019).
+
+  Removes the file (`File.rm`), then — if a buffer is open for that path — terminates it
+  and clears the active pointer if it was active. Discarding a buffer with unsaved
+  in-memory edits is reported (the `discarded?` flag), never silent. Refuses with
+  `{:error, :enoent}` if the file does not exist on disk (to drop a never-saved buffer
+  with no backing file, use `close_file/1`). Not a recorded edit. Returns
+  `{:ok, {expanded_path, discarded?}}`.
+  """
+  @spec delete_file(String.t()) :: {:ok, {String.t(), boolean()}} | {:error, term()}
+  def delete_file(path) when is_binary(path),
+    do: GenServer.call(__MODULE__, {:delete_file, path})
+
+  @doc """
+  Rename / move the file at `from` to `to` on disk, re-keying any open buffer (ADR-0019).
+
+  Renames on disk (`File.rename`), then — if a buffer is open for `from` — re-keys it to
+  `to` (`Geex.Buffer.rename/2`): its unsaved edits and undo history are preserved and now
+  target the new path, and the active-buffer pid is unchanged (it is the same process). The
+  re-keyed buffer carries its `synced` disk baseline along, so the reconcile floor (ADR-0017)
+  sees the moved file as unchanged from that baseline and never adopts the moved-but-stale
+  on-disk bytes back over those unsaved edits — no rename-specific suppression needed. Refuses
+  if `from` and `to` are the same path, or if `to` already exists (on disk or as an open
+  buffer) — geex does not clobber or merge. A `from` with neither a file on disk nor an open
+  buffer surfaces `{:error, :enoent}`; but a buffer opened on a not-yet-saved path is re-keyed
+  in memory (a later `save_file` writes it to `to`). Not a recorded edit. Returns
+  `{:ok, {from_expanded, to_expanded}}`.
+  """
+  @spec rename_file(String.t(), String.t()) :: {:ok, {String.t(), String.t()}} | {:error, term()}
+  def rename_file(from, to) when is_binary(from) and is_binary(to),
+    do: GenServer.call(__MODULE__, {:rename_file, from, to})
+
+  @doc """
+  Close an open buffer, freeing it — the file on disk is left untouched (ADR-0019).
+
+  With a `path`, closes the buffer open for it; with `nil`, closes the **active** buffer.
+  Terminates the buffer process and clears the active pointer if it was active. Discarding
+  unsaved in-memory edits is reported (`discarded?`), never silent — call `save_file/0`
+  first to keep them. Returns `{:error, :no_such_buffer}` if no matching buffer is open.
+  Not a recorded edit; the backing file is **not** deleted (that is `delete_file/1`).
+  Returns `{:ok, {label, discarded?}}` where `label` is the buffer's path (or
+  `"active buffer"` for a pathless scratch buffer).
+  """
+  @spec close_file(String.t() | nil) :: {:ok, {String.t(), boolean()}} | {:error, :no_such_buffer}
+  def close_file(path \\ nil) when is_binary(path) or is_nil(path),
+    do: GenServer.call(__MODULE__, {:close_file, path})
 
   @doc "The active buffer pid, or `:error` if none is active."
   @spec active_buffer() :: {:ok, pid()} | :error
@@ -98,6 +161,89 @@ defmodule Geex.Session do
     end
   end
 
+  def handle_call({:create_file, path, content}, _from, state) do
+    full = Path.expand(path)
+
+    reply =
+      cond do
+        # "create" means *new*: refuse if it already exists on disk or as an open buffer
+        # (don't clobber a file or shadow a buffer's in-memory content).
+        File.exists?(full) -> {:error, :eexist}
+        match?({:ok, _}, BufferSupervisor.whereis(full)) -> {:error, :eexist}
+        true -> with(:ok <- File.write(full, content), do: {:ok, full})
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:delete_file, path}, _from, state) do
+    full = Path.expand(path)
+
+    case File.rm(full) do
+      :ok ->
+        # The watcher sees this deletion, but on_disk_change skips a `:enoent` read, so
+        # the eviction below — not a bogus reconcile-to-empty — is what closes the buffer.
+        {discarded?, state} =
+          case BufferSupervisor.whereis(full) do
+            {:ok, pid} -> {dirty?(pid), drop_buffer(pid, state)}
+            :error -> {false, state}
+          end
+
+        {:reply, {:ok, {full, discarded?}}, state}
+
+      {:error, _posix} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:rename_file, from, to}, _from, state) do
+    f = Path.expand(from)
+    t = Path.expand(to)
+
+    {reply, state} =
+      cond do
+        f == t ->
+          {{:error, :same_path}, state}
+
+        File.exists?(t) or match?({:ok, _}, BufferSupervisor.whereis(t)) ->
+          {{:error, :destination_exists}, state}
+
+        true ->
+          case File.rename(f, t) do
+            :ok ->
+              {{:ok, {f, t}}, rekey_buffer(f, t, state)}
+
+            # A never-saved buffer has no file on disk yet (`open_file` on a missing path is
+            # a valid empty buffer, created on first save — ADR-0019), so `File.rename` fails
+            # `:enoent` — but the *buffer* is real and renamable: re-key it in-memory so a
+            # later `save_file` writes to the new path. With no open buffer there is genuinely
+            # nothing at `from`, so the posix error stands (matching the buffer-less case).
+            {:error, :enoent} ->
+              case BufferSupervisor.whereis(f) do
+                {:ok, _pid} -> {{:ok, {f, t}}, rekey_buffer(f, t, state)}
+                :error -> {{:error, :enoent}, state}
+              end
+
+            {:error, _posix} = error ->
+              {error, state}
+          end
+      end
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:close_file, path}, _from, state) do
+    case resolve_to_close(path, state) do
+      {:ok, pid, label} ->
+        {discarded?, label} = buffer_status(pid, label)
+        state = drop_buffer(pid, state)
+        {:reply, {:ok, {label, discarded?}}, state}
+
+      :error ->
+        {:reply, {:error, :no_such_buffer}, state}
+    end
+  end
+
   def handle_call(:active_buffer, _from, state) do
     reply = if pid = state.view.buffer_pid, do: {:ok, pid}, else: :error
     {:reply, reply, state}
@@ -132,5 +278,101 @@ defmodule Geex.Session do
           {:error, _reason} = error -> error
         end
     end
+  end
+
+  # Resolve the buffer `close_file` should drop: the active one (nil), or the buffer
+  # registered for an explicit path. `label` is carried for the result message — nil for
+  # the active buffer, filled in from its snapshot path later.
+  defp resolve_to_close(nil, state) do
+    case state.view.buffer_pid do
+      pid when is_pid(pid) -> {:ok, pid, nil}
+      nil -> :error
+    end
+  end
+
+  defp resolve_to_close(path, _state) when is_binary(path) do
+    case BufferSupervisor.whereis(Path.expand(path)) do
+      {:ok, pid} -> {:ok, pid, path}
+      :error -> :error
+    end
+  end
+
+  # If a buffer is open for `from`, re-key it to `to` (preserving its edits + history)
+  # and start watching the destination. The active-buffer pid is unchanged (same process),
+  # so the pointer needs no update. A re-key failure is logged, not fatal: the disk file
+  # already moved, and the buffer's stale path is recoverable by a re-open.
+  defp rekey_buffer(from, to, state) do
+    with {:ok, pid} <- BufferSupervisor.whereis(from) do
+      case safe_rename(pid, to) do
+        :ok ->
+          Geex.Reconcile.watch(to)
+
+        {:error, reason} ->
+          Logger.warning(
+            "geex: renamed #{from} -> #{to} on disk but could not re-key its buffer " <>
+              "(#{inspect(reason)}); the buffer still targets the old path"
+          )
+      end
+    end
+
+    state
+  end
+
+  # The buffer can die between the `whereis` and this call (it is `:temporary`); the disk
+  # rename has *already committed*, so a buffer death must degrade to the logged,
+  # stale-path-recoverable-by-reopen branch above — never crash the serialized Session
+  # (matching the `catch :exit` discipline of `dirty?`/`buffer_status`/`evict`).
+  defp safe_rename(pid, to) do
+    Buffer.rename(pid, to)
+  catch
+    :exit, _ -> {:error, :buffer_down}
+  end
+
+  # Evict `pid`: release its path registration synchronously (so a re-open/re-create of
+  # the path right after this sees a clean registry, not the dying pid via the monitor's
+  # async cleanup), terminate it, and clear the active pointer if it pointed here.
+  defp drop_buffer(pid, state) do
+    evict(pid)
+    if state.view.buffer_pid == pid, do: put_in(state.view.buffer_pid, nil), else: state
+  end
+
+  # Unregister-then-terminate, tolerant of two edge cases a *serialized* Session must not
+  # crash or lie on:
+  #   * the buffer already died (it is `:temporary`, and the active pid is unmonitored —
+  #     see `open_file/1`): an unguarded `GenServer.call` into a dead pid exits `:noproc`
+  #     and would take the whole Session (and its view/clipboard/minibuffer state) down.
+  #     The siblings `dirty?`/`buffer_status` already `catch :exit` for exactly this; do
+  #     the same here. A dead buffer needs no unregister — its entry clears via the
+  #     monitor's `:DOWN` — so swallowing the exit is correct.
+  #   * the buffer is not a `BufferSupervisor` child (a directly-started pathless scratch
+  #     buffer): `terminate/1` then returns `{:error, :not_found}` and the process would be
+  #     left ALIVE while we report it "closed" (and, if dirty, "discarded unsaved edits") —
+  #     a double lie that also leaks the process. Stop it directly so "closed" is honest.
+  defp evict(pid) do
+    Buffer.unregister(pid)
+
+    case BufferSupervisor.terminate(pid) do
+      :ok -> :ok
+      {:error, :not_found} -> GenServer.stop(pid, :shutdown)
+    end
+  catch
+    :exit, _ -> :ok
+  end
+
+  # Whether `pid`'s buffer holds unsaved edits — for the "discarded unsaved edits" notice.
+  # Guarded: a buffer dying between resolution and the call reports clean, never crashes.
+  defp dirty?(pid) do
+    Buffer.snapshot(pid).dirty
+  catch
+    :exit, _ -> false
+  end
+
+  # One snapshot read for both the dirty flag and a display label (the buffer's path, or a
+  # placeholder for a pathless scratch buffer / a buffer that just died).
+  defp buffer_status(pid, label) do
+    snapshot = Buffer.snapshot(pid)
+    {snapshot.dirty, label || snapshot.path || "active buffer"}
+  catch
+    :exit, _ -> {false, label || "buffer"}
   end
 end

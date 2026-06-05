@@ -37,9 +37,17 @@ defmodule Geex.MCP.OperationsTest do
   end
 
   describe "tools/0 — the operation-tool descriptors" do
-    test "exposes open_file and save_file with field-spec-projected schemas" do
+    test "exposes the buffer + disk-file lifecycle tools with field-spec-projected schemas" do
       names = Enum.map(Operations.tools(), & &1["name"]) |> Enum.sort()
-      assert names == ["open_file", "save_file"]
+
+      assert names == [
+               "close_file",
+               "create_file",
+               "delete_file",
+               "open_file",
+               "rename_file",
+               "save_file"
+             ]
 
       open = Enum.find(Operations.tools(), &(&1["name"] == "open_file"))
       assert open["inputSchema"]["type"] == "object"
@@ -49,6 +57,20 @@ defmodule Geex.MCP.OperationsTest do
 
       save = Enum.find(Operations.tools(), &(&1["name"] == "save_file"))
       assert save["inputSchema"]["required"] == []
+
+      # create_file: required path + optional content (default not surfaced in schema).
+      create = Enum.find(Operations.tools(), &(&1["name"] == "create_file"))
+      assert create["inputSchema"]["required"] == ["path"]
+      assert create["inputSchema"]["properties"]["content"]["type"] == "string"
+
+      # rename_file: two required string args.
+      rename = Enum.find(Operations.tools(), &(&1["name"] == "rename_file"))
+      assert Enum.sort(rename["inputSchema"]["required"]) == ["from", "to"]
+
+      # close_file: path is optional (defaults to the active buffer).
+      close = Enum.find(Operations.tools(), &(&1["name"] == "close_file"))
+      assert close["inputSchema"]["required"] == []
+      assert close["inputSchema"]["properties"]["path"]["type"] == "string"
     end
   end
 
@@ -123,6 +145,110 @@ defmodule Geex.MCP.OperationsTest do
       Session.set_active_buffer(scratch)
       {:ok, op} = Operations.lookup("save_file")
       assert {:error, ":no_path"} = Operations.call(op, %{})
+    end
+  end
+
+  describe "call/2 — create_file" do
+    test "creates a file with content and confirms the path" do
+      path = tmp_path()
+      {:ok, op} = Operations.lookup("create_file")
+      assert {:ok, msg} = Operations.call(op, %{"path" => path, "content" => "hi\n"})
+      assert msg =~ "created "
+      assert File.read!(path) == "hi\n"
+    end
+
+    test "an existing file is a clean {:error, _} with an actionable message" do
+      path = tmp_path()
+      File.write!(path, "x")
+      {:ok, op} = Operations.lookup("create_file")
+      assert {:error, why} = Operations.call(op, %{"path" => path})
+      assert why =~ "already exists"
+    end
+  end
+
+  describe "call/2 — delete_file" do
+    test "deletes a file and confirms" do
+      path = tmp_path()
+      File.write!(path, "x")
+      {:ok, op} = Operations.lookup("delete_file")
+      assert {:ok, msg} = Operations.call(op, %{"path" => path})
+      assert msg =~ "deleted "
+      refute File.exists?(path)
+    end
+
+    test "deleting an open buffer with unsaved edits reports the discard, never silent" do
+      path = tmp_path()
+      File.write!(path, "x")
+      open(path)
+      {:ok, cmd} = Geex.Commands.Insert.parse(%{line: 0, col: 0, text: "Z"})
+      {:ok, _} = Geex.Dispatch.run(Geex.Command.put_meta(cmd, Geex.Command.Meta.human()))
+
+      {:ok, op} = Operations.lookup("delete_file")
+      assert {:ok, msg} = Operations.call(op, %{"path" => path})
+      assert msg =~ "discarded unsaved edits"
+    end
+
+    test "a missing file is a clean {:error, _}" do
+      path = tmp_path()
+      {:ok, op} = Operations.lookup("delete_file")
+      assert {:error, why} = Operations.call(op, %{"path" => path})
+      assert why =~ "enoent"
+    end
+  end
+
+  describe "call/2 — rename_file" do
+    test "renames a file and confirms from -> to" do
+      from = tmp_path()
+      to = tmp_path()
+      File.write!(from, "x")
+      {:ok, op} = Operations.lookup("rename_file")
+      assert {:ok, msg} = Operations.call(op, %{"from" => from, "to" => to})
+      assert msg =~ "renamed "
+      assert msg =~ " -> "
+      assert File.read!(to) == "x"
+    end
+
+    test "an existing destination is a clean {:error, _}" do
+      from = tmp_path()
+      to = tmp_path()
+      File.write!(from, "a")
+      File.write!(to, "b")
+      {:ok, op} = Operations.lookup("rename_file")
+      assert {:error, why} = Operations.call(op, %{"from" => from, "to" => to})
+      assert why =~ "destination already exists"
+    end
+
+    test "a missing 'to' arg is {:invalid_args, _}, not a crash" do
+      {:ok, op} = Operations.lookup("rename_file")
+      assert {:invalid_args, why} = Operations.call(op, %{"from" => "a"})
+      assert why =~ "to"
+    end
+  end
+
+  describe "call/2 — close_file" do
+    test "closes the active buffer (no path arg)" do
+      path = tmp_path()
+      File.write!(path, "")
+      open(path)
+      {:ok, op} = Operations.lookup("close_file")
+      assert {:ok, msg} = Operations.call(op, %{})
+      assert msg =~ "closed "
+    end
+
+    test "an explicit null path closes the active buffer (collapses to nil)" do
+      path = tmp_path()
+      File.write!(path, "")
+      open(path)
+      {:ok, op} = Operations.lookup("close_file")
+      assert {:ok, msg} = Operations.call(op, %{"path" => nil})
+      assert msg =~ "closed "
+    end
+
+    test "no active buffer is a clean {:error, _}" do
+      Session.set_active_buffer(nil)
+      {:ok, op} = Operations.lookup("close_file")
+      assert {:error, why} = Operations.call(op, %{})
+      assert why =~ "no active buffer"
     end
   end
 end

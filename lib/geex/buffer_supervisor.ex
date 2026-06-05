@@ -13,10 +13,11 @@ defmodule Geex.BufferSupervisor do
 
   use DynamicSupervisor
 
-  # A generous ceiling on simultaneously-open buffers. There is no `close_file` yet
-  # (ADR-0019 ships only open/save), so buffers accumulate for the session's life; the
-  # cap turns a runaway open-loop into a clean `{:error, :max_children}` (surfaced as an
-  # isError tool result via `Session.open_file`) instead of unbounded memory growth.
+  # A generous ceiling on simultaneously-open buffers. `close_file` frees a slot
+  # (`Session.close_file/1` → `terminate/1`), but a harness need not close, so buffers
+  # can still accumulate; the cap turns a runaway open-loop into a clean
+  # `{:error, :max_children}` (surfaced as an isError tool result via `Session.open_file`)
+  # instead of unbounded memory growth.
   @max_buffers 1024
 
   def start_link(opts \\ []) do
@@ -42,6 +43,17 @@ defmodule Geex.BufferSupervisor do
       [] -> :error
     end
   end
+
+  @doc """
+  Terminate (close) an open buffer process — the mechanics behind
+  `Geex.Session.close_file/1` / `delete_file/1`. The buffer is `:temporary`, so it
+  stays down; its `Geex.Registry` entry clears on death (the registry monitors it),
+  freeing the path for a future re-open. Returns `:ok`, or `{:error, :not_found}` if
+  `pid` is not a current child (e.g. it already died).
+  """
+  @spec terminate(pid()) :: :ok | {:error, :not_found}
+  def terminate(pid) when is_pid(pid),
+    do: DynamicSupervisor.terminate_child(__MODULE__, pid)
 
   defp via(path), do: {:via, Registry, {Geex.Registry, path}}
 

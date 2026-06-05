@@ -7,9 +7,15 @@ defmodule Geex.MCP.Operations do
     * **edit tools** (`insert`/`delete`/`replace`) — macro-projected from the
       field-spec, routed through `Geex.Dispatch.run/1` into the undo history;
     * **read tools** — the read-only query surface (§15b);
-    * **operation tools** (`open_file`/`save_file`) — *this module*: hand-written
-      handlers that act on `Geex.Session` / disk and are **not** recorded as edits
-      (you don't "undo a save"; loading is not a content mutation — ADR-0003).
+    * **operation tools** (`open_file`/`save_file`/`create_file`/`delete_file`/
+      `rename_file`/`close_file`) — *this module*: hand-written handlers that act on
+      `Geex.Session` / disk and are **not** recorded as edits (you don't "undo a save";
+      loading is not a content mutation — ADR-0003). They split along two axes:
+      **buffer lifecycle** (`open`/`save`/`close`, acting on geex's in-memory world) and
+      **disk-file lifecycle** (`create`/`delete`/`rename`, acting on the file on disk and
+      cleaning up any buffer). Together they complete the write surface the
+      [coverage gate](../../doc/adr/0016-external-harness-integration.md) requires
+      (create / edit / delete / rename) so a harness's built-in writers can be denied.
 
   Operation tools are not commands: they have no `%Command{}`, never reach
   `Geex.Dispatch`, and never enter a buffer's history. But they still carry a
@@ -53,6 +59,81 @@ defmodule Geex.MCP.Operations do
         "Write the active buffer's current text back to its file on disk and clear the " <>
           "dirty flag. Not an edit (does not enter the undo history).",
       fields: []
+    },
+    %{
+      name: "create_file",
+      description:
+        "Create a new file on disk with optional initial content. Refuses if the path " <>
+          "already exists (as a file or an open buffer) — use open_file then edit/save to " <>
+          "change an existing file. A disk operation: it does not open a buffer (call " <>
+          "open_file to edit the new file) and is not an edit.",
+      fields: [
+        %Field{
+          name: :path,
+          type: :string,
+          required: true,
+          description: "Path of the new file to create (its parent directory must exist)"
+        },
+        %Field{
+          name: :content,
+          type: :string,
+          required: false,
+          default: "",
+          description: "Initial file contents (default: empty)"
+        }
+      ]
+    },
+    %{
+      name: "delete_file",
+      description:
+        "Delete a file from disk and evict any open buffer for it (discarding unsaved " <>
+          "in-memory edits, which are reported). Refuses if the file does not exist — to " <>
+          "drop a never-saved buffer with no file on disk, use close_file. Not an edit.",
+      fields: [
+        %Field{
+          name: :path,
+          type: :string,
+          required: true,
+          description: "Path of the file to delete"
+        }
+      ]
+    },
+    %{
+      name: "rename_file",
+      description:
+        "Rename or move a file on disk, re-keying any open buffer for it (its unsaved " <>
+          "edits and undo history are preserved, now targeting the new path). Refuses if " <>
+          "the destination already exists. Not an edit.",
+      fields: [
+        %Field{
+          name: :from,
+          type: :string,
+          required: true,
+          description: "Current path of the file"
+        },
+        %Field{
+          name: :to,
+          type: :string,
+          required: true,
+          description: "New path for the file (must not already exist)"
+        }
+      ]
+    },
+    %{
+      name: "close_file",
+      description:
+        "Close an open buffer (the active buffer if no path is given), freeing it; the " <>
+          "file on disk is left untouched. Unsaved in-memory edits are discarded and " <>
+          "reported — call save_file first to keep them. Not an edit.",
+      fields: [
+        %Field{
+          name: :path,
+          type: :string,
+          required: false,
+          default: nil,
+          description: "Path of the open buffer to close (default: the active buffer)"
+        }
+      ]
     }
   ]
 
@@ -107,6 +188,65 @@ defmodule Geex.MCP.Operations do
         {:error, ":no_active_buffer"}
     end
   end
+
+  defp run("create_file", %{path: path, content: content}) do
+    case Session.create_file(path, content) do
+      {:ok, full} ->
+        {:ok, "created #{full}"}
+
+      {:error, :eexist} ->
+        {:error, "already exists: #{Path.expand(path)} (use open_file to edit an existing file)"}
+
+      {:error, reason} ->
+        {:error, inspect(reason)}
+    end
+  end
+
+  defp run("delete_file", %{path: path}) do
+    case Session.delete_file(path) do
+      {:ok, {full, discarded?}} -> {:ok, "deleted #{full}#{discarded_note(discarded?)}"}
+      {:error, reason} -> {:error, inspect(reason)}
+    end
+  end
+
+  defp run("rename_file", %{from: from, to: to}) do
+    case Session.rename_file(from, to) do
+      {:ok, {full_from, full_to}} ->
+        {:ok, "renamed #{full_from} -> #{full_to}"}
+
+      {:error, :same_path} ->
+        {:error, "source and destination are the same path"}
+
+      {:error, :destination_exists} ->
+        {:error, "destination already exists: #{Path.expand(to)}"}
+
+      {:error, reason} ->
+        {:error, inspect(reason)}
+    end
+  end
+
+  defp run("close_file", %{path: path}) do
+    target = normalize_optional(path)
+
+    case Session.close_file(target) do
+      {:ok, {label, discarded?}} ->
+        {:ok, "closed #{label}#{discarded_note(discarded?)}"}
+
+      {:error, :no_such_buffer} ->
+        case target do
+          nil -> {:error, "no active buffer to close"}
+          p -> {:error, "no open buffer for #{Path.expand(p)}"}
+        end
+    end
+  end
+
+  # `cast(:string, nil)` yields "" (nil is an atom), so an explicitly-null or omitted
+  # optional `path` both collapse to nil → "close the active buffer".
+  defp normalize_optional(path) when path in [nil, ""], do: nil
+  defp normalize_optional(path), do: path
+
+  defp discarded_note(true), do: " (discarded unsaved edits)"
+  defp discarded_note(false), do: ""
 
   defp descriptor(op) do
     %{
