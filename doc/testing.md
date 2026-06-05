@@ -380,3 +380,66 @@ the live backend smoke awaits a provisioned host); debounce / close-event coales
 non-atomic mid-write reads; deletion + conflict ("reload?") merge UX (geex-as-primary); finer
 line-level reconcile diffs (pair with the ADR-0020 `edit` tool); a UI consumer for the
 surfaced divergence event.
+
+### 2026-06-05 — The `edit` (search/replace) tool — harness-ergonomic editing on the spine
+
+**Scope.** `Geex.Commands.Edit` + the pure `Geex.Edit.Resolve` (ADR-0020): an LLM edits by
+quoting old text and giving new text (the way it's trained), and geex compiles that to the
+coordinate `Doc.replace` primitive. Two deterministic tiers **apply** — exact-unique
+substring (grapheme-correct: positions via string-prefix splitting, no byte math) and a
+whitespace-normalized line window with re-indentation — both **unique-or-refuse**. No fuzzy
+*apply* beyond that: a line-presence classifier only shapes the refusal (`:stale` re-read /
+`:ambiguous` add-context / `:not_found` quote-exact), which is **stricter than Moby** and
+deletes the exact path that caused Moby's silent-duplication scar. `Edit` is **one atomic
+command**: `run/2` applies blocks sequentially (each re-resolved against the post-edit doc),
+and `Buffer`'s untouched-on-`{:error}` semantics give all-or-nothing rollback for free. One
+new arg type `:edits` (the first non-scalar) in `Type.cast` + `Schema.json_type`; Protocol
+surfaces the self-correction message. **No new dependency** (built-ins only).
+
+**Two deliberate refinements of ADR-0020** (now amended into the ADR + research): the
+matcher applies only the two deterministic tiers (the staleness/anchor reasoning informs the
+*refusal*, never a fuzzy apply); and `Edit` is one atomic command applying via `Doc.replace`,
+not N separately-dispatched `Replace` commands (the latter gave no atomicity).
+
+**Hardened by an adversarial review workflow** (4 dimension finders → per-finding
+verification; 17 confirmed). Fixed before commit: ① **self-overlapping-search miscount** —
+`String.split` counts non-overlapping, so `"end\nend"` in `"end\nend\nend"` looked unique
+and would have silently edited the first of two real (overlapping) matches; now counts
+overlapping occurrences and refuses `:ambiguous` (the exact silent-wrong-location failure the
+design exists to prevent). ② **CRLF→LF silent rewrite** — tier 2 trimmed `\r`, flipping a
+CRLF buffer to LF on edited lines; now preserves the matched window's line endings.
+③ **empty `edits: []`** ran as a no-op that dirtied the buffer + recorded a phantom history
+entry; now rejected at the cast boundary (clean isError). ④ the ADR/research were stale
+(described the abandoned N-Replace + applying-anchor design) — amended. Verifier-refuted /
+cosmetic findings (additionalProperties strictness — a pre-existing house pattern;
+non-string-description coercion; perf; message ergonomics) left as-is.
+
+**Automated.** `mix test` → **251 tests, 8 doctests, 0 failures** (was 212+8).
+`warnings-as-errors` clean. New: [resolve_test.exs](../test/geex/edit/resolve_test.exs) (the
+tiers; self-overlap ambiguity; CRLF preservation; tab + over-indent-clamp reindent; refusal
+classification; and a **seeded grapheme-correctness property** — 400 random UTF-8 cases
+asserting `resolve + Doc.replace == naive String.replace`, the ADR's #1-risk mitigation made
+real), [edit_test.exs](../test/geex/commands/edit_test.exs) (parse/cast; sequential apply;
+multi-block drift-induced ambiguity; all-or-nothing rollback through the dispatcher; **replay
+determinism** of a recorded `%Edit{}`), plus `:edits` cases in the Type and Schema tests and
+edit-tool cases in the Protocol test. *(Three of my own test expectations were initially
+wrong — tier-1 exact-substring is more surgical than I'd assumed; the implementation was
+correct and I fixed the tests.)*
+
+**Manual verification** — a live OTP tree driving `Geex.MCP.Protocol.handle_line/1`: an
+`edit` quoting `"def bar, do: 1"` flush-left against a 2-space-indented buffer matched via
+tier 2 and applied **re-indented** to `"  def bar, do: 2"` (`isError:false`); an unmatched
+block returned `isError:true` with `"...no matching text found — quote the old text exactly
+as it appears in the buffer. No edits were applied."`; `tools/list` exposed `edit` with the
+array `inputSchema`.
+
+**Good as of:** the commit carrying this entry. An LLM can now edit by quoting code — the way
+it's trained to — while every mutation is still a provenance-tagged `%Command{}` in the one
+undo history, applied atomically or refused with guidance, never silently mis-located.
+
+**Not tested / deferred:** empty-search "prepend/create" (refused for now); a generated
+(vs seeded-random) property harness (no stream_data dep); the anchor/order *applying* tier
+(deliberately not built — refuse-and-re-quote is the safe default); a broader line-ending
+contract in `Doc` (the edit tool preserves CRLF in tier 2, but `Doc` still treats `\r` as
+content model-wide); an `%Edit{}` in the §15c golden cassette (covered by a dedicated replay
+test instead).

@@ -76,6 +76,35 @@ defmodule Geex.MCP.Schema do
   defp json_type(:integer), do: %{"type" => "integer"}
   defp json_type(:boolean), do: %{"type" => "boolean"}
 
+  # The `edit` tool's search/replace array (ADR-0020): an array of objects, each with
+  # the verbatim text to find and its replacement.
+  defp json_type(:edits) do
+    %{
+      "type" => "array",
+      "items" => %{
+        "type" => "object",
+        "properties" => %{
+          "search" => %{
+            "type" => "string",
+            "description" =>
+              "Exact text to find, quoted verbatim from the buffer with a few lines of " <>
+                "surrounding context so it is unique."
+          },
+          "replace" => %{
+            "type" => "string",
+            "description" => "The new text to put in its place (empty to delete)."
+          },
+          "description" => %{
+            "type" => "string",
+            "description" => "Optional summary of this block's change."
+          }
+        },
+        "required" => ["search", "replace"],
+        "additionalProperties" => false
+      }
+    }
+  end
+
   defp json_type(other) do
     raise ArgumentError,
           "no JSON-Schema mapping for command arg type #{inspect(other)} — " <>

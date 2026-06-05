@@ -110,7 +110,7 @@ defmodule Geex.MCP.ProtocolTest do
     test "lists the registered edit commands plus the operation tools (ADR-0019)" do
       %{"result" => %{"tools" => tools}} = frame(request(1, "tools/list"))
       names = Enum.map(tools, & &1["name"]) |> Enum.sort()
-      assert names == ["delete", "insert", "open_file", "replace", "save_file"]
+      assert names == ["delete", "edit", "insert", "open_file", "replace", "save_file"]
       insert = Enum.find(tools, &(&1["name"] == "insert"))
       assert insert["inputSchema"]["required"] == ["line", "col", "text"]
     end
@@ -341,6 +341,52 @@ defmodule Geex.MCP.ProtocolTest do
 
       # reaches the handler (then fails arg validation as an isError result), rather
       # than a hard -32602 "arguments must be an object"
+      assert result["isError"] == true
+      assert [%{"text" => text}] = result["content"]
+      assert text =~ "Invalid arguments"
+    end
+  end
+
+  describe "tools/call — the edit (search/replace) tool (ADR-0020)" do
+    setup do
+      buf = start_supervised!({Buffer, text: "alpha\nbeta\n"})
+      Session.set_active_buffer(buf)
+      on_exit(fn -> Session.set_active_buffer(nil) end)
+      %{buf: buf}
+    end
+
+    test "a matched edit block edits the live buffer and returns the new text" do
+      params = %{
+        "name" => "edit",
+        "arguments" => %{"edits" => [%{"search" => "alpha", "replace" => "ALPHA"}]}
+      }
+
+      %{"result" => result} = frame(request(1, "tools/call", params))
+      assert result["isError"] == false
+      assert [%{"text" => "ALPHA\nbeta\n"}] = result["content"]
+      assert {:ok, %{history: [recorded]}} = Session.snapshot()
+      assert recorded.meta.actor == {:llm, "unknown"}
+    end
+
+    test "an unmatched block rides isError with a self-correction message (not a raw reason)" do
+      params = %{
+        "name" => "edit",
+        "arguments" => %{"edits" => [%{"search" => "not in the file", "replace" => "x"}]}
+      }
+
+      %{"result" => result} = frame(request(1, "tools/call", params))
+      assert result["isError"] == true
+      assert [%{"text" => text}] = result["content"]
+      assert text =~ "No edits were applied"
+      # the model gets guidance, not an inspected internal tuple
+      refute text =~ ":edit_failed"
+      refute text =~ "error: {"
+    end
+
+    test "missing edits arg → isError invalid-arguments result (SEP-1303)" do
+      %{"result" => result} =
+        frame(request(1, "tools/call", %{"name" => "edit", "arguments" => %{}}))
+
       assert result["isError"] == true
       assert [%{"text" => text}] = result["content"]
       assert text =~ "Invalid arguments"

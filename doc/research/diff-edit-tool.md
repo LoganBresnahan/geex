@@ -45,18 +45,21 @@ file-lifecycle + reconcile); this note records the decided approach so it isn't 
 - **New `Geex.Commands.Edit`** (MCP tool `edit`): one `edits` arg (array) + optional
   `description`. Needs **one new arg type** (`:edits`/`:json`) added in exactly two places —
   `Geex.Command.Type.cast/2` and `Geex.MCP.Schema.json_type/1` (the only spine touch).
-- **New pure `Geex.Edit.Resolve`** — `resolve_block(doc, search, replace) ::
+- **New pure `Geex.Edit.Resolve`** — `resolve_block(text, search, replace) ::
   {:ok, {{r1,c1},{r2,c2}}, text} | {:error, :stale | :ambiguous | :not_found}` porting
-  Moby's tiers (but **stricter**: refuse on >1 match rather than first-match-wins — safer
-  against disk truth). Helpers: `exact_span`, `normalized_window`, `similarity` (over
-  `myers_difference`), `anchor_match`, `reindent`, `offset_to_pos` (offset → grapheme
-  `{row,col}`). Drop Moby's jsdiff `applyPatch` tier (existed only because jsdiff was
-  already a dep).
-- **Compiles to the spine:** each resolved block → a `Geex.Commands.Replace` `%Command{}`
-  stamped with provenance → `Dispatch.run/1` (the resolve-and-snapshot discipline,
-  ADR-0014). The diff tool is a front-end; `Replace` stays the sole doc mutator. Apply
-  blocks **sequentially through dispatch** (each re-resolved against the post-edit doc) to
-  avoid coordinate drift.
+  Moby's tiers (but **stricter**: refuse on >1 match rather than first-match-wins, counting
+  *overlapping* occurrences). **As built**, only two tiers *apply* — `exact` (unique
+  substring; positions via string-prefix splitting, so grapheme-correct without byte math)
+  and `normalized` (whitespace-normalized window + `reindent`, line-ending-preserving). The
+  staleness/anchor reasoning is **not** an applying tier; a line-presence `classify/2` only
+  shapes the refusal message. (Moby's jsdiff `applyPatch` tier is dropped — it existed only
+  because jsdiff was already a dep.)
+- **Compiles to the `Doc.replace` primitive as one atomic command:** `Geex.Commands.Edit`
+  is a single `%Command{}` whose `run/2` resolves+applies each block **sequentially** against
+  the post-edit doc (re-resolved each time → no drift) via `Doc.replace`. `Geex.Buffer`'s
+  untouched-on-`{:error}` semantics give all-or-nothing rollback for free; one `%Edit{}`
+  lands in history (recording the search/replace intent, so replay re-resolves
+  deterministically). `Replace` stays the human/coordinate tool, not the `edit` apply path.
 - **Failures → MCP `isError: true`** with a self-correction message (`:stale` →
   "re-read"; `:ambiguous` → "add context"; `:not_found` → "quote exact text"). Never crash,
   never guess, never merge.

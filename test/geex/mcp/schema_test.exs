@@ -13,8 +13,14 @@ defmodule Geex.MCP.SchemaTest do
                "required" => ["line", "col", "text"],
                "properties" => %{
                  "line" => %{"type" => "integer", "description" => "0-based line index"},
-                 "col" => %{"type" => "integer", "description" => "0-based column (grapheme) index"},
-                 "text" => %{"type" => "string", "description" => "Text to insert (may contain newlines)"}
+                 "col" => %{
+                   "type" => "integer",
+                   "description" => "0-based column (grapheme) index"
+                 },
+                 "text" => %{
+                   "type" => "string",
+                   "description" => "Text to insert (may contain newlines)"
+                 }
                }
              }
     end
@@ -22,6 +28,7 @@ defmodule Geex.MCP.SchemaTest do
     test "a defaulted arg is NOT required (Delete.count)" do
       schema = Schema.input_schema(Delete)
       assert schema["required"] == ["line", "col"]
+
       assert schema["properties"]["count"] == %{
                "type" => "integer",
                "description" => "Number of graphemes to delete"
@@ -83,9 +90,30 @@ defmodule Geex.MCP.SchemaTest do
     end
 
     test "an unknown arg type fails loudly (drift between Type and Schema)" do
-      assert_raise ArgumentError, ~r/no JSON-Schema mapping for command arg type :coord_range/, fn ->
-        Schema.from_fields([%Field{name: :r, type: :coord_range}])
-      end
+      assert_raise ArgumentError,
+                   ~r/no JSON-Schema mapping for command arg type :coord_range/,
+                   fn ->
+                     Schema.from_fields([%Field{name: :r, type: :coord_range}])
+                   end
+    end
+
+    test ":edits projects to an array of {search, replace} objects" do
+      schema = Schema.from_fields([%Field{name: :edits, type: :edits}])
+      edits = schema["properties"]["edits"]
+
+      assert edits["type"] == "array"
+      assert edits["items"]["type"] == "object"
+      assert edits["items"]["required"] == ["search", "replace"]
+      assert edits["items"]["additionalProperties"] == false
+      assert edits["items"]["properties"]["search"]["type"] == "string"
+      assert edits["items"]["properties"]["replace"]["type"] == "string"
+    end
+
+    test "the real Edit command projects a wire-stable schema" do
+      schema = Schema.tool(Geex.Commands.Edit)
+      assert schema["name"] == "edit"
+      assert schema["inputSchema"]["required"] == ["edits"]
+      assert schema |> JSON.encode!() |> JSON.decode!() == schema
     end
   end
 end

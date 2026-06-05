@@ -165,8 +165,17 @@ defmodule Geex.MCP.Protocol do
         command = Command.put_meta(command, Meta.llm(@mcp_model))
 
         case Dispatch.run(command) do
-          {:ok, snapshot} -> tool_result(snapshot.text, false)
-          {:error, reason} -> tool_result("error: #{inspect(reason)}", true)
+          {:ok, snapshot} ->
+            tool_result(snapshot.text, false)
+
+          # A command may hand back a ready-to-show, model-facing message (the `edit`
+          # tool's self-correction guidance, ADR-0020) — surface it verbatim rather than
+          # inspecting an internal reason.
+          {:error, {:edit_failed, message}} ->
+            tool_result(message, true)
+
+          {:error, reason} ->
+            tool_result("error: #{inspect(reason)}", true)
         end
     end
   end

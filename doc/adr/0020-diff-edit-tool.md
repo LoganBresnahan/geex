@@ -1,6 +1,6 @@
 # ADR-0020: Diff / search-replace edit tool
 
-- **Status:** Accepted (approach decided; implementation follows file-lifecycle + reconcile)
+- **Status:** Accepted — **implemented** (`Geex.Edit.Resolve` + `Geex.Commands.Edit`), with two refinements to the original plan, noted inline in the Decision
 - **Date:** 2026-06-04
 - **Relates to:** [ADR-0014](0014-editor-state-and-dispatch-ownership.md), [ADR-0016](0016-external-harness-integration.md); detail in [research/diff-edit-tool.md](../research/diff-edit-tool.md)
 
@@ -21,17 +21,28 @@ The hard part is **robust apply** (matching possibly-stale `old_text`). Referenc
   unreliably; the contract is "quote the old text verbatim with 2-3 lines of context, give
   the new text." A new `Geex.Commands.Edit` (MCP tool `edit`) takes an `edits` array of
   `{search, replace}` (+ optional `description`).
-- **A pure `Geex.Edit.Resolve`** ports Moby's tiered matcher, first confident hit wins:
-  (1) exact-unique substring; (2) whitespace-normalized line window, **re-indented to the
-  file**; (3) **staleness gate** — whole-file similarity `< 0.75` ⇒ refuse; (4) anchor /
-  order match. geex is **stricter than Moby**: refuse on `> 1` match (`:ambiguous`) rather
-  than first-match-wins — safer against disk truth. It returns a coordinate span +
-  replacement text; it does not mutate.
-- **Compiles to the spine (resolve-and-snapshot).** Each confident block → a
-  `Geex.Commands.Replace` `%Command{}` (the existing primitive) stamped with provenance and
-  run through `Geex.Dispatch.run/1`. The diff tool is a *front-end*; `Replace` stays the
-  sole doc mutator and every edit lands in the undo history. Multiple blocks apply
-  **sequentially** (each re-resolved against the post-edit doc) to avoid coordinate drift.
+- **A pure `Geex.Edit.Resolve`** ports Moby's tiers, but only the **two deterministic
+  tiers _apply_** (first confident, unique hit wins): (1) exact-unique substring;
+  (2) whitespace-normalized line window, **re-indented to the file** (and preserving the
+  file's line endings). geex is **stricter than Moby** on two axes: it refuses on `> 1`
+  match (`:ambiguous`, counting *overlapping* occurrences) rather than first-match-wins; and
+  it **never fuzzily _applies_ an anchor/patch/staleness match** — Moby's riskiest path and
+  the source of its silent-duplication scar. Instead, when neither tier applies, a
+  line-presence **classifier** only shapes the *refusal message* (`:stale` if most search
+  lines still exist in the file → "re-read"; else `:not_found` → "quote exact text"). It
+  returns a coordinate span + replacement text; it does not mutate. *(This refines the
+  original four-applying-tier plan — the abandoned tiers 3/4 now inform refusal, not apply.)*
+- **Compiles to the `Doc.replace` primitive as one atomic command.** `Geex.Commands.Edit`
+  is a single `%Command{}` whose `run/2` resolves and applies each block **sequentially**
+  against the *post-edit* doc (re-resolved each time, so no coordinate drift) via
+  `Geex.Buffer.Doc.replace/3` — the same primitive `Geex.Commands.Replace` uses. Because
+  `Geex.Buffer` leaves its state untouched when a command returns `{:error, _}`, a block
+  that won't resolve **rolls back the whole edit for free** (all-or-nothing — a partial
+  multi-block edit can never corrupt the file). One `%Edit{}` lands in the undo history;
+  it records the search/replace *intent* (not baked coordinates), so replay re-resolves
+  against the same reconstructed doc — deterministic. *(This refines the original
+  "N separately-dispatched `Replace` commands through `Dispatch.run/1`" plan, which gave
+  no atomicity; `Replace` remains the human/coordinate tool, not the `edit` apply path.)*
 - **Refuse, never guess, never merge.** No confident match → MCP `isError: true` with a
   self-correction message (`:stale` → "re-read"; `:ambiguous` → "add context"; `:not_found`
   → "quote exact text"); the model self-corrects. (Moby's scar: a "merge on uncertainty"

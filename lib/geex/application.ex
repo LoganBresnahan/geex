@@ -9,7 +9,12 @@ defmodule Geex.Application do
       [
         {Registry, keys: :unique, name: Geex.Registry},
         {Geex.CommandRegistry,
-         commands: [Geex.Commands.Insert, Geex.Commands.Delete, Geex.Commands.Replace]}
+         commands: [
+           Geex.Commands.Insert,
+           Geex.Commands.Delete,
+           Geex.Commands.Replace,
+           Geex.Commands.Edit
+         ]}
       ] ++
         terminal_io_child() ++
         [

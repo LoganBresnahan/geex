@@ -48,10 +48,15 @@ echo-suppression — Rung 0, the always-on honest floor under every enforcement 
 Bandit + Plug (HTTP), `:file_system` (watcher); JSON + diffing stay built-in. **212 tests +
 8 doctests green.** What's verified by hand is logged in [testing.md](testing.md).
 
-The remaining file-layer piece is **decided and recorded, not yet built**: the **diff /
-search-replace `edit` tool** that compiles to `replace` (ports DeepSeek-Moby's tiered matcher,
-[adr/0020](adr/0020-diff-edit-tool.md), [research](research/diff-edit-tool.md)) — the
-harness-ergonomic editing layer, and the deliberate next increment.
+The file layer is now complete: the **diff / search-replace `edit` tool** is built
+([Geex.Commands.Edit](../lib/geex/commands/edit.ex) + the pure
+[Geex.Edit.Resolve](../lib/geex/edit/resolve.ex), [adr/0020](adr/0020-diff-edit-tool.md),
+[research](research/diff-edit-tool.md)). An LLM edits by quoting old text → new text; geex
+resolves it (exact-unique, then whitespace-normalized window + reindent; refuse-never-guess,
+stricter than DeepSeek-Moby) and compiles each block to the `replace` primitive as **one
+atomic command** (all-or-nothing). **251 tests + 8 doctests green.** The v0.5 MCP write
+surface — edit tools (`insert`/`delete`/`replace`/`edit`), the read snapshot, and the
+operation tools (`open_file`/`save_file`) — is in place.
 
 Cursor-relative resolution and the `Geex.Clipboard` subsystem are designed
 ([adr/0014](adr/0014-editor-state-and-dispatch-ownership.md),
@@ -115,9 +120,9 @@ Ships:
   path addressing (`Session.open_file/1`, path-registered buffers), and MCP **operation
   tools** (`open_file`/`save_file` — a third tool category; not recorded as edits,
   [adr/0019](adr/0019-file-lifecycle-and-operation-tools.md)).
-- **The `edit` (diff / search-replace) tool** — harness-ergonomic editing that compiles to
-  the `replace` primitive (ports DeepSeek-Moby's tiered matcher,
-  [adr/0020](adr/0020-diff-edit-tool.md)).
+- **The `edit` (diff / search-replace) tool (done)** — harness-ergonomic editing that
+  compiles to the `replace` primitive as one atomic command (ports DeepSeek-Moby's tiered
+  matcher, stricter — refuse-never-guess, [adr/0020](adr/0020-diff-edit-tool.md)).
 - **The reconcile floor (done)** — `Geex.Reconcile` (the `:file_system` watcher;
   out-of-band disk writes → `%Command{}` tagged `:external`, never silent; echo-suppressed
   by content comparison) ([adr/0017](adr/0017-reconcile-file-watch.md)). Still pending: the
