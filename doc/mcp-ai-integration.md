@@ -333,6 +333,15 @@ def tool_call(%{"name" => name, "arguments" => args}) do
 end
 ```
 
+> **Three tool categories ([adr/0019](adr/0019-file-lifecycle-and-operation-tools.md)).**
+> Not every MCP tool is a `%Command{}` edit. The surface is: **edit tools** (`insert`/
+> `delete`/`replace`) — macro-projected, routed through `Geex.Dispatch.run/1` into the undo
+> history (the seam below); **read tools** (`snapshot`) — the read-only query surface
+> (§15b); and **operation tools** (`open_file`/`save_file`) — file lifecycle, which act on
+> `Session`/disk and are *not* recorded as edits (you don't undo a save). `tools/call`
+> routes by category; `tools/list` merges all three (operation tools reuse the same
+> field-spec → JSON-Schema renderer).
+
 ### How a `%Command{}` becomes a tool (the macro seam)
 
 The crux of the "nearly free" claim. The `Geex.Command` macro

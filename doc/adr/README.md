@@ -34,6 +34,8 @@ Each ADR: **Status** · **Context** (the forces) · **Decision** · **Consequenc
 | [0016](0016-external-harness-integration.md) | External harness integration & the enforcement ladder (per-harness preset; OS-sandbox rung) | Accepted |
 | [0017](0017-reconcile-file-watch.md) | Reconcile: file-watch + `:external` provenance (the honest floor) | Accepted |
 | [0018](0018-mcp-transport-streamable-http.md) | MCP transport: Streamable HTTP, connect-first, dogfood == production | Accepted |
+| [0019](0019-file-lifecycle-and-operation-tools.md) | File lifecycle (load/save, multi-buffer) & MCP operation tools (a third tool category) | Accepted |
+| [0020](0020-diff-edit-tool.md) | Diff / search-replace edit tool (compiles to `replace`; ports Moby's tiered matcher) | Accepted |
 
 ## Adding one
 

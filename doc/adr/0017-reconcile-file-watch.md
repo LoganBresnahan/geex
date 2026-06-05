@@ -27,6 +27,16 @@ like the minibuffer or the MCP server.
    [`EditorState`](0014-editor-state-and-dispatch-ownership.md), synthesizes a minimal
    `%Command{}` sequence, and runs it through `Geex.Dispatch.run/1` into the one undo
    history — **the same path every other edit takes** ([ADR-0003](0003-one-shared-path.md)).
+   - **Watch mechanism (decided 2026-06-04): the `:file_system` hex library** —
+     push-based (inotify / fsevents / inotifywait), the standard BEAM choice (Phoenix
+     live-reload uses it), low latency and overhead. This is geex's ~3rd dependency, after
+     Bandit/Plug; a hand-rolled poller was the alternative and was rejected as a hack we'd
+     replace. (`JSON` and diffing stay built-in.)
+   - **Echo-suppression by content comparison (decided 2026-06-04):** on a watch event,
+     read the disk and compare to the buffer's `EditorState`. **Equal → ignore** (this is
+     geex's own `save/1`, or a no-op); **differ → reconcile.** Comparing content means a
+     geex save never looks like an external edit, so no separate "I just wrote this"
+     bookkeeping is needed — echo-suppression falls out for free.
 2. **Out-of-band edits are tagged `actor: :external`**, never fabricated as `{:llm, _}` or
    `:human` (ADR-0012: "never fabricates provenance it can't back"). `:external` is added
    to the canonical `Geex.Command.Meta` actor enumeration (the code already carries it;
@@ -38,8 +48,8 @@ like the minibuffer or the MCP server.
 4. **Ownership: geex-as-observer is the default for harness-driven files** — disk is the
    truth, geex follows and records. (geex-as-primary, where the buffer is truth and disk
    is output, is the interactive-editing case; it needs "file changed on disk, reload?"
-   merge UX and **echo-suppression** so a write geex itself just made is not re-ingested
-   as `:external` — a build prerequisite, tracked, not solved here.)
+   merge UX. Echo-suppression — a write geex itself just made not being re-ingested as
+   `:external` — is handled by the content comparison in point 1.)
 
 ## Consequences
 

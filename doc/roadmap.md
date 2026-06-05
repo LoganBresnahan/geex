@@ -33,8 +33,18 @@ provenance via `Dispatch.run/1`, version 2025-11-25), and `Geex.MCP.HTTP` (the *
 Streamable HTTP transport** — a Bandit/Plug listener bound to `127.0.0.1`, feature-gated by
 `start_http_mcp`). A real harness can connect over loopback HTTP and edit the live buffer
 with provenance — dogfood == production ([adr/0018](adr/0018-mcp-transport-streamable-http.md)).
-**First dependency:** Bandit + Plug (JSON stays built-in). **152 tests + 8 doctests green.**
-What's verified by hand is logged in [testing.md](testing.md).
+Edit coverage now includes a range `replace` ([test/geex/buffer/doc_test.exs](../test/geex/buffer/doc_test.exs)),
+and `Geex.Buffer` has **file I/O** (load-on-open + `save/1`). **First dependency:** Bandit +
+Plug (JSON stays built-in). **170 tests + 8 doctests green.** What's verified by hand is
+logged in [testing.md](testing.md).
+
+The rest of the file layer is **decided and recorded, partly built**: file lifecycle +
+multi-buffer + MCP **operation tools** (a third tool category — open/save aren't edits,
+[adr/0019](adr/0019-file-lifecycle-and-operation-tools.md)); the **reconcile** floor via the
+`:file_system` watcher with content-comparison echo-suppression
+([adr/0017](adr/0017-reconcile-file-watch.md)); and the **diff / search-replace `edit` tool**
+that compiles to `replace` (ports DeepSeek-Moby's tiered matcher,
+[adr/0020](adr/0020-diff-edit-tool.md), [research](research/diff-edit-tool.md)).
 
 Cursor-relative resolution and the `Geex.Clipboard` subsystem are designed
 ([adr/0014](adr/0014-editor-state-and-dispatch-ownership.md),
@@ -94,9 +104,16 @@ Ships:
   (`Bandit`+`Plug` — geex's first dep); a real harness *connects* and edits land in the
   live session ([adr/0018](adr/0018-mcp-transport-streamable-http.md)). stdio is demoted
   to a hermetic CI/conformance harness.
+- **File lifecycle + operation tools** — `Geex.Buffer` load/save (done), multi-buffer +
+  path addressing, and MCP **operation tools** (`open_file`/`save_file` — a third tool
+  category; not recorded as edits, [adr/0019](adr/0019-file-lifecycle-and-operation-tools.md)).
+- **The `edit` (diff / search-replace) tool** — harness-ergonomic editing that compiles to
+  the `replace` primitive (ports DeepSeek-Moby's tiered matcher,
+  [adr/0020](adr/0020-diff-edit-tool.md)).
 - **Harness presets + the reconcile floor** — checked-in per-harness presets (deny
-  built-in writers, point MCP config at geex) and `Geex.Reconcile` (out-of-band disk
-  writes → `%Command{}` tagged `:external`, never silent)
+  built-in writers, point MCP config at geex) and `Geex.Reconcile` (the `:file_system`
+  watcher; out-of-band disk writes → `%Command{}` tagged `:external`, never silent;
+  echo-suppressed by content comparison)
   ([adr/0016](adr/0016-external-harness-integration.md),
   [adr/0017](adr/0017-reconcile-file-watch.md)).
 - **MCP-client connection to an external pharos** for LSP — **disk-truth only**; pharos
