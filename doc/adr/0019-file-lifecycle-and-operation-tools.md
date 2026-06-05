@@ -55,6 +55,27 @@ these operations too.
   file target on every edit command. Concurrent multi-file editing (per-edit targets) is a
   later step if a consumer needs it.
 
+### Implementation decisions (surfaced by the build + an adversarial review)
+
+- **A buffer is a `:temporary` supervised child.** A document buffer holding unsaved edits
+  must **not** be silently restarted — a restart reloads from disk with an empty history,
+  dropping unsaved work and reverting to stale bytes. So a crashed buffer stays down; its
+  `Geex.Registry` entry clears, and recovery is an explicit re-open (which loads from disk on
+  purpose). Active-buffer death is surfaced at the MCP boundary as `-32603` and the `Session`
+  pointer self-heals on the next `open_file`; *monitoring* the active buffer is deferred (it
+  matters once there are concurrent clients).
+- **Load is non-raising.** `Buffer.init` uses non-bang `File.read`; an unreadable existing
+  file fails the start cleanly as `{:error, {:load_error, posix}}` rather than raising a
+  `File.Error` whose struct + stacktrace would leak into the model-facing tool result. The
+  "posix error → clean result" contract therefore holds for *load* as it already did for save.
+- **Buffer dedup is by the lexical (`Path.expand`-ed) path.** Symlinks/hard links are not
+  resolved, so one file reached via two spellings yields two buffers. Acceptable for the
+  single-user loopback slice; canonicalization pairs with any future workspace-root
+  confinement (geex is not a sandbox today).
+- **Open buffers are capped** (`BufferSupervisor max_children`): there is no `close_file`
+  yet, so buffers accumulate for the session's life; the cap turns a runaway open-loop into a
+  clean `{:error, :max_children}` (an isError tool result) instead of unbounded growth.
+
 ## See
 
 [ADR-0014](0014-editor-state-and-dispatch-ownership.md),

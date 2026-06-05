@@ -266,3 +266,58 @@ ranges in the live buffer over MCP. Buffer-level edit coverage is essentially co
 a diff / search-replace tool (the harness-ergonomic layer that compiles to coordinate
 commands — reference: the user's DeepSeek-Moby diff work + hex diff libs); file lifecycle
 (open/create/save/rename + multi-buffer + path addressing), which pairs with reconcile.
+
+### 2026-06-04 — File lifecycle slice 2: multi-buffer + MCP operation tools
+
+**Scope.** The third MCP tool category (ADR-0019): hand-written **operation tools**
+(`open_file`/`save_file`) that act on `Session`/disk and are **not** recorded as edits.
+`Geex.Session.open_file/1` is a race-free find-or-start (serialized in the Session
+GenServer; `Path.expand`-normalized; reused without clobbering unsaved edits), buffers now
+register by path in `Geex.Registry` (`Geex.BufferSupervisor` + `whereis/1`), and
+`Geex.MCP.Protocol` routes `tools/call` by category (operation → `Geex.MCP.Operations`,
+else the edit registry) and merges both into `tools/list`. Operation tools project
+`inputSchema` through the same `Geex.MCP.Schema` and validate args through the shared
+`Geex.Command.cast_args/2` — no drift. A real harness can now **open, edit, and save real
+files on disk** over loopback — the precondition for "geex editing geex".
+
+**Hardened by an adversarial review workflow** (4 dimension finders → per-finding
+adversarial verification; 17 confirmed). Fixed before commit: ① `Geex.Buffer` is now a
+`:temporary` child — a crash no longer silently resurrects it from disk (which would drop
+unsaved edits); ② `Buffer.init` uses non-bang `File.read` → an unreadable file fails the
+start cleanly as `{:error, {:load_error, posix}}` instead of leaking a `%File.Error{}`+
+stacktrace into the model's tool result; ③ `Buffer.save/1` returns `{:ok, path}` so
+`save_file` needs one call (no save-succeeded-but-reported-as-`-32603` window, no gratuitous
+snapshot); ④ an explicit `"arguments": null` coalesces to empty args (was a hard `-32602`);
+⑤ `BufferSupervisor` caps open buffers (`max_children: 1024`) so a runaway open-loop fails
+cleanly. Out-of-scope findings (active-buffer monitoring, symlink confinement, plugin name
+collisions) were left as documented notes — they belong to concurrent-client / sandbox /
+plugin work, not this loopback slice.
+
+**Automated.** `mix test` → **195 tests, 8 doctests, 0 failures** (was 163+8).
+`warnings-as-errors` clean. New: [operations_test.exs](../test/geex/mcp/operations_test.exs)
+(descriptors, lookup, `{:ok}`/`{:error}`/`{:invalid_args}` shapes, name-disjointness guard),
+operation-tool coverage in [protocol_test.exs](../test/geex/mcp/protocol_test.exs) (the full
+open→edit→save loop, history-invariant assertion, `args: null`, no-path/no-active-buffer
+isError, reuse-without-clobber), `open_file` cases in
+[session_test.exs](../test/geex/session_test.exs) (find-or-start, reuse, path normalization,
+registry registration), and an unreadable-file clean-error case in
+[buffer_io_test.exs](../test/geex/buffer_io_test.exs).
+
+**Manual verification** — a live OTP tree (`Registry` + `CommandRegistry` + `BufferSupervisor`
++ `Session`) driven through `Geex.MCP.Protocol.handle_line/1`: `tools/list` →
+`["delete","insert","open_file","replace","save_file"]`; `open_file` a 2-line file → returned
+its text (`isError:false`); `insert` → `"hello there\nworld\n"`; `save_file` → `"saved
+/tmp/…"` and the bytes landed on disk; `Session.snapshot` showed `history_len: 1` (open +
+save recorded **nothing** — the ADR-0019 invariant, live); `save_file` with `"arguments":
+null` → succeeded (no `-32602`).
+
+**Good as of:** the commit carrying this entry. A harness can open/edit/save real files on
+disk over loopback MCP, every edit a provenance-tagged `%Command{}` in the one undo history,
+operations deliberately outside it.
+
+**Not tested / deferred:** `close_file` (no buffer eviction yet — the `max_children` cap is
+the interim guard); reconcile (out-of-band disk writes → `:external`, the `:file_system`
+watcher — the deliberate next increment, ADR-0017); the diff / search-replace `edit` tool
+(ADR-0020); active-buffer death monitoring + Session self-heal (surfaced as `-32603` today,
+self-heals on re-open); symlink/hard-link path aliasing (dedup is by lexical path);
+concurrent multi-file editing (per-edit targets).

@@ -18,33 +18,48 @@ defmodule Geex.Buffer do
   it is view-local (`Geex.View`) and surfaces via `Geex.Session.snapshot/0`.
 
   **File I/O.** A buffer started with a `:path` loads that file's contents (a missing
-  path is a fresh empty buffer — the file is created on first `save/1`); an explicit
-  `:text` overrides (in-memory/test buffers). `save/1` writes the current text back to
-  the path and clears `dirty`. Loading and saving are *not* recorded edit commands —
-  they are I/O lifecycle, like navigation (ADR-0003) — so `save/1` never enters the
-  undo history; only content edits (insert/delete/replace) do. `Doc` round-trips
-  through `\\n` split/join, so `load → save` is byte-stable for LF files.
+  path is a fresh empty buffer — the file is created on first `save/1`; an *unreadable*
+  existing file fails the start cleanly with `{:error, {:load_error, posix}}`). An
+  explicit `:text` overrides (in-memory/test buffers). `save/1` writes the current text
+  back to the path, clears `dirty`, and returns `{:ok, path}`. Loading and saving are
+  *not* recorded edit commands — they are I/O lifecycle, like navigation (ADR-0003) —
+  so `save/1` never enters the undo history; only content edits (insert/delete/replace)
+  do. `Doc` round-trips through `\\n` split/join, so `load → save` is byte-stable for
+  LF files.
+
+  **Crash policy.** A buffer is a `:temporary` child (`Geex.BufferSupervisor`): if it
+  crashes it stays down. It is deliberately *not* restarted — a restart would reload
+  the file from disk with a fresh empty history, silently discarding unsaved in-memory
+  edits and reverting to stale bytes. Recovery is an explicit re-open (which loads from
+  disk on purpose). On death its `Geex.Registry` entry clears, so re-opening the path
+  starts a fresh buffer.
   """
 
-  use GenServer
+  use GenServer, restart: :temporary
 
   alias Geex.EditorState
 
   @doc """
   Start a buffer. Options: `:path` (file path; its contents are loaded if the file
-  exists, else a fresh empty buffer) and `:text` (explicit initial contents, overrides
-  loading — for in-memory/test buffers).
+  exists, else a fresh empty buffer), `:text` (explicit initial contents, overrides
+  loading — for in-memory/test buffers), and `:name` (a process name, typically a
+  `{:via, Registry, …}` tuple so the buffer is addressable by path — see
+  `Geex.BufferSupervisor`).
   """
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts)
+    {name, opts} = Keyword.pop(opts, :name)
+    GenServer.start_link(__MODULE__, opts, name_opt(name))
   end
 
+  defp name_opt(nil), do: []
+  defp name_opt(name), do: [name: name]
+
   @doc """
-  Write the buffer's current text to its `:path` and clear `dirty`. Returns `:ok`,
-  `{:error, :no_path}` (buffer has no backing file), or `{:error, posix}`. Not an edit
-  — `save/1` does not touch the undo history.
+  Write the buffer's current text to its `:path` and clear `dirty`. Returns
+  `{:ok, path}`, `{:error, :no_path}` (buffer has no backing file), or
+  `{:error, posix}`. Not an edit — `save/1` does not touch the undo history.
   """
-  @spec save(GenServer.server()) :: :ok | {:error, term()}
+  @spec save(GenServer.server()) :: {:ok, String.t()} | {:error, term()}
   def save(server), do: GenServer.call(server, :save)
 
   @doc """
@@ -71,22 +86,35 @@ defmodule Geex.Buffer do
   def init(opts) do
     path = Keyword.get(opts, :path)
 
-    text =
-      cond do
-        Keyword.has_key?(opts, :text) -> Keyword.get(opts, :text)
-        is_binary(path) and File.regular?(path) -> File.read!(path)
-        true -> ""
-      end
+    case load_text(opts, path) do
+      {:ok, text} ->
+        state = %{
+          path: path,
+          editor: EditorState.new(text),
+          # newest-first internally (O(1) prepend); exposed oldest-first via snapshot.
+          history: [],
+          dirty: false
+        }
 
-    state = %{
-      path: path,
-      editor: EditorState.new(text),
-      # newest-first internally (O(1) prepend); exposed oldest-first via snapshot.
-      history: [],
-      dirty: false
-    }
+        {:ok, state}
 
-    {:ok, state}
+      # A genuinely unreadable existing file (`:eacces`, a TOCTOU `:enoent`/`:eisdir`)
+      # fails the start cleanly — non-bang `File.read/1` keeps the I/O error out of a
+      # raised `File.Error`+stacktrace, so `open_file` surfaces a tidy posix reason
+      # rather than dumping internals into the model's tool result.
+      {:error, posix} ->
+        {:stop, {:load_error, posix}}
+    end
+  end
+
+  # `:text` overrides loading. A missing path is a fresh empty buffer (created on first
+  # save). An existing regular file is read; anything else (no path, a directory) is empty.
+  defp load_text(opts, path) do
+    cond do
+      Keyword.has_key?(opts, :text) -> {:ok, Keyword.get(opts, :text)}
+      is_binary(path) and File.regular?(path) -> File.read(path)
+      true -> {:ok, ""}
+    end
   end
 
   @impl true
@@ -112,7 +140,7 @@ defmodule Geex.Buffer do
 
   def handle_call(:save, _from, state) do
     case File.write(state.path, EditorState.text(state.editor)) do
-      :ok -> {:reply, :ok, %{state | dirty: false}}
+      :ok -> {:reply, {:ok, state.path}, %{state | dirty: false}}
       {:error, _reason} = error -> {:reply, error, state}
     end
   end

@@ -16,6 +16,34 @@ defmodule Geex.MCP.ProtocolTest do
     Protocol.handle_line(JSON.encode!(msg))
   end
 
+  # A unique tmp path per test (counter, not randomness — no Date/rand).
+  defp tmp_path do
+    name = "geex_op_#{System.unique_integer([:positive])}.txt"
+    path = Path.join(System.tmp_dir!(), name)
+    on_exit(fn -> File.rm(path) end)
+    path
+  end
+
+  # Open `path` via the MCP tool, and schedule the started buffer's teardown so the
+  # app-global BufferSupervisor / Registry stay clean across tests.
+  defp open_file_tool(id, path) do
+    out =
+      frame(request(id, "tools/call", %{"name" => "open_file", "arguments" => %{"path" => path}}))
+
+    case Geex.BufferSupervisor.whereis(Path.expand(path)) do
+      {:ok, pid} ->
+        on_exit(fn ->
+          if Process.alive?(pid),
+            do: DynamicSupervisor.terminate_child(Geex.BufferSupervisor, pid)
+        end)
+
+      :error ->
+        :ok
+    end
+
+    out
+  end
+
   describe "the JSON-RPC envelope (pure, no app state)" do
     test "malformed JSON → protocol_error -32700 with null id" do
       assert {:protocol_error, _} = out = Protocol.handle_line("{not json")
@@ -78,13 +106,24 @@ defmodule Geex.MCP.ProtocolTest do
     end
   end
 
-  describe "tools/list (projected from the live registry)" do
-    test "lists the registered commands as MCP tools" do
+  describe "tools/list (projected from the live registry, merged with operation tools)" do
+    test "lists the registered edit commands plus the operation tools (ADR-0019)" do
       %{"result" => %{"tools" => tools}} = frame(request(1, "tools/list"))
       names = Enum.map(tools, & &1["name"]) |> Enum.sort()
-      assert names == ["delete", "insert", "replace"]
+      assert names == ["delete", "insert", "open_file", "replace", "save_file"]
       insert = Enum.find(tools, &(&1["name"] == "insert"))
       assert insert["inputSchema"]["required"] == ["line", "col", "text"]
+    end
+
+    test "operation tools carry a field-spec-projected inputSchema" do
+      %{"result" => %{"tools" => tools}} = frame(request(1, "tools/list"))
+
+      open = Enum.find(tools, &(&1["name"] == "open_file"))
+      assert open["inputSchema"]["required"] == ["path"]
+      assert open["inputSchema"]["properties"]["path"]["type"] == "string"
+
+      save = Enum.find(tools, &(&1["name"] == "save_file"))
+      assert save["inputSchema"]["required"] == []
     end
   end
 
@@ -108,9 +147,22 @@ defmodule Geex.MCP.ProtocolTest do
     end
 
     test "a replace tool-call edits a range in the live buffer" do
-      request(1, "tools/call", %{"name" => "insert", "arguments" => %{"line" => 0, "col" => 0, "text" => "hello world"}})
+      request(1, "tools/call", %{
+        "name" => "insert",
+        "arguments" => %{"line" => 0, "col" => 0, "text" => "hello world"}
+      })
 
-      replace = %{"name" => "replace", "arguments" => %{"start_line" => 0, "start_col" => 6, "end_line" => 0, "end_col" => 11, "text" => "there"}}
+      replace = %{
+        "name" => "replace",
+        "arguments" => %{
+          "start_line" => 0,
+          "start_col" => 6,
+          "end_line" => 0,
+          "end_col" => 11,
+          "text" => "there"
+        }
+      }
+
       %{"result" => result} = frame(request(2, "tools/call", replace))
 
       assert result["isError"] == false
@@ -157,6 +209,141 @@ defmodule Geex.MCP.ProtocolTest do
 
       params = %{"name" => "insert", "arguments" => %{"line" => 0, "col" => 0, "text" => "x"}}
       assert %{"error" => %{"code" => -32603}} = frame(request(1, "tools/call", params))
+    end
+  end
+
+  describe "tools/call — operation tools (open_file/save_file, ADR-0019)" do
+    setup do
+      on_exit(fn -> Session.set_active_buffer(nil) end)
+      :ok
+    end
+
+    test "open_file loads a file, makes it the active buffer, and returns its text" do
+      path = tmp_path()
+      File.write!(path, "alpha\nbeta\n")
+
+      %{"result" => result} = open_file_tool(1, path)
+      assert result["isError"] == false
+      assert [%{"type" => "text", "text" => "alpha\nbeta\n"}] = result["content"]
+
+      # the opened file is now the active buffer
+      assert {:ok, snap} = Session.snapshot()
+      assert snap.text == "alpha\nbeta\n"
+    end
+
+    test "open a missing file → fresh empty buffer (created on first save_file)" do
+      path = tmp_path()
+      refute File.exists?(path)
+
+      %{"result" => result} = open_file_tool(1, path)
+      assert result["isError"] == false
+      assert [%{"text" => ""}] = result["content"]
+
+      %{"result" => saved} =
+        frame(request(2, "tools/call", %{"name" => "save_file", "arguments" => %{}}))
+
+      assert saved["isError"] == false
+      assert File.read!(path) == ""
+    end
+
+    test "the full loop: open → edit → save lands on disk (dogfood == production)" do
+      path = tmp_path()
+      File.write!(path, "hello\nworld\n")
+
+      open_file_tool(1, path)
+
+      edit = %{"name" => "insert", "arguments" => %{"line" => 0, "col" => 5, "text" => " there"}}
+      %{"result" => edited} = frame(request(2, "tools/call", edit))
+      assert edited["isError"] == false
+
+      %{"result" => saved} =
+        frame(request(3, "tools/call", %{"name" => "save_file", "arguments" => %{}}))
+
+      assert saved["isError"] == false
+      assert [%{"text" => text}] = saved["content"]
+      assert text =~ "saved "
+      assert File.read!(path) == "hello there\nworld\n"
+
+      # the headline ADR-0019 invariant: open_file + save_file added nothing to the
+      # undo history — only the one edit is recorded.
+      assert {:ok, %{history: [_only_the_edit]}} = Session.snapshot()
+    end
+
+    test "the edit recorded through the loop is provenance-tagged LLM" do
+      path = tmp_path()
+      File.write!(path, "")
+      open_file_tool(1, path)
+
+      frame(
+        request(2, "tools/call", %{
+          "name" => "insert",
+          "arguments" => %{"line" => 0, "col" => 0, "text" => "x"}
+        })
+      )
+
+      assert {:ok, %{history: [recorded]}} = Session.snapshot()
+      assert recorded.meta.actor == {:llm, "unknown"}
+    end
+
+    test "save_file with no active buffer → isError result" do
+      Session.set_active_buffer(nil)
+
+      %{"result" => result} =
+        frame(request(1, "tools/call", %{"name" => "save_file", "arguments" => %{}}))
+
+      assert result["isError"] == true
+      assert [%{"text" => text}] = result["content"]
+      assert text =~ ":no_active_buffer"
+    end
+
+    test "save_file when the active buffer has no path → isError result" do
+      scratch = start_supervised!({Buffer, text: "scratch"})
+      Session.set_active_buffer(scratch)
+
+      %{"result" => result} =
+        frame(request(1, "tools/call", %{"name" => "save_file", "arguments" => %{}}))
+
+      assert result["isError"] == true
+      assert [%{"text" => text}] = result["content"]
+      assert text =~ ":no_path"
+    end
+
+    test "open_file with a missing path arg → isError result (SEP-1303), not -32602" do
+      %{"result" => result} =
+        frame(request(1, "tools/call", %{"name" => "open_file", "arguments" => %{}}))
+
+      assert result["isError"] == true
+      assert [%{"text" => text}] = result["content"]
+      assert text =~ "Invalid arguments"
+    end
+
+    test "re-opening an already-open file reuses the buffer (keeps unsaved edits)" do
+      path = tmp_path()
+      File.write!(path, "original\n")
+      open_file_tool(1, path)
+
+      frame(
+        request(2, "tools/call", %{
+          "name" => "insert",
+          "arguments" => %{"line" => 0, "col" => 0, "text" => "X"}
+        })
+      )
+
+      # re-open the same path: the in-memory edit must survive (no clobber-from-disk)
+      %{"result" => reopened} = open_file_tool(3, path)
+      assert [%{"text" => "Xoriginal\n"}] = reopened["content"]
+    end
+
+    test ~s(an explicit "arguments": null coalesces to empty args, not -32602) do
+      # some clients serialize an omitted/empty arguments object as JSON null
+      params = %{"name" => "open_file", "arguments" => nil}
+      %{"result" => result} = frame(request(1, "tools/call", params))
+
+      # reaches the handler (then fails arg validation as an isError result), rather
+      # than a hard -32602 "arguments must be an object"
+      assert result["isError"] == true
+      assert [%{"text" => text}] = result["content"]
+      assert text =~ "Invalid arguments"
     end
   end
 

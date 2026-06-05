@@ -116,27 +116,39 @@ defmodule Geex.Command do
   @doc false
   @spec __parse__(module(), [Field.t()], map()) :: {:ok, struct()} | {:error, String.t()}
   def __parse__(module, fields, args) when is_map(args) do
-    result =
-      Enum.reduce_while(fields, {:ok, %{}}, fn %Field{} = f, {:ok, acc} ->
-        case fetch_arg(args, f.name) do
-          :__missing__ when f.required ->
-            {:halt, {:error, "missing required arg: #{f.name}"}}
-
-          :__missing__ ->
-            {:cont, {:ok, Map.put(acc, f.name, f.default)}}
-
-          raw ->
-            case Type.cast(f.type, raw) do
-              {:ok, val} -> {:cont, {:ok, Map.put(acc, f.name, val)}}
-              {:error, why} -> {:halt, {:error, "arg #{f.name}: #{why}"}}
-            end
-        end
-      end)
-
-    case result do
+    case cast_args(fields, args) do
       {:ok, map} -> {:ok, struct(module, map)}
       {:error, _} = e -> e
     end
+  end
+
+  @doc """
+  Coerce an args map (string- or atom-keyed) against a field-spec into a validated,
+  atom-keyed map — the shared core of `parse/1`.
+
+  Edit commands wrap the result in their generated struct; `Geex.MCP.Operations`
+  uses the map directly for its hand-written operation tools (ADR-0019). Routing
+  both through this one function means the operation tools honor exactly the same
+  required-arg and type-cast rules as macro-projected edit tools, with no drift
+  (ADR-0004).
+  """
+  @spec cast_args([Field.t()], map()) :: {:ok, map()} | {:error, String.t()}
+  def cast_args(fields, args) when is_list(fields) and is_map(args) do
+    Enum.reduce_while(fields, {:ok, %{}}, fn %Field{} = f, {:ok, acc} ->
+      case fetch_arg(args, f.name) do
+        :__missing__ when f.required ->
+          {:halt, {:error, "missing required arg: #{f.name}"}}
+
+        :__missing__ ->
+          {:cont, {:ok, Map.put(acc, f.name, f.default)}}
+
+        raw ->
+          case Type.cast(f.type, raw) do
+            {:ok, val} -> {:cont, {:ok, Map.put(acc, f.name, val)}}
+            {:error, why} -> {:halt, {:error, "arg #{f.name}: #{why}"}}
+          end
+      end
+    end)
   end
 
   @doc "Stamp provenance onto a command value (ADR-0005)."

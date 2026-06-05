@@ -34,17 +34,21 @@ Streamable HTTP transport** — a Bandit/Plug listener bound to `127.0.0.1`, fea
 `start_http_mcp`). A real harness can connect over loopback HTTP and edit the live buffer
 with provenance — dogfood == production ([adr/0018](adr/0018-mcp-transport-streamable-http.md)).
 Edit coverage now includes a range `replace` ([test/geex/buffer/doc_test.exs](../test/geex/buffer/doc_test.exs)),
-and `Geex.Buffer` has **file I/O** (load-on-open + `save/1`). **First dependency:** Bandit +
-Plug (JSON stays built-in). **170 tests + 8 doctests green.** What's verified by hand is
+`Geex.Buffer` has **file I/O** (load-on-open + `save/1`), and the **file lifecycle +
+multi-buffer + MCP operation tools** are built: `Geex.Session.open_file/1` (find-or-start a
+path-registered buffer, make it active), and a third MCP tool category — `open_file`/`save_file`
+**operation tools** ([Geex.MCP.Operations](../lib/geex/mcp/operations.ex)) that act on
+`Session`/disk and are **not** recorded as edits ([adr/0019](adr/0019-file-lifecycle-and-operation-tools.md)).
+`tools/call` routes by category and `tools/list` merges all three. A real harness can now
+**open, edit, and save real files on disk** over loopback. **First dependency:** Bandit +
+Plug (JSON stays built-in). **195 tests + 8 doctests green.** What's verified by hand is
 logged in [testing.md](testing.md).
 
-The rest of the file layer is **decided and recorded, partly built**: file lifecycle +
-multi-buffer + MCP **operation tools** (a third tool category — open/save aren't edits,
-[adr/0019](adr/0019-file-lifecycle-and-operation-tools.md)); the **reconcile** floor via the
-`:file_system` watcher with content-comparison echo-suppression
-([adr/0017](adr/0017-reconcile-file-watch.md)); and the **diff / search-replace `edit` tool**
-that compiles to `replace` (ports DeepSeek-Moby's tiered matcher,
-[adr/0020](adr/0020-diff-edit-tool.md), [research](research/diff-edit-tool.md)).
+The remaining file layer is **decided and recorded, not yet built**: the **reconcile** floor
+via the `:file_system` watcher with content-comparison echo-suppression
+([adr/0017](adr/0017-reconcile-file-watch.md)) — the deliberate next increment — and the
+**diff / search-replace `edit` tool** that compiles to `replace` (ports DeepSeek-Moby's
+tiered matcher, [adr/0020](adr/0020-diff-edit-tool.md), [research](research/diff-edit-tool.md)).
 
 Cursor-relative resolution and the `Geex.Clipboard` subsystem are designed
 ([adr/0014](adr/0014-editor-state-and-dispatch-ownership.md),
@@ -104,9 +108,10 @@ Ships:
   (`Bandit`+`Plug` — geex's first dep); a real harness *connects* and edits land in the
   live session ([adr/0018](adr/0018-mcp-transport-streamable-http.md)). stdio is demoted
   to a hermetic CI/conformance harness.
-- **File lifecycle + operation tools** — `Geex.Buffer` load/save (done), multi-buffer +
-  path addressing, and MCP **operation tools** (`open_file`/`save_file` — a third tool
-  category; not recorded as edits, [adr/0019](adr/0019-file-lifecycle-and-operation-tools.md)).
+- **File lifecycle + operation tools (done)** — `Geex.Buffer` load/save, multi-buffer +
+  path addressing (`Session.open_file/1`, path-registered buffers), and MCP **operation
+  tools** (`open_file`/`save_file` — a third tool category; not recorded as edits,
+  [adr/0019](adr/0019-file-lifecycle-and-operation-tools.md)).
 - **The `edit` (diff / search-replace) tool** — harness-ergonomic editing that compiles to
   the `replace` primitive (ports DeepSeek-Moby's tiered matcher,
   [adr/0020](adr/0020-diff-edit-tool.md)).

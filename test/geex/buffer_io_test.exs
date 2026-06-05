@@ -33,7 +33,7 @@ defmodule Geex.BufferIOTest do
       refute File.exists?(path)
       buf = start_supervised!({Buffer, path: path})
       assert Buffer.get_text(buf) == ""
-      assert :ok = Buffer.save(buf)
+      assert {:ok, ^path} = Buffer.save(buf)
       assert File.read!(path) == ""
     end
 
@@ -42,6 +42,23 @@ defmodule Geex.BufferIOTest do
       File.write!(path, "on disk")
       buf = start_supervised!({Buffer, path: path, text: "in memory"})
       assert Buffer.get_text(buf) == "in memory"
+    end
+
+    test "an unreadable existing file fails the start cleanly (no raised File.Error)" do
+      path = tmp_path()
+      File.write!(path, "secret")
+      File.chmod!(path, 0o000)
+      on_exit(fn -> File.chmod(path, 0o600) end)
+
+      # root bypasses permission bits; only assert where the OS actually denies the read.
+      # GenServer.start (not start_link) so the failed-init exit isn't linked to the test.
+      case File.read(path) do
+        {:error, :eacces} ->
+          assert {:error, {:load_error, :eacces}} = GenServer.start(Buffer, path: path)
+
+        {:ok, _} ->
+          :ok
+      end
     end
   end
 
@@ -52,7 +69,7 @@ defmodule Geex.BufferIOTest do
       buf = start_supervised!({Buffer, path: path})
 
       insert(buf, 0, 5, " there")
-      assert :ok = Buffer.save(buf)
+      assert {:ok, ^path} = Buffer.save(buf)
       assert File.read!(path) == "hello there\nworld\n"
     end
 
@@ -64,7 +81,7 @@ defmodule Geex.BufferIOTest do
       insert(buf, 0, 0, "x")
       assert Buffer.snapshot(buf).dirty == true
 
-      assert :ok = Buffer.save(buf)
+      assert {:ok, ^path} = Buffer.save(buf)
       assert Buffer.snapshot(buf).dirty == false
     end
 
