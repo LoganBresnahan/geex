@@ -63,6 +63,16 @@ defmodule Geex.Buffer do
   def save(server), do: GenServer.call(server, :save)
 
   @doc """
+  Mark the buffer as **in sync with its backing file** — clears `dirty` *without*
+  writing. Used by reconcile (ADR-0017) after adopting an out-of-band disk change:
+  the `EditorState` already equals disk byte-for-byte, so the buffer is clean (a save
+  would re-write identical bytes), even though the adopting `replace` ran through
+  `dispatch/2` (which marks every command dirty). Returns the updated snapshot.
+  """
+  @spec mark_synced(GenServer.server()) :: map()
+  def mark_synced(server), do: GenServer.call(server, :mark_synced)
+
+  @doc """
   Apply a provenance-stamped `command` to this buffer. Returns `{:ok, snapshot}`
   (text + history as data) or `{:error, reason}`, leaving state unchanged on error.
   """
@@ -135,6 +145,11 @@ defmodule Geex.Buffer do
 
   def handle_call(:history, _from, state),
     do: {:reply, Enum.reverse(state.history), state}
+
+  def handle_call(:mark_synced, _from, state) do
+    state = %{state | dirty: false}
+    {:reply, build_snapshot(state), state}
+  end
 
   def handle_call(:save, _from, %{path: nil} = state), do: {:reply, {:error, :no_path}, state}
 

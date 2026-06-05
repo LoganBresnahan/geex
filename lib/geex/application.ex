@@ -17,6 +17,7 @@ defmodule Geex.Application do
           Geex.BufferSupervisor,
           Geex.Session
         ] ++
+        reconcile_child() ++
         http_mcp_child()
 
     opts = [strategy: :one_for_one, name: Geex.Supervisor]
@@ -26,6 +27,17 @@ defmodule Geex.Application do
   defp terminal_io_child do
     if Application.get_env(:geex, :start_terminal, true) do
       [Geex.TerminalIO]
+    else
+      []
+    end
+  end
+
+  # The reconcile file-watcher (ADR-0017) — the always-on Rung 0 floor. Gated like the
+  # others; default ON (it is the honest floor), off under `mix test` (config.exs). It
+  # depends on BufferSupervisor + Session, so it starts after them.
+  defp reconcile_child do
+    if Application.get_env(:geex, :start_reconcile, true) do
+      [Geex.Reconcile]
     else
       []
     end

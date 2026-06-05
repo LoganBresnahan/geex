@@ -321,3 +321,62 @@ watcher — the deliberate next increment, ADR-0017); the diff / search-replace 
 (ADR-0020); active-buffer death monitoring + Session self-heal (surfaced as `-32603` today,
 self-heals on re-open); symlink/hard-link path aliasing (dedup is by lexical path);
 concurrent multi-file editing (per-edit targets).
+
+### 2026-06-05 — Reconcile: file-watch + `:external` provenance (Rung 0, the honest floor)
+
+**Scope.** `Geex.Reconcile` (ADR-0017): when something writes an open buffer's backing
+file behind geex's back, geex diffs disk against its `EditorState` and replays the change
+as a provenance-tagged `%Command{}` — "the file-watcher is just another transport producing
+commands". Two layers like `Geex.MCP.Protocol`: a directly-testable **core**
+(`reconcile/2` — content-comparison echo-suppression → synthesize one `:external`
+whole-buffer `replace` → `Buffer.dispatch` into the changed buffer's history → `mark_synced`)
+and a **watcher GenServer** (`:file_system` per-directory; resolves buffers by path via
+`Geex.Registry`; degrades to a logged no-op when `inotify-tools` is absent). `:external` is
+never fabricated as `{:llm,_}`/`:human`; surfaced-never-silent = `Logger` + the `:external`
+command in queryable history; geex-as-observer (disk is truth) is the default, and even an
+overwrite of unsaved edits is one **undoable** `:external` command. **geex's ~3rd dependency:
+`:file_system`** (Bandit/Plug were 1st/2nd; JSON + diffing stay built-in).
+
+**Hardened by an adversarial review workflow** (4 dimension finders → per-finding
+verification; 13 confirmed). Fixed before commit: ① the `:file_system` worker survives a
+*normal* backend exit and forwards `:stop` without an `{:EXIT,…}` — the old code dropped
+`:stop`, leaving a directory permanently "watched" by a zombie worker (silently never
+reconciling again); now `:stop` *and* a trapped `:EXIT` both free the directory for
+re-watching. ② `reconcile/2`'s bare `GenServer.call`s could let a target buffer's death
+crash the reconciler and cascade-kill every linked watcher → now contained as `{:error,
+{:buffer_down, _}}`. ③ reconcile left the buffer `dirty: true` though memory now equals disk
+→ added `Buffer.mark_synced/1`, called after a reconcile (geex-as-observer post-condition).
+④ ADR-0017's "runs through `Dispatch.run/1`" was inaccurate (run/1 only hits the active
+buffer) — amended to `Buffer.dispatch/2` targeting the changed buffer. Verifier-refuted /
+out-of-scope findings left as notes: close-event filtering/debounce for mid-write partials
+(the proposed `:closed` filter was *wrong* — the backend maps CLOSE_WRITE→`:modified`; needs
+a timer, deferred), `@max_watched_dirs` (transitively bounded by `@max_buffers`), symlink
+canonicalization (doesn't fire on the Linux/inotify backend).
+
+**Automated.** `mix test` → **212 tests, 8 doctests, 0 failures** (was 195+8).
+`warnings-as-errors` clean. New: [reconcile_test.exs](../test/geex/reconcile_test.exs) — the
+core (echo-suppression; `:external` synthesis; empty↔content; unicode; non-active-target;
+dirty cleared; dead-buffer containment), the watcher glue via injected `:file_event` (changed
+file reconciles; equal disk = echo ignored; no-open-buffer no-op; deleted file not reconciled
+to empty; `:stop`/unknown ignored), watcher cleanup (`:stop`/`:EXIT` free the dir; unknown
+watcher no-op), and `watch/2` lifecycle (no-op when gated off; graceful backend-missing
+degradation).
+
+**Manual verification** — a live OTP tree (`Registry`+`CommandRegistry`+`BufferSupervisor`+
+`Session`+`Reconcile`): `Session.open_file` triggered `Reconcile.watch` (degraded cleanly —
+no `inotify-tools` here — logged, no crash); an external write + the injected watch event
+reconciled the buffer to the disk content with `history actors: [:external]`, `version: 1`,
+**`dirty: false`**; a second geex save + watch event added no new `:external` (echo
+suppressed); and `reconcile/2` on a killed buffer returned `{:error, {:buffer_down, :noproc}}`
+with the reconciler still alive.
+
+**Good as of:** the commit carrying this entry. Out-of-band disk writes to an open buffer are
+now reconciled into the one undo history as honest `:external` commands — the always-on Rung 0
+floor under every enforcement rung (ADR-0016) is real.
+
+**Not tested / deferred:** the real `inotify`/`fsevents` event *source* (the library's job;
+`inotify-tools` is absent in this env, so the watcher was exercised via injected events and
+the live backend smoke awaits a provisioned host); debounce / close-event coalescing for
+non-atomic mid-write reads; deletion + conflict ("reload?") merge UX (geex-as-primary); finer
+line-level reconcile diffs (pair with the ADR-0020 `edit` tool); a UI consumer for the
+surfaced divergence event.

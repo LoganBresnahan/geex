@@ -26,7 +26,12 @@ defmodule Geex.MixProject do
       # dispatcher/provenance, rent the HTTP framing. Bandit + Plug are the
       # BEAM-native stack; JSON stays the built-in module.
       {:bandit, "~> 1.11"},
-      {:plug, "~> 1.16"}
+      {:plug, "~> 1.16"},
+      # The reconcile file-watcher (ADR-0017) — push-based inotify/fsevents, the
+      # standard BEAM choice (Phoenix live-reload uses it). The Linux backend shells
+      # out to `inotifywait` (inotify-tools); without it the watcher degrades to a
+      # no-op (logged) and the reconcile core is unaffected.
+      {:file_system, "~> 1.0"}
     ]
   end
 end

@@ -25,8 +25,15 @@ like the minibuffer or the MCP server.
 1. **`Geex.Reconcile` — a file-watch GenServer** watches each open buffer's backing file.
    On an out-of-band disk change it diffs the disk text against the buffer's
    [`EditorState`](0014-editor-state-and-dispatch-ownership.md), synthesizes a minimal
-   `%Command{}` sequence, and runs it through `Geex.Dispatch.run/1` into the one undo
-   history — **the same path every other edit takes** ([ADR-0003](0003-one-shared-path.md)).
+   `%Command{}` (a whole-buffer `replace` to the disk content, for now — finer line-level
+   diffs pair with the [ADR-0020](0020-diff-edit-tool.md) myers work), and dispatches it
+   into the one undo history — **the same path every other edit takes**
+   ([ADR-0003](0003-one-shared-path.md)). It targets the *changed file's* buffer (resolved
+   by path via `Geex.Registry`), which may not be the active one, so it uses the per-buffer
+   chokepoint `Geex.Buffer.dispatch/2` (the gather → apply → scatter → record primitive that
+   `Geex.Dispatch.run/1` itself wraps) rather than `run/1`, whose active-buffer resolution
+   doesn't fit. After adopting disk content it marks the buffer **synced** (memory now equals
+   disk, so it is not dirty — the geex-as-observer post-condition).
    - **Watch mechanism (decided 2026-06-04): the `:file_system` hex library** —
      push-based (inotify / fsevents / inotifywait), the standard BEAM choice (Phoenix
      live-reload uses it), low latency and overhead. This is geex's ~3rd dependency, after
@@ -63,6 +70,31 @@ like the minibuffer or the MCP server.
 - **Cost / risk:** echo-suppression and disk/buffer conflict handling are the sharp edges;
   reconcile must not loop or mis-attribute. Diff→command reconstruction is lossy by nature
   (intent is not recoverable from a result).
+
+### Implementation decisions (surfaced by the build + an adversarial review)
+
+- **Echo/loop freedom is structural.** Reconcile only *reads* disk and dispatches in-memory
+  commands — it never writes disk — so it cannot echo its own work. A burst of `:modified`
+  events for one write reconciles once, then content-compares the rest to `:ignored`; a
+  geex `save/1` produces disk == `EditorState`, so the resulting watch event is ignored.
+- **Graceful degradation.** If the watch backend is unavailable (`inotify-tools` not
+  installed) `FileSystem.start_link` returns `:ignore`; the watcher logs and no-ops, the app
+  still boots, and the **reconcile core stays fully usable** when invoked directly.
+- **OTP robustness.** The reconciler traps exits and *both* a worker's `:stop` event and a
+  trapped `:EXIT` free its directory for re-watching — the `:file_system` worker survives a
+  *normal* backend exit (forwarding `:stop` without exiting), so `:stop` is the authoritative
+  cleanup signal, not a following `:EXIT`. A target buffer that dies under the watcher is
+  contained as `{:error, {:buffer_down, _}}`, so one buffer's death can't crash the reconciler
+  and cascade-kill every linked file-watcher.
+- **Lexical path identity.** Watch + event resolution key on the `Path.expand`-ed path,
+  matching the buffer-dedup identity ([ADR-0019](0019-file-lifecycle-and-operation-tools.md));
+  symlinked aliases aren't canonicalized.
+- **Deferred refinements:** close-event filtering / debounce (a non-atomic mid-write read is
+  adopted then corrected by the settling event — coarse but undoable); deletion handling (a
+  removed file is skipped, not reconciled to empty); conflict-aware "file changed, reload?"
+  merge UX (geex-as-primary); finer line-level diffs; surfacing to a UI consumer (today:
+  `Logger` + the `:external` command in queryable history). The watcher is feature-gated
+  (`:start_reconcile`, on in dev/prod, off under `mix test`).
 
 ## Open question — attribution beyond `:external` (leaning **no**, 2026-06-04)
 

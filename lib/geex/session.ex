@@ -84,9 +84,17 @@ defmodule Geex.Session do
   def handle_call({:open_file, path}, _from, state) do
     # Serialized inside this GenServer, so the find-or-start is race-free even if
     # two harness calls open the same path at once.
-    case find_or_start_buffer(Path.expand(path)) do
-      {:ok, pid} -> {:reply, {:ok, pid}, put_in(state.view.buffer_pid, pid)}
-      {:error, _reason} = error -> {:reply, error, state}
+    full = Path.expand(path)
+
+    case find_or_start_buffer(full) do
+      {:ok, pid} ->
+        # Start watching for out-of-band writes to this file (ADR-0017). A no-op when
+        # the reconciler is gated off.
+        Geex.Reconcile.watch(full)
+        {:reply, {:ok, pid}, put_in(state.view.buffer_pid, pid)}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
     end
   end
 
