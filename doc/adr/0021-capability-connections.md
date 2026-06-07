@@ -123,6 +123,14 @@ and committing to the real engine avoids a migration.)
   Provider language is **irrelevant** (MCP is the boundary); Pharos's BEAM-ness buys nothing in
   v0.5 (disk-truth, un-bundled). Output that mutates (a rename `WorkspaceEdit`) re-enters via
   `Dispatch.run/1`; reads (diagnostics/hover) render.
+  - **Providers are config-selected, never bundled as a dependency; geex runs fully with none.**
+    Pharos is a standalone MCP server (a separate binary geex connects to — like rust-analyzer to
+    an editor), *not* a library geex depends on ([ADR-0008](0008-pharos-not-bundled.md)). The
+    `LSP` port is provider-agnostic: the user selects Pharos / another provider / **none** in
+    config, and with none geex still edits + highlights (LSP is additive, never required).
+    First-party adapters are **offered config-gated** — bundled-but-inert, or an opt-in hex dep
+    for source builds; a not-bundled adapter for a shipped binary is the WASM tier. Never forced —
+    the same offer-don't-force posture as the harness presets ([ADR-0016](0016-external-harness-integration.md)).
 - **Highlighting** → a `Highlight` contract: text [+ language] → token spans carrying
   **tree-sitter capture names** (engine- *and* theme-agnostic; the terminal **cannot** highlight
   — it only renders the SGR geex emits). **Engine = tree-sitter on the WASM tier** (point 7;
