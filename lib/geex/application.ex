@@ -48,12 +48,22 @@ defmodule Geex.Application do
     end
   end
 
+  # The default loopback MCP port (ADR-0018) — the single source of truth. `config/runtime.exs`'s
+  # GEEX_MCP_PORT fallback mirrors this, and the checked-in preset (`presets/`) + its test assert
+  # the preset URL against `default_http_mcp_port/0`, so the preset can't silently drift off the
+  # port a default-served geex actually listens on.
+  @default_http_mcp_port 4000
+
+  @doc "The default port the loopback MCP HTTP transport serves on when none is configured."
+  @spec default_http_mcp_port() :: pos_integer()
+  def default_http_mcp_port, do: @default_http_mcp_port
+
   # The loopback MCP HTTP transport (ADR-0018), feature-gated exactly like
   # terminal_io_child/0. Default OFF; bind 127.0.0.1 only (never 0.0.0.0) so
-  # nothing off-host can reach it. `geex --serve` flips :start_http_mcp on.
+  # nothing off-host can reach it. `mix geex.serve` / `GEEX_SERVE=1` flips :start_http_mcp on.
   defp http_mcp_child do
     if Application.get_env(:geex, :start_http_mcp, false) do
-      port = Application.get_env(:geex, :http_mcp_port, 4000)
+      port = Application.get_env(:geex, :http_mcp_port, @default_http_mcp_port)
       [{Bandit, plug: Geex.MCP.HTTP, scheme: :http, ip: {127, 0, 0, 1}, port: port}]
     else
       []

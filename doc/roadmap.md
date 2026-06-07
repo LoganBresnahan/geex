@@ -125,17 +125,29 @@ Ships:
   matcher, stricter — refuse-never-guess, [adr/0020](adr/0020-diff-edit-tool.md)).
 - **The reconcile floor (done)** — `Geex.Reconcile` (the `:file_system` watcher;
   out-of-band disk writes → `%Command{}` tagged `:external`, never silent; echo-suppressed
-  by content comparison) ([adr/0017](adr/0017-reconcile-file-watch.md)). Still pending: the
-  checked-in **per-harness presets** (deny built-in writers, point MCP config at geex)
-  ([adr/0016](adr/0016-external-harness-integration.md)).
+  by content comparison) ([adr/0017](adr/0017-reconcile-file-watch.md)).
+- **Per-harness presets + the serve switch (done; Claude Code flagship)** — `mix geex.serve`
+  (`GEEX_SERVE=1` via `config/runtime.exs`) brings up the loopback MCP listener, and
+  `presets/claude-code/` ships the **Rung 1** preset — an `.mcp.json` pointing the harness at
+  geex plus a `permissions.deny` of its structured writers
+  ([adr/0016](adr/0016-external-harness-integration.md), advisory-by-cooperation; shell writes
+  stay Rung 0's job). Verified end-to-end *over the wire*: an external `curl` client did
+  `initialize → tools/list → open_file → insert → save_file` against a running geex and the
+  edit landed as a provenance-tagged `%Command{}` on disk ([testing.md](testing.md)). Still
+  pending: a live *claude-code-honoring-the-preset* run (vs. the `curl` proof), and the
+  other first-class presets (Codex, Gemini, Continue, Roo, OpenCode).
 - **MCP-client connection to an external pharos** for LSP — **disk-truth only**; pharos
   is *not bundled* ([adr/0008](adr/0008-pharos-not-bundled.md),
-  [adr/0010](adr/0010-disk-truth-lsp-v05.md)).
+  [adr/0010](adr/0010-disk-truth-lsp-v05.md)). Not started — the remaining v0.5 ship.
 
 Exit criteria: a real harness (claude-code first) connects to the running geex over
 loopback HTTP and edits buffers; every edit is a provenance-tagged `%Command{}` in the
 live shared undo history; out-of-band writes are reconciled as `:external`; sessions
-replay.
+replay. **Status:** the *connect + edit + provenance + save* clauses are proven live (an
+external loopback MCP client; the named-harness-honoring-the-preset run is the open item);
+`:external` reconcile is core-tested but not yet shown against a live `inotify` backend
+(absent on the dev box); replay is proven by the §15c cassette (`Dispatch.replay/2`), not
+re-shown in the dogfood.
 
 v0.5 **non-goals** (deferred, [mcp-ai-integration.md](mcp-ai-integration.md) §12):
 unsaved-state LSP, WASM extension host, third-party extension API, distributed Erlang,

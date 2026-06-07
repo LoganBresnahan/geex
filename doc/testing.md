@@ -548,3 +548,83 @@ net change and the edits are preserved): the accepted ADR-0017 save-granularity 
 refined here. The `synced` baseline is whole-file (not yet a line-level diff anchor — the
 ADR-0020 myers work could refine the adopted `:external` command without touching the
 comparison).
+
+### 2026-06-05 — Per-harness presets + the live loopback dogfood (ADR-0016 Rung 1, ADR-0018)
+
+The slice that closes v0.5's *transport* headline: a real external client connects to a
+running geex over loopback **Streamable HTTP** (ADR-0018) and edits a real file through the
+**one** command path, with provenance. Plus the checked-in **Rung 1 preset** (ADR-0016) that
+points a harness at geex and denies its structured writers — shippable now that the write
+surface meets the coverage gate (create/edit/delete/rename over MCP).
+
+New surface: a **serve switch** — `config/runtime.exs` reads `GEEX_SERVE=1` to flip
+`:start_http_mcp` on and `:start_terminal` off (a serving node runs headless), with the port
+from `GEEX_MCP_PORT` (default `Geex.Application.default_http_mcp_port/0` = 4000); `mix geex.serve
+[--port N]` is sugar that sets those then delegates to `mix run --no-halt`. The listener still
+binds `127.0.0.1` only. The **Claude Code preset** (`presets/claude-code/`): `.mcp.json`
+(`type: "http"`, `http://127.0.0.1:4000/mcp`) + `.claude/settings.json`
+(`permissions.deny` = `Write`/`Edit`/`MultiEdit`/`NotebookEdit`). `presets/README.md` frames
+the enforcement ladder — a preset is **advisory-by-cooperation, not enforcement**; shell/
+subprocess writes are deliberately *not* denied (that is the Rung 1 subprocess-write gap, left
+to Rung 0 reconcile's `:external` tagging, closed only by Rung 2 OS-sandbox).
+
+**Manual verification — a live `mix geex.serve` on `127.0.0.1:4000`, driven by an external
+`curl` process (a separate OS client speaking the real wire):** `initialize` →
+`{protocolVersion 2025-11-25, serverInfo geex 0.1.0}`; `notifications/initialized` → HTTP 202;
+`tools/list` → all ten tools (`insert`/`delete`/`replace`/`edit` + `open_file`/`save_file`/
+`create_file`/`delete_file`/`rename_file`/`close_file`); `open_file` a real file → its text;
+`insert` at `line 0 col 5` → the mutated text returned; `save_file` → `"saved …"` and the
+**disk file changed** (`hello world` → `hello, geex world`, confirmed by `cat`). A second proof
+drove an edit with `curl` and then read the buffer's live undo history in-process: **one
+`Geex.Commands.Insert` with `meta.actor: {:llm, "unknown"}`** — the loopback-HTTP edit is a
+provenance-tagged `%Command{}` in the one history. (`{:llm, "unknown"}` is the honest stateless
+provenance: an MCP tool-call genuinely arrived through the LLM door; the *model* identity is
+connection state the stateless `Geex.MCP.Protocol` core does not yet thread — a deliberate
+follow-up.)
+
+**Automated.** `mix test` → **302 tests, 8 doctests, 0 failures** (was 297+8).
+`warnings-as-errors` clean; formatted. New coverage: `test/geex/presets_test.exs` pins the
+preset invariants with teeth — the MCP endpoint is **loopback only** and on geex's
+single-source default port (`Geex.Application.default_http_mcp_port/0`, not a bare literal); the
+deny-list covers **all four** structured writers (incl. legacy `MultiEdit`, so it can't silently
+drop); and it **does not** deny Bash (pinning the ADR-0016 "shell writes are Rung 0's job"
+decision — a future `Bash(...)` deny reddens it) nor Read. The serve port parse is defended:
+an empty `GEEX_MCP_PORT` falls back to the default, and a non-numeric / out-of-range value (env
+*or* `--port`) fails the boot with a message **naming the variable**, not an opaque
+`String.to_integer` / `:gen_tcp.listen` `:badarg` (smoke-checked).
+
+**Hardened by an adversarial review** (4-dimension finders → independent per-finding
+verification; 8 confirmed, 2 rejected). Fixed: the deny-list test omitted `MultiEdit` (the one
+writer it forgot to pin — a drift hole); `MultiEdit` was presented as a *current* Claude Code
+tool when it was folded into `Edit` in 2.0 (README now marks it legacy/back-compat); empty/bad
+`GEEX_MCP_PORT` and out-of-range `--port` crashed boot opaquely (now validated + named); the
+port test hardcoded `4000` instead of the serve default (now single-source); and — the honesty
+fix — the README overclaimed Claude Code "verified end-to-end ✅", when `curl` proved the *wire*
+but **not the named harness honoring the preset** (Status now reads "wire + tools + provenance +
+save verified with an external client; a live claude-code-honoring-the-preset run still
+pending"). Rejected: a "guard against copying the preset to geex's own root" (user-error, not a
+defect — though the README now cautions against it) and a `{:llm,"unknown"}` provenance nit
+(already honestly documented).
+
+**Good as of:** the commit carrying this entry. `mix geex.serve` brings up a loopback MCP
+endpoint; an external client connects, opens/edits/saves real files, and every edit is a
+provenance-tagged `%Command{}` in the one undo history — dogfood == production for the transport.
+
+**Not tested / deferred (honest scope of this dogfood):**
+- **The named harness itself was not run.** The wire was exercised with `curl`/an external HTTP
+  client, which genuinely proves the loopback Streamable-HTTP transport, the tool surface,
+  provenance, and save. It does **not** prove that *claude-code* — honoring the checked-in
+  `.mcp.json` + deny-list — routes an edit through geex. That live preset-honoring run is the
+  open item before the Claude Code preset can be called "verified end-to-end."
+- **The reconcile / `:external` clause of the v0.5 criteria was not demonstrated live here.**
+  The watcher degrades to a logged no-op on this WSL box (`inotify-tools` absent), so an
+  out-of-band write was not auto-reconciled end-to-end; the reconcile **core** is unit-tested
+  (the 2026-06-05 file-ops entry above) and a live backend awaits a provisioned host.
+- **"Sessions replay" is carried by the §15c cassette, not this dogfood.** Deterministic replay
+  is proven by `Geex.Dispatch.replay/2` + the golden-pair cassette test (a pure command-list
+  replay over an `EditorState`); there is no `Geex.Session`-level replay entry point yet, and no
+  replay step ran in this transcript. This slice closes the *connect + edit + provenance + save*
+  clauses; replay stands on the earlier, separate proof.
+- **Other first-class presets** (Codex, Gemini, Continue, Roo, OpenCode) are not checked in —
+  the same two pieces in each harness's own config dialect, added as named consumers appear
+  (presets are ongoing, version-sensitive maintenance — ADR-0016).
