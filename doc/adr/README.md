@@ -36,6 +36,9 @@ Each ADR: **Status** · **Context** (the forces) · **Decision** · **Consequenc
 | [0018](0018-mcp-transport-streamable-http.md) | MCP transport: Streamable HTTP, connect-first, dogfood == production | Accepted |
 | [0019](0019-file-lifecycle-and-operation-tools.md) | File lifecycle (load/save, multi-buffer) & MCP operation tools (a third tool category) | Accepted |
 | [0020](0020-diff-edit-tool.md) | Diff / search-replace edit tool (compiles to `replace`; ports Moby's tiered matcher) | Accepted |
+| [0021](0021-capability-connections.md) | Capability connections — contracts, adapters & hosting tiers (consume-MCP model; LSP + highlighting) | Accepted |
+| [0022](0022-capability-reactor.md) | The capability reactor — when highlighting & LSP fire (per-buffer process; async cadence) | Accepted |
+| [0023](0023-theming-and-extension-loading.md) | Theming & loading themes/grammars/extensions (capture-vocab theme; config-path install; fetch-nothing) | Accepted |
 
 ## Adding one
 
