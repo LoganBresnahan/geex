@@ -63,8 +63,18 @@ only *code* and *parsers* are `.wasm`.** Nobody hosts "a `.wasm` of a theme."
 | Kind | What it is | Format | Loaded how | Sandbox? | Bundled |
 |---|---|---|---|---|---|
 | **Theme** | data (colors) | native / Zed / Helix | **read & validate a file** | No (data) | a few defaults |
-| **Grammar** | a parser (compute) | tree-sitter `.wasm` | wasmex instantiates | Yes (WASM) | curated default set |
-| **Extension / adapter** | code (logic) | native hex (trusted) **or** `.wasm` (untrusted) | hex (build) / wasmex (runtime) | per trust | first-party native |
+| **Grammar** | a parser (compute) | tree-sitter `.wasm` | **`wasmtime` (inside the tree-sitter NIF) instantiates** | Yes (WASM) | curated default set |
+| **Extension / adapter** | code (logic) | native hex (trusted) **or** `.wasm` (untrusted) | hex (build) / **`wasmex`** (runtime) | per trust | first-party native |
+
+> **Grammar loading — verified architecture** (2026-06-07 WASM de-risk research, 8/8 confirmed):
+> a grammar `.wasm` is *inert* without the tree-sitter runtime, so it is **not** loaded by
+> `wasmex`. The highlighter is one small native NIF — the `tree-sitter` crate (`wasm` feature,
+> embedding `wasmtime`) + `tree-sitter-highlight` — that loads portable grammar `.wasm` at runtime
+> (`WasmStore::load_language`). The user-facing promise is unchanged (drop a `.wasm`, declare its
+> path, sandboxed by `wasmtime`); only the *host* differs. `wasmex` remains the host for the
+> **untrusted-extension** tier ([ADR-0009](0009-three-tier-extension-model.md)), not grammars.
+> See [ADR-0021](0021-capability-connections.md) point 7 and the
+> [research notes](../research/capability-connections.md).
 
 **5. Loading is config-path-based; geex fetches nothing.** A user adds anything geex doesn't
 bundle by putting the file on disk and **declaring its path in user config** (distinct from the
@@ -86,9 +96,12 @@ my-highlighter = "~/ext/foo.wasm"
 
 **6. WASM loading is a three-layer safety pipeline.** For anything that executes:
 **(a) authorization** — an explicit config path = the user chose to load *this* file;
-**(b) containment** — wasmex runs it sandboxed (a grammar gets *nothing*: text in, tree out);
-**(c) correctness** — geex validates it satisfies the expected interface (tree-sitter grammar /
-the [ADR-0021](0021-capability-connections.md) contract), else rejects with a clear error.
+**(b) containment** — the WASM sandbox runs it (`wasmtime` in the tree-sitter NIF for grammars,
+`wasmex` for extensions); a grammar gets *nothing* — text in, tree out; a malformed/non-grammar
+`.wasm` traps to `{:error, _}`, never a BEAM crash;
+**(c) correctness** — geex validates it satisfies the expected interface (tree-sitter grammar ABI
+/ the [ADR-0021](0021-capability-connections.md) contract), else rejects with a clear error (e.g.
+"rebuild with tree-sitter X.Y" on ABI skew).
 
 **7. No marketplace.** "Drop a file, declare its path" *is* the install story. `geex install
 <url>` (auto-fetch into a dir) is optional sugar on top and deferrable; a marketplace

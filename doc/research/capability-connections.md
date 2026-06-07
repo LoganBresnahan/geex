@@ -62,3 +62,46 @@ display **and** structural context for the command path.)
 
 **Conclusion:** two contracts (`Highlight` host-in; `LSP` connect-out), one-way overlap
 (LSP `semanticTokens` may enrich `Highlight`), potentially **one provider** (Pharos serves both).
+
+## WASM tier — de-risk (2026-06-07; 8/8 claims confirmed live, incl. local toolchain)
+
+The crux: a per-grammar `tree-sitter-<lang>.wasm` is **inert** — it exports only
+`tree_sitter_<lang>() -> TSLanguage*` and must be driven by the tree-sitter **runtime**. So
+"highlighting" = runtime + grammar + `highlights.scm`, and the only question is *where the runtime
+lives*. Three realistic architectures:
+
+| Arch | Shape | Portable grammars? | NIF? | Maturity |
+|---|---|---|---|---|
+| **1 (recommended)** | one native `tree-sitter` NIF (`wasm` feature → embeds `wasmtime`) + `tree-sitter-highlight`; loads portable grammar `.wasm` at runtime via `WasmStore::load_language` | **Yes** | one small stable NIF (runtime only, never per-grammar) | Rust pieces production; BEAM wrapper **net-new** = the build target |
+| 2 (north-star) | pure `wasmex` runs `tree-sitter.wasm` (the runtime) + grammars | Yes | no new NIF (wasmex) | **unbuilt** — web-tree-sitter's runtime is Emscripten-built, needs JS/`fs` glue nobody has re-hosted on BEAM |
+| 3 (bring-up only) | static-NIF (`autumnus`/`lumis`): tree-sitter + highlight + grammars baked in at compile time | **No** (recompile to add a lang) | NIF that grows per language | **production** (lumis: 110+ langs, ANSI, Neovim themes) |
+
+**Pick ARCH 1.** It's the only one satisfying all three goals: portable grammars (`tree-sitter
+build --wasm`/wasi-sdk since CLI v0.26.1 → `WasmStore` consumes exactly those), one small native
+surface, runs on BEAM. The `tree-sitter-highlight` crate's `HighlightEvent` capture spans **are**
+geex's `Highlight` contract `{byte_start, byte_end, capture_name}`.
+
+**Inverts the earlier "wasmex loads grammars" framing:** wasmtime *inside the tree-sitter NIF*
+loads grammar `.wasm`, not wasmex (which stays for the untrusted-extension tier). The
+binary-distribution story is unchanged (one runtime NIF + portable grammars), the *runtime NIF*
+is just tree-sitter+wasmtime, not wasmex. ADR-0021 §7 / ADR-0023 amended to match.
+
+**Verified deps (buildable here today — Rust 1.94, OTP 28, Elixir 1.19.5):** `tree-sitter` 0.26.9
+(feature `wasm`), `tree-sitter-highlight` 0.26.9, `rustler` + `rustler_precompiled`, `tree-sitter`
+CLI (for `build --wasm`, build-time/author-side only), `wasmex` 0.14.0 (extension tier only, not
+this path; supports core modules + WIT/component-model, fuel/epoch/StoreLimits sandboxing,
+scheduler-safe via a tokio worker pool).
+
+**Spike (de-risk in hours, pure-Rust before any BEAM):** ① `tree-sitter build --wasm` on
+tree-sitter-json → confirm a `.wasm` + wasi-sdk auto-download. ② pure-Rust harness:
+`Engine → WasmStore::load_language("json", bytes) → parser.set_wasm_store` → assert `Ok` (**the
+single biggest unknown** — wasi-sdk-grammar ⇄ native-runtime ABI; pin CLI & crate to the same
+0.26.x). ③ run `highlights.scm` on `{"a":"b\n"}` → assert ≥1 `HighlightStart(idx)` → real capture
++ non-empty byte range. ④ wrap ②–③ behind ONE Rustler NIF `geex_ts.highlight(grammar_bytes,
+scm, src) -> {:ok, [{start,end,capture}]}`; call from iex. ⑤ failure paths: non-grammar bytes →
+`{:error,_}` (no crash); deadline → `{:error,:timeout}` on a dirty scheduler. ⑥ repeat for
+tree-sitter-elixir (dogfood). **Go/no-go:** **GO** (conditional on step ②) — every load-bearing
+dep verified; the tier is viable now; ARCH 2 stays a north-star. Risks: grammar↔runtime ABI skew
+(pin versions, validate ABI at load), whole-buffer re-parse latency on big files (cache
+Engine/Store/Parser + keep a persistent `Tree` for incremental reparse — a native-NIF strength
+ARCH 2 lacks).

@@ -101,17 +101,23 @@ fallback** (zero-config, binary-only providers, CI). Pharos already serves both.
 lifecycle: connect if a URL is configured, else spawn-stdio — one knob, no daemon-management
 surface.
 
-**7. Binary / NIF economics put the highlighter on the WASM tier.** geex shipping as a binary
-(`mix release`, optionally Burrito) is trivial for pure-BEAM code; a **NIF** breaks
+**7. Binary / NIF economics → one runtime NIF + portable grammar `.wasm`.** geex shipping as a
+binary (`mix release`, optionally Burrito) is trivial for pure-BEAM code; a **NIF** breaks
 "compile-once-run-anywhere" — per-platform native build matrix, in-VM segfault blast radius,
-dirty-scheduler care. WASM **collapses** that: one per-platform runtime NIF (wasmex), above
-which grammars are **portable `.wasm`** needing no native build and no geex recompile. So the
-highlighter is **tree-sitter on the WASM tier** — *not* a tree-sitter NIF (whose Elixir bindings
-are all early-stage anyway). This makes **highlighting the WASM tier's named consumer** (point
-5): the tier is built *now*, not deferred. (`Makeup`, the pure-Elixir lexer, was considered as a
-zero-NIF interim base but **dropped** — it would be a throwaway, its token taxonomy isn't
-tree-sitter's so themes wouldn't map (point 8 / [ADR-0023](0023-theming-and-extension-loading.md)),
-and committing to the real engine avoids a migration.)
+dirty-scheduler care. The win is to collapse that to **one small, stable runtime NIF**, above
+which grammars are **portable `.wasm`** (built once via `tree-sitter build --wasm`/wasi-sdk) —
+adding a language ships a `.wasm`, never a recompile. **Verified architecture** (2026-06-07 WASM
+de-risk research, 8/8 claims confirmed — [research notes](../research/capability-connections.md)):
+that runtime NIF is a **native tree-sitter runtime (the `tree-sitter` crate's `wasm` feature,
+which embeds `wasmtime`) + `tree-sitter-highlight`**, which loads portable grammar `.wasm` at
+runtime (`WasmStore::load_language`) and emits capture spans. A grammar `.wasm` is *inert*
+without the runtime, so the runtime is kept native and does the wasm loading itself — **not**
+`wasmex` (which would have to re-host tree-sitter's Emscripten runtime — unbuilt on the BEAM), and
+**not** a per-grammar static NIF (the early-stage Elixir bindings bake grammars in). `wasmex` is
+retained for the *separate untrusted-extension* `.wasm` tier ([ADR-0009](0009-three-tier-extension-model.md)),
+not grammar loading. This makes **highlighting the WASM-tier's named consumer** (point 5), built
+*now*. (`Makeup` was considered as a zero-NIF interim base but **dropped** — a throwaway whose
+token taxonomy isn't tree-sitter's, so themes wouldn't map; [ADR-0023](0023-theming-and-extension-loading.md).)
 
 **8. First consumers (named):**
 
