@@ -78,4 +78,29 @@ defmodule Geex.Highlight.ReactorTest do
     # A second start collapses to the same reactor.
     assert {:ok, ^pid} = ReactorSupervisor.start_reactor(buf, "elixir")
   end
+
+  test "stop releases the registration synchronously (immediate re-register works)" do
+    buf = start_supervised!({Buffer, text: "x = 1\n"}, id: :stop_buf)
+    {:ok, r1} = ReactorSupervisor.start_reactor(buf, "elixir")
+    assert Reactor.for_buffer(buf) == {:ok, r1}
+
+    assert :ok = Reactor.stop(r1)
+    refute Process.alive?(r1)
+    assert Reactor.for_buffer(buf) == :error
+
+    # No stale {:already_started} from r1's dead registration.
+    assert {:ok, r2} = ReactorSupervisor.start_reactor(buf, "elixir")
+    assert r2 != r1
+  end
+
+  test "rewatch stops the stale reactor for a renamed buffer" do
+    buf = start_supervised!({Buffer, text: "x = 1\n"}, id: :rewatch_buf)
+    {:ok, r1} = ReactorSupervisor.start_reactor(buf, "elixir")
+
+    # Gated off under mix test → rewatch stops the old reactor without starting a
+    # new one; gated on (dev), watch/2 would then restart it for the new language.
+    assert :ok = Reactor.rewatch(buf, "/tmp/whatever.json")
+    refute Process.alive?(r1)
+    assert Reactor.for_buffer(buf) == :error
+  end
 end

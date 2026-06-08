@@ -52,15 +52,22 @@ defmodule Geex.Highlight.Paint do
       text
       |> String.graphemes()
       |> Enum.reduce({Screen.new(w, h), 0, 0, 0}, fn
-        "\n", {screen, byte, row, _col} ->
-          {screen, byte + 1, row + 1, 0}
+        # "\r\n" is a single grapheme; both forms terminate the line.
+        g, {screen, byte, row, _col} when g in ["\n", "\r\n"] ->
+          {screen, byte + byte_size(g), row + 1, 0}
 
         g, {screen, byte, row, col} ->
-          cell = cell_for(g, Map.get(by_byte, byte), fg, bg)
+          cell = cell_for(g, style_at(by_byte, byte, byte_size(g)), fg, bg)
           {Screen.set_cell(screen, col, row - scroll, cell), byte + byte_size(g), row, col + 1}
       end)
 
     screen
+  end
+
+  # A grapheme can span several bytes; take the style of the first styled byte in
+  # its range, so a span that begins mid-grapheme still colours the grapheme.
+  defp style_at(by_byte, byte, size) do
+    Enum.find_value(byte..(byte + size - 1)//1, fn b -> Map.get(by_byte, b) end)
   end
 
   defp cell_for(g, nil, fg, bg), do: %Cell{char: g, fg: fg, bg: bg}

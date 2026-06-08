@@ -309,6 +309,9 @@ defmodule Geex.Session do
       case safe_rename(pid, to) do
         :ok ->
           Geex.Reconcile.watch(to)
+          # Re-evaluate highlighting for the new path: the grammar follows the new
+          # extension (or stops if unsupported). A no-op when gated off (ADR-0022).
+          Geex.Highlight.Reactor.rewatch(pid, to)
 
         {:error, reason} ->
           Logger.warning(

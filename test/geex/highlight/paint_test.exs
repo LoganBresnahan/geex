@@ -41,6 +41,26 @@ defmodule Geex.Highlight.PaintTest do
       assert %{char: "a"} = Screen.get_cell(screen, 0, 0)
       assert %{char: "é", fg: @keyword_red} = Screen.get_cell(screen, 1, 0)
     end
+
+    test "a span starting mid-grapheme still colours the grapheme" do
+      text = "aé"
+      # span covers only byte 2 (the interior byte of é at bytes 1..2)
+      spans = [%Span{start_byte: 2, end_byte: 3, capture: "keyword"}]
+      screen = Paint.to_screen(text, spans, @theme, 5, 1)
+
+      assert %{char: "é", fg: @keyword_red} = Screen.get_cell(screen, 1, 0)
+    end
+
+    test "CRLF terminates the line and is not drawn as a cell" do
+      screen = Paint.to_screen("ab\r\ncd", [], @theme, 10, 5)
+
+      assert %{char: "a"} = Screen.get_cell(screen, 0, 0)
+      assert %{char: "b"} = Screen.get_cell(screen, 1, 0)
+      # The "\r\n" grapheme advances the row rather than painting a cell.
+      assert Screen.get_cell(screen, 2, 0).char == " "
+      assert %{char: "c"} = Screen.get_cell(screen, 0, 1)
+      assert %{char: "d"} = Screen.get_cell(screen, 1, 1)
+    end
   end
 
   describe "end-to-end: reactor-shaped spans render to truecolor on screen" do

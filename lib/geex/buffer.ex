@@ -245,10 +245,12 @@ defmodule Geex.Buffer do
   end
 
   # A monitored subscriber died — drop it. Keeps the subscriber set free of stale
-  # pids (a crashed reactor leaves no residue).
+  # pids (a crashed reactor leaves no residue). Guarded to *subscriber* refs only,
+  # so a future monitor added to the buffer can't be silently swallowed here.
   @impl true
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
-    {:noreply, %{state | subscribers: Map.delete(state.subscribers, ref)}}
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{subscribers: subscribers} = state)
+      when is_map_key(subscribers, ref) do
+    {:noreply, %{state | subscribers: Map.delete(subscribers, ref)}}
   end
 
   # Post-dispatch emit (ADR-0022): tell each subscriber the buffer changed, tagged

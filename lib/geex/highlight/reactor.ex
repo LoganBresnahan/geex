@@ -103,6 +103,37 @@ defmodule Geex.Highlight.Reactor do
     :ok
   end
 
+  @doc """
+  Re-evaluate highlighting after a buffer is re-keyed to `path` (a rename,
+  ADR-0019): stop any reactor running for `buffer`, then `watch/2` the new path —
+  so the grammar follows the new extension (and stops if the new language is
+  unsupported). A no-op when gated off. Mirrors `Geex.Reconcile.watch/1` being
+  re-called on rename.
+  """
+  @spec rewatch(pid(), String.t()) :: :ok
+  def rewatch(buffer, path) when is_pid(buffer) and is_binary(path) do
+    case for_buffer(buffer) do
+      {:ok, pid} -> safe_stop(pid)
+      :error -> :ok
+    end
+
+    watch(buffer, path)
+  end
+
+  @doc """
+  Stop a reactor, **synchronously releasing its per-buffer registration** so a
+  replacement (`rewatch/2`) can register immediately without racing the Registry's
+  async monitor cleanup of the dead entry.
+  """
+  @spec stop(GenServer.server()) :: :ok
+  def stop(reactor), do: GenServer.call(reactor, :stop)
+
+  defp safe_stop(pid) do
+    stop(pid)
+  catch
+    :exit, _ -> :ok
+  end
+
   ## GenServer
 
   @impl true
@@ -131,6 +162,13 @@ defmodule Geex.Highlight.Reactor do
 
   @impl true
   def handle_call(:highlights, _from, state), do: {:reply, state.result, state}
+
+  # Unregister in-process (we own the registration) before stopping, so the key
+  # is free the instant the caller's `stop/1` returns.
+  def handle_call(:stop, _from, state) do
+    Registry.unregister(Geex.Registry, {:highlight_reactor, state.buffer})
+    {:stop, :normal, :ok, state}
+  end
 
   @impl true
   def handle_info({:geex_buffer_change, buffer, _version}, %{buffer: buffer} = state) do
