@@ -126,6 +126,14 @@ defmodule Geex.Buffer do
   def subscribe(server, pid) when is_pid(pid), do: GenServer.call(server, {:subscribe, pid})
 
   @doc """
+  Stop sending change notifications to `pid` — drops its subscription and the
+  buffer's monitor of it. Fire-and-forget; safe to call for a pid that is not
+  subscribed (a no-op). Used by `Geex.Loop` when it re-attaches to another buffer.
+  """
+  @spec unsubscribe(GenServer.server(), pid()) :: :ok
+  def unsubscribe(server, pid) when is_pid(pid), do: GenServer.cast(server, {:unsubscribe, pid})
+
+  @doc """
   Read-only snapshot: text, lines, version, dirty, path, the `synced` disk baseline (what
   reconcile compares against), and command history.
   """
@@ -244,6 +252,11 @@ defmodule Geex.Buffer do
     end
   end
 
+  @impl true
+  def handle_cast({:unsubscribe, pid}, state) do
+    {:noreply, %{state | subscribers: drop_subscriber(state.subscribers, pid)}}
+  end
+
   # A monitored subscriber died — drop it. Keeps the subscriber set free of stale
   # pids (a crashed reactor leaves no residue). Guarded to *subscriber* refs only,
   # so a future monitor added to the buffer can't be silently swallowed here.
@@ -251,6 +264,15 @@ defmodule Geex.Buffer do
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{subscribers: subscribers} = state)
       when is_map_key(subscribers, ref) do
     {:noreply, %{state | subscribers: Map.delete(subscribers, ref)}}
+  end
+
+  # Remove every subscription held by `pid` and demonitor it — the explicit
+  # counterpart to a subscriber's `:DOWN` cleanup (used on `unsubscribe/2`).
+  defp drop_subscriber(subscribers, pid) do
+    Enum.reduce(subscribers, subscribers, fn
+      {ref, ^pid}, acc -> Process.demonitor(ref, [:flush]); Map.delete(acc, ref)
+      {_ref, _other}, acc -> acc
+    end)
   end
 
   # Post-dispatch emit (ADR-0022): tell each subscriber the buffer changed, tagged

@@ -32,8 +32,10 @@ defmodule Geex.Loop do
   use GenServer
   require Logger
 
-  alias Geex.{Buffer, Renderer, Screen, Session, TerminalIO, Theme, Width}
+  alias Geex.{Buffer, Command, Dispatch, Renderer, Screen, Session, TerminalIO, Theme, Width}
+  alias Geex.Command.Meta
   alias Geex.Highlight.{Paint, Reactor}
+  alias Geex.Loop.Keymap
 
   ## Public API
 
@@ -102,8 +104,17 @@ defmodule Geex.Loop do
     {:noreply, schedule_repaint(%{state | w: cols, h: rows})}
   end
 
-  # Input half lands next — keys are accepted but not yet mapped to commands.
-  def handle_info({:geex_io, _event}, state), do: {:noreply, state}
+  # End of input (terminal closed) → exit.
+  def handle_info({:geex_io, :eof}, state), do: {:stop, :normal, state}
+
+  # A key: resolve it against the current text + cursor (read fresh from Session) and
+  # apply via the one shared path (edits) or a view-local cursor move.
+  def handle_info({:geex_io, event}, state) do
+    case safe_session_snapshot() do
+      {:ok, %{text: text, cursor: cursor}} -> {:noreply, apply_key(event, cursor, text, state)}
+      _ -> {:noreply, state}
+    end
+  end
 
   # The active buffer died — detach; a fresh open re-attaches via Session.
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{buffer_ref: ref} = state),
@@ -145,8 +156,13 @@ defmodule Geex.Loop do
     %{state | buffer: pid, buffer_ref: ref, reactor: reactor}
   end
 
-  defp detach(%{buffer_ref: ref} = state) when is_reference(ref) do
+  defp detach(%{buffer_ref: ref, buffer: buf, reactor: reactor} = state) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
+    # Drop our subscriptions too, not just our monitor: otherwise the old buffer and
+    # its reactor keep us in their subscriber sets (and keep sending us now-dropped
+    # change/overlay messages) until they die — a leak across buffer switches.
+    if is_pid(buf), do: Buffer.unsubscribe(buf, self())
+    if is_pid(reactor), do: Reactor.unsubscribe(reactor, self())
     %{state | buffer: nil, buffer_ref: nil, reactor: nil}
   end
 
@@ -169,6 +185,42 @@ defmodule Geex.Loop do
 
   defp cursor_target(%{w: w, h: h}, x, y) when x >= 0 and x < w and y >= 0 and y < h, do: {x, y}
   defp cursor_target(_state, _x, _y), do: :hidden
+
+  # Resolve a key to an action and apply it. Edits go through the **one shared path**
+  # (Dispatch.run with human provenance) then move the cursor; a move just sets the
+  # cursor; quit stops the VM so the app's shutdown restores the terminal. The buffer's
+  # post-dispatch change notification will also schedule a repaint, but we schedule one
+  # here too so a pure cursor move (no edit) repaints as well.
+  defp apply_key(event, cursor, text, state) do
+    case Keymap.resolve(event, cursor, text) do
+      :ignore ->
+        state
+
+      :quit ->
+        System.stop()
+        state
+
+      {:move, new_cursor} ->
+        set_cursor(new_cursor)
+        schedule_repaint(state)
+
+      {:edit, cmd, new_cursor} ->
+        with {:ok, _snap} <- safe_dispatch(cmd), do: set_cursor(new_cursor)
+        schedule_repaint(state)
+    end
+  end
+
+  defp safe_dispatch(cmd) do
+    Dispatch.run(Command.put_meta(cmd, Meta.human()))
+  catch
+    :exit, _ -> {:error, :down}
+  end
+
+  defp set_cursor(cursor) do
+    Session.set_cursor(cursor)
+  catch
+    :exit, _ -> :ok
+  end
 
   defp overlay_spans(nil), do: []
 

@@ -53,6 +53,17 @@ defmodule Geex.Highlight.ReactorTest do
     assert version >= snap.version
   end
 
+  test "unsubscribe/2 stops overlay-ready notifications", %{buf: buf, reactor: reactor} do
+    {:ok, _} = Reactor.await(reactor, 0)
+    Reactor.subscribe(reactor)
+    Reactor.unsubscribe(reactor)
+    # A sync round-trip ensures the unsubscribe cast is processed before the edit.
+    _ = Reactor.highlights(reactor)
+
+    {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "q = 1\n"))
+    refute_receive {:geex_highlights, ^buf, _}, 300
+  end
+
   test "a subscriber that exits is dropped without disturbing the reactor", %{buf: buf, reactor: reactor} do
     {:ok, _} = Reactor.await(reactor, 0)
     test = self()

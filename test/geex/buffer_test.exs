@@ -39,6 +39,18 @@ defmodule Geex.BufferTest do
     %{buf: start_supervised!({Buffer, text: ""})}
   end
 
+  test "subscribe/2 notifies on change; unsubscribe/2 stops the notifications", %{buf: buf} do
+    {:ok, _v} = Buffer.subscribe(buf, self())
+    {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "a"))
+    assert_receive {:geex_buffer_change, ^buf, _}, 500
+
+    :ok = Buffer.unsubscribe(buf, self())
+    # A sync round-trip ensures the unsubscribe cast is processed before the next edit.
+    _ = Buffer.snapshot(buf)
+    {:ok, _} = Buffer.dispatch(buf, insert(0, 1, "b"))
+    refute_receive {:geex_buffer_change, ^buf, _}, 200
+  end
+
   test "dispatch threads a command into the EditorState and records it with provenance", %{buf: buf} do
     cmd = insert(0, 0, "hello") |> Command.put_meta(Meta.llm("claude-opus-4-8"))
     assert {:ok, snap} = Buffer.dispatch(buf, cmd)

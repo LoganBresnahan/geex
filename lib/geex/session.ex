@@ -34,6 +34,15 @@ defmodule Geex.Session do
     do: GenServer.call(__MODULE__, {:set_active_buffer, pid})
 
   @doc """
+  Set the view-local cursor to `{line, col}` (0-based, `col` grapheme-indexed).
+  View-local and ephemeral (ADR-0014 §2) — not a recorded edit, not in history; the
+  interactive loop (`Geex.Loop`) drives it as you type and move.
+  """
+  @spec set_cursor({non_neg_integer(), non_neg_integer()}) :: :ok
+  def set_cursor({line, col} = cursor) when is_integer(line) and is_integer(col),
+    do: GenServer.call(__MODULE__, {:set_cursor, cursor})
+
+  @doc """
   Open the file at `path` and make it the **active** buffer (ADR-0019).
 
   Find-or-start: `path` is normalized (`Path.expand/1`) and a buffer registered
@@ -156,6 +165,10 @@ defmodule Geex.Session do
   @impl true
   def handle_call({:set_active_buffer, pid}, _from, state) do
     {:reply, :ok, put_active(state, pid)}
+  end
+
+  def handle_call({:set_cursor, cursor}, _from, state) do
+    {:reply, :ok, put_in(state.view.cursor, cursor)}
   end
 
   def handle_call({:open_file, path}, _from, state) do

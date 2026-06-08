@@ -35,6 +35,9 @@ defmodule Geex.SessionTest do
   setup do
     buf = start_supervised!({Buffer, text: ""})
     Session.set_active_buffer(buf)
+    # The view-local cursor lives on the global Session; reset it so a prior test's
+    # cursor move (set_cursor/1) can't leak into one that assumes the default.
+    Session.set_cursor({0, 0})
     on_exit(fn -> Session.set_active_buffer(nil) end)
     %{buf: buf}
   end
@@ -64,6 +67,12 @@ defmodule Geex.SessionTest do
     # `buf` is already active (setup) → no pointer change → no notification.
     Session.set_active_buffer(buf)
     refute_receive {:geex_active_buffer, _}, 200
+  end
+
+  test "set_cursor/1 updates the view-local cursor surfaced by snapshot/0" do
+    {:ok, _} = Dispatch.run(insert(0, 0, "abc", Meta.human()))
+    :ok = Session.set_cursor({0, 2})
+    assert {:ok, %{cursor: {0, 2}}} = Session.snapshot()
   end
 
   test "Dispatch.run/1 routes a stamped command to the active buffer and records it" do

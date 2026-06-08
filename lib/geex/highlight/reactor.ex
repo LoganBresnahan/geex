@@ -72,6 +72,14 @@ defmodule Geex.Highlight.Reactor do
   def subscribe(reactor, pid \\ self()), do: GenServer.call(reactor, {:subscribe, pid})
 
   @doc """
+  Stop sending overlay-ready notifications to `pid` — drops its subscription and the
+  reactor's monitor of it. Fire-and-forget; a no-op for a pid that is not subscribed.
+  Used by `Geex.Loop` when it re-attaches to another buffer.
+  """
+  @spec unsubscribe(GenServer.server(), pid()) :: :ok
+  def unsubscribe(reactor, pid \\ self()), do: GenServer.cast(reactor, {:unsubscribe, pid})
+
+  @doc """
   Block until the reactor has an overlay for buffer version `>= min_version` (or
   `timeout_ms` elapses). Polls `highlights/1` — for tests and callers that want to
   observe a specific edit's highlighting. Returns `{:ok, overlay}` or
@@ -191,6 +199,11 @@ defmodule Geex.Highlight.Reactor do
   end
 
   @impl true
+  def handle_cast({:unsubscribe, pid}, state) do
+    {:noreply, %{state | subscribers: drop_subscriber(state.subscribers, pid)}}
+  end
+
+  @impl true
   def handle_info({:geex_buffer_change, buffer, _version}, %{buffer: buffer} = state) do
     {:noreply, maybe_start(%{state | pending: true})}
   end
@@ -240,6 +253,15 @@ defmodule Geex.Highlight.Reactor do
   defp notify(%{subscribers: subs, buffer: buffer}, version) do
     msg = {:geex_highlights, buffer, version}
     Enum.each(Map.values(subs), &send(&1, msg))
+  end
+
+  # Remove every subscription held by `pid` and demonitor it — the explicit
+  # counterpart to a subscriber's `:DOWN` cleanup (used on `unsubscribe/2`).
+  defp drop_subscriber(subscribers, pid) do
+    Enum.reduce(subscribers, subscribers, fn
+      {ref, ^pid}, acc -> Process.demonitor(ref, [:flush]); Map.delete(acc, ref)
+      {_ref, _other}, acc -> acc
+    end)
   end
 
   defp maybe_start(%{in_flight: nil, pending: true} = state), do: start_pass(state)
