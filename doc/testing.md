@@ -668,3 +668,49 @@ synchronous seam the reactor will call.
   (`rustler_precompiled`) yet; its `Highlighter`-convenience-wrapper wasm support is untested
   (the NIF uses `Query`/`QueryCursor` directly), and incremental reparse (persistent `Tree`) is a
   noted follow-up.
+
+### 2026-06-07 — The highlight reactor + display wiring (ADR-0022)
+
+Highlighting now **fires off the command stream** and **paints the screen grid**, closing the two
+items the previous entry deferred. Two slices + a review pass.
+
+**Reactor.** `Geex.Buffer` gained a post-dispatch change emit (`subscribe/2` + a monitored-subscriber
+set; `{:geex_buffer_change, buffer, version}` after each successful dispatch — a plain `send`, never
+blocking). `Geex.Highlight.Reactor` is one `:temporary` process per buffer: it subscribes, and turns
+each change into an **async, coalesced, latest-wins** whole-buffer pass run in a throwaway task
+(`<=1` in flight; a burst collapses to one re-highlight of the newest text), keeping the spans as a
+**view-local overlay** (`highlights/1`) — never through `Dispatch`, never in history. It monitors its
+buffer and follows its life (crash isolation). Started from `Session.open_file` via `watch/2`, gated
+`:start_highlight` (off under `mix test`, like reconcile).
+
+**Display.** `Geex.Sgr` encodes any `Geex.Cell` colour (`:default`/`{:ansi}`/`{:xterm}`/`{:rgb}`) to
+SGR. `Geex.Highlight.Paint.to_screen/6` projects text + spans + theme onto a `Geex.Screen` (grapheme
+walk tracks the byte offset for multibyte; `scroll` picks the first visible line). `Geex.Renderer`
+now emits SGR — one cursor-move + escape + chars + reset per same-style run; a **plain run emits no
+SGR**, so all prior renderer output is byte-identical. `Geex.Ansi` was refactored onto the shared
+`Paint` + `Sgr` with identical public behaviour.
+
+**Verified:** **339 tests + 8 doctests** green; the reactor + paint suites deterministic across 3
+seeds. Reactor tests cover the initial pass, **fires-on-edit** (a dispatched insert re-highlights),
+**latest-wins coalescing** (a burst converges to the newest version), buffer-death cleanup, and the
+race-free `stop`/`rewatch`. Display tests cover SGR runs/splits/plain-unchanged, projection
+(styled/unstyled/scroll/multibyte/CRLF), and **end-to-end** (`Highlight.spans` → `to_screen` →
+`Renderer.diff` → truecolor bytes). A 3-lens adversarial-review workflow (concurrency / render /
+lifecycle) found **no critical defects**; four real fixes landed: CRLF-as-one-grapheme in the
+projection, mid-grapheme style lookup, a stale reactor grammar after a rename (added
+`Reactor.rewatch/2` + synchronous-unregister `stop/1`), and a too-broad buffer `:DOWN` clause.
+
+**Good as of:** the commit carrying this entry. In dev, opening a `.ex`/`.json` file starts a reactor
+that re-highlights on every edit; `Geex.Highlight.Paint.to_screen/6` + `Geex.Renderer` render it in
+truecolor.
+
+**Not tested / deferred (honest scope):**
+- **No live editor loop yet** — nothing currently *calls* `to_screen` against an open buffer's
+  overlay each frame; the projection + reactor are proven by tests and the `Renderer.diff` path, not
+  by an interactive TUI (that is the minibuffer/TUI thread). So a human has not yet *watched* a
+  buffer recolour as they type; the wiring underneath it is in and tested.
+- **Whole-buffer** highlight + projection — **viewport-first** (reactor) and viewport-scoped
+  projection are the paired ADR-0022 tuning refinements, along with a **debounce** interval (today
+  coalescing is purely in-flight-gated).
+- **`rename` to a different language is re-evaluated, but only when `:start_highlight` is on;** under
+  `mix test` the rewatch stops the stale reactor and does not restart (gate off), as the test asserts.
