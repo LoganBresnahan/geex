@@ -71,8 +71,17 @@ defmodule Geex.Application do
   defp http_mcp_child do
     if Application.get_env(:geex, :start_http_mcp, false) do
       port = Geex.MCP.Port.resolve(Application.get_env(:geex, :http_mcp_port, 0))
-      Geex.MCP.Port.announce(port)
-      [{Bandit, plug: Geex.MCP.HTTP, scheme: :http, ip: {127, 0, 0, 1}, port: port}]
+
+      # Announce AFTER Bandit, never before: the announcer is ordered after the
+      # listener in this one_for_one tree, so if Bandit fails to bind (a pinned-port
+      # clash, or the free-port TOCTOU losing the race) the supervisor aborts before
+      # the announcer runs — and no stale URL/port file is left naming a port nothing
+      # is actually listening on. A run-once Task (`:temporary`); it logs + writes
+      # `GEEX_MCP_PORT_FILE` then exits.
+      [
+        {Bandit, plug: Geex.MCP.HTTP, scheme: :http, ip: {127, 0, 0, 1}, port: port},
+        {Task, fn -> Geex.MCP.Port.announce(port) end}
+      ]
     else
       []
     end
