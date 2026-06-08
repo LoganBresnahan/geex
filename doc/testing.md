@@ -848,5 +848,13 @@ Ctrl-X quits cleanly (terminal restored), and logs land in `<tmp>/geex.log` (no 
 - **Log splatter.** Startup `Logger` output painted over the alt-screen; `Geex.run/1` redirects logs to a
   file first (hence `--no-start`, so the redirect precedes the app boot).
 
-**Still unverified live:** real SIGWINCH resize (tmux `resize-window` would test it), and the deferred
-scroll/keymap/mouse/degradation list above.
+**Vertical scroll — added + verified live (commit `54156cb`).** `Geex.Loop.scroll_for/3` (pure) tracks
+the cursor: the viewport top edge-aligns when the cursor crosses a boundary, otherwise stays put;
+`repaint` threads it through `Paint.to_screen` + `cursor_xy`. Verified in an 80×14 tmux pane on
+`loop.ex`: 20 Downs scrolled the view down with the cursor pinned to the bottom row (`cursor_y=13`), 25
+Ups scrolled back to the file top (`cursor_y=0`). No scrolloff margin yet (a config knob); horizontal
+scroll still deferred.
+
+**Still unverified live:** real SIGWINCH resize (tmux `resize-window` would test it); the
+keymap-capability/Kitty-protocol model ([ADR-0026](adr/0026-terminal-input-model.md)); mouse;
+truecolor→256/16 degradation.
