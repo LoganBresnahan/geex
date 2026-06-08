@@ -106,6 +106,36 @@ defmodule Geex.LoopTest do
     end
   end
 
+  describe "frame/8 — current-line highlight" do
+    setup do: %{theme: Geex.Theme.default()}
+
+    test "tints the cursor's whole row (gutter + text) with active_line_bg", %{theme: theme} do
+      pal = theme.palette
+      {screen, _cursor, _hscroll} = Loop.frame("ab\ncd\nef", [], theme, {1, 0}, 20, 3, 0)
+      # cursor on line 1 → its gutter cell and text cell carry the active-line background...
+      assert Screen.get_cell(screen, 0, 1).bg == pal.active_line_bg
+      assert Screen.get_cell(screen, 4, 1).bg == pal.active_line_bg
+      # ...while another row keeps the plain editor background.
+      assert Screen.get_cell(screen, 4, 0).bg == pal.bg
+    end
+  end
+
+  describe "vscroll_thumb/3 — vertical scroll bar geometry" do
+    test "thumb length is proportional to the visible fraction" do
+      # 10 of 20 lines visible → a half-height thumb at the top.
+      assert {0, 5} = Loop.vscroll_thumb(10, 20, 0)
+    end
+
+    test "the thumb travels from top to bottom with the scroll" do
+      assert {0, 5} = Loop.vscroll_thumb(10, 20, 0)
+      assert {5, 5} = Loop.vscroll_thumb(10, 20, 10)
+    end
+
+    test "a tiny viewport over a huge file still shows a one-row thumb" do
+      assert {0, 1} = Loop.vscroll_thumb(10, 1000, 0)
+    end
+  end
+
   describe "scroll_for/3 — keep the cursor's line in the viewport" do
     test "a visible cursor leaves the viewport put" do
       assert Loop.scroll_for(0, 5, 10) == 0

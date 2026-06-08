@@ -890,6 +890,18 @@ interactive e…` → `ditor loop ([ADR-0024]…`) with the **gutter pinned** an
 together (line 1 showed just its tail ` do`); the cursor stayed in the text area (`x=41`); walking back
 to the line start **snapped `hscroll` to 0**. 436 tests + 8 doctests green.
 
+**Current-line highlight + vertical scroll bar — added + verified live.** (1) **Cursor-line highlight**:
+`Loop.frame` tints the cursor's whole row (gutter + text) with the theme's `active_line_bg` (the last
+unused palette colour; BoP `#281C1C66` flattens to ≈`rgb(49,35,33)`, a subtle darkening) — only cell
+backgrounds change, the brightened active line number stays. Verified in a 100×30 pane: the cursor row
+carried `48;2;49;35;33`; moving down 5 reverted the old row to plain `48;2;55;39;37` and tinted the new
+one — the highlight follows the cursor, no bleed. (2) **Vertical scroll bar**: when the buffer overflows
+the viewport, the rightmost column is reserved (text renders one column narrower) and shows a dim `│`
+track with a bright `█` thumb in the accent/cursor colour (`Loop.vscroll_thumb/3` sizes it ∝ visible
+fraction, positions it ∝ scroll). Verified: thumb at the top at scroll 0, travelling to the bottom of the
+track after jumping to line 206. The cursor never lands on the bar (it stays in `[gutter, w−1)`). 440
+tests + 8 doctests green.
+
 **Still unverified live:** the keymap-capability/Kitty-protocol model
-([ADR-0026](adr/0026-terminal-input-model.md)); mouse; truecolor→256/16 degradation; scroll bars
-(vertical + horizontal — chrome, the next slice).
+([ADR-0026](adr/0026-terminal-input-model.md)); mouse; truecolor→256/16 degradation; the **horizontal**
+scroll bar (a row-placement decision — reserve a row vs. overlay the status line — the next slice).

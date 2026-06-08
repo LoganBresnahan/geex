@@ -100,6 +100,7 @@ defmodule Geex.Loop do
       text
       |> Paint.to_screen(spans, theme, w, h, scroll, gw, hscroll)
       |> draw_gutter(text, theme, h, scroll, gw, cursor_line)
+      |> highlight_line(w, cy, theme.palette.active_line_bg)
 
     {screen, {gw + dcol - hscroll, cy}, hscroll}
   end
@@ -264,14 +265,21 @@ defmodule Geex.Loop do
         # off the top/bottom edges. Paint the text rect, grow to the full height, then
         # overlay the status row.
         h_text = text_height(state.h)
+        # Reserve the rightmost column for a vertical scroll bar when the buffer overflows
+        # the viewport; the text then renders into a one-column-narrower area.
+        total = line_count(text)
+        vbar? = h_text > 0 and total > h_text
+        tw = state.w - if(vbar?, do: 1, else: 0)
+
         scroll = scroll_for(state.scroll, line, h_text, @scrolloff)
 
         {screen, {cx, cy}, hscroll} =
-          frame(text, overlay_spans(state.reactor), state.theme, cursor, state.w, h_text, scroll, state.hscroll)
+          frame(text, overlay_spans(state.reactor), state.theme, cursor, tw, h_text, scroll, state.hscroll)
 
         screen =
           screen
           |> Screen.resize(state.w, state.h)
+          |> maybe_vscrollbar(vbar?, state.w - 1, h_text, scroll, total, state.theme)
           |> draw_status(state, snap)
 
         Renderer.flush(screen, cursor_target(state.w, h_text, cx, cy))
@@ -324,6 +332,46 @@ defmodule Geex.Loop do
       else
         acc
       end
+    end)
+  end
+
+  # Tint the cursor's whole row (gutter + text) with the theme's active-line background —
+  # the "current line" highlight that follows the cursor. Only the cell backgrounds change
+  # (chars + fg, incl. the brightened active line number, are untouched). A no-op off-screen.
+  defp highlight_line(screen, w, row, bg) when row >= 0 do
+    Enum.reduce(0..(w - 1)//1, screen, fn x, acc ->
+      Screen.set_cell(acc, x, row, %{Screen.get_cell(acc, x, row) | bg: bg})
+    end)
+  end
+
+  defp highlight_line(screen, _w, _row, _bg), do: screen
+
+  @doc """
+  The vertical scroll bar's thumb as `{top, length}` for a viewport of `h` rows over `total`
+  lines, scrolled to `scroll`: the length is proportional to the visible fraction (at least
+  one row) and the top is proportional to how far down the scroll is.
+  """
+  @spec vscroll_thumb(pos_integer(), pos_integer(), non_neg_integer()) ::
+          {non_neg_integer(), pos_integer()}
+  def vscroll_thumb(h, total, scroll) do
+    len = max(div(h * h, total), 1)
+    span = max(h - len, 0)
+    top = min(div(scroll * span, max(total - h, 1)), span)
+    {top, len}
+  end
+
+  # Draw the vertical scroll bar in column `x` over rows `0..h-1`: a dim track with a brighter
+  # thumb (the accent/cursor colour) marking the visible slice. Shown only when the buffer
+  # overflows the viewport (the caller's `vbar?`).
+  defp maybe_vscrollbar(screen, false, _x, _h, _scroll, _total, _theme), do: screen
+
+  defp maybe_vscrollbar(screen, true, x, h, scroll, total, %Theme{palette: pal}) do
+    {top, len} = vscroll_thumb(h, total, scroll)
+    track = %Cell{char: "│", fg: pal.line_number, bg: pal.bg}
+    thumb = %Cell{char: "█", fg: pal.cursor, bg: pal.bg}
+
+    Enum.reduce(0..(h - 1)//1, screen, fn row, acc ->
+      Screen.set_cell(acc, x, row, if(row >= top and row < top + len, do: thumb, else: track))
     end)
   end
 
