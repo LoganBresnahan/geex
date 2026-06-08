@@ -80,13 +80,38 @@ defmodule Geex.RendererTest do
       assert render(Renderer.diff(current, next)) == "\e[1;1H   "
     end
 
-    test "style-only changes are picked up (currently as char rewrite)" do
-      # v0.1 doesn't emit SGR yet, but unequal cells still redraw. Once
-      # SGR support lands, update this test to assert on the SGR bytes.
+    test "a style-only change now emits the SGR escape + reset" do
       current = Screen.new(5, 1) |> Screen.set_cell(0, 0, %Cell{char: "a"})
       next = Screen.new(5, 1) |> Screen.set_cell(0, 0, %Cell{char: "a", fg: {:ansi, 1}})
 
-      assert render(Renderer.diff(current, next)) == "\e[1;1Ha"
+      # {:ansi, 1} fg -> SGR 31; move, then \e[31m a \e[0m.
+      assert render(Renderer.diff(current, next)) == "\e[1;1H\e[31ma\e[0m"
+    end
+  end
+
+  describe "diff/2 — SGR styling" do
+    test "a truecolor styled run emits one SGR + reset around its characters" do
+      style = %Cell{fg: {:rgb, 239, 93, 50}, attrs: [:italic]}
+      next = Screen.new(5, 1) |> Screen.draw_text(0, 0, "def", style)
+
+      assert render(Renderer.diff(Screen.new(5, 1), next)) ==
+               "\e[1;1H\e[3;38;2;239;93;50mdef\e[0m"
+    end
+
+    test "adjacent cells with different styles split into separate runs" do
+      next =
+        Screen.new(5, 1)
+        |> Screen.set_cell(0, 0, %Cell{char: "a", fg: {:ansi, 1}})
+        |> Screen.set_cell(1, 0, %Cell{char: "b", fg: {:ansi, 2}})
+
+      # Two style-runs, each its own cursor-move + SGR + reset.
+      assert render(Renderer.diff(Screen.new(5, 1), next)) ==
+               "\e[1;1H\e[31ma\e[0m\e[1;2H\e[32mb\e[0m"
+    end
+
+    test "a plain run still emits no SGR (unstyled output is unchanged)" do
+      next = Screen.new(5, 1) |> Screen.draw_text(0, 0, "abc")
+      assert render(Renderer.diff(Screen.new(5, 1), next)) == "\e[1;1Habc"
     end
   end
 end

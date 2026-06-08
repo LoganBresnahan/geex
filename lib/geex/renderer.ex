@@ -13,12 +13,13 @@ defmodule Geex.Renderer do
   After `Geex.TerminalIO.write/1` has been called, `current` becomes
   `next` — that's the new truth.
 
-  ## v0.1 scope
+  ## Scope
 
-    * Plain character emission only. Cells carry `fg`/`bg`/`attrs` but
-      the renderer currently ignores them — SGR support lands next.
-      A style-only change still triggers a redraw (cells compare unequal),
-      so behaviour is correct, just slightly wasteful.
+    * Styled emission. A run of changed, x-adjacent cells with the **same**
+      style is emitted as one cursor-move + the run's SGR escape (`Geex.Sgr`) +
+      its characters + a reset. A plain run (default colours, no attrs) emits
+      no SGR — byte-identical to plain character emission — so unstyled content
+      costs nothing. A style change breaks the run (its own SGR), like a gap.
 
     * Dimension changes (initial flush, terminal resize) emit `\\e[2J`
       and diff `next` against a blank screen of the new size.
@@ -32,7 +33,7 @@ defmodule Geex.Renderer do
 
   use GenServer
 
-  alias Geex.{Cell, Screen, TerminalIO}
+  alias Geex.{Cell, Screen, Sgr, TerminalIO}
 
   ## Public API
 
@@ -90,32 +91,47 @@ defmodule Geex.Renderer do
           curr = Screen.get_cell(current, x, y),
           nxt = Screen.get_cell(next, x, y),
           not Cell.equal?(curr, nxt) do
-        {x, nxt.char}
+        {x, nxt}
       end
 
     changed
     |> group_runs()
-    |> Enum.map(fn {x, chars} -> emit_run(x, y, chars) end)
+    |> Enum.map(fn {x, cells} -> emit_run(x, y, cells) end)
   end
 
-  # [{x, char}] in ascending x order → [{start_x, [chars]}], grouping
-  # x-adjacent cells into a single run.
+  # [{x, cell}] in ascending x order → [{start_x, [cells]}], starting a new run
+  # whenever x is non-adjacent OR the style changes — so each run paints under a
+  # single SGR escape.
   defp group_runs([]), do: []
-  defp group_runs([{x, char} | rest]), do: do_group(rest, x, [char], x, [])
+  defp group_runs([{x, cell} | rest]), do: do_group(rest, x, [cell], x, cell, [])
 
-  defp do_group([], start_x, chars, _last, acc),
-    do: Enum.reverse([{start_x, Enum.reverse(chars)} | acc])
+  defp do_group([], start_x, cells, _last, _style, acc),
+    do: Enum.reverse([{start_x, Enum.reverse(cells)} | acc])
 
-  defp do_group([{x, char} | rest], start_x, chars, last, acc) when x == last + 1,
-    do: do_group(rest, start_x, [char | chars], x, acc)
+  defp do_group([{x, cell} | rest], start_x, cells, last, style, acc) do
+    if x == last + 1 and same_style?(cell, style) do
+      do_group(rest, start_x, [cell | cells], x, style, acc)
+    else
+      do_group(rest, x, [cell], x, cell, [{start_x, Enum.reverse(cells)} | acc])
+    end
+  end
 
-  defp do_group([{x, char} | rest], start_x, chars, _last, acc),
-    do: do_group(rest, x, [char], x, [{start_x, Enum.reverse(chars)} | acc])
+  # Style-only equality (char ignored): two cells paint under the same SGR iff
+  # their fg/bg match and their attr sets are equal.
+  defp same_style?(a, b),
+    do: a.fg == b.fg and a.bg == b.bg and MapSet.new(a.attrs) == MapSet.new(b.attrs)
 
-  # Cursor move (1-indexed) + run of characters. The terminal advances
-  # the cursor itself after each character; one move per run is enough.
-  defp emit_run(x, y, chars) do
-    ["\e[", Integer.to_string(y + 1), ";", Integer.to_string(x + 1), "H" | chars]
+  # Cursor move (1-indexed) + the run's characters. A styled run wraps them in its
+  # SGR escape + a reset; a plain run (no SGR) emits just the move + chars, leaving
+  # unstyled output byte-identical to plain character emission.
+  defp emit_run(x, y, [first | _] = cells) do
+    move = ["\e[", Integer.to_string(y + 1), ";", Integer.to_string(x + 1), "H"]
+    chars = Enum.map(cells, & &1.char)
+
+    case Sgr.escape(first.fg, first.bg, first.attrs) do
+      "" -> [move, chars]
+      sgr -> [move, sgr, chars, Sgr.reset()]
+    end
   end
 
   ## GenServer

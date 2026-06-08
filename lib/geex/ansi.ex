@@ -12,15 +12,16 @@ defmodule Geex.Ansi do
   (more specific) capture. Unstyled bytes keep the terminal default.
 
   This renders a styled *string* (for previews, logs, the `mix geex.highlight`
-  demo). Painting buffer text onto the `Geex.Screen`/`Geex.Cell` grid for the
-  live editor (teaching `Geex.Renderer` to emit SGR per cell) is the connected
-  follow-up; the colour/attr vocabulary here is already `Geex.Cell`'s.
+  demo). For the live editor, `Geex.Highlight.Paint.to_screen/6` projects the same
+  spans onto the `Geex.Screen`/`Geex.Cell` grid and `Geex.Renderer` emits the SGR;
+  both share the per-byte resolution in `Geex.Highlight.Paint` and the encoding in
+  `Geex.Sgr`.
   """
 
+  alias Geex.Highlight.Paint
+  alias Geex.Sgr
   alias Geex.Theme
   alias Geex.Theme.Style
-
-  @reset "\e[0m"
 
   @doc """
   Render `text` highlighted by `spans` under `theme` to a truecolor ANSI string.
@@ -28,7 +29,7 @@ defmodule Geex.Ansi do
   """
   @spec highlight(Theme.t(), String.t(), [Geex.Highlight.Span.t()]) :: String.t()
   def highlight(%Theme{} = theme, text, spans) when is_binary(text) do
-    painted = paint(theme, spans)
+    painted = Paint.styles(theme, spans)
     n = byte_size(text)
 
     if n == 0 do
@@ -41,7 +42,7 @@ defmodule Geex.Ansi do
 
         case Map.get(painted, first) do
           nil -> seg
-          %Style{} = style -> sgr(style) <> seg <> @reset
+          %Style{} = style -> sgr(style) <> seg <> Sgr.reset()
         end
       end)
     end
@@ -49,38 +50,5 @@ defmodule Geex.Ansi do
 
   @doc "The SGR escape for a `Style` (truecolor fg/bg + attrs). `\"\"` if it paints nothing."
   @spec sgr(Style.t()) :: String.t()
-  def sgr(%Style{fg: fg, bg: bg, attrs: attrs}) do
-    case attr_codes(attrs) ++ colour_codes(38, fg) ++ colour_codes(48, bg) do
-      [] -> ""
-      codes -> "\e[" <> Enum.join(codes, ";") <> "m"
-    end
-  end
-
-  # %{byte_index => Style} — widest spans first so narrower/more-specific win.
-  defp paint(theme, spans) do
-    spans
-    |> Enum.map(fn span -> {span, Theme.style_for(theme, span.capture)} end)
-    |> Enum.reject(fn {_span, style} -> is_nil(style) end)
-    |> Enum.sort_by(fn {span, _style} ->
-      {-(span.end_byte - span.start_byte), dot_count(span.capture)}
-    end)
-    |> Enum.reduce(%{}, fn {span, style}, acc ->
-      Enum.reduce(span.start_byte..(span.end_byte - 1)//1, acc, &Map.put(&2, &1, style))
-    end)
-  end
-
-  defp dot_count(capture), do: capture |> String.graphemes() |> Enum.count(&(&1 == "."))
-
-  defp colour_codes(_base, :default), do: []
-
-  defp colour_codes(base, {:rgb, r, g, b}),
-    do: [Integer.to_string(base), "2", Integer.to_string(r), Integer.to_string(g), Integer.to_string(b)]
-
-  defp attr_codes(attrs), do: Enum.flat_map(attrs, &attr_code/1)
-
-  defp attr_code(:bold), do: ["1"]
-  defp attr_code(:dim), do: ["2"]
-  defp attr_code(:italic), do: ["3"]
-  defp attr_code(:underline), do: ["4"]
-  defp attr_code(:reverse), do: ["7"]
+  def sgr(%Style{fg: fg, bg: bg, attrs: attrs}), do: Sgr.escape(fg, bg, attrs)
 end
