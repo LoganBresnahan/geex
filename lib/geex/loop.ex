@@ -278,7 +278,7 @@ defmodule Geex.Loop do
 
         gw = gutter_width(text)
         text_w = max(tw - gw, 0)
-        content_w = max_visible_width(text, scroll, h_text)
+        content_w = max_line_width(text)
 
         screen =
           screen
@@ -368,12 +368,15 @@ defmodule Geex.Loop do
     {pos, len}
   end
 
-  @doc "The widest display width among the `h` lines of `text` visible from `scroll`."
-  @spec max_visible_width(String.t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  def max_visible_width(text, scroll, h) do
+  @doc """
+  The widest display width among **all** lines of `text` — the horizontal extent the buffer
+  can scroll to. Used (not the visible-only width) so the horizontal bar's presence and thumb
+  size stay stable as you scroll *vertically*; only the thumb position tracks `hscroll`.
+  """
+  @spec max_line_width(String.t()) :: non_neg_integer()
+  def max_line_width(text) do
     text
     |> String.split("\n")
-    |> Enum.slice(scroll, h)
     |> Enum.reduce(0, fn line, acc -> max(acc, Width.string(line)) end)
   end
 
@@ -384,8 +387,10 @@ defmodule Geex.Loop do
 
   defp maybe_vscrollbar(screen, true, x, h, scroll, total, %Theme{palette: pal}) do
     {top, len} = scrollbar_thumb(h, total, scroll)
+    # A light vertical track with a heavy, accent-coloured thumb — both centred rules (not a
+    # full block), so the bar reads as a thin line, matching the horizontal bar's weight.
     track = %Cell{char: "│", fg: pal.line_number, bg: pal.bg}
-    thumb = %Cell{char: "█", fg: pal.cursor, bg: pal.bg}
+    thumb = %Cell{char: "┃", fg: pal.cursor, bg: pal.bg}
 
     Enum.reduce(0..(h - 1)//1, screen, fn row, acc ->
       Screen.set_cell(acc, x, row, if(row >= top and row < top + len, do: thumb, else: track))

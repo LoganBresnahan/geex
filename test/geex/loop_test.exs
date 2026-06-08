@@ -136,18 +136,15 @@ defmodule Geex.LoopTest do
     end
   end
 
-  describe "max_visible_width/3 — widest visible line" do
-    test "is the widest display width among the visible lines" do
-      text = "ab\ncdef\ngh\nijklmno"
-      # visible lines 1..2 ("cdef", "gh") → max width 4.
-      assert Loop.max_visible_width(text, 1, 2) == 4
-      # all four lines → "ijklmno" is widest at 7.
-      assert Loop.max_visible_width(text, 0, 4) == 7
+  describe "max_line_width/1 — widest line in the whole buffer" do
+    test "is the widest display width across all lines" do
+      # "ijklmno" is the widest at 7 — regardless of which lines are on screen.
+      assert Loop.max_line_width("ab\ncdef\ngh\nijklmno") == 7
     end
 
     test "counts display columns, so a wide glyph is two" do
       # "a中" = 1 + 2 = 3 columns.
-      assert Loop.max_visible_width("a\u{4E2D}", 0, 1) == 3
+      assert Loop.max_line_width("a\u{4E2D}") == 3
     end
   end
 
