@@ -154,6 +154,9 @@ defmodule Geex.Session do
         # Start watching for out-of-band writes to this file (ADR-0017). A no-op when
         # the reconciler is gated off.
         Geex.Reconcile.watch(full)
+        # Start a highlight reactor for this buffer (ADR-0022). A no-op when gated
+        # off, the language is unsupported, or one is already running.
+        Geex.Highlight.Reactor.watch(pid, full)
         {:reply, {:ok, pid}, put_in(state.view.buffer_pid, pid)}
 
       {:error, _reason} = error ->

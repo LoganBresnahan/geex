@@ -7,6 +7,10 @@ import Config
 # but off under `mix test`: tests start their own isolated, named `Geex.Reconcile`
 # and inject `:file_event` messages directly, so they exercise the watcher glue and
 # the reconcile core without the global singleton or a platform inotify backend.
+# The highlight reactor (ADR-0022) fires off the command stream in dev/prod; off
+# under `mix test` so existing buffer/session tests don't spin up reactors +
+# tree-sitter passes on every open. Highlight tests start a reactor explicitly.
 config :geex,
   start_terminal: config_env() != :test,
-  start_reconcile: config_env() != :test
+  start_reconcile: config_env() != :test,
+  start_highlight: config_env() != :test

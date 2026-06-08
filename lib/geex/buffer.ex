@@ -111,6 +111,21 @@ defmodule Geex.Buffer do
     do: GenServer.call(server, {:dispatch, command})
 
   @doc """
+  Subscribe `pid` to this buffer's change stream. After every successful
+  `dispatch/2` the buffer sends each subscriber `{:geex_buffer_change, buffer_pid,
+  version}` — the post-dispatch emit that makes the command pipeline the editor's
+  "after change" hook ([ADR-0022](`e:doc/adr/0022-capability-reactor.md`)). The
+  capability reactor (highlighting, later LSP) is the consumer; the buffer knows
+  only "subscribers", not what they do, and never blocks on them (it `send`s).
+
+  Subscribers are monitored and dropped on death, so a crashed reactor leaves no
+  residue. Returns `{:ok, version}` — the current version — so a subscriber can do
+  an initial pass over already-loaded content before any edit arrives.
+  """
+  @spec subscribe(GenServer.server(), pid()) :: {:ok, non_neg_integer()}
+  def subscribe(server, pid) when is_pid(pid), do: GenServer.call(server, {:subscribe, pid})
+
+  @doc """
   Read-only snapshot: text, lines, version, dirty, path, the `synced` disk baseline (what
   reconcile compares against), and command history.
   """
@@ -136,6 +151,9 @@ defmodule Geex.Buffer do
           editor: EditorState.new(text),
           # newest-first internally (O(1) prepend); exposed oldest-first via snapshot.
           history: [],
+          # Change-stream subscribers (ADR-0022): %{monitor_ref => pid}. Empty by
+          # default — the buffer notifies no one unless something subscribes.
+          subscribers: %{},
           dirty: false,
           # The disk content the buffer is **in sync with** — its baseline. Reconcile
           # (ADR-0017) compares disk against *this*, not the live (possibly dirty) text, so an
@@ -171,11 +189,17 @@ defmodule Geex.Buffer do
     case Geex.Dispatch.apply_command(command, state.editor) do
       {:ok, editor} ->
         new_state = %{state | editor: editor, history: [command | state.history], dirty: true}
+        notify_change(new_state)
         {:reply, {:ok, build_snapshot(new_state)}, new_state}
 
       {:error, _reason} = error ->
         {:reply, error, state}
     end
+  end
+
+  def handle_call({:subscribe, pid}, _from, state) do
+    ref = Process.monitor(pid)
+    {:reply, {:ok, length(state.history)}, put_in(state.subscribers[ref], pid)}
   end
 
   def handle_call(:snapshot, _from, state), do: {:reply, build_snapshot(state), state}
@@ -218,6 +242,21 @@ defmodule Geex.Buffer do
       :ok -> {:reply, {:ok, state.path}, %{state | dirty: false, synced: text}}
       {:error, _reason} = error -> {:reply, error, state}
     end
+  end
+
+  # A monitored subscriber died — drop it. Keeps the subscriber set free of stale
+  # pids (a crashed reactor leaves no residue).
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    {:noreply, %{state | subscribers: Map.delete(state.subscribers, ref)}}
+  end
+
+  # Post-dispatch emit (ADR-0022): tell each subscriber the buffer changed, tagged
+  # with the new version. A plain `send` — the buffer never blocks on a reactor.
+  defp notify_change(state) do
+    version = length(state.history)
+    for {_ref, pid} <- state.subscribers, do: send(pid, {:geex_buffer_change, self(), version})
+    :ok
   end
 
   defp build_snapshot(state) do

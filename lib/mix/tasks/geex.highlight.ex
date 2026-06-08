@@ -54,10 +54,15 @@ defmodule Mix.Tasks.Geex.Highlight do
   end
 
   defp lang_for(path) do
-    case Path.extname(path) do
-      ext when ext in [".ex", ".exs"] -> "elixir"
-      ".json" -> "json"
-      other -> Mix.raise("no bundled grammar for #{inspect(other)} (have: #{Enum.join(Geex.Highlight.Grammars.bundled(), ", ")})")
+    case Geex.Highlight.language_for_path(path) do
+      {:ok, lang} ->
+        lang
+
+      :error ->
+        Mix.raise(
+          "no bundled grammar for #{inspect(Path.extname(path))} " <>
+            "(have: #{Enum.join(Geex.Highlight.Grammars.bundled(), ", ")})"
+        )
     end
   end
 end

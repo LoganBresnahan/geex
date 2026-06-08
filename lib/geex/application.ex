@@ -20,6 +20,9 @@ defmodule Geex.Application do
         [
           Geex.Renderer,
           Geex.BufferSupervisor,
+          # Per-buffer highlight reactors (ADR-0022) are started on demand under
+          # this supervisor; cheap when empty, always present.
+          Geex.Highlight.ReactorSupervisor,
           Geex.Session
         ] ++
         reconcile_child() ++

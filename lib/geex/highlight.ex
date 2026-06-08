@@ -45,6 +45,20 @@ defmodule Geex.Highlight do
     end
   end
 
+  @doc """
+  The bundled grammar name for a file path, by extension, or `:error` if geex has
+  no grammar for it. The reactor uses this to pick a language; the
+  `mix geex.highlight` task uses it too.
+  """
+  @spec language_for_path(String.t()) :: {:ok, String.t()} | :error
+  def language_for_path(path) when is_binary(path) do
+    case Path.extname(path) do
+      ext when ext in [".ex", ".exs"] -> {:ok, "elixir"}
+      ".json" -> {:ok, "json"}
+      _ -> :error
+    end
+  end
+
   defp engine_highlight(grammar, text, timeout_ms) do
     case TreeSitterWasm.highlight(grammar, text, timeout_ms) do
       {:ok, raw} -> {:ok, raw}
