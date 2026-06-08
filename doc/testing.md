@@ -879,6 +879,17 @@ text rows). Both directions, width and height — the `:prim_tty` resize event r
 `{:geex_io, {:resize, rows, cols}}` → `Loop` (`Renderer.resize` + repaint). Closes the last unverified
 display path.
 
+**Horizontal scroll — added + verified live (ADR-0027-consistent).** `Paint.to_screen` gained an
+`hscroll` column offset + a `place/5` helper that clips the **left** edge (which `put_grapheme` doesn't):
+a grapheme scrolled past the gutter is dropped, and a wide glyph straddling the left edge shows a blank
+in its visible half (the deferred wide-glyph edge from the width slice, now closed; unit-tested with
+`中文`). `Loop.frame` reuses the **same `scroll_for/4`** along the column axis (an `@hscrolloff` margin)
+and returns the resolved `hscroll` for the loop to persist. Verified in a 50×20 tmux pane on `loop.ex`:
+moving the cursor right to column 56 of a long line scrolled the text left by 19 columns (`The
+interactive e…` → `ditor loop ([ADR-0024]…`) with the **gutter pinned** and the whole viewport shifting
+together (line 1 showed just its tail ` do`); the cursor stayed in the text area (`x=41`); walking back
+to the line start **snapped `hscroll` to 0**. 436 tests + 8 doctests green.
+
 **Still unverified live:** the keymap-capability/Kitty-protocol model
-([ADR-0026](adr/0026-terminal-input-model.md)); mouse; truecolor→256/16 degradation; horizontal scroll
-(long lines, the next slice).
+([ADR-0026](adr/0026-terminal-input-model.md)); mouse; truecolor→256/16 degradation; scroll bars
+(vertical + horizontal — chrome, the next slice).

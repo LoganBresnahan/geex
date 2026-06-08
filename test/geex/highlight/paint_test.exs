@@ -76,6 +76,22 @@ defmodule Geex.Highlight.PaintTest do
       # "x" lands at column 2 — not column 1, which the wide glyph already covers.
       assert %{char: "x"} = Screen.get_cell(screen, 2, 0)
     end
+
+    test "horizontal scroll drops graphemes past the left edge" do
+      # "abc" scrolled right by 1 column → "a" is off-screen, "b" leads.
+      screen = Paint.to_screen("abc", [], theme(), 6, 1, 0, 0, 1)
+      assert Screen.get_cell(screen, 0, 0).char == "b"
+      assert Screen.get_cell(screen, 1, 0).char == "c"
+    end
+
+    test "a wide glyph straddling the left edge shows a blank in its visible column" do
+      # "中文": each is width 2. hscroll 1 scrolls off 中's left half; its right half
+      # (column 0) becomes a blank, and 文 follows at columns 1–2.
+      screen = Paint.to_screen("\u{4E2D}\u{6587}", [], theme(), 6, 1, 0, 0, 1)
+      assert Screen.get_cell(screen, 0, 0).char == " "
+      assert Screen.get_cell(screen, 1, 0).char == "\u{6587}"
+      assert Screen.get_cell(screen, 2, 0).char == ""
+    end
   end
 
   describe "end-to-end: reactor-shaped spans render to truecolor on screen" do

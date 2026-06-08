@@ -42,12 +42,12 @@ defmodule Geex.LoopTest do
     end
   end
 
-  describe "frame/7 — screen + cursor (with the line-number gutter)" do
+  describe "frame/8 — screen + cursor (with the line-number gutter)" do
     setup do: %{theme: Geex.Theme.default()}
 
     test "paints the text inset past the gutter and offsets the cursor", %{theme: theme} do
       # "def\nend": 2 lines → gutter_width 4, so text starts at column 4.
-      {screen, cursor} = Loop.frame("def\nend", [], theme, {1, 2}, 20, 3, 0)
+      {screen, cursor, _hscroll} = Loop.frame("def\nend", [], theme, {1, 2}, 20, 3, 0)
 
       assert %Screen{} = screen
       assert Loop.gutter_width("def\nend") == 4
@@ -58,7 +58,7 @@ defmodule Geex.LoopTest do
     end
 
     test "draws right-aligned 1-based line numbers in the gutter", %{theme: theme} do
-      {screen, _cursor} = Loop.frame("def\nend", [], theme, {0, 0}, 20, 3, 0)
+      {screen, _cursor, _hscroll} = Loop.frame("def\nend", [], theme, {0, 0}, 20, 3, 0)
       # 4-col gutter "  1 " / "  2 " → the digit lands at column 2.
       assert Screen.get_cell(screen, 2, 0).char == "1"
       assert Screen.get_cell(screen, 2, 1).char == "2"
@@ -66,15 +66,43 @@ defmodule Geex.LoopTest do
 
     test "brightens the cursor's line number, dims the rest", %{theme: theme} do
       pal = theme.palette
-      {screen, _cursor} = Loop.frame("def\nend", [], theme, {1, 0}, 20, 3, 0)
+      {screen, _cursor, _hscroll} = Loop.frame("def\nend", [], theme, {1, 0}, 20, 3, 0)
       assert Screen.get_cell(screen, 2, 1).fg == pal.active_line_number
       assert Screen.get_cell(screen, 2, 0).fg == pal.line_number
     end
 
     test "rows past end-of-file carry no number", %{theme: theme} do
-      {screen, _cursor} = Loop.frame("only", [], theme, {0, 0}, 20, 3, 0)
+      {screen, _cursor, _hscroll} = Loop.frame("only", [], theme, {0, 0}, 20, 3, 0)
       assert Screen.get_cell(screen, 2, 0).char == "1"
       assert Screen.get_cell(screen, 2, 1).char == " "
+    end
+  end
+
+  describe "frame/8 — horizontal scroll" do
+    setup do: %{theme: Geex.Theme.default()}
+
+    test "a line that fits leaves hscroll at 0", %{theme: theme} do
+      {_screen, {cx, _cy}, hscroll} = Loop.frame("abc", [], theme, {0, 3}, 20, 3, 0, 0)
+      assert hscroll == 0
+      assert cx == 7
+    end
+
+    test "the cursor past the right edge scrolls the text left", %{theme: theme} do
+      long = "abcdefghijklmnopqrst"
+      # w 14, gutter 4 → text area 10 wide; cursor at column 15 is off the right.
+      {screen, {cx, _cy}, hscroll} = Loop.frame(long, [], theme, {0, 15}, 14, 3, 0, 0)
+      assert hscroll > 0
+      # cursor stays inside the text area [4, 14)
+      assert cx >= 4 and cx < 14
+      # the first text column is no longer "a" — the line scrolled left
+      assert Screen.get_cell(screen, 4, 0).char != "a"
+    end
+
+    test "moving back to the line start snaps hscroll to 0", %{theme: theme} do
+      long = "abcdefghijklmnopqrst"
+      {_screen, {cx, _cy}, hscroll} = Loop.frame(long, [], theme, {0, 1}, 14, 3, 0, 10)
+      assert hscroll == 0
+      assert cx == 5
     end
   end
 

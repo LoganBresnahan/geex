@@ -45,6 +45,11 @@ defmodule Geex.Loop do
   # (ADR-0025). Clamped to half the window so the bands never cross.
   @scrolloff 3
 
+  # Columns of context kept between the cursor and the left/right of the text area
+  # (vim's `sidescrolloff`) — the horizontal analogue, applied via the same
+  # `scroll_for/4` along the column axis.
+  @hscrolloff 8
+
   ## Public API
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -71,27 +76,32 @@ defmodule Geex.Loop do
   end
 
   @doc """
-  The next `Geex.Screen` plus the cursor's on-screen position, for the given inputs.
+  The next `Geex.Screen`, the cursor's on-screen position, and the horizontal scroll, for
+  the given inputs (the previous `hscroll` carries the column offset between frames).
 
-  Reserves a **line-number gutter** of `gutter_width/1` columns on the left: the text
-  is painted inset by that width, the gutter is drawn over the left columns (1-based
-  logical line numbers, [ADR-0027](../../doc/adr/0027-grid-command-addressing.md) — the
-  number you read *is* the command grid's `y`), and the cursor's `x` is shifted right by
-  the gutter width to match.
+  Reserves a **line-number gutter** of `gutter_width/1` columns on the left: the text is
+  painted inset by that width, the gutter drawn over the left columns (1-based logical line
+  numbers, [ADR-0027](../../doc/adr/0027-grid-command-addressing.md) — the number you read
+  *is* the command grid's `y`). The text area `[gutter, w)` also scrolls **horizontally** to
+  keep the cursor's column visible (the same `scroll_for/4` along the column axis, with an
+  `@hscrolloff` margin); the cursor's `x` is shifted by the gutter width and the horizontal
+  scroll to match. Returns the resolved `hscroll` so the caller can persist it.
   """
   @spec frame(String.t(), [map()], Theme.t(), {non_neg_integer(), non_neg_integer()},
-          non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
-          {Screen.t(), {non_neg_integer(), integer()}}
-  def frame(text, spans, %Theme{} = theme, {cursor_line, _} = cursor, w, h, scroll) do
+          non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          {Screen.t(), {non_neg_integer(), integer()}, non_neg_integer()}
+  def frame(text, spans, %Theme{} = theme, {cursor_line, _} = cursor, w, h, scroll, hscroll \\ 0) do
     gw = gutter_width(text)
-    {cx, cy} = cursor_xy(text, cursor, scroll)
+    text_w = max(w - gw, 0)
+    {dcol, cy} = cursor_xy(text, cursor, scroll)
+    hscroll = scroll_for(hscroll, dcol, text_w, @hscrolloff)
 
     screen =
       text
-      |> Paint.to_screen(spans, theme, w, h, scroll, gw)
+      |> Paint.to_screen(spans, theme, w, h, scroll, gw, hscroll)
       |> draw_gutter(text, theme, h, scroll, gw, cursor_line)
 
-    {screen, {cx + gw, cy}}
+    {screen, {gw + dcol - hscroll, cy}, hscroll}
   end
 
   @doc """
@@ -154,7 +164,7 @@ defmodule Geex.Loop do
     {w, h} = safe_window_size()
 
     state =
-      %{w: w, h: h, scroll: 0, theme: Theme.default(), buffer: nil, buffer_ref: nil, reactor: nil, repaint?: false}
+      %{w: w, h: h, scroll: 0, hscroll: 0, theme: Theme.default(), buffer: nil, buffer_ref: nil, reactor: nil, repaint?: false}
       |> attach(active)
 
     {:ok, schedule_repaint(state)}
@@ -255,7 +265,9 @@ defmodule Geex.Loop do
         # overlay the status row.
         h_text = text_height(state.h)
         scroll = scroll_for(state.scroll, line, h_text, @scrolloff)
-        {screen, {cx, cy}} = frame(text, overlay_spans(state.reactor), state.theme, cursor, state.w, h_text, scroll)
+
+        {screen, {cx, cy}, hscroll} =
+          frame(text, overlay_spans(state.reactor), state.theme, cursor, state.w, h_text, scroll, state.hscroll)
 
         screen =
           screen
@@ -263,12 +275,12 @@ defmodule Geex.Loop do
           |> draw_status(state, snap)
 
         Renderer.flush(screen, cursor_target(state.w, h_text, cx, cy))
-        %{state | scroll: scroll}
+        %{state | scroll: scroll, hscroll: hscroll}
 
       _ ->
         screen = draw_empty_status(Screen.new(state.w, state.h), state)
         Renderer.flush(screen, :hidden)
-        %{state | scroll: 0}
+        %{state | scroll: 0, hscroll: 0}
     end
   end
 

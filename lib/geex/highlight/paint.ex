@@ -11,7 +11,7 @@ defmodule Geex.Highlight.Paint do
   (`Geex.Ansi`) and the on-screen cell render here.
   """
 
-  alias Geex.{Cell, Screen, Theme}
+  alias Geex.{Cell, Screen, Theme, Width}
   alias Geex.Theme.Style
 
   @doc """
@@ -33,23 +33,26 @@ defmodule Geex.Highlight.Paint do
 
   @doc """
   Project `text` highlighted by `spans` under `theme` onto a `w`×`h` `Geex.Screen`,
-  scrolled down by `scroll` rows (the first visible buffer line) and inset from the
-  left by `x0` columns (the line-number gutter — text begins at column `x0`).
+  scrolled down by `scroll` rows (the first visible buffer line), inset from the left by
+  `x0` columns (the line-number gutter — text begins at column `x0`), and scrolled right
+  by `hscroll` display columns (the first `hscroll` columns of each line are off-screen).
 
-  Walks the text grapheme by grapheme, tracking the byte offset (so multibyte
-  characters map to the right span) and the line/column. Each grapheme becomes a
-  styled `Geex.Cell` placed by `Geex.Screen.put_grapheme/4`, so it advances the
-  column by its **display width** ([`Geex.Width`](`Geex.Width`)) — a wide glyph
-  takes two columns and the next grapheme lands after it. The **whole pane is filled
-  with the theme's editor background** first, then glyphs overlay it — so blank lines
-  and the gaps after short lines carry the theme background, not the terminal default.
-  The `x0` columns at the left are left as background for the caller to draw the gutter
-  over. Off-screen cells are clipped by `Geex.Screen`; newlines return to column `x0`.
+  Walks the text grapheme by grapheme, tracking the byte offset (so multibyte characters
+  map to the right span) and the line's **virtual column** (its display column had nothing
+  scrolled, starting at `x0`). Each grapheme's screen column is `virtual − hscroll`; it
+  advances the virtual column by the grapheme's **display width** ([`Geex.Width`](`Geex.Width`))
+  — a wide glyph takes two. The **whole pane is filled with the theme's editor background**
+  first, then glyphs overlay it — so blank lines and the gaps after short lines carry the
+  theme background. The `x0` gutter columns are left as background for the caller to draw
+  over. Text is clipped to the rect `[x0, w)`: the right edge by `Geex.Screen`, the **left
+  edge here** (a grapheme scrolled past `x0` is dropped; a wide glyph straddling `x0` — its
+  lead scrolled off, its second column visible — shows a blank in that column). Newlines
+  return to the virtual column `x0`.
   """
-  @spec to_screen(String.t(), [Geex.Highlight.Span.t()], Theme.t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+  @spec to_screen(String.t(), [Geex.Highlight.Span.t()], Theme.t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           Screen.t()
-  def to_screen(text, spans, %Theme{} = theme, w, h, scroll \\ 0, x0 \\ 0)
-      when is_binary(text) and w >= 0 and h >= 0 and scroll >= 0 and x0 >= 0 do
+  def to_screen(text, spans, %Theme{} = theme, w, h, scroll \\ 0, x0 \\ 0, hscroll \\ 0)
+      when is_binary(text) and w >= 0 and h >= 0 and scroll >= 0 and x0 >= 0 and hscroll >= 0 do
     by_byte = styles(theme, spans)
     fg = theme.palette.fg
     bg = theme.palette.bg
@@ -59,22 +62,37 @@ defmodule Geex.Highlight.Paint do
     # the buffer all show the theme background, not the terminal's default.
     base = Screen.fill_rect(Screen.new(w, h), 0, 0, w, h, %Cell{char: " ", fg: fg, bg: bg})
 
-    {screen, _byte, _row, _col} =
+    {screen, _byte, _row, _vcol} =
       text
       |> String.graphemes()
       |> Enum.reduce({base, 0, 0, x0}, fn
         # "\r\n" is a single grapheme; both forms terminate the line.
-        g, {screen, byte, row, _col} when g in ["\n", "\r\n"] ->
+        g, {screen, byte, row, _vcol} when g in ["\n", "\r\n"] ->
           {screen, byte + byte_size(g), row + 1, x0}
 
-        g, {screen, byte, row, col} ->
+        g, {screen, byte, row, vcol} ->
+          wd = Width.cells(g)
           cell = cell_for(g, style_at(by_byte, byte, byte_size(g)), fg, bg)
-          {screen, next_col} = Screen.put_grapheme(screen, col, row - scroll, cell)
-          {screen, byte + byte_size(g), row, next_col}
+          screen = place(screen, vcol - hscroll, row - scroll, cell, wd, x0)
+          {screen, byte + byte_size(g), row, vcol + wd}
       end)
 
     screen
   end
+
+  # Place a grapheme at screen column `x` on `row`, given its display width `wd` and the
+  # left edge `x0` of the text rect (the gutter inset). `Geex.Screen.put_grapheme/4` handles
+  # the **right** edge (a wide glyph in the last column is padded); this adds the **left**
+  # edge that horizontal scroll needs:
+  #   * zero-width grapheme — draw nothing;
+  #   * lead at or past `x0` — normal placement (put_grapheme, right edge handled);
+  #   * wide glyph straddling `x0` (lead at `x0-1`, second column at `x0`) — its left half is
+  #     scrolled off, so its visible column shows a blank in the glyph's style;
+  #   * anything fully left of `x0` — dropped.
+  defp place(screen, _x, _row, _cell, 0, _x0), do: screen
+  defp place(screen, x, row, cell, _wd, x0) when x >= x0, do: elem(Screen.put_grapheme(screen, x, row, cell), 0)
+  defp place(screen, x, row, cell, 2, x0) when x == x0 - 1, do: Screen.set_cell(screen, x0, row, %{cell | char: " "})
+  defp place(screen, _x, _row, _cell, _wd, _x0), do: screen
 
   # A grapheme can span several bytes; take the style of the first styled byte in
   # its range, so a span that begins mid-grapheme still colours the grapheme.
