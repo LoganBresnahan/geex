@@ -5,46 +5,26 @@ defmodule Geex do
   """
 
   @doc """
-  Smoke entry point for v0.1 — boots the application, subscribes to
-  `Geex.TerminalIO` events, and writes each event as a status line at
-  the top of the alternate screen. No quit key: every printable
-  character is reserved for editing, so exit via the BEAM break menu
-  (Ctrl-c twice).
+  Boot geex as an interactive terminal editor and open `path` (if given).
 
-  Launch outside of iex so `:prim_tty` has exclusive terminal ownership:
+  Starts the application — which brings up `Geex.TerminalIO` (raw-mode
+  `:prim_tty`) and the event-driven `Geex.Loop` that paints the active buffer,
+  highlights it live, and turns keys into commands on the one shared path — then
+  opens `path` as the active buffer and blocks. **Quit with Ctrl-Q** (the loop
+  calls `System.stop/0`, so the app's shutdown restores the terminal).
 
-      elixir --erl "-noshell -noinput" -S mix run -e 'Geex.run()'
+  Launch *outside* iex so `:prim_tty` has exclusive terminal ownership:
 
-  No real editing yet — this just proves the input/output path works
-  end-to-end on top of `:prim_tty`.
+      elixir --erl "-noshell -noinput" -S mix run -e 'Geex.run("lib/geex/loop.ex")'
+
+  With no path, geex boots to an empty screen (open a file via the MCP
+  `open_file` tool, or pass one here). This is the live dogfood: watch geex
+  recolour its own source as you type.
   """
-  def run(_path \\ nil) do
+  @spec run(String.t() | nil) :: no_return()
+  def run(path \\ nil) do
     {:ok, _} = Application.ensure_all_started(:geex)
-    Geex.TerminalIO.subscribe()
-
-    Geex.TerminalIO.write([
-      "\e[1;1H",
-      "geex v0.1 smoke — Ctrl-c twice to quit",
-      "\e[3;1H",
-      "events:"
-    ])
-
-    loop(_row = 4)
-  end
-
-  defp loop(row) do
-    receive do
-      {:geex_io, :eof} ->
-        :ok
-
-      {:geex_io, event} ->
-        Geex.TerminalIO.write([
-          "\e[#{row};1H",
-          "\e[K",
-          inspect(event)
-        ])
-
-        loop(row + 1)
-    end
+    if is_binary(path), do: Geex.Session.open_file(path)
+    Process.sleep(:infinity)
   end
 end
