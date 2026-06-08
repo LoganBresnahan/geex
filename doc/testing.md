@@ -873,6 +873,12 @@ next).** Three slices, each confirmed in a 100×30 tmux pane on `loop.ex`:
   scroll (showed 9,10,11… not screen ordinals) and restart at 1 at the file top — matching ADR-0027's "the
   gutter number is the command grid's `y`". 431 tests + 8 doctests green.
 
-**Still unverified live:** real SIGWINCH resize (tmux `resize-window` would test it); the
-keymap-capability/Kitty-protocol model ([ADR-0026](adr/0026-terminal-input-model.md)); mouse;
-truecolor→256/16 degradation; horizontal scroll (long lines, the next slice).
+**SIGWINCH resize — verified live.** `tmux resize-window` on a running geex: 80×24 → 120×30 grew the
+status bar from 80 to 120 columns and re-laid-out the pane; → 50×12 shrank it back (status 50 wide, ~11
+text rows). Both directions, width and height — the `:prim_tty` resize event reaches `TerminalIO` →
+`{:geex_io, {:resize, rows, cols}}` → `Loop` (`Renderer.resize` + repaint). Closes the last unverified
+display path.
+
+**Still unverified live:** the keymap-capability/Kitty-protocol model
+([ADR-0026](adr/0026-terminal-input-model.md)); mouse; truecolor→256/16 degradation; horizontal scroll
+(long lines, the next slice).
