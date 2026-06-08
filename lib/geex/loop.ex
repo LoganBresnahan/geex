@@ -70,15 +70,41 @@ defmodule Geex.Loop do
     {x, line - scroll}
   end
 
-  @doc "The next `Geex.Screen` plus the cursor's on-screen position, for the given inputs."
+  @doc """
+  The next `Geex.Screen` plus the cursor's on-screen position, for the given inputs.
+
+  Reserves a **line-number gutter** of `gutter_width/1` columns on the left: the text
+  is painted inset by that width, the gutter is drawn over the left columns (1-based
+  logical line numbers, [ADR-0027](../../doc/adr/0027-grid-command-addressing.md) — the
+  number you read *is* the command grid's `y`), and the cursor's `x` is shifted right by
+  the gutter width to match.
+  """
   @spec frame(String.t(), [map()], Theme.t(), {non_neg_integer(), non_neg_integer()},
           non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           {Screen.t(), {non_neg_integer(), integer()}}
-  def frame(text, spans, %Theme{} = theme, cursor, w, h, scroll) do
-    {Paint.to_screen(text, spans, theme, w, h, scroll), cursor_xy(text, cursor, scroll)}
+  def frame(text, spans, %Theme{} = theme, {cursor_line, _} = cursor, w, h, scroll) do
+    gw = gutter_width(text)
+    {cx, cy} = cursor_xy(text, cursor, scroll)
+
+    screen =
+      text
+      |> Paint.to_screen(spans, theme, w, h, scroll, gw)
+      |> draw_gutter(text, theme, h, scroll, gw, cursor_line)
+
+    {screen, {cx + gw, cy}}
   end
 
+  @doc """
+  The width in columns of the line-number gutter for `text`: enough digits for the
+  highest line number (1-based) — minimum two — plus a one-column margin on each side.
+  Grows as the file crosses a power of ten, so the numbers stay right-aligned.
+  """
+  @spec gutter_width(String.t()) :: pos_integer()
+  def gutter_width(text), do: max(digits(line_count(text)), 2) + 2
+
   defp line_at(text, line), do: text |> String.split("\n") |> Enum.at(line, "")
+  defp line_count(text), do: text |> String.split("\n") |> length()
+  defp digits(n), do: n |> Integer.to_string() |> String.length()
 
   @doc """
   The viewport top (first visible buffer line) that keeps cursor `line` visible in
@@ -267,6 +293,27 @@ defmodule Geex.Loop do
   defp position({line, col}), do: "#{line + 1}:#{col + 1}"
 
   defp status_style(%Theme{palette: p}), do: %Cell{fg: p.bg, bg: p.fg}
+
+  # Draw the line-number gutter over the left `gw` columns: each visible text row gets
+  # its 1-based logical line number, right-aligned, in the theme's line-number colour —
+  # the cursor's line brightened (active_line_number). Rows past end-of-file keep the
+  # background Paint already filled. (ADR-0027: this number is the command grid's `y`.)
+  defp draw_gutter(screen, text, %Theme{palette: pal}, h, scroll, gw, cursor_line) do
+    lines = line_count(text)
+    digits = gw - 2
+
+    Enum.reduce(0..(h - 1)//1, screen, fn row, acc ->
+      line = scroll + row
+
+      if line < lines do
+        label = " " <> String.pad_leading(Integer.to_string(line + 1), digits) <> " "
+        fg = if line == cursor_line, do: pal.active_line_number, else: pal.line_number
+        Screen.draw_text(acc, 0, row, label, %Cell{fg: fg, bg: pal.bg})
+      else
+        acc
+      end
+    end)
+  end
 
   defp cursor_target(w, h_text, x, y) when x >= 0 and x < w and y >= 0 and y < h_text, do: {x, y}
   defp cursor_target(_w, _h_text, _x, _y), do: :hidden

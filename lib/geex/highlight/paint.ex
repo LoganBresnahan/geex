@@ -33,7 +33,8 @@ defmodule Geex.Highlight.Paint do
 
   @doc """
   Project `text` highlighted by `spans` under `theme` onto a `w`×`h` `Geex.Screen`,
-  scrolled down by `scroll` rows (the first visible buffer line).
+  scrolled down by `scroll` rows (the first visible buffer line) and inset from the
+  left by `x0` columns (the line-number gutter — text begins at column `x0`).
 
   Walks the text grapheme by grapheme, tracking the byte offset (so multibyte
   characters map to the right span) and the line/column. Each grapheme becomes a
@@ -42,12 +43,13 @@ defmodule Geex.Highlight.Paint do
   takes two columns and the next grapheme lands after it. The **whole pane is filled
   with the theme's editor background** first, then glyphs overlay it — so blank lines
   and the gaps after short lines carry the theme background, not the terminal default.
-  Off-screen cells are clipped by `Geex.Screen`; newlines advance the row.
+  The `x0` columns at the left are left as background for the caller to draw the gutter
+  over. Off-screen cells are clipped by `Geex.Screen`; newlines return to column `x0`.
   """
-  @spec to_screen(String.t(), [Geex.Highlight.Span.t()], Theme.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+  @spec to_screen(String.t(), [Geex.Highlight.Span.t()], Theme.t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           Screen.t()
-  def to_screen(text, spans, %Theme{} = theme, w, h, scroll \\ 0)
-      when is_binary(text) and w >= 0 and h >= 0 and scroll >= 0 do
+  def to_screen(text, spans, %Theme{} = theme, w, h, scroll \\ 0, x0 \\ 0)
+      when is_binary(text) and w >= 0 and h >= 0 and scroll >= 0 and x0 >= 0 do
     by_byte = styles(theme, spans)
     fg = theme.palette.fg
     bg = theme.palette.bg
@@ -60,10 +62,10 @@ defmodule Geex.Highlight.Paint do
     {screen, _byte, _row, _col} =
       text
       |> String.graphemes()
-      |> Enum.reduce({base, 0, 0, 0}, fn
+      |> Enum.reduce({base, 0, 0, x0}, fn
         # "\r\n" is a single grapheme; both forms terminate the line.
         g, {screen, byte, row, _col} when g in ["\n", "\r\n"] ->
-          {screen, byte + byte_size(g), row + 1, 0}
+          {screen, byte + byte_size(g), row + 1, x0}
 
         g, {screen, byte, row, col} ->
           cell = cell_for(g, style_at(by_byte, byte, byte_size(g)), fg, bg)

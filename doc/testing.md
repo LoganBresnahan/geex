@@ -855,6 +855,24 @@ the cursor: the viewport top edge-aligns when the cursor crosses a boundary, oth
 Ups scrolled back to the file top (`cursor_y=0`). No scrolloff margin yet (a config knob); horizontal
 scroll still deferred.
 
+**Editor chrome — added + verified live (commits `e014d8b` bg-fill, `0c413c8` status+scrolloff, gutter
+next).** Three slices, each confirmed in a 100×30 tmux pane on `loop.ex`:
+- **Theme background fill** (`Paint.to_screen`): the whole pane carries the BoP editor bg (`{:rgb,55,39,37}`)
+  — blank lines + the gaps after short lines + below-buffer all brown; the bg SGR emits once and persists,
+  no reset-to-default in the ANSI capture.
+- **Status line + scrolloff** (`Loop`): the bottom row shows `loop.ex … line:col` on a reverse-video bar
+  (`38;2;55;39;37` on `48;2;230;225;196` — theme fg/bg swapped); `scroll_for/4`'s margin held the cursor
+  **exactly 3 rows** off the bottom edge (`cursor_y=25` in a 30-row pane, text rows 0..28) while scrolling,
+  with the top-of-file pin riding the cursor above the margin.
+- **Line-number gutter** (`Loop.frame` + `gutter_width/1`, [ADR-0027](adr/0027-grid-command-addressing.md)):
+  right-aligned 1-based numbers in a width-`f(line count)` left inset (5 cols on the ~370-line file); text
+  inset to column 5 and the cursor offset to match (`cursor_x=5` at line start); the **active line's number
+  is cream `active_line_number`, inactive ones dim brown `line_number`** (a tmux-capture gotcha: the active
+  number inherits the trailing bg-fill's cream and so emits no fresh SGR — confirmed via the top row, which
+  has no preceding cell and shows an explicit `38;2;230;225;196`). Numbers track **buffer lines** under
+  scroll (showed 9,10,11… not screen ordinals) and restart at 1 at the file top — matching ADR-0027's "the
+  gutter number is the command grid's `y`". 431 tests + 8 doctests green.
+
 **Still unverified live:** real SIGWINCH resize (tmux `resize-window` would test it); the
 keymap-capability/Kitty-protocol model ([ADR-0026](adr/0026-terminal-input-model.md)); mouse;
-truecolor→256/16 degradation.
+truecolor→256/16 degradation; horizontal scroll (long lines, the next slice).

@@ -30,16 +30,51 @@ defmodule Geex.LoopTest do
     end
   end
 
-  describe "frame/7 — screen + cursor for the given inputs" do
-    test "paints the text and reports the cursor position" do
-      theme = Geex.Theme.default()
+  describe "gutter_width/1 — line-number gutter sizing" do
+    test "a small file gets the two-digit minimum (4 columns)" do
+      assert Loop.gutter_width("") == 4
+      assert Loop.gutter_width("a\nb\nc") == 4
+    end
+
+    test "grows when the line count crosses a power of ten" do
+      assert Loop.gutter_width(String.duplicate("x\n", 98) <> "x") == 4
+      assert Loop.gutter_width(String.duplicate("x\n", 99) <> "x") == 5
+    end
+  end
+
+  describe "frame/7 — screen + cursor (with the line-number gutter)" do
+    setup do: %{theme: Geex.Theme.default()}
+
+    test "paints the text inset past the gutter and offsets the cursor", %{theme: theme} do
+      # "def\nend": 2 lines → gutter_width 4, so text starts at column 4.
       {screen, cursor} = Loop.frame("def\nend", [], theme, {1, 2}, 20, 3, 0)
 
       assert %Screen{} = screen
-      assert Screen.get_cell(screen, 0, 0).char == "d"
-      assert Screen.get_cell(screen, 0, 1).char == "e"
-      # cursor after "en" on line 1 → {x: 2, y: 1}
-      assert cursor == {2, 1}
+      assert Loop.gutter_width("def\nend") == 4
+      assert Screen.get_cell(screen, 4, 0).char == "d"
+      assert Screen.get_cell(screen, 4, 1).char == "e"
+      # after "en" on line 1 → x 2 within the line, + 4 gutter columns = {6, 1}
+      assert cursor == {6, 1}
+    end
+
+    test "draws right-aligned 1-based line numbers in the gutter", %{theme: theme} do
+      {screen, _cursor} = Loop.frame("def\nend", [], theme, {0, 0}, 20, 3, 0)
+      # 4-col gutter "  1 " / "  2 " → the digit lands at column 2.
+      assert Screen.get_cell(screen, 2, 0).char == "1"
+      assert Screen.get_cell(screen, 2, 1).char == "2"
+    end
+
+    test "brightens the cursor's line number, dims the rest", %{theme: theme} do
+      pal = theme.palette
+      {screen, _cursor} = Loop.frame("def\nend", [], theme, {1, 0}, 20, 3, 0)
+      assert Screen.get_cell(screen, 2, 1).fg == pal.active_line_number
+      assert Screen.get_cell(screen, 2, 0).fg == pal.line_number
+    end
+
+    test "rows past end-of-file carry no number", %{theme: theme} do
+      {screen, _cursor} = Loop.frame("only", [], theme, {0, 0}, 20, 3, 0)
+      assert Screen.get_cell(screen, 2, 0).char == "1"
+      assert Screen.get_cell(screen, 2, 1).char == " "
     end
   end
 
