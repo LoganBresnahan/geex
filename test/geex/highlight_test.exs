@@ -56,5 +56,23 @@ defmodule Geex.HighlightTest do
     test "empty source yields an ok result (no spans)" do
       assert {:ok, []} = Highlight.spans("", "json")
     end
+
+    test "a pathological parse under a tight deadline is a tagged timeout, not a hang" do
+      big = "[" <> Enum.map_join(1..200_000, ",", fn _ -> "0" end) <> "]"
+      assert {:error, :timeout} = Highlight.spans(big, "json", 0)
+    end
+  end
+
+  describe "Grammars.handle/1 — compiled-grammar cache" do
+    test "compiles once and returns the same handle on repeat calls" do
+      assert {:ok, h1} = Geex.Highlight.Grammars.handle("elixir")
+      assert {:ok, h2} = Geex.Highlight.Grammars.handle("elixir")
+      assert h1 == h2
+    end
+
+    test "unknown language errors and is not cached" do
+      assert {:error, {:unknown_language, "ruby"}} = Geex.Highlight.Grammars.handle("ruby")
+      assert :persistent_term.get({Geex.Highlight.Grammars, "ruby"}, :miss) == :miss
+    end
   end
 end

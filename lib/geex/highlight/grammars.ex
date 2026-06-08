@@ -1,12 +1,14 @@
 defmodule Geex.Highlight.Grammars do
   @moduledoc """
-  Resolves a language name to its tree-sitter grammar bytes + highlights query.
+  Resolves a language name to a **compiled, cached** tree-sitter grammar handle.
 
   [ADR-0023](../../../doc/adr/0023-theming-and-extension-loading.md): geex ships
   **a few default grammars** as portable `.wasm` under `priv/grammars/<lang>/`
-  (`parser.wasm` + `highlights.scm`). User grammars are loaded by **declaring a
-  path in config** — geex fetches nothing; that override lands with the
-  user-config layer. For now this resolves only the bundled set.
+  (`parser.wasm` + `highlights.scm`). Compiling a grammar (wasm + query) is the
+  expensive step, so the resulting `TreeSitterWasm` handle is compiled **once
+  per language** and memoized in `:persistent_term` — a process-independent,
+  read-many cache for an immutable handle. User grammars (config-declared paths,
+  ADR-0023) land with the user-config layer; geex fetches nothing.
 
   Each grammar dir's name doubles as the language name passed to the engine,
   which resolves the `tree_sitter_<name>` export inside `parser.wasm`.
@@ -19,24 +21,50 @@ defmodule Geex.Highlight.Grammars do
   def bundled, do: @bundled
 
   @doc """
-  Load a bundled grammar. Returns the language name (the engine export key),
-  the portable `parser.wasm` bytes, and the `highlights.scm` query.
-  """
-  @spec load(String.t()) ::
-          {:ok, %{name: String.t(), wasm: binary(), scm: String.t()}}
-          | {:error, {:unknown_language, String.t()} | {:grammar_read, File.posix()}}
-  def load(language) when is_binary(language) do
-    if language in @bundled do
-      dir = Application.app_dir(:geex, Path.join(["priv", "grammars", language]))
+  A cached, compiled grammar handle for `language`. Compiles + memoizes on first
+  use; later calls return the same handle.
 
-      with {:ok, wasm} <- File.read(Path.join(dir, "parser.wasm")),
-           {:ok, scm} <- File.read(Path.join(dir, "highlights.scm")) do
-        {:ok, %{name: language, wasm: wasm, scm: scm}}
-      else
-        {:error, posix} -> {:error, {:grammar_read, posix}}
-      end
+  Returns `{:ok, TreeSitterWasm.grammar()}` or `{:error, reason}`:
+
+    * `{:unknown_language, name}` — no bundled grammar
+    * `{:grammar_read, posix}` — grammar files unreadable
+    * `{:engine, message}` — the engine rejected the grammar/query
+  """
+  @spec handle(String.t()) :: {:ok, TreeSitterWasm.grammar()} | {:error, term()}
+  def handle(language) when is_binary(language) do
+    case :persistent_term.get({__MODULE__, language}, :miss) do
+      :miss ->
+        with {:ok, grammar} <- compile(language) do
+          # Idempotent: a concurrent first-call may compile twice; last write
+          # wins and the extra handle is GC'd. Errors are never cached.
+          :persistent_term.put({__MODULE__, language}, grammar)
+          {:ok, grammar}
+        end
+
+      grammar ->
+        {:ok, grammar}
+    end
+  end
+
+  defp compile(language) when language in @bundled do
+    dir = Application.app_dir(:geex, Path.join(["priv", "grammars", language]))
+
+    with {:ok, wasm} <- File.read(Path.join(dir, "parser.wasm")),
+         {:ok, scm} <- File.read(Path.join(dir, "highlights.scm")),
+         {:ok, grammar} <- load_grammar(wasm, language, scm) do
+      {:ok, grammar}
     else
-      {:error, {:unknown_language, language}}
+      {:error, posix} when is_atom(posix) -> {:error, {:grammar_read, posix}}
+      {:error, _} = tagged -> tagged
+    end
+  end
+
+  defp compile(language), do: {:error, {:unknown_language, language}}
+
+  defp load_grammar(wasm, name, scm) do
+    case TreeSitterWasm.load_grammar(wasm, name, scm) do
+      {:ok, grammar} -> {:ok, grammar}
+      {:error, message} -> {:error, {:engine, message}}
     end
   end
 end
