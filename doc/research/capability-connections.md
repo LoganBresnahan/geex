@@ -132,8 +132,18 @@ tree-sitter **CLI 0.26.9** + crate **0.26.9** (`wasm` feature) → embedded **wa
 `Parser::set_wasm_store(WasmStore) -> Result<(), LanguageError>`. Captures iterate via
 `streaming_iterator::StreamingIterator`; names from `Query::capture_names()[cap.index]`.
 
-**Open follow-ups (not blockers):** ④ wrap behind one Rustler NIF + dirty-scheduler timeout (the
-BEAM step — not yet run); whether the `tree-sitter-highlight` `Highlighter` convenience layer
-supports wasm languages is **untested** — the spike deliberately used `Query`/`QueryCursor`
-directly (the path the NIF will take anyway, since it yields exact spans), so this is a
-nice-to-have, not on the critical path; incremental-reparse `Tree` caching for big-file latency.
+- **④ DONE — the NIF runs on the BEAM.** Standalone package `/home/oof/tree_sitter_wasm`
+  (`mix` + Rustler 0.38, `tree-sitter` 0.26.9 `wasm` feature; `crate-type = cdylib`). The
+  `#[rustler::nif(schedule = "DirtyCpu")]` `highlight(grammar, name, scm, src)` wraps the same
+  `run()` and encodes `{:ok, [{start, end, capture}]}` / `{:error, msg}`.
+  `TreeSitterWasm.highlight(json_wasm, "json", scm, src)` → **`{:ok, [12 spans]}`** identical to
+  the pure-Rust run; garbage bytes → `{:error, "load_language(json): WasmError { kind: Parse, … }"}`
+  (clean tuple, no VM crash). Compiled clean; `priv/native/tree_sitter_wasm.so` is the only build
+  artifact. Not yet committed/published (local-path-dep phase).
+
+**Open follow-ups (not blockers):** dirty-scheduler **parse deadline** → `{:error, :timeout}`
+(currently DirtyCpu only, no cancellation); cache `Engine`/`Store`/`Parser` in a `ResourceArc`
+(per-call construction today) + persistent `Tree` for incremental reparse on big files; whether the
+`tree-sitter-highlight` `Highlighter` convenience layer supports wasm languages is **untested** —
+the spike + NIF deliberately use `Query`/`QueryCursor` directly (the path that yields exact spans
+anyway), so it is a nice-to-have, not on the critical path.
