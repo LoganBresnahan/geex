@@ -31,7 +31,12 @@ defmodule Geex.MixProject do
       # standard BEAM choice (Phoenix live-reload uses it). The Linux backend shells
       # out to `inotifywait` (inotify-tools); without it the watcher degrades to a
       # no-op (logged) and the reconcile core is unaffected.
-      {:file_system, "~> 1.0"}
+      {:file_system, "~> 1.0"},
+      # The syntax-highlighting engine (ADR-0021 host-in / ADR-0023): the native
+      # tree-sitter runtime that loads portable grammar.wasm. Net-new on the BEAM
+      # (every other binding static-links grammars). Path dep during the spike;
+      # github/hex once its highlight/4 API stabilizes.
+      {:tree_sitter_wasm, path: "../tree_sitter_wasm"}
     ]
   end
 end
