@@ -1,0 +1,58 @@
+defmodule Geex.WidthTest do
+  use ExUnit.Case, async: true
+
+  alias Geex.Width
+
+  describe "cells/1 — column width of a grapheme" do
+    test "ASCII printable is one column" do
+      assert Width.cells("a") == 1
+      assert Width.cells("Z") == 1
+      assert Width.cells("0") == 1
+      assert Width.cells(" ") == 1
+      assert Width.cells("~") == 1
+    end
+
+    test "East-Asian wide characters are two columns" do
+      # U+5B57 字, U+4E2D 中, U+FF21 fullwidth Latin capital A.
+      assert Width.cells("\u{5B57}") == 2
+      assert Width.cells("\u{4E2D}") == 2
+      assert Width.cells("\u{FF21}") == 2
+    end
+
+    test "wide emoji is two columns" do
+      # U+1F389 PARTY POPPER.
+      assert Width.cells("\u{1F389}") == 2
+    end
+
+    test "a precomposed accented letter is one column" do
+      # U+00E9 é.
+      assert Width.cells("é") == 1
+    end
+
+    test "a base + combining mark is one grapheme, one column (the mark adds 0)" do
+      # "e" + U+0301 COMBINING ACUTE ACCENT — one grapheme cluster.
+      assert Width.cells("é") == 1
+    end
+
+    test "a lone non-spacing combining mark is zero columns" do
+      # U+0301 COMBINING ACUTE ACCENT on its own.
+      assert Width.cells("́") == 0
+    end
+
+    test "explicit zero-width format characters are zero columns" do
+      assert Width.cells("​") == 0
+      assert Width.cells("‍") == 0
+      assert Width.cells("﻿") == 0
+    end
+
+    test "control codes are zero columns" do
+      assert Width.cells("\t") == 0
+      assert Width.cells("\n") == 0
+      assert Width.cells("\e") == 0
+    end
+
+    test "the empty string is zero columns" do
+      assert Width.cells("") == 0
+    end
+  end
+end

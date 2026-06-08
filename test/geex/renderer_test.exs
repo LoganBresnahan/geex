@@ -114,4 +114,23 @@ defmodule Geex.RendererTest do
       assert render(Renderer.diff(Screen.new(5, 1), next)) == "\e[1;1Habc"
     end
   end
+
+  describe "diff/2 — wide glyphs" do
+    test "a wide glyph emits its bytes once; the continuation cell adds no character" do
+      next = Screen.new(3, 1) |> Screen.draw_text(0, 0, "\u{4E2D}b")
+
+      # "中" then "b" in one run; the continuation cell ("") emits nothing, so the
+      # glyph is neither duplicated nor padded — the terminal's own auto-advance
+      # covers the second column.
+      assert render(Renderer.diff(Screen.new(3, 1), next)) == "\e[1;1H\u{4E2D}b"
+    end
+
+    test "a styled wide glyph wraps both halves in one SGR run" do
+      style = %Cell{fg: {:ansi, 1}}
+      next = Screen.new(3, 1) |> Screen.draw_text(0, 0, "\u{4E2D}", style)
+
+      # Lead + continuation share the style → one run, the glyph emitted once.
+      assert render(Renderer.diff(Screen.new(3, 1), next)) == "\e[1;1H\e[31m\u{4E2D}\e[0m"
+    end
+  end
 end

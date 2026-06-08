@@ -13,6 +13,12 @@ defmodule Geex.Cell do
   `attrs` is a list of style flags drawn from `t:attr/0`. Equality is
   by-membership at the API layer (`equal?/2`), since `[:bold, :italic]`
   and `[:italic, :bold]` paint identically.
+
+  An **empty `char` (`""`)** is the *continuation* sentinel: the right half of a
+  wide (double-width) glyph, written by `Geex.Screen.put_grapheme/4`. It is a
+  real, non-blank cell (so the diff tracks it) but the renderer emits no
+  character for it — the wide glyph in the cell to its left already covers that
+  column. It is distinct from `blank/0` (a space, `" "`).
   """
 
   defstruct char: " ", fg: :default, bg: :default, attrs: []

@@ -62,6 +62,20 @@ defmodule Geex.Highlight.PaintTest do
       assert %{char: "c"} = Screen.get_cell(screen, 0, 1)
       assert %{char: "d"} = Screen.get_cell(screen, 1, 1)
     end
+
+    test "a wide glyph spans two columns; the next grapheme lands at column 2" do
+      # "中x" — U+4E2D (3 bytes, wide) then "x". The span colours the wide glyph.
+      text = "\u{4E2D}x"
+      spans = [%Span{start_byte: 0, end_byte: 3, capture: "keyword"}]
+      screen = Paint.to_screen(text, spans, theme(), 10, 1)
+
+      assert %{char: "\u{4E2D}", fg: @keyword_red} = Screen.get_cell(screen, 0, 0)
+      # Column 1 is the continuation: empty char, carrying the wide glyph's style
+      # (so the renderer treats both halves as one styled run).
+      assert %{char: "", fg: @keyword_red} = Screen.get_cell(screen, 1, 0)
+      # "x" lands at column 2 — not column 1, which the wide glyph already covers.
+      assert %{char: "x"} = Screen.get_cell(screen, 2, 0)
+    end
   end
 
   describe "end-to-end: reactor-shaped spans render to truecolor on screen" do

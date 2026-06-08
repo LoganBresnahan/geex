@@ -37,8 +37,11 @@ defmodule Geex.Highlight.Paint do
 
   Walks the text grapheme by grapheme, tracking the byte offset (so multibyte
   characters map to the right span) and the line/column. Each grapheme becomes a
-  styled `Geex.Cell` — the token's foreground over the theme's editor background;
-  off-screen cells are clipped by `Geex.Screen`. Newlines advance the row.
+  styled `Geex.Cell` placed by `Geex.Screen.put_grapheme/4`, so it advances the
+  column by its **display width** ([`Geex.Width`](`Geex.Width`)) — a wide glyph
+  takes two columns and the next grapheme lands after it. The token's foreground
+  paints over the theme's editor background; off-screen cells are clipped by
+  `Geex.Screen`. Newlines advance the row.
   """
   @spec to_screen(String.t(), [Geex.Highlight.Span.t()], Theme.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           Screen.t()
@@ -58,7 +61,8 @@ defmodule Geex.Highlight.Paint do
 
         g, {screen, byte, row, col} ->
           cell = cell_for(g, style_at(by_byte, byte, byte_size(g)), fg, bg)
-          {Screen.set_cell(screen, col, row - scroll, cell), byte + byte_size(g), row, col + 1}
+          {screen, next_col} = Screen.put_grapheme(screen, col, row - scroll, cell)
+          {screen, byte + byte_size(g), row, next_col}
       end)
 
     screen

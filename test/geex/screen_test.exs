@@ -75,6 +75,53 @@ defmodule Geex.ScreenTest do
       assert Screen.get_cell(s, 0, 0).char == "é"
       assert Screen.get_cell(s, 1, 0).char == "é"
     end
+
+    test "a wide glyph takes two columns; the next grapheme lands after it" do
+      # U+5B57 字 (wide), then "x".
+      s = Screen.new(5, 1) |> Screen.draw_text(0, 0, "\u{5B57}x")
+      assert Screen.get_cell(s, 0, 0).char == "\u{5B57}"
+      # Column 1 is the continuation (empty char), not "x".
+      assert Screen.get_cell(s, 1, 0).char == ""
+      assert Screen.get_cell(s, 2, 0).char == "x"
+    end
+  end
+
+  describe "put_grapheme/4" do
+    test "a narrow glyph occupies one column and advances by one" do
+      {s, next} = Screen.put_grapheme(Screen.new(5, 1), 1, 0, %Cell{char: "a"})
+      assert next == 2
+      assert Screen.get_cell(s, 1, 0).char == "a"
+    end
+
+    test "a wide glyph occupies two columns (lead + continuation) and advances by two" do
+      {s, next} = Screen.put_grapheme(Screen.new(5, 1), 0, 0, %Cell{char: "\u{5B57}", fg: {:ansi, 1}})
+      assert next == 2
+      assert Screen.get_cell(s, 0, 0) == %Cell{char: "\u{5B57}", fg: {:ansi, 1}}
+      # The continuation shares the glyph's style but carries an empty char.
+      assert Screen.get_cell(s, 1, 0) == %Cell{char: "", fg: {:ansi, 1}}
+    end
+
+    test "a zero-width grapheme places nothing and does not advance" do
+      {s, next} = Screen.put_grapheme(Screen.new(5, 1), 2, 0, %Cell{char: "​"})
+      assert next == 2
+      assert s.cells == %{}
+    end
+
+    test "a wide glyph with no room for its continuation is padded blank, not half-drawn" do
+      # 1-wide screen: a 2-column glyph cannot fit. It must not be placed (drawing
+      # the lead alone would overflow the single column).
+      {s, next} = Screen.put_grapheme(Screen.new(1, 1), 0, 0, %Cell{char: "\u{5B57}"})
+      assert next == 2
+      assert Screen.get_cell(s, 0, 0) == Cell.blank()
+      assert s.cells == %{}
+    end
+
+    test "a wide glyph at the last column of a wider screen is also dropped, not half-drawn" do
+      # Screen is 2 wide; placing at column 1 (the last) leaves no room for column 2.
+      {s, next} = Screen.put_grapheme(Screen.new(2, 1), 1, 0, %Cell{char: "\u{5B57}"})
+      assert next == 3
+      assert Screen.get_cell(s, 1, 0) == Cell.blank()
+    end
   end
 
   describe "fill_rect/6" do

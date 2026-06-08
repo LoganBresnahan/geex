@@ -77,21 +77,64 @@ defmodule Geex.Screen do
   end
 
   @doc """
-  Draw `text` starting at `{x, y}`, advancing one column per grapheme.
-  Style fields default to a plain cell; pass a partial cell to apply
-  colours/attrs uniformly across the run.
+  Place one grapheme cell at `{x, y}`, occupying its **display width** in
+  columns ([`Geex.Width`](`Geex.Width`)), and return `{screen, next_x}`.
+
+  A normal grapheme takes one column. A wide (double-width) grapheme — a CJK
+  ideograph, wide emoji — takes two: the cell at `x` carries the glyph and the
+  cell at `x + 1` is a **continuation** (an empty-`char` cell sharing the glyph's
+  style) that the renderer emits nothing for, since the wide glyph already
+  covers that column. A zero-width grapheme (combining mark) places nothing and
+  does not advance.
+
+  `next_x` advances by the width regardless of clipping, so a glyph drawn partly
+  or wholly off-screen still keeps the columns after it aligned. A wide glyph with
+  **no room for its second column** at the right edge (`x` is the last column) is
+  *not* drawn — the lead alone would overflow the line — so it is padded with a
+  blank instead.
+  """
+  @spec put_grapheme(t(), integer(), integer(), Cell.t()) :: {t(), integer()}
+  def put_grapheme(%__MODULE__{} = s, x, y, %Cell{char: g} = cell) do
+    case Geex.Width.cells(g) do
+      0 ->
+        {s, x}
+
+      1 ->
+        {set_cell(s, x, y, cell), x + 1}
+
+      2 ->
+        if x + 1 < s.w do
+          s = set_cell(s, x, y, cell)
+          s = set_cell(s, x + 1, y, %{cell | char: ""})
+          {s, x + 2}
+        else
+          # The continuation would fall off the right edge: drawing the lead alone
+          # puts a double-width glyph in the last column and overflows the line.
+          # Pad the column with a blank (carrying the glyph's style) instead.
+          {set_cell(s, x, y, %{cell | char: " "}), x + 2}
+        end
+    end
+  end
+
+  @doc """
+  Draw `text` starting at `{x, y}`, advancing by each grapheme's **display
+  width** ([`Geex.Width`](`Geex.Width`)) — wide glyphs take two columns. Style
+  fields default to a plain cell; pass a partial cell to apply colours/attrs
+  uniformly across the run.
 
   Stops at the right edge of the screen (no wrapping). Newlines in the
   text are not interpreted — pass per-line strings.
   """
   @spec draw_text(t(), integer(), integer(), String.t(), Cell.t()) :: t()
   def draw_text(%__MODULE__{} = s, x, y, text, style \\ Cell.blank()) when is_binary(text) do
-    text
-    |> String.graphemes()
-    |> Enum.with_index()
-    |> Enum.reduce(s, fn {g, i}, acc ->
-      set_cell(acc, x + i, y, %{style | char: g})
-    end)
+    {screen, _x} =
+      text
+      |> String.graphemes()
+      |> Enum.reduce({s, x}, fn g, {acc, col} ->
+        put_grapheme(acc, col, y, %{style | char: g})
+      end)
+
+    screen
   end
 
   @doc """
