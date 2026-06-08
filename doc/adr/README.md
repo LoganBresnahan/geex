@@ -42,6 +42,7 @@ Each ADR: **Status** · **Context** (the forces) · **Decision** · **Consequenc
 | [0024](0024-tui-core-extractable.md) | TUI core is extractable but stays in geex until mature + a second consumer (no-NIF `prim_tty`) | Accepted |
 | [0025](0025-user-config-layer.md) | The user-config layer (theme/grammar/extension selection; TOML at XDG; precedence + cache), distinct from app config | Accepted |
 | [0026](0026-terminal-input-model.md) | Terminal input model & keymap — one default + capability-gated extras (Kitty-protocol detect; reserved-chord table; Alt secondary; OSC 52 / bracketed paste) | Accepted |
+| [0027](0027-grid-command-addressing.md) | Grid command addressing — numeric `x y` coordinates (no letters); grapheme-`x` / logical-line-`y` canonical axis, width excluded; absolute vs viewport sigil; bake-before-record | Proposed |
 
 ## Adding one
 

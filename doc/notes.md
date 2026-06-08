@@ -801,9 +801,17 @@ Editors are the most notorious scope-creep projects in software. Every step reve
 
 ## Grid command system (the differentiator)
 
+> **The coordinate model is now settled in [ADR-0027](adr/0027-grid-command-addressing.md).**
+> Short version: notation is **numeric `x5 y7`** (letters dropped — they only return as
+> easy-motion *jump labels*, not coordinates); the canonical axis is **grapheme-`x` +
+> logical-line-`y` with display width excluded** (a width bug can mis-render but never
+> mis-address); absolute vs viewport is a **sigil**, not a notation change; mutating
+> commands **bake the resolved span before recording** (replay-safety). The original sketch
+> below is kept for the brainstorm trail; the open questions are answered there.
+
 Emacs-style minibuffer where the user types coordinates and the cursor jumps / selection happens.
 
-Examples (working syntax — pin before parser code):
+Examples (original sketch — superseded by ADR-0027's numeric form):
 - `a1` — jump cursor to a1
 - `a1-g6` — select linear range from a1 to g6
 - `a1:g6` — select rectangular block (spreadsheet convention)
