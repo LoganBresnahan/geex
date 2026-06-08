@@ -72,6 +72,23 @@ defmodule Geex.Loop do
 
   defp line_at(text, line), do: text |> String.split("\n") |> Enum.at(line, "")
 
+  @doc """
+  The viewport top (first visible buffer line) that keeps cursor `line` visible in
+  a window of `h` rows, given the previous `scroll`: edge-aligns when the cursor
+  crosses a boundary, otherwise leaves the viewport put. No scrolloff margin yet —
+  the cursor can sit on the top/bottom row; a margin is a future config knob.
+  """
+  @spec scroll_for(non_neg_integer(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  def scroll_for(scroll, line, h) when h > 0 do
+    cond do
+      line < scroll -> line
+      line >= scroll + h -> line - h + 1
+      true -> scroll
+    end
+  end
+
+  def scroll_for(scroll, _line, _h), do: scroll
+
   ## GenServer
 
   @impl true
@@ -81,7 +98,7 @@ defmodule Geex.Loop do
     {w, h} = safe_window_size()
 
     state =
-      %{w: w, h: h, theme: Theme.default(), buffer: nil, buffer_ref: nil, reactor: nil, repaint?: false}
+      %{w: w, h: h, scroll: 0, theme: Theme.default(), buffer: nil, buffer_ref: nil, reactor: nil, repaint?: false}
       |> attach(active)
 
     {:ok, schedule_repaint(state)}
@@ -175,16 +192,16 @@ defmodule Geex.Loop do
 
   defp repaint(state) do
     case safe_session_snapshot() do
-      {:ok, %{text: text, cursor: cursor}} ->
-        # Viewport scroll is deferred (renders from the top); cursor + paint share it.
-        scroll = 0
+      {:ok, %{text: text, cursor: {line, _} = cursor}} ->
+        # Track the cursor: scroll so its line stays visible in the h-row viewport.
+        scroll = scroll_for(state.scroll, line, state.h)
         {screen, {cx, cy}} = frame(text, overlay_spans(state.reactor), state.theme, cursor, state.w, state.h, scroll)
         Renderer.flush(screen, cursor_target(state, cx, cy))
-        state
+        %{state | scroll: scroll}
 
       _ ->
         Renderer.flush(Screen.new(state.w, state.h), :hidden)
-        state
+        %{state | scroll: 0}
     end
   end
 

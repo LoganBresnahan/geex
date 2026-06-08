@@ -1,6 +1,6 @@
 # ADR-0026: Terminal input model & keymap (one default, capability-gated extras)
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-08
 - **Refines:** [ADR-0025](0025-user-config-layer.md) (the keymap is user-config *data*),
   [ADR-0024](0024-tui-core-extractable.md) (the TUI core / `prim_tty`)

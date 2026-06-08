@@ -42,4 +42,28 @@ defmodule Geex.LoopTest do
       assert cursor == {2, 1}
     end
   end
+
+  describe "scroll_for/3 — keep the cursor's line in the viewport" do
+    test "a visible cursor leaves the viewport put" do
+      assert Loop.scroll_for(0, 5, 10) == 0
+      assert Loop.scroll_for(3, 5, 10) == 3
+    end
+
+    test "a cursor below the viewport scrolls down so it lands on the bottom row" do
+      # line 12 in a 10-row window → scroll 3 (shows lines 3..12; cursor at row 9)
+      assert Loop.scroll_for(0, 12, 10) == 3
+    end
+
+    test "a cursor above the viewport scrolls up so it lands on the top row" do
+      assert Loop.scroll_for(5, 3, 10) == 3
+    end
+
+    test "the top of the file pins scroll at 0" do
+      assert Loop.scroll_for(4, 0, 10) == 0
+    end
+
+    test "a zero-height viewport is a no-op" do
+      assert Loop.scroll_for(7, 100, 0) == 7
+    end
+  end
 end
