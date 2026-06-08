@@ -714,3 +714,39 @@ truecolor.
   coalescing is purely in-flight-gated).
 - **`rename` to a different language is re-evaluated, but only when `:start_highlight` is on;** under
   `mix test` the rewatch stops the stale reactor and does not restart (gate off), as the test asserts.
+
+### 2026-06-08 — Dynamic MCP port + themes-as-data (ADR-0018 / ADR-0023 / ADR-0024)
+
+Three threads from a design discussion, built overnight.
+
+**Dynamic MCP port (ADR-0018).** geex stops hardcoding 4000 — it asks the **host** for a free port
+(like pharos's `port = 0`). `Geex.MCP.Port.resolve/1` (`0` → a free loopback port via bind-0/read/
+close; `N` → `N`), `announce/1` (log `geex MCP: serving <url>` + write `GEEX_MCP_PORT_FILE` when set,
+for headless discovery). `Geex.Application` resolves the requested port (default `0`) and orders a
+run-once announcer Task **after** Bandit, so a bind failure leaves no stale port file. `mix geex.serve`
+/ `GEEX_SERVE` default to auto; `--port N`/`GEEX_MCP_PORT=N` pin; the checked-in presets stay the
+pinned-4000 example. **Verified:** 6 `Geex.MCP.Port` tests + **smoke-verified end-to-end twice** —
+`mix geex.serve --port 0` bound `:43760`/`:45854`, announced + wrote the port file, and a real MCP
+`initialize` round-tripped. The announcer-after-Bandit ordering came from the adversarial review (a
+stale-port-file-on-bind-failure finding).
+
+**Themes are data (ADR-0023).** BoP shipped as a hardcoded Elixir module — a violation of ADR-0023
+§1 ("themes are data, never code"). Now: a **native JSON theme format** keyed on tree-sitter captures
+(bare hex = fg; object adds bg + attrs); `Geex.Theme.load/1`/`from_json/1` (validating, **never raises
+on a bad file** — tagged `{:read,_}`/`{:bad_json,_}`/`{:missing,_}`/`{:bad_color,_,_}`), `bundled/1` +
+`default/0`; `Geex.Color.parse/2` the safe parser. `priv/themes/birds-of-paradise.json` is the bundled
+default **and** the reference. `Geex.Theme.Import.Zed` reshapes a Zed theme onto the native map + reuses
+the loader (near-lossless — Zed keys on captures). **Verified:** 16 tests incl. validate/malformed/
+missing-field paths and importing the **frozen real Zed BoP fixture**, asserting it matches the native
+port for shared captures; the data-file `default()` reproduces the old hardcoded theme exactly (all
+prior theme/paint assertions unchanged). Full suite: **357 tests + 8 doctests**.
+
+**TUI extraction + dogfooding ([ADR-0024](adr/0024-tui-core-extractable.md)).** Decision recorded, not
+code: the NIF-free `:prim_tty` TUI core is an extractable package candidate but stays in geex until
+mature (wcwidth/mouse) + a second consumer; and the **live visual dogfood is gated on the interactive
+TUI loop** (not built) — the wiring underneath is tested, the loop is the next visible milestone.
+
+**Not tested / deferred:** config-path **user themes** (the install story — declare a path in config)
+land with the user-config layer; the loader/format here is what they'll use. The dynamic port is
+resolved up front (small pre-bind window) rather than read back from Bandit (pharos's `after_start`) —
+acceptable on loopback; a Bandit read-back is the zero-window follow-up.
