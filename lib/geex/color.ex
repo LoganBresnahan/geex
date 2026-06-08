@@ -25,6 +25,22 @@ defmodule Geex.Color do
     flatten({:rgb, byte(r), byte(g), byte(b)}, byte(a), bg || {:rgb, 0, 0, 0})
   end
 
+  @doc """
+  Safe parse of `#RRGGBB` / `#RRGGBBAA` for **untrusted** theme data: returns
+  `{:ok, rgb}` or `:error` (never raises). An 8-digit colour is flattened against
+  `bg`. Use this over `from_hex/2` when the input is a loaded file.
+  """
+  @spec parse(term(), rgb() | nil) :: {:ok, rgb()} | :error
+  def parse(hex, bg \\ nil)
+
+  def parse("#" <> rest, bg) when byte_size(rest) in [6, 8] do
+    if hex?(rest), do: {:ok, from_hex("#" <> rest, bg)}, else: :error
+  end
+
+  def parse(_hex, _bg), do: :error
+
+  defp hex?(str), do: match?({_, ""}, Integer.parse(str, 16))
+
   @doc "Composite `fg` at alpha `a` (0..255) over opaque `bg`."
   @spec flatten(rgb(), 0..255, rgb()) :: rgb()
   def flatten({:rgb, fr, fg, fb}, a, {:rgb, br, bg, bb}) do

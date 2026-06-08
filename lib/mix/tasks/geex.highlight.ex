@@ -46,7 +46,7 @@ defmodule Mix.Tasks.Geex.Highlight do
 
     case Geex.Highlight.spans(text, lang) do
       {:ok, spans} ->
-        IO.write(Geex.Ansi.highlight(Geex.Theme.BirdsOfParadise.theme(), text, spans))
+        IO.write(Geex.Ansi.highlight(Geex.Theme.default(), text, spans))
 
       {:error, reason} ->
         Mix.raise("highlight failed: #{inspect(reason)}")
