@@ -790,3 +790,39 @@ interactive TUI loop, like the rest of the display path); horizontal scroll + a 
 glyph (its right half at column 0) is a future edge — geex has no horizontal scroll yet. ADR-0025 is a
 **decision**, not an implementation: the `Geex.Config` reader, the TOML dep, and the env projection are
 the build it specifies.
+
+### 2026-06-08 — The interactive editor loop (ADR-0024), render + input halves
+
+The ADR-0024 milestone: an **event-driven** loop (`Geex.Loop`) that renders the active buffer + its
+highlight overlay and accepts typing — the thing that makes the live-highlighting dogfood real.
+
+**Render half (commit `5192f53`).** `Geex.Loop` sits above `Geex.Session` and drives the generic core.
+It subscribes to four event sources and coalesces a burst into one repaint (a `repaint?` flag + one
+self-posted `:repaint`): **TerminalIO** (resize/keys), **Session** (active-buffer change — new
+`Session.subscribe/1` → `{:geex_active_buffer, pid｜nil}`), **Buffer** (text change), and the
+**Reactor** (overlay ready — new `Reactor.subscribe/2` → `{:geex_highlights, buffer, version}`, so the
+loop wakes on fresh colours instead of polling). A repaint reads `Session.snapshot`, builds the screen
+via `Paint.to_screen`, and places a **width-correct hardware cursor** through the new `Renderer.flush/2`
+(cell diff + cursor in one write, so the cursor lands after the cells).
+
+**Input half (commit `afb14ba`).** `Geex.Loop.Keymap` maps a key + cursor + text to an action, **purely**:
+printable→`Insert`, Enter→newline, Tab→spaces, Backspace→`Delete` (or a `Replace` line-join at column 0,
+since `Delete` is single-line), arrows→cursor motion **clamped + wrapping**, Ctrl-Q→quit. Edits dispatch
+through `Dispatch.run` on the **one shared path** (human provenance); the cursor moves via the new
+`Session.set_cursor/1`. So a human keystroke and an LLM edit travel the identical route.
+
+**Verified:** the pure surfaces — `Loop.cursor_xy`/`frame`, `Renderer.cursor_seq`, the whole `Keymap`
+(motion edges, line-join, command coordinates), `Session.subscribe`/`set_cursor`, `Reactor`/`Buffer`
+subscribe+unsubscribe. **Full suite 410 tests + 8 doctests.** **Adversarial review** (`loop-slice-review`,
+2 dims × find→refute) found **2 confirmed leaks, both fixed**: `Loop.detach` demonitored the old buffer
+but never **unsubscribed** from it or its reactor, so across buffer switches the old processes kept the
+loop subscribed (sending now-dropped messages) until death — fixed with `Buffer.unsubscribe/2` +
+`Reactor.unsubscribe/2` called from `detach` (+ regression tests).
+
+**Not tested / deferred — the live dogfood.** The `Geex.Loop` GenServer is **gated with the terminal**
+(off under `mix test`) and **not yet run against a real TTY** — this dev box has none. So a human has not
+*watched* geex paint, recolour, and accept typing; the pure logic is tested and the wiring is
+correct-by-construction, but the on-screen behaviour (raw-mode I/O, the actual SGR/cursor stream, resize)
+is unverified until a `mix run` in a terminal. **Also deferred:** vertical/horizontal **scroll** (renders
+from the top, cursor off-screen-below is hidden), the **configurable keymap** (this one is hardcoded;
+the user-config keymap is ADR-0025), mouse, and truecolor→256/16 degradation.
