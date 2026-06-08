@@ -4,7 +4,8 @@
 - **Date:** 2026-06-08
 - **Refines:** [ADR-0025](0025-user-config-layer.md) (the keymap is user-config *data*),
   [ADR-0024](0024-tui-core-extractable.md) (the TUI core / `prim_tty`)
-- **Relates to:** [ADR-0015](0015-clipboard-subsystem.md) (internal registers vs the system clipboard)
+- **Relates to:** [ADR-0015](0015-clipboard-subsystem.md) (internal registers vs the system clipboard),
+  [ADR-0028](0028-editor-shell-and-minibuffer.md) (`Alt+M` opens the minibuffer; the `Alt+WASD` defaults)
 
 ## Context
 
@@ -76,7 +77,12 @@ a user binds into the minefield:
 
 **6. Alt is a secondary, configurable namespace** — `Alt+letter` only, never load-bearing
 for essential commands (those stay on deliverable Ctrl keys). It is gated on parser support
-and remappable for the i3/macOS cases.
+and remappable for the i3/macOS cases. Two concrete defaults live here (added 2026-06-08):
+**`Alt+W`/`A`/`S`/`D` = up/left/down/right movement**, an arrow-key alternative for keyboards
+without arrows (the arrows remain the primary binding, so movement is never *only* on Alt —
+honouring the "not load-bearing" rule); and **`Alt+M` opens the minibuffer**
+([ADR-0028](0028-editor-shell-and-minibuffer.md)). On tiling WMs where Alt is the mod key
+these may be grabbed, so they stay remappable via config ([ADR-0025](0025-user-config-layer.md)).
 
 **7. System clipboard via OSC 52; bracketed paste on.** geex's internal copy/cut/paste are
 its own registers ([ADR-0015](0015-clipboard-subsystem.md)); reaching the *system*

@@ -860,7 +860,7 @@ Candidates (no decision yet):
 
 - Text data structure: list of binary lines for v0; rope vs piece table later?
 - Undo: immutable snapshots (cheap given BEAM) vs explicit operation log?
-- Minibuffer command grammar beyond grid: command palette? vim-style ex commands?
+- Minibuffer command grammar beyond grid: command palette? vim-style ex commands? — **the shell model is settled in [ADR-0028](adr/0028-editor-shell-and-minibuffer.md)** (minibuffer = the command surface, modal: grid / search / palette / fuzzy finder; opened by `Alt+M`; command palette *instead of* a menu bar; no small file cap; tabs + file tree deferred behind the pane system).
 - Config: file-based, code-based (like xmonad/emacs), or runtime commands?
 - Theme/color: 256-color, true color, or both detected?
 - Extension API design: pin much later, not v0.1.
