@@ -105,3 +105,35 @@ dep verified; the tier is viable now; ARCH 2 stays a north-star. Risks: grammar�
 (pin versions, validate ABI at load), whole-buffer re-parse latency on big files (cache
 Engine/Store/Parser + keep a persistent `Tree` for incremental reparse — a native-NIF strength
 ARCH 2 lacks).
+
+### Spike EXECUTED — 2026-06-07, **GO confirmed** (steps ①②③⑤ run; pure Rust)
+
+Ran the load path end-to-end in a throwaway crate (`/home/oof/ts-wasm-spike`, sibling to geex; not
+committed — promote to the real `tree_sitter_wasm` package once the NIF API stabilizes). Toolchain:
+tree-sitter **CLI 0.26.9** + crate **0.26.9** (`wasm` feature) → embedded **wasmtime 36.0.10** (via
+`wasmtime-c-api-impl`, confirming the "vendored wasmtime inside the tree-sitter NIF" architecture),
+**wasi-sdk-29**, Rust 1.94.
+
+- **① build:** `tree-sitter build --wasm` on tree-sitter-json → a **6272-byte** portable
+  `tree-sitter-json.wasm`; wasi-sdk auto-downloaded to `~/.cache/tree-sitter` on first run. ✓
+- **② load (the single biggest unknown — RESOLVED):** `WasmStore::new(&Engine)` →
+  `store.load_language("json", bytes)` → `Language` (**ABI version 14**); `parser.set_wasm_store` +
+  `set_language` + `parse` → root `kind="document"`, `has_error=false`, correct s-expression. The
+  wasi-sdk-grammar ⇄ native-runtime ABI handshake **works first try** with matched 0.26.x. ✓
+- **③ contract:** `highlights.scm` via `Query`/`QueryCursor` on the wasm-store parser → **12 capture
+  spans**, each `(byte_start, byte_end, capture_name)` — `string`, `escape`, `number`,
+  `constant.builtin`, `string.special.key`. This **is** geex's `Highlight` contract, produced
+  directly (no `tree-sitter-highlight` `Highlighter` wrapper). ✓
+- **⑤ (lite) safety:** non-grammar bytes → `WasmErrorKind::Parse`, **no crash**. ✓
+
+**Exact API (tree-sitter 0.26.9):** `tree_sitter::wasmtime::Engine` (re-exported from
+`wasmtime_c_api`), `WasmStore::new(&Engine) -> Result<_, WasmError>`,
+`WasmStore::load_language(&mut self, name, bytes) -> Result<Language, WasmError>`,
+`Parser::set_wasm_store(WasmStore) -> Result<(), LanguageError>`. Captures iterate via
+`streaming_iterator::StreamingIterator`; names from `Query::capture_names()[cap.index]`.
+
+**Open follow-ups (not blockers):** ④ wrap behind one Rustler NIF + dirty-scheduler timeout (the
+BEAM step — not yet run); whether the `tree-sitter-highlight` `Highlighter` convenience layer
+supports wasm languages is **untested** — the spike deliberately used `Query`/`QueryCursor`
+directly (the path the NIF will take anyway, since it yields exact spans), so this is a
+nice-to-have, not on the critical path; incremental-reparse `Tree` caching for big-file latency.

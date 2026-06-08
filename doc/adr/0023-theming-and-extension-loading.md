@@ -108,6 +108,34 @@ my-highlighter = "~/ext/foo.wasm"
 (discovery/distribution/signing) is post-everything, gated on a real ecosystem — geex builds none
 now.
 
+### Packaging the highlighter NIF
+
+**8. The ARCH 1 NIF is net-new and ships as a standalone, extractable package — geex *rents* the
+extension runtime, builds only the one runtime nobody else has.** The 2026-06 survey found **no
+BEAM package** that loads portable grammar `.wasm` at runtime: every existing binding
+(`autumnus`/`lumis`, `treesitter_elixir`, `puretype/ex_tree_sitter`, `ex_tree_sitter_highlight`)
+**statically links** grammars at compile time (= ARCH 3 — recompile to add a language). So geex
+must build it. Two decisions fix its *form*:
+
+- **Standalone hex package, not buried in geex** (geex-agnostic name, e.g. `tree_sitter_wasm`). It
+  is a general BEAM capability (a NIF is callable from Elixir/Erlang/Gleam alike), it fills a real
+  ecosystem gap, and a focused package is the clean vehicle for the `rustler_precompiled` builds
+  geex's binary distribution needs anyway. geex then *consumes* it as a dep — "rent the runtime,
+  own the contracts," except geex creates this runtime only because none exists. **Staged
+  extraction:** build it as a local `path:`/`github:` dep while the `highlight/3` API is still
+  being discovered; publish to hex once the load path is proven and the API stabilizes — the same
+  build-extractable discipline as the Pharos adapter ([ADR-0021](0021-capability-connections.md)).
+  Publishing is opt-in generosity on top of the obligation (geex needs the NIF either way) and
+  carries a real cost: a precompiled-NIF CI matrix + version bumps against the tree-sitter crate.
+- **Rent `wasmex` for the untrusted-extension tier; do not roll our own wasmtime host.** "Make a
+  NIF for the wasmtime runtime instead of `wasmex`" literally = *rewrite `wasmex`* (itself a
+  Rustler NIF over wasmtime, with WASI / component-model / fuel / epoch / `StoreLimits` /
+  scheduler-safety / precompiled distribution already done). The binary therefore carries **two
+  wasmtime copies** — one vendored inside the tree-sitter NIF (specialized for grammar loading,
+  never exposed) and one in `wasmex` (a general embedding for extensions). Accepted as a minor
+  cost; revisit only on a *measured* binary-size problem, where the fix is upstreaming
+  grammar-loading into `wasmex`, not a bespoke host.
+
 ## Consequences
 
 - Theming is the lightest subsystem: pure data, loaded like config, **zero security surface** (a
@@ -119,6 +147,9 @@ now.
 - The install model is **fetch-nothing / declare-paths**, which sidesteps download-trust, TLS,
   and cache-invalidation, and makes executing third-party code a deliberate act — the WASM
   sandbox ([ADR-0009](0009-three-tier-extension-model.md)) contains it regardless.
+- geex **owns one new NIF** — the `tree_sitter_wasm` highlighter (net-new on the BEAM) — and may
+  publish it standalone; `wasmex` and the tree-sitter crate are *rented*, so the only Rust geex
+  maintains is the thin runtime+highlight wrapper. Two vendored wasmtime copies in the binary.
 - **Cost:** geex needs a **user-config** layer (theme selection + grammar/extension paths),
   distinct from the app/runtime config; a native `Theme` representation + renderer truecolor/alpha
   support; a curated default grammar bundle; the Zed/Helix importer + the lossy VS Code one are
