@@ -747,6 +747,46 @@ mature (wcwidth/mouse) + a second consumer; and the **live visual dogfood is gat
 TUI loop** (not built) — the wiring underneath is tested, the loop is the next visible milestone.
 
 **Not tested / deferred:** config-path **user themes** (the install story — declare a path in config)
-land with the user-config layer; the loader/format here is what they'll use. The dynamic port is
+land with the user-config layer, now specified in [ADR-0025](adr/0025-user-config-layer.md); the
+loader/format here is what they'll use. The dynamic port is
 resolved up front (small pre-bind window) rather than read back from Bandit (pharos's `after_start`) —
 acceptable on loopback; a Bandit read-back is the zero-window follow-up.
+
+### 2026-06-08 — Display width (wcwidth) + the user-config ADR (ADR-0024 / ADR-0025)
+
+**Display width — `Geex.Width` (ADR-0024 toolkit gap #1).** The render path assumed *one grapheme =
+one column*; a single double-width glyph (`字`, wide emoji) desynced every cell after it on the line.
+Now `Geex.Width.cells/1 → 0 | 1 | 2`, backed by OTP's pure-Erlang `:unicode_util.is_wide/1` +
+`lookup/1` (the same oracle `:prim_tty` falls back to) — **NIF-free**, so the extractable TUI core
+stays clean. Wide CJK/emoji → 2, combining marks / controls / explicit zero-width format chars → 0,
+ASCII fast path → 1. Wired through a **continuation-cell model**: `Geex.Screen.put_grapheme/4` places
+the glyph in a *lead* cell + an empty-`char` *continuation* cell (sharing the lead's style) for the
+right half; `draw_text` and `Geex.Highlight.Paint.to_screen/6` advance by display width. The
+`Geex.Renderer` needed **no change** — a `""` continuation emits no character and the terminal's own
+auto-advance covers column two. **Verified:** 19 tests (width unit — expectations checked against OTP
+first, not assumed; `put_grapheme` lead+continuation; Paint wide projection; Renderer emits the glyph
+once + the continuation nothing). Full suite **375 tests + 8 doctests**.
+
+**Adversarial review (`width-slice-review`, 2 dimensions × find→refute).** Found **1 critical**, all
+else refuted (the width oracle and the lone-continuation invariant held). The critical: a wide glyph
+whose **lead is the last column** placed the glyph there while its continuation clipped off-screen —
+the renderer then drew a double-width glyph in the final column and overflowed the line (trigger:
+`Screen.new(2,1) |> draw_text(0,0,"a中")`). **Fixed:** `put_grapheme/4` now refuses to draw a wide
+glyph with no room for its second column — it pads the column blank and advances — with two regression
+tests. (The prior test that *asserted* the half-drawn lead was the bug-as-spec; it was removed.)
+
+**User-config layer — [ADR-0025](adr/0025-user-config-layer.md) (Proposed, not code).** Separates the
+human's **user config** (theme/grammar/extension paths, later the keymap) from geex's **app/runtime
+config** (boot flags/deps). TOML at `~/.config/geex/config.toml` (XDG), precedence `defaults < global
+< project < GEEX_* env` cached in `:persistent_term` (pharos pattern). The shipped `Geex.Theme.load/1`
+is the path-ready reader; this is the layer that points at it (the userpath-theme install story).
+Format **decided: TOML** (comments + pharos parity; the §2a pointer-layer rule — config selects/points
+at data files, never inlines them — keeps it shallow so TOML's arrays-of-tables weakness never bites).
+The
+roadmap gained an **editor-experience** section so this slice is tracked there, not just in ADRs.
+
+**Not tested / deferred:** `Geex.Width` is unit-/render-tested but **not yet seen live** (gated on the
+interactive TUI loop, like the rest of the display path); horizontal scroll + a **left-clipped** wide
+glyph (its right half at column 0) is a future edge — geex has no horizontal scroll yet. ADR-0025 is a
+**decision**, not an implementation: the `Geex.Config` reader, the TOML dep, and the env projection are
+the build it specifies.

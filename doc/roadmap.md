@@ -178,6 +178,41 @@ Each gated on a **named consumer** (the brain/world test, [vision.md](vision.md)
 
 ---
 
+## The editor-experience layer (highlighting · themes · TUI)
+
+Orthogonal to the AI-layer staging above — this is the *"build the world well"* axis
+([vision.md](vision.md)) that makes geex a place a human (and an LLM) actually edits.
+
+**Built:**
+- **Highlighter** — tree-sitter on the WASM tier via the standalone `tree_sitter_wasm` NIF;
+  emits capture-tagged spans ([adr/0021](adr/0021-capability-connections.md)).
+- **The capability reactor** — a per-buffer process that fires highlighting off the command
+  stream (async, coalesced, latest-wins) and exposes the overlay
+  ([adr/0022](adr/0022-capability-reactor.md)).
+- **Themes are data** — native JSON keyed on tree-sitter captures, longest-prefix resolution,
+  truecolor SGR + alpha-flatten; Birds of Paradise is the bundled reference; a Zed importer reads
+  the in-vocabulary ecosystem ([adr/0023](adr/0023-theming-and-extension-loading.md)).
+- **The TUI core** — `TerminalIO` (`:prim_tty`, NIF-free) + `Screen`/`Cell`/`Renderer`/`Sgr`
+  (cell diff → bytes); extractable but kept in geex for now
+  ([adr/0024](adr/0024-tui-core-extractable.md)).
+- **Display width** — `Geex.Width` (`:unicode_util`-backed, NIF-free): wide/CJK/emoji glyphs take
+  two columns via a lead + continuation cell, zero-width marks take none. Closes the first of
+  ADR-0024's "half a toolkit" gaps.
+
+**Pending (each gated on its named consumer):**
+- **The user-config layer** — theme selection + grammar/extension paths in `~/.config/geex/
+  config.toml`, precedence + cache ([adr/0025](adr/0025-user-config-layer.md), *Proposed*). The
+  theme loader is path-ready; this is the reader that points at it (the userpath-theme install
+  story).
+- **The interactive TUI loop** — render the reactor's overlay each frame against an open buffer;
+  the next visible milestone, and what makes the live highlighting dogfood real
+  ([adr/0024](adr/0024-tui-core-extractable.md)). Brings the keymap (→ user-config) and the
+  cursor/clipboard consumers ([adr/0014](adr/0014-editor-state-and-dispatch-ownership.md),
+  [adr/0015](adr/0015-clipboard-subsystem.md)).
+- **Remaining toolkit gaps** — truecolor→256/16 degradation (capability detect), mouse input.
+
+---
+
 ## The throughline
 
 Everything above is one bet, staged: **make the command the universal unit, run it
