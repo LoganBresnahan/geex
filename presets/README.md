@@ -55,11 +55,14 @@ So a harness whose structured writers are denied can still do all of create / ed
 
 ## Using a preset
 
-1. **Start geex serving** the loopback MCP transport (ADR-0018):
+1. **Start geex serving** the loopback MCP transport (ADR-0018). These checked-in presets
+   target the fixed port `4000`, so pin it:
 
    ```sh
-   mix geex.serve            # 127.0.0.1:4000  (or: GEEX_SERVE=1 mix run --no-halt)
-   mix geex.serve --port 4100
+   mix geex.serve --port 4000   # pin 4000 to match the preset's .mcp.json
+   mix geex.serve               # default: ask the host for a FREE port (no collision) —
+                                # see the "geex MCP: serving http://127.0.0.1:<port>/mcp" log
+                                # line, or set GEEX_MCP_PORT_FILE=<path> to discover it
    ```
 
    The listener binds `127.0.0.1` only; nothing off-host can reach it.
@@ -81,7 +84,8 @@ So a harness whose structured writers are denied can still do all of create / ed
      exposes is harmless, kept for back-compat). Commit it (this is the shared, team file;
      personal overrides go in the gitignored `.claude/settings.local.json`).
 
-   Adjust the port in `.mcp.json` if you served on a non-default one.
+   The `.mcp.json` points at port `4000` — so serve with `--port 4000` (above), or edit the
+   `.mcp.json` URL to whatever port geex announced when it auto-bound a free one.
 
 3. **Approve the server once.** On first run Claude Code prompts to trust the project MCP
    server in `.mcp.json` (a deliberate one-time security gate); approve it. Check status

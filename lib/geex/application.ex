@@ -51,22 +51,27 @@ defmodule Geex.Application do
     end
   end
 
-  # The default loopback MCP port (ADR-0018) — the single source of truth. `config/runtime.exs`'s
-  # GEEX_MCP_PORT fallback mirrors this, and the checked-in preset (`presets/`) + its test assert
-  # the preset URL against `default_http_mcp_port/0`, so the preset can't silently drift off the
-  # port a default-served geex actually listens on.
-  @default_http_mcp_port 4000
+  # The port the checked-in example preset (`presets/`) targets, and what its test
+  # asserts the preset URL against so it can't silently drift. NOTE: this is *not*
+  # the app's runtime default anymore — by default geex asks the host for a free
+  # port (`Geex.MCP.Port`); pin `--port 4000` to use the static preset as-is.
+  @example_preset_port 4000
 
-  @doc "The default port the loopback MCP HTTP transport serves on when none is configured."
+  @doc "The port the checked-in example preset targets (pin `--port 4000` to use it as-is)."
   @spec default_http_mcp_port() :: pos_integer()
-  def default_http_mcp_port, do: @default_http_mcp_port
+  def default_http_mcp_port, do: @example_preset_port
 
   # The loopback MCP HTTP transport (ADR-0018), feature-gated exactly like
   # terminal_io_child/0. Default OFF; bind 127.0.0.1 only (never 0.0.0.0) so
   # nothing off-host can reach it. `mix geex.serve` / `GEEX_SERVE=1` flips :start_http_mcp on.
+  #
+  # Port: default 0 = ask the host for a free port (no hardcoded collision); a
+  # pinned `http_mcp_port` is honoured. The resolved URL is announced (logged +
+  # `GEEX_MCP_PORT_FILE`) so a headless caller can discover a dynamic port.
   defp http_mcp_child do
     if Application.get_env(:geex, :start_http_mcp, false) do
-      port = Application.get_env(:geex, :http_mcp_port, @default_http_mcp_port)
+      port = Geex.MCP.Port.resolve(Application.get_env(:geex, :http_mcp_port, 0))
+      Geex.MCP.Port.announce(port)
       [{Bandit, plug: Geex.MCP.HTTP, scheme: :http, ip: {127, 0, 0, 1}, port: port}]
     else
       []
