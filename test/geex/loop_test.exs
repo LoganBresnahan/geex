@@ -66,4 +66,55 @@ defmodule Geex.LoopTest do
       assert Loop.scroll_for(7, 100, 0) == 7
     end
   end
+
+  describe "scroll_for/4 — with a scrolloff margin" do
+    test "scrolls early to keep the margin below the cursor" do
+      # 20-row window, scrolloff 3: the cursor must stay 3 rows off the bottom, so a
+      # cursor on line 10 (already visible at row 10) still doesn't scroll...
+      assert Loop.scroll_for(0, 10, 20, 3) == 0
+      # ...but line 17 is within 3 of the bottom (row 17 of 0..19) → scroll by 1.
+      assert Loop.scroll_for(0, 17, 20, 3) == 1
+    end
+
+    test "scrolls early to keep the margin above the cursor" do
+      # Viewport shows lines 10..29; cursor on line 11 is within 3 of the top → scroll up.
+      assert Loop.scroll_for(10, 11, 20, 3) == 8
+    end
+
+    test "the top of the file pins scroll at 0 — the cursor rides above the margin" do
+      assert Loop.scroll_for(0, 0, 20, 3) == 0
+      assert Loop.scroll_for(0, 2, 20, 3) == 0
+    end
+
+    test "the margin is clamped to half the window so the bands never cross" do
+      # h = 5 → margin clamps to div(4, 2) = 2, not the requested 10.
+      assert Loop.scroll_for(0, 3, 5, 10) == 1
+    end
+
+    test "scrolloff 0 matches the no-margin edge alignment" do
+      assert Loop.scroll_for(0, 12, 10, 0) == Loop.scroll_for(0, 12, 10)
+    end
+  end
+
+  describe "status_text/3 — fixed-width status line" do
+    test "pads the label left and the position flush right" do
+      bar = Loop.status_text("foo.ex", "12:4", 20)
+      assert String.length(bar) == 20
+      assert String.starts_with?(bar, " foo.ex")
+      assert String.ends_with?(bar, "12:4 ")
+    end
+
+    test "an empty right segment still fills the width" do
+      bar = Loop.status_text("[no buffer]", "", 20)
+      assert String.length(bar) == 20
+      assert String.starts_with?(bar, " [no buffer]")
+    end
+
+    test "over-long content runs past the width (the renderer clips it)" do
+      # left + right already exceed 8 columns, so there is no padding and the string
+      # runs long; the screen clips it at the edge rather than this truncating.
+      bar = Loop.status_text("a-very-long-name.ex", "999:42", 8)
+      assert String.length(bar) > 8
+    end
+  end
 end

@@ -50,6 +50,19 @@ defmodule Geex.Width do
     end
   end
 
+  @doc """
+  The total display width of `string` — the sum of its graphemes' `cells/1`
+  widths, the number of terminal **columns** it draws to. Distinct from its byte
+  size or grapheme count: a wide glyph counts two, a combining mark zero. Used to
+  lay out fixed-width chrome (the status line; later the line-number gutter).
+  """
+  @spec string(String.t()) :: non_neg_integer()
+  def string(string) when is_binary(string) do
+    string
+    |> String.graphemes()
+    |> Enum.reduce(0, fn g, acc -> acc + cells(g) end)
+  end
+
   # `is_wide/1` is a compiled clause table (cheap) and is checked first: a wide
   # glyph is never zero-width, so this avoids the heavier `lookup/1` for CJK. The
   # zero-width path runs only for narrow non-ASCII graphemes.

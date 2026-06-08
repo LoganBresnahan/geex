@@ -19,10 +19,13 @@ defmodule Geex.Loop do
   events coalesces to a single repaint (`schedule_repaint/1` sets a flag and posts
   one `:repaint` to self; further events while it is pending are folded in).
 
-  **Render half only** for now — it paints the active buffer + the reactor's
-  overlay live, the ADR-0024 milestone that unlocks the live-highlighting dogfood.
-  The **input half** (keys → `%Command{}` on the one shared path, ADR-0003) is the
-  next slice; keys are accepted but ignored here.
+  Both halves are live: it paints the active buffer + the reactor's overlay, and
+  routes keys to `%Command{}` edits on the one shared path (ADR-0003) or view-local
+  cursor moves (via `Geex.Loop.Keymap`). The frame reserves its **bottom row** for a
+  status line (buffer label · `line:col` · dirty flag); the buffer renders into the
+  rows above, and a **scrolloff** margin keeps the cursor off the viewport edges. The
+  next chrome slice is the line-number gutter — a left-column analog of the status
+  row that shares the same viewport-region math.
 
   Needs a real terminal (`Geex.TerminalIO` over `:prim_tty`), so it starts only
   when the terminal is enabled — off under `mix test`, like `Geex.TerminalIO`. Its
@@ -32,10 +35,15 @@ defmodule Geex.Loop do
   use GenServer
   require Logger
 
-  alias Geex.{Buffer, Command, Dispatch, Renderer, Screen, Session, TerminalIO, Theme, Width}
+  alias Geex.{Buffer, Cell, Command, Dispatch, Renderer, Screen, Session, TerminalIO, Theme, Width}
   alias Geex.Command.Meta
   alias Geex.Highlight.{Paint, Reactor}
   alias Geex.Loop.Keymap
+
+  # Rows of context kept between the cursor and the top/bottom of the viewport
+  # (vim's `scrolloff`). A fixed default for now; a future per-user config knob
+  # (ADR-0025). Clamped to half the window so the bands never cross.
+  @scrolloff 3
 
   ## Public API
 
@@ -74,20 +82,42 @@ defmodule Geex.Loop do
 
   @doc """
   The viewport top (first visible buffer line) that keeps cursor `line` visible in
-  a window of `h` rows, given the previous `scroll`: edge-aligns when the cursor
-  crosses a boundary, otherwise leaves the viewport put. No scrolloff margin yet —
-  the cursor can sit on the top/bottom row; a margin is a future config knob.
+  a window of `h` rows, given the previous `scroll`. Keeps `scrolloff` rows of
+  context between the cursor and the top/bottom edge: scrolls when the cursor comes
+  within the margin, otherwise leaves the viewport put. The margin is clamped to
+  half the window (so the top and bottom bands never cross) and the top of the file
+  still pins `scroll` at 0 — near line 0 the cursor simply rides above the margin.
   """
-  @spec scroll_for(non_neg_integer(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  def scroll_for(scroll, line, h) when h > 0 do
+  @spec scroll_for(non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  def scroll_for(scroll, line, h, scrolloff \\ 0)
+
+  def scroll_for(scroll, line, h, scrolloff) when h > 0 do
+    margin = min(max(scrolloff, 0), div(h - 1, 2))
+
     cond do
-      line < scroll -> line
-      line >= scroll + h -> line - h + 1
+      line - margin < scroll -> max(line - margin, 0)
+      line + margin > scroll + h - 1 -> line + margin - h + 1
       true -> scroll
     end
   end
 
-  def scroll_for(scroll, _line, _h), do: scroll
+  def scroll_for(scroll, _line, _h, _scrolloff), do: scroll
+
+  @doc """
+  The status line as one string of exactly `w` columns: `left` (the buffer label
+  and any dirty marker) padded so `right` (`line:col`) sits flush against the right
+  edge, each with a one-column margin from the edges. If the two segments together
+  exceed `w` the string runs long and the renderer clips it at the screen edge — the
+  right segment (the position) is the first to go.
+  """
+  @spec status_text(String.t(), String.t(), non_neg_integer()) :: String.t()
+  def status_text(left, right, w) do
+    l = " " <> left
+    r = right <> " "
+    pad = max(w - Width.string(l) - Width.string(r), 0)
+    l <> String.duplicate(" ", pad) <> r
+  end
 
   ## GenServer
 
@@ -192,21 +222,54 @@ defmodule Geex.Loop do
 
   defp repaint(state) do
     case safe_session_snapshot() do
-      {:ok, %{text: text, cursor: {line, _} = cursor}} ->
-        # Track the cursor: scroll so its line stays visible in the h-row viewport.
-        scroll = scroll_for(state.scroll, line, state.h)
-        {screen, {cx, cy}} = frame(text, overlay_spans(state.reactor), state.theme, cursor, state.w, state.h, scroll)
-        Renderer.flush(screen, cursor_target(state, cx, cy))
+      {:ok, %{text: text, cursor: {line, _} = cursor} = snap} ->
+        # The bottom row is the status line; the buffer renders into the rows above
+        # it, the cursor stays within that text area, and a scrolloff margin keeps it
+        # off the top/bottom edges. Paint the text rect, grow to the full height, then
+        # overlay the status row.
+        h_text = text_height(state.h)
+        scroll = scroll_for(state.scroll, line, h_text, @scrolloff)
+        {screen, {cx, cy}} = frame(text, overlay_spans(state.reactor), state.theme, cursor, state.w, h_text, scroll)
+
+        screen =
+          screen
+          |> Screen.resize(state.w, state.h)
+          |> draw_status(state, snap)
+
+        Renderer.flush(screen, cursor_target(state.w, h_text, cx, cy))
         %{state | scroll: scroll}
 
       _ ->
-        Renderer.flush(Screen.new(state.w, state.h), :hidden)
+        screen = draw_empty_status(Screen.new(state.w, state.h), state)
+        Renderer.flush(screen, :hidden)
         %{state | scroll: 0}
     end
   end
 
-  defp cursor_target(%{w: w, h: h}, x, y) when x >= 0 and x < w and y >= 0 and y < h, do: {x, y}
-  defp cursor_target(_state, _x, _y), do: :hidden
+  # One row at the bottom is reserved for the status line; the buffer gets the rest.
+  defp text_height(h), do: max(h - 1, 0)
+
+  # Overlay the status line on the bottom row of `screen`: the buffer label + dirty
+  # marker on the left, the 1-based `line:col` flush right, on a reverse-video bar
+  # (theme fg/bg swapped — always-readable, theme-faithful chrome).
+  defp draw_status(screen, %{w: w, h: h, theme: theme}, snap) do
+    left = status_label(snap.path) <> if(snap.dirty, do: " [+]", else: "")
+    Screen.draw_text(screen, 0, h - 1, status_text(left, position(snap.cursor), w), status_style(theme))
+  end
+
+  defp draw_empty_status(screen, %{w: w, h: h, theme: theme}) do
+    Screen.draw_text(screen, 0, h - 1, status_text("[no buffer]", "", w), status_style(theme))
+  end
+
+  defp status_label(nil), do: "[scratch]"
+  defp status_label(path) when is_binary(path), do: Path.basename(path)
+
+  defp position({line, col}), do: "#{line + 1}:#{col + 1}"
+
+  defp status_style(%Theme{palette: p}), do: %Cell{fg: p.bg, bg: p.fg}
+
+  defp cursor_target(w, h_text, x, y) when x >= 0 and x < w and y >= 0 and y < h_text, do: {x, y}
+  defp cursor_target(_w, _h_text, _x, _y), do: :hidden
 
   # Resolve a key to an action and apply it. Edits go through the **one shared path**
   # (Dispatch.run with human provenance) then move the cursor; a move just sets the

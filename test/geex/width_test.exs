@@ -55,4 +55,21 @@ defmodule Geex.WidthTest do
       assert Width.cells("") == 0
     end
   end
+
+  describe "string/1 — total column width of a string" do
+    test "ASCII sums to its length" do
+      assert Width.string("hello") == 5
+      assert Width.string("") == 0
+    end
+
+    test "a wide glyph counts two" do
+      # "a" (1) + U+4E2D 中 (2) + "b" (1) = 4 columns.
+      assert Width.string("a\u{4E2D}b") == 4
+    end
+
+    test "a combining mark adds zero" do
+      # "e" + U+0301 COMBINING ACUTE ACCENT is one grapheme, one column.
+      assert Width.string("e\u{0301}") == 1
+    end
+  end
 end
