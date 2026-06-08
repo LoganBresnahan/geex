@@ -865,3 +865,101 @@ Candidates (no decision yet):
 - Theme/color: 256-color, true color, or both detected?
 - Extension API design: pin much later, not v0.1.
 - Eventually: pharos-mcp integration shape (MCP-client over stdio vs extracted library).
+- **Persistence:** a durable store *outside* ERTS? (crash recovery / session restore / a durable command-log audit) — see "Persistence & durable state".
+- **Agent integration:** adopt ACP (bring-your-own-agent) alongside the MCP-connect model? — see "Agent integration".
+- **Scroll bars** (vertical + horizontal, when applicable) — see "Scroll bars".
+
+---
+
+## Persistence & durable state (open question)
+
+Everything geex holds lives in **ERTS memory**: the buffers, each buffer's undo history,
+and the recorded command stream. A crash or restart loses all of it — the files on disk are
+the only durable truth today (the disk-truth stance, [ADR-0010](adr/0010-disk-truth-lsp-v05.md)
+/ [ADR-0017](adr/0017-reconcile-file-watch.md)).
+
+Question: **does geex need a persistent store *outside* ERTS?** What it would buy —
+**crash recovery / session restore** (reopen the buffers, cursors, scroll you had); **durable
+undo** across restarts (today history is ephemeral by design,
+[ADR-0014](adr/0014-editor-state-and-dispatch-ownership.md)); an **audit log** of every
+command (provenance is already on every command, [ADR-0005](adr/0005-provenance-on-every-command.md);
+persisting the stream makes "who changed what, when" durable).
+
+The natural thing to persist is **the command stream itself**: commands are serializable
+values ([ADR-0002](adr/0002-commands-as-values.md) + the neutral field-spec
+[ADR-0004](adr/0004-neutral-field-spec.md)), and the §15c cassette already serializes recorded
+command lists and replays them via `Dispatch.replay/2`. So a durable store = an **append-only
+command log (event-sourcing)**, replayable into state — *not* a snapshot blob. Candidate
+backends (no decision): a plain file (the cassette format extended), `:dets`, SQLite
+(`exqlite` / `ecto_sqlite3`), `CubDB`, or `mnesia`. This is the same axis as the existing
+"undo: immutable snapshots vs operation log" question — a *persisted* operation log **is**
+event-sourcing. Decide before v1; it touches the buffer/history model and the replay contract.
+
+---
+
+## Agent integration: MCP-connect vs ACP (bring-your-own-agent)
+
+geex already speaks **MCP two ways**: as a **server** (an external harness — Claude Code,
+Codex — connects in over loopback HTTP to drive edits, [ADR-0018](adr/0018-mcp-transport-streamable-http.md))
+and as a **client** (it consumes capability providers like pharos LSP,
+[ADR-0021](adr/0021-capability-connections.md)).
+
+**ACP — the Agent Client Protocol** (open-source/Apache, by Zed;
+[zed.dev/blog/bring-your-own-agent-to-zed](https://zed.dev/blog/bring-your-own-agent-to-zed))
+— is a *different axis*. It's "LSP for coding agents": the **editor is the client**, the
+**agent runs as a subprocess**, they speak a **minimal set of JSON-RPC endpoints**, and the
+editor renders the agent's responses. The editor provides edit visualization, multi-buffer
+review, syntax highlighting, LSP, and tool/MCP access-control; the agent provides the
+reasoning. Zed ships it with **Gemini CLI** (reference) and **Claude Code** (beta); nothing
+routes through Zed's servers. (Note: it's "Agent **Client** Protocol", not "agent context
+protocol".)
+
+These are the **two directions of "bring your own brain"** (geex owns the world, not the
+brain — [ADR-0007](adr/0007-world-not-brain.md)):
+
+- **MCP-connect (have):** *I'm in Claude Code; my edits flow OUT to geex.* geex is the world a
+  foreign harness reaches into.
+- **ACP-host (consider):** *I'm in geex; I summon an agent INTO a geex panel.* geex hosts the
+  agent's UI and runs it as a supervised subprocess.
+
+For an LLM-native editor the **in-editor agent panel is arguably the native experience**, and
+ACP-host is how you get it without writing an agent. Open questions before adopting:
+
+- Does geex become an **ACP client/host** — a third protocol seam alongside MCP-server and
+  MCP-client?
+- How does ACP's edit/permission/diff flow map onto **the one shared command path** +
+  **provenance** ([ADR-0003](adr/0003-one-shared-path.md) / [ADR-0005](adr/0005-provenance-on-every-command.md))?
+  An ACP agent's edits should still land as `%Command{}` on the spine, tagged with agent
+  provenance — the same discipline as the MCP path, so reconcile/replay/undo all still hold.
+- Where does the **enforcement ladder** ([ADR-0016](adr/0016-external-harness-integration.md))
+  sit for an agent geex itself launches (vs one that connects in)?
+- ACP is **stdio/subprocess**; geex's MCP transport is **connect-to-running HTTP**
+  ([ADR-0018](adr/0018-mcp-transport-streamable-http.md)) — a different lifecycle (geex
+  *spawns + supervises* the agent vs the harness spawning geex).
+
+### Port DeepSeek Moby as an ACP agent
+
+Moby (DeepSeek) already informed geex once — the `edit` tool ports **Moby's tiered
+search/replace matcher** ([ADR-0020](adr/0020-diff-edit-tool.md)). Next idea: **port Moby to
+an ACP agent** (today a VS Code extension, `~/deepseek-vscode-extension`). An ACP agent runs
+**unchanged in both Zed (BYO-agent) and geex** if geex speaks ACP-host — one agent, two
+editors. That makes Moby the **named first consumer** justifying ACP-host in geex (the
+named-consumer rule, vision §3), and gives geex a first-party in-editor agent.
+
+---
+
+## Scroll bars (vertical + horizontal)
+
+Show a scroll bar when content overflows the viewport, on each axis independently:
+
+- **Vertical** — a thumb in the **rightmost column**, length/offset proportional to `scroll` /
+  total line count. Reserve one column on the right (another inset, like the gutter on the left).
+- **Horizontal** — a thumb proportional to `hscroll` / longest-visible-line width, tucked with
+  the status row (or a reserved row above it).
+
+They're **chrome like the gutter and status line** — each reserves space from the text rect, so
+they ride the same viewport-region math (left inset = gutter, right inset = vertical bar, bottom
+row = status + horizontal bar). Fold the **horizontal bar into the horizontal-scroll slice** (it
+already computes `hscroll` + the max line width it needs); add the **vertical bar**
+opportunistically (its data — `scroll`, line count — already exists). "When applicable" = only
+when that axis overflows, so a file that fits shows neither.
