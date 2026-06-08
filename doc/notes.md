@@ -948,6 +948,38 @@ named-consumer rule, vision §3), and gives geex a first-party in-editor agent.
 
 ---
 
+## Multiple geex processes / a shared backend (daemon model)
+
+Two terminals (or tabs) each running geex might want to **share state** — open buffers, the
+session — instead of being fully independent processes. Like multiple `iex` sessions attaching
+to one node, `emacsclient` to `emacs --daemon`, or several editors talking to one language
+server. The BEAM makes this unusually natural:
+
+- A **daemon** geex node + thin terminal **frontends** that attach — an extension of the
+  connect-to-running model ([ADR-0018](adr/0018-mcp-transport-streamable-http.md), where geex
+  already runs as a server harnesses connect to; here the *terminal* is also a client).
+- Distributed Erlang (`Node.connect`, `:rpc`, `:global` / `:pg`) for cross-node sharing, or a
+  single-node daemon with local frontend processes.
+
+It fits two things already in place:
+
+- **View-local cursor/scroll ([ADR-0014](adr/0014-editor-state-and-dispatch-ownership.md)).** If
+  *buffers* are shared (one `Geex.Buffer` per file, already registered by path in
+  `BufferSupervisor`) but *views* are per-frontend, two terminals editing the same file each keep
+  their own cursor/scroll — collaborative-ish editing falls out. The buffer is already a shared
+  GenServer with a subscriber set (the loop + reactor subscribe), so a second frontend loop
+  subscribing to the same buffer would see live edits with no new machinery.
+- **Persistence (above).** The daemon is where durable state would live (the command log /
+  session), outliving any single frontend.
+
+Open questions: what's **shared** (buffers? clipboard? session?) vs **per-frontend** (the view —
+cursor/scroll/selection, already isolated); single daemon node vs distributed nodes; discovery +
+auth (the loopback / connect-first security of [ADR-0018](adr/0018-mcp-transport-streamable-http.md));
+daemon lifecycle (it outlives frontends — when does it stop?). Today: one geex process = one
+frontend = one session.
+
+---
+
 ## Scroll bars (vertical + horizontal)
 
 Show a scroll bar when content overflows the viewport, on each axis independently:

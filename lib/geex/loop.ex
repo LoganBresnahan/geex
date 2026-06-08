@@ -402,8 +402,10 @@ defmodule Geex.Loop do
 
     if row >= 0 and text_w > 0 and content_w > text_w do
       {left, len} = scrollbar_thumb(text_w, content_w, hscroll)
+      # Both are vertically-centred horizontal rules (not full blocks), so the bar reads as a
+      # thin line rather than a chunky band: a light track with a heavy, accent-coloured thumb.
       track = %Cell{char: "─", fg: pal.line_number, bg: pal.bg}
-      thumb = %Cell{char: "█", fg: pal.cursor, bg: pal.bg}
+      thumb = %Cell{char: "━", fg: pal.cursor, bg: pal.bg}
 
       Enum.reduce(0..(text_w - 1)//1, screen, fn i, acc ->
         Screen.set_cell(acc, gw + i, row, if(i >= left and i < left + len, do: thumb, else: track))
