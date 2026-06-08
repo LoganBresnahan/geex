@@ -819,10 +819,34 @@ but never **unsubscribed** from it or its reactor, so across buffer switches the
 loop subscribed (sending now-dropped messages) until death — fixed with `Buffer.unsubscribe/2` +
 `Reactor.unsubscribe/2` called from `detach` (+ regression tests).
 
-**Not tested / deferred — the live dogfood.** The `Geex.Loop` GenServer is **gated with the terminal**
-(off under `mix test`) and **not yet run against a real TTY** — this dev box has none. So a human has not
-*watched* geex paint, recolour, and accept typing; the pure logic is tested and the wiring is
-correct-by-construction, but the on-screen behaviour (raw-mode I/O, the actual SGR/cursor stream, resize)
-is unverified until a `mix run` in a terminal. **Also deferred:** vertical/horizontal **scroll** (renders
-from the top, cursor off-screen-below is hidden), the **configurable keymap** (this one is hardcoded;
-the user-config keymap is ADR-0025), mouse, and truecolor→256/16 degradation.
+**Still deferred:** vertical/horizontal **scroll** (renders from the top, cursor off-screen-below is
+hidden), the **configurable keymap** (this one is hardcoded; the user-config keymap is ADR-0025), mouse,
+and truecolor→256/16 degradation.
+
+### 2026-06-08 — Live dogfood, driven autonomously via a tmux pty (commit `cd234e8`)
+
+The `Geex.Loop` GenServer needs a real terminal (raw-mode `:prim_tty`), which this dev box's agent shell
+lacks. **tmux supplies one**: run geex inside `tmux new-session` (its own pty), `tmux send-keys` to type,
+and `tmux capture-pane -p` (`-e` for ANSI) to read the rendered character grid back — so the TUI is
+**drivable and observable headlessly**, no human screenshot needed. The full launch:
+
+    elixir --erl "-noshell -noinput +Bd" -S mix run --no-start -e 'Geex.run("lib/geex/loop.ex")'
+
+**Verified live:** geex paints the file in Birds-of-Paradise truecolor (box-drawing intact), typing
+inserts + **re-highlights live**, Enter splits the line, a no-arg launch opens a typeable scratch buffer,
+Ctrl-X quits cleanly (terminal restored), and logs land in `<tmp>/geex.log` (no alt-screen splatter).
+
+**Bugs the live run caught — only a real terminal surfaces these — all fixed (`cd234e8`):**
+- **Width/height swap.** `:prim_tty.window_size/1` returns `{cols, rows}`; `TerminalIO` + `Loop` read it
+  as `{rows, cols}`, so a 100×32 terminal rendered **32 columns wide**. Fixed in the initial size and the
+  resize event.
+- **Quit keys.** Ctrl-Q is XON (flow control), Ctrl-C is SIGINT — swallowed before a raw-mode app sees
+  them. Accept Ctrl-X (reliable) + Ctrl-Q/Ctrl-C; EOF (Ctrl-D) now quits (was: restart the loop).
+- **The BEAM break handler.** The runtime reserves SIGINT/Ctrl-C for its `BREAK:` inspect-a-node menu
+  (`sigint` isn't in `os:set_signal/2`), so the launch passes **`+Bd`** to disable it; SIGTERM stays
+  graceful (so `kill` restores the tty).
+- **Log splatter.** Startup `Logger` output painted over the alt-screen; `Geex.run/1` redirects logs to a
+  file first (hence `--no-start`, so the redirect precedes the app boot).
+
+**Still unverified live:** real SIGWINCH resize (tmux `resize-window` would test it), and the deferred
+scroll/keymap/mouse/degradation list above.
