@@ -115,6 +115,20 @@ defmodule Geex.RendererTest do
     end
   end
 
+  describe "cursor_seq/1 — hardware cursor placement (flush/2)" do
+    test "shows + moves the cursor (0-indexed → 1-indexed)" do
+      assert IO.iodata_to_binary(Renderer.cursor_seq({2, 0})) == "\e[?25h\e[1;3H"
+    end
+
+    test "hides the cursor when off-screen" do
+      assert IO.iodata_to_binary(Renderer.cursor_seq(:hidden)) == "\e[?25l"
+    end
+
+    test "nil emits nothing" do
+      assert IO.iodata_to_binary(Renderer.cursor_seq(nil)) == ""
+    end
+  end
+
   describe "diff/2 — wide glyphs" do
     test "a wide glyph emits its bytes once; the continuation cell adds no character" do
       next = Screen.new(3, 1) |> Screen.draw_text(0, 0, "\u{4E2D}b")

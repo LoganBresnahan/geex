@@ -38,6 +38,37 @@ defmodule Geex.Highlight.ReactorTest do
     assert "comment" in captures(overlay)
   end
 
+  test "subscribe/2 returns the current overlay so a subscriber can paint immediately", %{reactor: reactor} do
+    {:ok, _} = Reactor.await(reactor, 0)
+    assert %{version: 0, spans: _} = Reactor.subscribe(reactor)
+  end
+
+  test "subscribe/2 pushes {:geex_highlights, buffer, version} when a pass lands", %{buf: buf, reactor: reactor} do
+    # Drain the initial pass, then subscribe, so we observe the EDIT's notification.
+    {:ok, _} = Reactor.await(reactor, 0)
+    Reactor.subscribe(reactor)
+
+    {:ok, snap} = Buffer.dispatch(buf, insert(1, 0, "  # note\n"))
+    assert_receive {:geex_highlights, ^buf, version}, 1_000
+    assert version >= snap.version
+  end
+
+  test "a subscriber that exits is dropped without disturbing the reactor", %{buf: buf, reactor: reactor} do
+    {:ok, _} = Reactor.await(reactor, 0)
+    test = self()
+    sub = spawn(fn -> Reactor.subscribe(reactor); send(test, :subscribed); Process.sleep(:infinity) end)
+    assert_receive :subscribed, 1_000
+    Process.exit(sub, :kill)
+
+    # The reactor survives the dead subscriber and keeps notifying the live one
+    # (the test process subscribes itself via the default pid).
+    Reactor.subscribe(reactor)
+    {:ok, snap} = Buffer.dispatch(buf, insert(0, 0, "z = 0\n"))
+    assert_receive {:geex_highlights, ^buf, v}, 1_000
+    assert v >= snap.version
+    assert Process.alive?(reactor)
+  end
+
   test "latest-wins: a burst of edits coalesces to an overlay for the newest text", %{buf: buf, reactor: reactor} do
     {:ok, _} = Reactor.await(reactor, 0)
 

@@ -58,6 +58,20 @@ defmodule Geex.Highlight.Reactor do
   def highlights(reactor), do: GenServer.call(reactor, :highlights)
 
   @doc """
+  Subscribe `pid` (default: caller) to **overlay-ready** notifications. After each
+  completed pass the reactor sends the subscriber:
+
+      {:geex_highlights, buffer, version}
+
+  so an event-driven consumer (the editor loop) repaints when fresh colours land
+  rather than polling. Returns the current overlay (or `nil`) so the subscriber
+  can paint immediately and then receive updates. The subscriber is monitored and
+  dropped on exit.
+  """
+  @spec subscribe(GenServer.server(), pid()) :: %{version: non_neg_integer(), spans: [map()]} | nil
+  def subscribe(reactor, pid \\ self()), do: GenServer.call(reactor, {:subscribe, pid})
+
+  @doc """
   Block until the reactor has an overlay for buffer version `>= min_version` (or
   `timeout_ms` elapses). Polls `highlights/1` — for tests and callers that want to
   observe a specific edit's highlighting. Returns `{:ok, overlay}` or
@@ -151,6 +165,7 @@ defmodule Geex.Highlight.Reactor do
       lang: lang,
       timeout_ms: timeout,
       result: nil,
+      subscribers: %{},
       in_flight: nil,
       # An initial pass over already-loaded content, before any edit.
       pending: true,
@@ -162,6 +177,11 @@ defmodule Geex.Highlight.Reactor do
 
   @impl true
   def handle_call(:highlights, _from, state), do: {:reply, state.result, state}
+
+  def handle_call({:subscribe, pid}, _from, state) do
+    ref = Process.monitor(pid)
+    {:reply, state.result, %{state | subscribers: Map.put(state.subscribers, ref, pid)}}
+  end
 
   # Unregister in-process (we own the registration) before stopping, so the key
   # is free the instant the caller's `stop/1` returns.
@@ -178,17 +198,19 @@ defmodule Geex.Highlight.Reactor do
   def handle_info({:pass_result, id, version, result}, %{in_flight: %{id: id, ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
 
-    new_result =
+    state =
       case result do
         {:ok, spans} ->
-          %{version: version, spans: spans}
+          fresh = %{state | in_flight: nil, result: %{version: version, spans: spans}}
+          notify(fresh, version)
+          fresh
 
         {:error, reason} ->
           Logger.debug("geex highlight reactor: pass failed (#{inspect(reason)}); keeping prior overlay")
-          state.result
+          %{state | in_flight: nil}
       end
 
-    {:noreply, maybe_start(%{state | in_flight: nil, result: new_result})}
+    {:noreply, maybe_start(state)}
   end
 
   # A result from a superseded pass — ignore.
@@ -205,9 +227,20 @@ defmodule Geex.Highlight.Reactor do
     {:noreply, maybe_start(%{state | in_flight: nil})}
   end
 
+  # A subscriber died — drop it from the overlay-notify set.
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{subscribers: subs} = state)
+      when is_map_key(subs, ref) do
+    {:noreply, %{state | subscribers: Map.delete(subs, ref)}}
+  end
+
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state), do: {:noreply, state}
 
   ## Internal — the latest-wins pass loop
+
+  defp notify(%{subscribers: subs, buffer: buffer}, version) do
+    msg = {:geex_highlights, buffer, version}
+    Enum.each(Map.values(subs), &send(&1, msg))
+  end
 
   defp maybe_start(%{in_flight: nil, pending: true} = state), do: start_pass(state)
   defp maybe_start(state), do: state

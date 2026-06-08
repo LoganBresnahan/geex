@@ -25,6 +25,7 @@ defmodule Geex.Application do
           Geex.Highlight.ReactorSupervisor,
           Geex.Session
         ] ++
+        loop_child() ++
         reconcile_child() ++
         http_mcp_child()
 
@@ -35,6 +36,20 @@ defmodule Geex.Application do
   defp terminal_io_child do
     if Application.get_env(:geex, :start_terminal, true) do
       [Geex.TerminalIO]
+    else
+      []
+    end
+  end
+
+  # The interactive editor loop (ADR-0024) — the event-driven frame owner that
+  # renders the active buffer + its highlight overlay each frame. Gated with the
+  # terminal: it drives Geex.TerminalIO (and would block on `window_size` without
+  # it), so it is meaningless headless. Off under `mix test`, like the terminal.
+  # Starts after Session / Renderer / ReactorSupervisor, which it subscribes to and
+  # renders through.
+  defp loop_child do
+    if Application.get_env(:geex, :start_terminal, true) do
+      [Geex.Loop]
     else
       []
     end

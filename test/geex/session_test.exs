@@ -48,6 +48,24 @@ defmodule Geex.SessionTest do
     assert Session.active_buffer() == {:ok, buf}
   end
 
+  test "subscribe/1 returns the current active buffer and pushes on change", %{buf: buf} do
+    assert Session.subscribe() == buf
+
+    other = start_supervised!({Buffer, text: "x"}, id: :other_active_buf)
+    Session.set_active_buffer(other)
+    assert_receive {:geex_active_buffer, ^other}, 1_000
+
+    Session.set_active_buffer(nil)
+    assert_receive {:geex_active_buffer, nil}, 1_000
+  end
+
+  test "subscribe/1 does not notify when the active buffer is unchanged", %{buf: buf} do
+    Session.subscribe()
+    # `buf` is already active (setup) → no pointer change → no notification.
+    Session.set_active_buffer(buf)
+    refute_receive {:geex_active_buffer, _}, 200
+  end
+
   test "Dispatch.run/1 routes a stamped command to the active buffer and records it" do
     assert {:ok, snap} = Dispatch.run(insert(0, 0, "hi", Meta.llm("claude-opus-4-8")))
     assert snap.text == "hi"

@@ -121,6 +121,19 @@ defmodule Geex.Session do
   def active_buffer, do: GenServer.call(__MODULE__, :active_buffer)
 
   @doc """
+  Subscribe `pid` (default: caller) to **active-buffer** changes. When the active
+  buffer pointer moves (a file opened, switched, or closed) the subscriber receives:
+
+      {:geex_active_buffer, pid | nil}
+
+  so the editor loop (`Geex.Loop`) can re-attach its render to the new buffer.
+  Returns the current active buffer (`pid` or `nil`) so the subscriber can attach
+  immediately. The subscriber is monitored and dropped on exit.
+  """
+  @spec subscribe(pid()) :: pid() | nil
+  def subscribe(pid \\ self()), do: GenServer.call(__MODULE__, {:subscribe, pid})
+
+  @doc """
   Read-only snapshot for headless inspection (§15b): the active buffer's recorded
   state plus the view-local `:cursor`. `{:error, :no_active_buffer}` if none active.
   """
@@ -133,7 +146,8 @@ defmodule Geex.Session do
       view: %View{},
       clipboard: %{},
       minibuffer: %{mode: :inactive, input: "", cursor: 0},
-      layout: nil
+      layout: nil,
+      subscribers: %{}
     }
 
     {:ok, state}
@@ -141,7 +155,7 @@ defmodule Geex.Session do
 
   @impl true
   def handle_call({:set_active_buffer, pid}, _from, state) do
-    {:reply, :ok, put_in(state.view.buffer_pid, pid)}
+    {:reply, :ok, put_active(state, pid)}
   end
 
   def handle_call({:open_file, path}, _from, state) do
@@ -157,7 +171,7 @@ defmodule Geex.Session do
         # Start a highlight reactor for this buffer (ADR-0022). A no-op when gated
         # off, the language is unsupported, or one is already running.
         Geex.Highlight.Reactor.watch(pid, full)
-        {:reply, {:ok, pid}, put_in(state.view.buffer_pid, pid)}
+        {:reply, {:ok, pid}, put_active(state, pid)}
 
       {:error, _reason} = error ->
         {:reply, error, state}
@@ -252,6 +266,11 @@ defmodule Geex.Session do
     {:reply, reply, state}
   end
 
+  def handle_call({:subscribe, pid}, _from, state) do
+    ref = Process.monitor(pid)
+    {:reply, state.view.buffer_pid, %{state | subscribers: Map.put(state.subscribers, ref, pid)}}
+  end
+
   def handle_call(:snapshot, _from, state) do
     reply =
       case state.view.buffer_pid do
@@ -265,6 +284,14 @@ defmodule Geex.Session do
 
     {:reply, reply, state}
   end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{subscribers: subs} = state)
+      when is_map_key(subs, ref) do
+    {:noreply, %{state | subscribers: Map.delete(subs, ref)}}
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
 
   # Reuse the buffer already open for this (normalized) path, else start one. The
   # `:already_started` race (registry rejects a duplicate name) collapses back to
@@ -339,7 +366,19 @@ defmodule Geex.Session do
   # async cleanup), terminate it, and clear the active pointer if it pointed here.
   defp drop_buffer(pid, state) do
     evict(pid)
-    if state.view.buffer_pid == pid, do: put_in(state.view.buffer_pid, nil), else: state
+    if state.view.buffer_pid == pid, do: put_active(state, nil), else: state
+  end
+
+  # Update the active-buffer pointer and notify subscribers when it actually changes.
+  defp put_active(state, pid) do
+    if state.view.buffer_pid == pid do
+      state
+    else
+      state = put_in(state.view.buffer_pid, pid)
+      msg = {:geex_active_buffer, pid}
+      Enum.each(Map.values(state.subscribers), &send(&1, msg))
+      state
+    end
   end
 
   # Unregister-then-terminate, tolerant of two edge cases a *serialized* Session must not

@@ -46,6 +46,15 @@ defmodule Geex.Renderer do
   def flush(%Screen{} = next), do: GenServer.cast(__MODULE__, {:flush, next})
 
   @doc """
+  Push `next` **and** place the hardware cursor in the same write — `cursor` is
+  `{x, y}` (0-indexed) to show-and-move it, or `:hidden`. Emitting the cursor with
+  the cell diff keeps it correctly ordered *after* the cells, so the diff's own
+  intermediate cursor moves don't leave it in the wrong place.
+  """
+  @spec flush(Screen.t(), {non_neg_integer(), non_neg_integer()} | :hidden) :: :ok
+  def flush(%Screen{} = next, cursor), do: GenServer.cast(__MODULE__, {:flush, next, cursor})
+
+  @doc """
   Reset the renderer's model of the terminal to a blank screen of the
   given size. Use on terminal resize — the *next* flush will then
   draw everything against a known-blank baseline.
@@ -75,6 +84,18 @@ defmodule Geex.Renderer do
       ["\e[2J" | rows_diff(Screen.new(next.w, next.h), next)]
     end
   end
+
+  @doc """
+  The escape sequence that positions the hardware cursor: show + move to `{x, y}`
+  (0-indexed → 1-indexed), `:hidden` to hide it, `nil`/anything else for no-op.
+  Appended after the cell diff by `flush/2`.
+  """
+  @spec cursor_seq({non_neg_integer(), non_neg_integer()} | :hidden | nil) :: iodata()
+  def cursor_seq({x, y}) when x >= 0 and y >= 0,
+    do: ["\e[?25h", "\e[", Integer.to_string(y + 1), ";", Integer.to_string(x + 1), "H"]
+
+  def cursor_seq(:hidden), do: "\e[?25l"
+  def cursor_seq(_), do: []
 
   defp rows_diff(_current, %Screen{h: 0}), do: []
   defp rows_diff(_current, %Screen{w: 0}), do: []
@@ -145,6 +166,14 @@ defmodule Geex.Renderer do
       [] -> {:noreply, %{state | current: next}}
       iodata -> TerminalIO.write(iodata); {:noreply, %{state | current: next}}
     end
+  end
+
+  # Cell diff + cursor placement in one write. The cursor is (re)emitted every
+  # frame (it may move without any cell changing — e.g. an arrow key), so unlike
+  # flush/1 this always writes.
+  def handle_cast({:flush, %Screen{} = next, cursor}, %{current: current} = state) do
+    TerminalIO.write([diff(current, next), cursor_seq(cursor)])
+    {:noreply, %{state | current: next}}
   end
 
   def handle_cast({:resize, w, h}, state) do
