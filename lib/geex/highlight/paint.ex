@@ -39,9 +39,10 @@ defmodule Geex.Highlight.Paint do
   characters map to the right span) and the line/column. Each grapheme becomes a
   styled `Geex.Cell` placed by `Geex.Screen.put_grapheme/4`, so it advances the
   column by its **display width** ([`Geex.Width`](`Geex.Width`)) — a wide glyph
-  takes two columns and the next grapheme lands after it. The token's foreground
-  paints over the theme's editor background; off-screen cells are clipped by
-  `Geex.Screen`. Newlines advance the row.
+  takes two columns and the next grapheme lands after it. The **whole pane is filled
+  with the theme's editor background** first, then glyphs overlay it — so blank lines
+  and the gaps after short lines carry the theme background, not the terminal default.
+  Off-screen cells are clipped by `Geex.Screen`; newlines advance the row.
   """
   @spec to_screen(String.t(), [Geex.Highlight.Span.t()], Theme.t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           Screen.t()
@@ -51,10 +52,15 @@ defmodule Geex.Highlight.Paint do
     fg = theme.palette.fg
     bg = theme.palette.bg
 
+    # Paint the whole pane with the theme's editor background first, then overlay
+    # the glyphs — so blank lines, the gaps after short lines, and the area below
+    # the buffer all show the theme background, not the terminal's default.
+    base = Screen.fill_rect(Screen.new(w, h), 0, 0, w, h, %Cell{char: " ", fg: fg, bg: bg})
+
     {screen, _byte, _row, _col} =
       text
       |> String.graphemes()
-      |> Enum.reduce({Screen.new(w, h), 0, 0, 0}, fn
+      |> Enum.reduce({base, 0, 0, 0}, fn
         # "\r\n" is a single grapheme; both forms terminate the line.
         g, {screen, byte, row, _col} when g in ["\n", "\r\n"] ->
           {screen, byte + byte_size(g), row + 1, 0}
