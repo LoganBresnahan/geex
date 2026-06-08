@@ -74,8 +74,10 @@ defmodule Geex.Loop.KeymapTest do
   end
 
   describe "resolve/3 — control" do
-    test "Ctrl-Q quits" do
+    test "Ctrl-X / Ctrl-Q / Ctrl-C all quit (flow-control/signal-robust)" do
+      assert :quit = Keymap.resolve({:ctrl, ?x}, {0, 0}, "")
       assert :quit = Keymap.resolve({:ctrl, ?q}, {0, 0}, "")
+      assert :quit = Keymap.resolve({:ctrl, ?c}, {0, 0}, "")
     end
 
     test "an unknown key is ignored" do

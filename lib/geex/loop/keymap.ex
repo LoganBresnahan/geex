@@ -59,7 +59,10 @@ defmodule Geex.Loop.Keymap do
   def resolve({:key, :up}, cursor, text), do: {:move, vert(cursor, text, -1)}
   def resolve({:key, :down}, cursor, text), do: {:move, vert(cursor, text, +1)}
 
-  def resolve({:ctrl, ?q}, _cursor, _text), do: :quit
+  # Quit. Ctrl-X is the reliable key — Ctrl-Q is XON (software flow control) and
+  # Ctrl-C is SIGINT, both of which can be swallowed by the tty before they ever
+  # reach a raw-mode app, so accept all three.
+  def resolve({:ctrl, c}, _cursor, _text) when c in [?x, ?q, ?c], do: :quit
 
   def resolve(_event, _cursor, _text), do: :ignore
 

@@ -52,7 +52,10 @@ defmodule Geex.TerminalIO do
     GenServer.cast(__MODULE__, {:write, iodata})
   end
 
-  @doc "Get the current `{rows, cols}` of the terminal."
+  @doc """
+  Get the current `{cols, rows}` of the terminal — width first, then height, the
+  order `:prim_tty.window_size/1` itself returns (`{State#state.cols, rows}`).
+  """
   def window_size do
     GenServer.call(__MODULE__, :window_size)
   end
@@ -156,8 +159,10 @@ defmodule Geex.TerminalIO do
   def handle_info({ref, {:signal, signal}}, %{reader_ref: ref} = state) do
     new_tty = :prim_tty.handle_signal(state.tty, signal)
 
+    # `:prim_tty.window_size/1` returns {cols, rows}; the resize event carries
+    # {rows, cols} (its documented order), so swap on the way out.
     case :prim_tty.window_size(new_tty) do
-      {:ok, {rows, cols}} -> publish({:geex_io, {:resize, rows, cols}}, state)
+      {:ok, {cols, rows}} -> publish({:geex_io, {:resize, rows, cols}}, state)
       _ -> :ok
     end
 

@@ -104,8 +104,13 @@ defmodule Geex.Loop do
     {:noreply, schedule_repaint(%{state | w: cols, h: rows})}
   end
 
-  # End of input (terminal closed) → exit.
-  def handle_info({:geex_io, :eof}, state), do: {:stop, :normal, state}
+  # End of input (terminal closed / Ctrl-D) → quit the editor. Stopping the loop
+  # alone would just restart it (a permanent child), so stop the VM — the app's
+  # shutdown restores the terminal.
+  def handle_info({:geex_io, :eof}, state) do
+    System.stop()
+    {:noreply, state}
+  end
 
   # A key: resolve it against the current text + cursor (read fresh from Session) and
   # apply via the one shared path (edits) or a view-local cursor move.
@@ -232,10 +237,11 @@ defmodule Geex.Loop do
   end
 
   # A transient/absent TerminalIO must not crash the loop on startup; fall back to
-  # a sane default size (the next :resize corrects it).
+  # a sane default size (the next :resize corrects it). window_size/0 returns
+  # {cols, rows}, which is geex's {w, h} directly.
   defp safe_window_size do
     case TerminalIO.window_size() do
-      {:ok, {rows, cols}} -> {cols, rows}
+      {:ok, {cols, rows}} -> {cols, rows}
       _ -> {80, 24}
     end
   catch
