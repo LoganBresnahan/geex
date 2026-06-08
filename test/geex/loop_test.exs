@@ -120,19 +120,34 @@ defmodule Geex.LoopTest do
     end
   end
 
-  describe "vscroll_thumb/3 — vertical scroll bar geometry" do
+  describe "scrollbar_thumb/3 — scroll bar geometry (both axes)" do
     test "thumb length is proportional to the visible fraction" do
-      # 10 of 20 lines visible → a half-height thumb at the top.
-      assert {0, 5} = Loop.vscroll_thumb(10, 20, 0)
+      # 10 of 20 cells visible → a half-length thumb at the start.
+      assert {0, 5} = Loop.scrollbar_thumb(10, 20, 0)
     end
 
-    test "the thumb travels from top to bottom with the scroll" do
-      assert {0, 5} = Loop.vscroll_thumb(10, 20, 0)
-      assert {5, 5} = Loop.vscroll_thumb(10, 20, 10)
+    test "the thumb travels from start to end with the scroll" do
+      assert {0, 5} = Loop.scrollbar_thumb(10, 20, 0)
+      assert {5, 5} = Loop.scrollbar_thumb(10, 20, 10)
     end
 
-    test "a tiny viewport over a huge file still shows a one-row thumb" do
-      assert {0, 1} = Loop.vscroll_thumb(10, 1000, 0)
+    test "a tiny viewport over a huge content still shows a one-cell thumb" do
+      assert {0, 1} = Loop.scrollbar_thumb(10, 1000, 0)
+    end
+  end
+
+  describe "max_visible_width/3 — widest visible line" do
+    test "is the widest display width among the visible lines" do
+      text = "ab\ncdef\ngh\nijklmno"
+      # visible lines 1..2 ("cdef", "gh") → max width 4.
+      assert Loop.max_visible_width(text, 1, 2) == 4
+      # all four lines → "ijklmno" is widest at 7.
+      assert Loop.max_visible_width(text, 0, 4) == 7
+    end
+
+    test "counts display columns, so a wide glyph is two" do
+      # "a中" = 1 + 2 = 3 columns.
+      assert Loop.max_visible_width("a\u{4E2D}", 0, 1) == 3
     end
   end
 

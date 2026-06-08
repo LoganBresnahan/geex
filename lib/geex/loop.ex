@@ -276,10 +276,15 @@ defmodule Geex.Loop do
         {screen, {cx, cy}, hscroll} =
           frame(text, overlay_spans(state.reactor), state.theme, cursor, tw, h_text, scroll, state.hscroll)
 
+        gw = gutter_width(text)
+        text_w = max(tw - gw, 0)
+        content_w = max_visible_width(text, scroll, h_text)
+
         screen =
           screen
           |> Screen.resize(state.w, state.h)
           |> maybe_vscrollbar(vbar?, state.w - 1, h_text, scroll, total, state.theme)
+          |> draw_hbar(state, gw, text_w, content_w, hscroll)
           |> draw_status(state, snap)
 
         Renderer.flush(screen, cursor_target(state.w, h_text, cx, cy))
@@ -292,8 +297,10 @@ defmodule Geex.Loop do
     end
   end
 
-  # One row at the bottom is reserved for the status line; the buffer gets the rest.
-  defp text_height(h), do: max(h - 1, 0)
+  # Two rows at the bottom are reserved: the status line (h-1) and the horizontal scroll
+  # bar (h-2). The horizontal-bar row is *always* reserved — even when no line overflows —
+  # so showing/hiding the bar never reflows the text vertically. The buffer gets the rest.
+  defp text_height(h), do: max(h - 2, 0)
 
   # Overlay the status line on the bottom row of `screen`: the buffer label + dirty
   # marker on the left, the 1-based `line:col` flush right, on a reverse-video bar
@@ -347,17 +354,27 @@ defmodule Geex.Loop do
   defp highlight_line(screen, _w, _row, _bg), do: screen
 
   @doc """
-  The vertical scroll bar's thumb as `{top, length}` for a viewport of `h` rows over `total`
-  lines, scrolled to `scroll`: the length is proportional to the visible fraction (at least
-  one row) and the top is proportional to how far down the scroll is.
+  A scroll bar thumb as `{offset, length}` along one axis: for a `viewport` of cells showing
+  `content` cells total, scrolled to `offset`, the thumb length is proportional to the visible
+  fraction (at least one cell) and its position is proportional to how far the scroll is. Used
+  for both the vertical bar (rows over lines) and the horizontal bar (columns over line width).
   """
-  @spec vscroll_thumb(pos_integer(), pos_integer(), non_neg_integer()) ::
+  @spec scrollbar_thumb(pos_integer(), pos_integer(), non_neg_integer()) ::
           {non_neg_integer(), pos_integer()}
-  def vscroll_thumb(h, total, scroll) do
-    len = max(div(h * h, total), 1)
-    span = max(h - len, 0)
-    top = min(div(scroll * span, max(total - h, 1)), span)
-    {top, len}
+  def scrollbar_thumb(viewport, content, offset) do
+    len = max(div(viewport * viewport, content), 1)
+    span = max(viewport - len, 0)
+    pos = min(div(offset * span, max(content - viewport, 1)), span)
+    {pos, len}
+  end
+
+  @doc "The widest display width among the `h` lines of `text` visible from `scroll`."
+  @spec max_visible_width(String.t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  def max_visible_width(text, scroll, h) do
+    text
+    |> String.split("\n")
+    |> Enum.slice(scroll, h)
+    |> Enum.reduce(0, fn line, acc -> max(acc, Width.string(line)) end)
   end
 
   # Draw the vertical scroll bar in column `x` over rows `0..h-1`: a dim track with a brighter
@@ -366,13 +383,34 @@ defmodule Geex.Loop do
   defp maybe_vscrollbar(screen, false, _x, _h, _scroll, _total, _theme), do: screen
 
   defp maybe_vscrollbar(screen, true, x, h, scroll, total, %Theme{palette: pal}) do
-    {top, len} = vscroll_thumb(h, total, scroll)
+    {top, len} = scrollbar_thumb(h, total, scroll)
     track = %Cell{char: "│", fg: pal.line_number, bg: pal.bg}
     thumb = %Cell{char: "█", fg: pal.cursor, bg: pal.bg}
 
     Enum.reduce(0..(h - 1)//1, screen, fn row, acc ->
       Screen.set_cell(acc, x, row, if(row >= top and row < top + len, do: thumb, else: track))
     end)
+  end
+
+  # Draw the (permanently reserved) horizontal scroll bar row at `h-2`: first fill it with the
+  # theme background (so the reserved space is themed even with no bar), then — only when a
+  # visible line is wider than the text area — draw a dim track + bright thumb across the text
+  # columns `[gw, gw + text_w)`, the thumb sized/placed by `hscroll` over the widest line.
+  defp draw_hbar(screen, %{w: w, h: h, theme: %Theme{palette: pal}}, gw, text_w, content_w, hscroll) do
+    row = h - 2
+    screen = Screen.fill_rect(screen, 0, row, w, 1, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
+
+    if row >= 0 and text_w > 0 and content_w > text_w do
+      {left, len} = scrollbar_thumb(text_w, content_w, hscroll)
+      track = %Cell{char: "─", fg: pal.line_number, bg: pal.bg}
+      thumb = %Cell{char: "█", fg: pal.cursor, bg: pal.bg}
+
+      Enum.reduce(0..(text_w - 1)//1, screen, fn i, acc ->
+        Screen.set_cell(acc, gw + i, row, if(i >= left and i < left + len, do: thumb, else: track))
+      end)
+    else
+      screen
+    end
   end
 
   defp cursor_target(w, h_text, x, y) when x >= 0 and x < w and y >= 0 and y < h_text, do: {x, y}

@@ -959,7 +959,20 @@ Show a scroll bar when content overflows the viewport, on each axis independentl
 
 They're **chrome like the gutter and status line** — each reserves space from the text rect, so
 they ride the same viewport-region math (left inset = gutter, right inset = vertical bar, bottom
-row = status + horizontal bar). Fold the **horizontal bar into the horizontal-scroll slice** (it
-already computes `hscroll` + the max line width it needs); add the **vertical bar**
-opportunistically (its data — `scroll`, line count — already exists). "When applicable" = only
-when that axis overflows, so a file that fits shows neither.
+row = status + horizontal bar). The vertical bar reserves the rightmost **column only when the
+buffer overflows** (line count is stable, so no flicker); the horizontal bar reserves a **row above
+the status line permanently** (decided 2026-06-08 — horizontal overflow toggles as you scroll, so a
+permanent row avoids reflow), drawing into it only when a visible line overflows. The thumbs track
+the **viewport** (scroll / hscroll), not the cursor, and move proportionally — on a long file the
+vertical thumb shifts ~1 row per N lines scrolled, so small cursor moves won't visibly move it.
+
+### Driving them — keybindings + mouse (follow-ups, not built)
+
+- **Scroll keybindings** belong in the keymap ([ADR-0026](adr/0026-terminal-input-model.md)): vertical
+  (PageUp/PageDown, half-page, line-scroll à la `Ctrl-E`/`Ctrl-Y`, jump-to-top/bottom) **and**
+  horizontal (scroll-left/right, jump-to-line-start/end). Today only arrow-key cursor motion scrolls
+  the view indirectly (via `scrolloff`); there are no view-scroll commands yet.
+- **Mouse** is not implemented at all, so the scroll bars **cannot be dragged or clicked** yet. A mouse
+  layer (SGR mouse mode `\e[?1006h`, parsed in `Geex.Input.Parser`) would enable: drag the thumb to
+  scroll, click the trough to page, click text to position the cursor, wheel to scroll. Mouse reuses the
+  same `scrollbar_thumb`/region math in reverse (pixel/cell → scroll offset). A real slice of its own.

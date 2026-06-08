@@ -902,6 +902,16 @@ fraction, positions it ∝ scroll). Verified: thumb at the top at scroll 0, trav
 track after jumping to line 206. The cursor never lands on the bar (it stays in `[gutter, w−1)`). 440
 tests + 8 doctests green.
 
-**Still unverified live:** the keymap-capability/Kitty-protocol model
-([ADR-0026](adr/0026-terminal-input-model.md)); mouse; truecolor→256/16 degradation; the **horizontal**
-scroll bar (a row-placement decision — reserve a row vs. overlay the status line — the next slice).
+**Horizontal scroll bar — added + verified live.** A **permanently reserved row** above the status line
+(row `h-2`; `text_height/1` now `h-2`, so showing/hiding the bar never reflows the text). It fills with the
+theme background when there's no overflow and draws a dim `─` track + bright `█` thumb across the text
+columns when a *visible* line is wider than the text area (`max_visible_width/3` × `scrollbar_thumb/3`, the
+geometry now shared with the vertical bar). Verified in a 60×20 pane: scrolling right to column 71 of a
+long line slid the thumb off the left edge (`───████───`); and the **vertical** thumb, after scrolling the
+view down to line 163, travelled from the top to the middle of its track — confirming both bars track the
+viewport (not the cursor) and move on real scrolling. 442 tests + 8 doctests green.
+
+**Still unverified live / not built:** the keymap-capability/Kitty-protocol model
+([ADR-0026](adr/0026-terminal-input-model.md)); **mouse** (so the scroll bars can't be dragged yet —
+captured as a follow-up); **scroll keybindings** (PageUp/Down, line-scroll, horizontal — part of the
+keymap work, [ADR-0026](adr/0026-terminal-input-model.md)); truecolor→256/16 degradation.
