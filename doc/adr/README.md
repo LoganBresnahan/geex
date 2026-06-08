@@ -39,6 +39,7 @@ Each ADR: **Status** · **Context** (the forces) · **Decision** · **Consequenc
 | [0021](0021-capability-connections.md) | Capability connections — contracts, adapters & hosting tiers (consume-MCP model; LSP + highlighting) | Accepted |
 | [0022](0022-capability-reactor.md) | The capability reactor — when highlighting & LSP fire (per-buffer process; async cadence) | Accepted |
 | [0023](0023-theming-and-extension-loading.md) | Theming & loading themes/grammars/extensions (capture-vocab theme; config-path install; fetch-nothing) | Accepted |
+| [0024](0024-tui-core-extractable.md) | TUI core is extractable but stays in geex until mature + a second consumer (no-NIF `prim_tty`) | Accepted |
 
 ## Adding one
 
