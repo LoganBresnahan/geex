@@ -628,3 +628,43 @@ provenance-tagged `%Command{}` in the one undo history — dogfood == production
 - **Other first-class presets** (Codex, Gemini, Continue, Roo, OpenCode) are not checked in —
   the same two pieces in each harness's own config dialect, added as named consumers appear
   (presets are ongoing, version-sensitive maintenance — ADR-0016).
+
+### 2026-06-07 — Syntax highlighting: tree-sitter-on-wasm engine + Birds of Paradise theme (ADR-0021/0023)
+
+geex's first **host-in** capability. A net-new BEAM package, `tree_sitter_wasm` (sibling repo,
+path dep), is the ARCH-1 highlighter: a Rustler NIF (tree-sitter 0.26.9 `wasm` feature → embedded
+wasmtime) that loads a **portable grammar `.wasm`** (`tree-sitter build --wasm`, wasi-sdk) via
+`WasmStore::load_language` and returns capture spans `{byte_start, byte_end, capture}`. Wired into
+geex behind `Geex.Highlight` (the contract), with bundled json + elixir grammars; rendered by a
+capture→`Style`→truecolor-ANSI pipeline (`Geex.Theme`/`Geex.Color`/`Geex.Ansi`) and the **Birds of
+Paradise** theme (the author's Zed port, the template others follow).
+
+**Verified:** package suite **8 tests** (load, capture contract, cache reuse, large-input/0 ms
+**`:timeout`**, the **parser-reset regression**, malformed-bytes/bad-query error tuples); geex suite
+**322 tests + 8 doctests** green, `highlight_test` deterministic across 3 seeds. `mix geex.highlight`
+renders the elixir sample live in 24-bit truecolor — keyword-red, string-yellow-italic, an
+**escape-purple nested inside the string**, number/atom-blue, comment-brown-italic — Birds of
+Paradise faithfully in the terminal. Hardened: the compiled grammar (parser+store+query) is cached
+in a `ResourceArc` behind a `Mutex`; the parse is bounded by a wall-clock deadline; a cancelled parse
+**resets** the cached parser (the bug the determinism run caught). An adversarial-review workflow
+(4 lenses, 12 agents, findings verified) confirmed **no critical/concurrency defects**; two real fixes
+landed — `Application.app_dir/2` now returns a tagged `{:app_not_loaded, :geex}` instead of raising,
+and `mix geex.highlight` `Mix.raise`s cleanly on an unreadable file (was `File.read!`).
+
+**Good as of:** the commit carrying this entry. `mix geex.highlight lib/geex/ansi.ex` (or any
+`.ex`/`.json`, or no arg) prints truecolor-highlighted source; `Geex.Highlight.spans/3` is the
+synchronous seam the reactor will call.
+
+**Not tested / deferred (honest scope):**
+- **The reactor is NOT built** ([ADR-0022](adr/0022-capability-reactor.md)) — *when* highlighting
+  fires (async, debounced, viewport-first off the command stream) is its own later slice;
+  `spans/3` is synchronous and runs nothing on its own.
+- **Not wired to the live display.** `Geex.Ansi` renders a styled *string*; teaching
+  `Geex.Renderer` to emit SGR per `Geex.Cell` (so a buffer paints on the `Screen` grid) is the
+  connected follow-up — the colour/attr vocabulary already matches `Geex.Cell`.
+- **Only json + elixir grammars are bundled;** user/config-path grammars + the theme importers
+  (Zed/Helix near-lossless, VS Code lossy) land with the user-config layer ([ADR-0023](adr/0023-theming-and-extension-loading.md)).
+- **`tree_sitter_wasm` is unpublished** (local path dep) and ships **no precompiled NIF**
+  (`rustler_precompiled`) yet; its `Highlighter`-convenience-wrapper wasm support is untested
+  (the NIF uses `Query`/`QueryCursor` directly), and incremental reparse (persistent `Tree`) is a
+  noted follow-up.

@@ -34,8 +34,14 @@ defmodule Mix.Tasks.Geex.Highlight do
 
     {text, lang} =
       case args do
-        [] -> {@sample, "elixir"}
-        [path | _] -> {File.read!(path), lang_for(path)}
+        [] ->
+          {@sample, "elixir"}
+
+        [path | _] ->
+          case File.read(path) do
+            {:ok, text} -> {text, lang_for(path)}
+            {:error, posix} -> Mix.raise("could not read #{path}: #{:file.format_error(posix)}")
+          end
       end
 
     case Geex.Highlight.spans(text, lang) do

@@ -47,9 +47,8 @@ defmodule Geex.Highlight.Grammars do
   end
 
   defp compile(language) when language in @bundled do
-    dir = Application.app_dir(:geex, Path.join(["priv", "grammars", language]))
-
-    with {:ok, wasm} <- File.read(Path.join(dir, "parser.wasm")),
+    with {:ok, dir} <- grammar_dir(language),
+         {:ok, wasm} <- File.read(Path.join(dir, "parser.wasm")),
          {:ok, scm} <- File.read(Path.join(dir, "highlights.scm")),
          {:ok, grammar} <- load_grammar(wasm, language, scm) do
       {:ok, grammar}
@@ -60,6 +59,14 @@ defmodule Geex.Highlight.Grammars do
   end
 
   defp compile(language), do: {:error, {:unknown_language, language}}
+
+  # Application.app_dir/2 raises if :geex isn't loaded; keep the contract's
+  # tagged-error shape rather than leaking an ArgumentError to the caller.
+  defp grammar_dir(language) do
+    {:ok, Application.app_dir(:geex, Path.join(["priv", "grammars", language]))}
+  rescue
+    ArgumentError -> {:error, {:app_not_loaded, :geex}}
+  end
 
   defp load_grammar(wasm, name, scm) do
     case TreeSitterWasm.load_grammar(wasm, name, scm) do
