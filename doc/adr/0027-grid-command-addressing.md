@@ -176,6 +176,35 @@ being composed, not permanent chrome (ties the screen cost to the moment it earn
 same instinct as showing the scroll bars only on overflow). This lands with the deferred
 viewport-relative mode + `Width.col_at_display/2`.
 
+## Amendment (2026-06-09): built — the grid picking surface
+
+The first grid slice shipped: the **human picking surface** (the mode the amendment above promoted to
+primary), end-to-end and live-verified.
+
+- **`Geex.Coord`** (`%Coord{x, y}` + `Coord.Range`) — `parse/1` reads `x5 y7` / `x5 y7 - x12 y9`
+  (rejecting `0`/signed coords, a reversed range, an empty range at parse, §7); `to_caret/2` (a `goto`
+  jump) and `to_span/2` (the inclusive→half-open span for `Doc.slice`/`replace`) resolve **grapheme**
+  coordinates against a `Doc`, clamping `x` past a line end and erroring on `y` past EOF (§7). Pure, no
+  view/width — the §2 safety property realised.
+- **`Geex.Width.col_at_display/2`** — the deferred `cursor_xy` dual: display column → grapheme `x`.
+  Pure (a function of the line text, *not* scroll — `hscroll` only positions ruler ticks), so the
+  display↔grapheme cast that §"display ruler" worried about is a plain pure cast, not a view read.
+- **Grid mode** — `Alt+G` opens the minibuffer in `:grid` mode and shows the **contextual** display-
+  column **ruler** (top row, `hscroll`-locked, reserved via `Screen.translate_y/1`) + the **grid-line
+  overlay** (dotted vertical rules every 5th display column, every 10th brightened, drawn only on blank
+  cells — indent-guide style, never over a glyph). `copy`/`cut <range>`, `goto`/bare `<coord>`; the
+  transport casts display→grapheme (`col_at_display`) then resolves via `Coord`, and `copy`/`cut` reuse
+  the clipboard ops by setting the resolved span as the selection (so the region is briefly visible).
+- **Verified live** against a real wide glyph (the one fragile seam, §"Verification"): on `x中yz hello`,
+  `goto x4` lands on grapheme 3 (`y`), both of `中`'s cells (`x2`/`x3`) map to its grapheme, and
+  `cut x7-x11` removes `hello` — the cast honours the wide glyph exactly. (The `cursor_x` tmux-oracle
+  assertion in §"Verification" remains the deferred *automated* guard; this was a manual confirmation.)
+
+**Still deferred** (unchanged): the **buffer-absolute grapheme** form on the agent/MCP surface (the
+`Geex.Command.Type` `:coord` cast + a grid edit tool — this slice is the *human* surface only; the agent
+already edits by grapheme `line/col`); **block** (`:`) and **multi-selection** (`,`) ranges;
+easy-motion **jump labels**; the `\e[6n` empirical per-terminal width detection; pane targeting.
+
 ## See
 
 [doc/notes.md](../notes.md) (the original grid sketch + open questions this settles),

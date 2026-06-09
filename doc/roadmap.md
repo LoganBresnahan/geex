@@ -247,11 +247,14 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    `run_command` hack is deleted; bare `N`, typed `line N`, and `tools/call line` converge on
    `ViewActions.line/1`.
 4. **The remaining minibuffer modes** ([adr/0028](adr/0028-editor-shell-and-minibuffer.md) §2):
-   **palette** (`Alt+P` / typed `palette`), **grid** (`:coord`/`:coord_range` cast →
-   `Coord.to_span` → copy/cut/replace, [adr/0027](adr/0027-grid-command-addressing.md)) with
-   the **display ruler + grid-line overlay** (the ADR-0027 amendment; `cursor_x`-verified
-   display↔grapheme cast), incremental **search** (`/`), and the **fuzzy file/buffer finder**
-   (with path tab-completion — one `Completion` abstraction, sources per mode).
+   - **grid** (`Alt+G`) — **built, first slice** ([adr/0027](adr/0027-grid-command-addressing.md)
+     amendment): `Geex.Coord` (`parse`/`to_caret`/`to_span`) + `Width.col_at_display` (the
+     display→grapheme cast) + the contextual display-column **ruler** and dotted **grid-line
+     overlay**; `copy`/`cut`/`goto` over coordinates, live-verified against a wide glyph.
+     Remaining: the **agent/buffer-absolute** grapheme form (`Geex.Command.Type` `:coord` cast +
+     a grid edit tool), block/multi ranges, the `cursor_x`-oracle *automated* cast test.
+   - **palette** (`Alt+P` / typed `palette`), incremental **search** (`/`), and the **fuzzy
+     file/buffer finder** (path tab-completion — one `Completion` abstraction, sources per mode).
 5. **undo / redo** — **built** ([adr/0031](adr/0031-undo-redo-history-operations.md)): history
    operations on `Alt+Z` / `Alt+Shift+Z` (replay-from-base over the recorded history + the loaded
    `base`, [adr/0014](adr/0014-editor-state-and-dispatch-ownership.md)); a fresh edit clears the

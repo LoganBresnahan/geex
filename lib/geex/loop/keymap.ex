@@ -27,6 +27,7 @@ defmodule Geex.Loop.Keymap do
           {:edit, struct(), cursor()}
           | {:move, cursor()}
           | :minibuffer
+          | :grid
           | :select_start
           | :select_all
           | :select_clear
@@ -80,6 +81,9 @@ defmodule Geex.Loop.Keymap do
   #   Q   E   — word back / forward
   #   R   F   — line start / end
   def resolve({:alt, c}, _cursor, _text) when c in [?m, ?M], do: :minibuffer
+  # Grid mode (ADR-0027): Alt+G opens the minibuffer in `:grid` mode and shows the
+  # display-column ruler + grid-line overlay for picking coordinates.
+  def resolve({:alt, c}, _cursor, _text) when c in [?g, ?G], do: :grid
   # Undo / redo (ADR-0031): Alt+Z undoes, Alt+Shift+Z redoes — these are case-*sensitive*
   # (the terminal sends `M-z` vs `M-Z`), the one Alt chord where shift means something other
   # than the same action. History operations, not edits; the loop runs them on the buffer.

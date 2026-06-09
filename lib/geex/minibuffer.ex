@@ -9,14 +9,16 @@ defmodule Geex.Minibuffer do
   `active?/1`, renders `prompt/1 <> value/1` over the status row, and `close/1`s it on
   submit or cancel.
 
-  Modes grow with the command surface — v1 ships `:command` (a bare line number jumps to
-  that line); grid commands ([ADR-0027](../../doc/adr/0027-grid-command-addressing.md)),
-  incremental search, the command palette, and the fuzzy finder are the next modes.
+  Modes grow with the command surface — `:command` (typed verbs / a bare line number) and
+  `:grid` (coordinate commands, [ADR-0027](../../doc/adr/0027-grid-command-addressing.md) —
+  the loop shows the display-column ruler + grid-line overlay while it is open, so the `x`
+  the user types is a display column). Incremental search, the palette, and the fuzzy finder
+  are the next modes.
   """
 
   defstruct mode: :inactive, input: "", cursor: 0
 
-  @type mode :: :inactive | :command
+  @type mode :: :inactive | :command | :grid
   @type t :: %__MODULE__{mode: mode(), input: String.t(), cursor: non_neg_integer()}
 
   @doc "A closed (inactive) minibuffer."
@@ -25,7 +27,8 @@ defmodule Geex.Minibuffer do
 
   @doc "Open the minibuffer in `mode` with an empty input."
   @spec open(mode()) :: t()
-  def open(mode \\ :command) when mode != :inactive, do: %__MODULE__{mode: mode, input: "", cursor: 0}
+  def open(mode \\ :command) when mode != :inactive,
+    do: %__MODULE__{mode: mode, input: "", cursor: 0}
 
   @doc "Whether the minibuffer is capturing input."
   @spec active?(t()) :: boolean()
@@ -43,6 +46,7 @@ defmodule Geex.Minibuffer do
   @doc "The prompt shown before the input, per mode."
   @spec prompt(t()) :: String.t()
   def prompt(%__MODULE__{mode: :command}), do: ":"
+  def prompt(%__MODULE__{mode: :grid}), do: "grid "
   def prompt(%__MODULE__{}), do: ""
 
   @doc "Insert grapheme(s) `g` at the cursor, advancing it past them."

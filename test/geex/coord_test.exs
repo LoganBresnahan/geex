@@ -99,5 +99,12 @@ defmodule Geex.CoordTest do
       r = %Range{from: %Coord{x: 1, y: 1}, to: %Coord{x: 1, y: 9}}
       assert Coord.to_span(r, doc("a\nb")) == {:error, :line_out_of_range}
     end
+
+    test "both endpoints overshooting a short line clamp to a collapsed span (the caller must guard)" do
+      # `x5 y1 - x9 y1` parses (5 < 9), but on "ab" both x clamp to the line end (2), so the span
+      # collapses to a point — the loop's grid_clip treats this as a no-op, not a phantom selection.
+      r = %Range{from: %Coord{x: 5, y: 1}, to: %Coord{x: 9, y: 1}}
+      assert {:ok, {{0, 2}, {0, 2}}} = Coord.to_span(r, doc("ab"))
+    end
   end
 end

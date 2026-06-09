@@ -67,6 +67,40 @@ defmodule Geex.Loop.VerbsTest do
     end
   end
 
+  describe "parse_grid/1 — grid-mode coordinate commands (ADR-0027)" do
+    alias Geex.Coord
+
+    test "copy/cut take a range" do
+      assert {:copy, %Coord.Range{from: %Coord{x: 5, y: 7}, to: %Coord{x: 12, y: 9}}} =
+               Verbs.parse_grid("copy x5 y7 - x12 y9")
+
+      assert {:cut, %Coord.Range{}} = Verbs.parse_grid("cut x1 y1 - x3 y1")
+    end
+
+    test "goto and a bare coordinate both jump to a single coordinate" do
+      assert {:goto, %Coord{x: 5, y: 7}} = Verbs.parse_grid("goto x5 y7")
+      assert {:goto, %Coord{x: 5, y: 7}} = Verbs.parse_grid("x5 y7")
+    end
+
+    test "the wrong shape for the verb is unknown" do
+      # copy needs a range, not a single coord
+      assert Verbs.parse_grid("copy x5 y7") == :unknown
+      # goto needs a single coord, not a range
+      assert Verbs.parse_grid("goto x5 y7 - x9 y7") == :unknown
+    end
+
+    test "reversed / empty / malformed coordinates are unknown" do
+      assert Verbs.parse_grid("copy x9 y1 - x2 y1") == :unknown
+      assert Verbs.parse_grid("copy x5 y7 - x5 y7") == :unknown
+      assert Verbs.parse_grid("frob") == :unknown
+    end
+
+    test "`no` / empty cancels" do
+      assert Verbs.parse_grid("no") == :cancel
+      assert Verbs.parse_grid("") == :cancel
+    end
+  end
+
   describe "parse/1 — cancel and unknown" do
     test "`no` is the true Alt+N twin (clears a selection); an empty line cancels" do
       assert Verbs.parse("no") == {:action, :select_clear}

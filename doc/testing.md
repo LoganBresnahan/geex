@@ -1168,3 +1168,39 @@ gated; (d) LOW — typed `no` parsed as a plain cancel, so the typed surface **c
 **Scoping:** the verb table is hardcoded v1 — it re-bases on the **catalog** when the palette lands
 (ADR-0028); `scroll` / coordinate `select` / grid `goto x y` are the next view-action members; typed
 `open`/`new`/`close` wait for path completion (the finder).
+
+### 2026-06-09 — Grid commands: the human picking surface (ADR-0027 built)
+
+The differentiator. Coordinate-addressed `copy`/`cut`/`goto` with a display-column **ruler** + **grid-line
+overlay**. Two commits. **A** (`11d7af1`) — the pure, replay-safe core: `Geex.Coord` (`%Coord{x,y}` +
+`Coord.Range`; `parse/1`, `to_caret/2`, `to_span/2` — inclusive→half-open, clamp-x, EOF-error) +
+`Width.col_at_display/2` (display column → 1-based grapheme `x`; a wide glyph owns two display columns, both
+map to it) + `Screen.translate_y/2`. All grapheme/pure — the ADR-0027 §2 safety property (a width-table
+change can mis-*render* but never mis-*address*). **B** — grid mode: `Alt+G` opens the minibuffer in `:grid`
+mode and the repaint shows the **contextual** ruler (top row, `hscroll`-locked, reserved via `translate_y`)
++ the **dotted `┊` grid-line overlay** (every 5th display column, every 10th brightened, two-tone palette-
+derived, drawn only on blank cells — indent-guide style, never over a glyph). `Verbs.parse_grid` parses
+`copy`/`cut <range>` and `goto`/bare `<coord>`; the loop casts display→grapheme per endpoint, resolves via
+`Coord`, and `copy`/`cut` reuse the clipboard ops by setting the resolved span as the (briefly visible)
+selection. The key simplification: `y` is the gutter number (already logical, scroll-independent), and the
+display→grapheme cast is **pure** (`hscroll` only positions ruler ticks) — so the "viewport-relative" mode
+the ADR fretted over is just a pure cast.
+
+**Live-verified in tmux** — incl. the one fragile seam (the display↔grapheme cast, ADR-0027 §"Verification"):
+the ruler shows `…7890123…`, the dotted rules land in the blank cells under their ticks; `goto x5 y2` →
+status 2:5; `copy x3 y2 - x5 y2` then paste duplicates "def". On a **wide-glyph** line `x中yz hello`:
+`goto x4` lands on grapheme 3 (`y`, *not* 4), `x2`/`x3` both map to `中`'s grapheme, and `cut x7-x11` removes
+"hello" — the cast honours `中`'s two columns exactly. Chrome clears on submit. (Manual confirmation; the
+`cursor_x`-oracle *automated* test stays deferred.)
+
+**Adversarial review** (`grid-commands-review`, 4 dimensions × find→verify, 6 agents): **1 of 2 confirmed**
+(live-reproduced). Fixed (medium): `grid_clip` built the selection **unconditionally**, so a range whose
+endpoints both overshoot a short line (`copy x5 y1 - x9 y1` on a 2-char line) resolves to a **collapsed**
+span; `do_copy`/`do_cut`'s collapsed-guard early-returns *without* nilling it, leaving a truthy-but-collapsed
+`%Selection{}` that the next motion turns into a **phantom highlight** → `grid_clip` now nils the selection on
+the collapsed path (a real no-op). Re-verified live: a collapsed grid-copy + motion shows **0** selection-
+tinted cells. **606 tests + 9 doctests** green, `--warnings-as-errors` clean.
+
+**Scoping:** this is the **human** picking surface only. The **agent/buffer-absolute** grapheme form (a
+`Geex.Command.Type` `:coord` cast + a grid edit tool), **block**/**multi** ranges, easy-motion jump labels,
+and the `cursor_x`-oracle automated cast test are documented deferrals (ADR-0027 amendment).

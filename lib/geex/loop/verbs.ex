@@ -24,9 +24,18 @@ defmodule Geex.Loop.Verbs do
   table is the v1 the catalog replaces).
   """
 
+  alias Geex.Coord
+
   @type verb ::
           {:line, non_neg_integer()}
           | {:action, atom()}
+          | :cancel
+          | :unknown
+
+  @type grid ::
+          {:goto, Coord.t()}
+          | {:copy, Coord.Range.t()}
+          | {:cut, Coord.Range.t()}
           | :cancel
           | :unknown
 
@@ -34,6 +43,40 @@ defmodule Geex.Loop.Verbs do
   @spec parse(String.t()) :: verb()
   def parse(input) when is_binary(input) do
     input |> String.trim() |> String.downcase() |> do_parse()
+  end
+
+  @doc """
+  Parse a `:grid`-mode line (ADR-0027): `copy`/`cut` over a coordinate **range**, `goto`
+  (or a bare coordinate) over a single **coordinate**. The coordinates are *display columns*
+  here (the ruler is up) — the loop casts `x` to a grapheme before resolving. `no`/empty
+  cancels; a malformed line or the wrong shape for the verb (a coord where a range is needed)
+  is `:unknown`. Pure — `Geex.Coord.parse/1` does the syntactic work.
+  """
+  @spec parse_grid(String.t()) :: grid()
+  def parse_grid(input) when is_binary(input) do
+    input |> String.trim() |> String.downcase() |> do_parse_grid()
+  end
+
+  defp do_parse_grid(""), do: :cancel
+  defp do_parse_grid("no"), do: :cancel
+  defp do_parse_grid("copy " <> rest), do: grid_range(rest, :copy)
+  defp do_parse_grid("cut " <> rest), do: grid_range(rest, :cut)
+  defp do_parse_grid("goto " <> rest), do: grid_coord(rest, :goto)
+  # A bare coordinate (no verb) jumps the cursor there.
+  defp do_parse_grid(rest), do: grid_coord(rest, :goto)
+
+  defp grid_range(rest, verb) do
+    case Coord.parse(rest) do
+      {:ok, %Coord.Range{} = range} -> {verb, range}
+      _ -> :unknown
+    end
+  end
+
+  defp grid_coord(rest, verb) do
+    case Coord.parse(rest) do
+      {:ok, %Coord{} = coord} -> {verb, coord}
+      _ -> :unknown
+    end
   end
 
   defp do_parse(""), do: :cancel

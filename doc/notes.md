@@ -853,8 +853,13 @@ When grid mode is triggered, optionally overlay coordinate labels on visible reg
 
 > **Ruler / overlay are settled in [ADR-0027 amendment](adr/0027-grid-command-addressing.md#amendment-2026-06-08-the-display-ruler--the-human-picking-surface)** — the x-axis ruler is *display-column* (a shared top ruler can only honestly count cells), so it **is** viewport-relative mode made visible; ruler + grid-line paint are **contextual** (shown only while composing a viewport grid command). The display↔grapheme cast is verified by tmux `cursor_x`; its runtime cousin is `\e[6n`.
 
-**Grid-line *styling* brain-dump (2026-06-09, user)** — open design for the grid-mode build:
-the contextual overlay could be a **hotkey-toggled grid-line paint** (the `grid`/`lines`
+**Grid-line *styling* brain-dump (2026-06-09, user) — BUILT 2026-06-09** (`Alt+G` grid mode,
+[ADR-0027 amendment](adr/0027-grid-command-addressing.md#amendment-2026-06-09-built--the-grid-picking-surface)):
+the v1 shipped a contextual display-column **ruler** + a **dotted** (`┊`) grid-line overlay
+every 5th column, every 10th brightened (two-tone, palette-derived: minor = `line_number`,
+major = `cursor`), drawn **only on blank cells** (indent-guide style — never over a glyph). The
+notes below are the *original* design space; what shipped is the minimal honest core of it.
+The contextual overlay could be a **hotkey-toggled grid-line paint** (the `grid`/`lines`
 verb/chord) drawing **multicoloured and/or dotted rules** so a user can visually *mark* the
 region they're about to name — e.g. every-5th-column rule dotted dim, every-10th solid +
 colour-cycled, so "x37" is findable by eye without counting. Colour-cycling rules double as a
@@ -897,7 +902,10 @@ pattern again.
 | `Alt+N` / Esc | clear the selection — **built** |
 | `Alt+X` / `Alt+C` / `Alt+V` | cut / copy / paste the selection (copy/cut no-op with no selection; paste replaces a selection) — **built** |
 | `Alt+Z` / `Alt+Shift+Z` | undo / redo (history operations, not recorded `%Command{}`s) — **built** |
+| `Alt+M` | open the minibuffer (`:command` mode) — **built** |
+| `Alt+G` | open grid mode (display-col ruler + grid lines; `copy`/`cut`/`goto` over coords) — **built** |
 | `Alt+P` | open the command palette |
+| `Ctrl-O` | save the active buffer — **built** |
 
 **`Alt+Shift+letter` is deliverable on legacy terminals — `Alt+z` ≠ `Alt+Shift+z`.** Alt is
 ESC-prefixed and Shift just makes the letter uppercase, so the bytes differ (`ESC z` vs

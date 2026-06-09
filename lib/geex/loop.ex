@@ -40,6 +40,7 @@ defmodule Geex.Loop do
     Cell,
     Clipboard,
     Command,
+    Coord,
     Dispatch,
     Minibuffer,
     Renderer,
@@ -349,7 +350,12 @@ defmodule Geex.Loop do
         # it, the cursor stays within that text area, and a scrolloff margin keeps it
         # off the top/bottom edges. Paint the text rect, grow to the full height, then
         # overlay the status row.
-        h_text = text_height(state.h)
+        #
+        # Grid mode (ADR-0027) reserves one more row at the **top** for the display-column
+        # ruler; the text frame is painted at the reduced height and shifted down by `top`.
+        grid? = grid_mode?(state)
+        top = if grid?, do: 1, else: 0
+        h_text = max(text_height(state.h) - top, 0)
         # Reserve the rightmost column for a vertical scroll bar when the buffer overflows
         # the viewport; the text then renders into a one-column-narrower area.
         total = line_count(text)
@@ -387,10 +393,20 @@ defmodule Geex.Loop do
           screen
           |> Screen.resize(state.w, state.h)
           |> maybe_vscrollbar(vbar?, state.w - 1, h_text, scroll, total, state.theme)
+          # Shift the text + scroll bar down past the reserved ruler row, then paint the
+          # contextual grid chrome over the now-vacant top row + the text region.
+          |> Screen.translate_y(top)
+          |> draw_ruler(grid?, gw, text_w, hscroll, state.theme)
+          |> draw_grid_lines(grid?, gw, text_w, h_text, top, hscroll, state.theme)
           |> draw_hbar(state, gw, text_w, content_w, hscroll)
 
-        {screen, cursor} =
-          draw_bottom(screen, state, snap, cursor_target(state.w, h_text, cx, cy))
+        target =
+          case cursor_target(state.w, h_text, cx, cy) do
+            {x, y} -> {x, y + top}
+            :hidden -> :hidden
+          end
+
+        {screen, cursor} = draw_bottom(screen, state, snap, target)
 
         Renderer.flush(screen, cursor)
         %{state | scroll: scroll, hscroll: hscroll}
@@ -574,6 +590,65 @@ defmodule Geex.Loop do
   defp cursor_target(w, h_text, x, y) when x >= 0 and x < w and y >= 0 and y < h_text, do: {x, y}
   defp cursor_target(_w, _h_text, _x, _y), do: :hidden
 
+  # Grid mode is active iff the minibuffer is open in `:grid` mode — the trigger for the
+  # contextual ruler + grid-line overlay (ADR-0027 §"Render": chrome only while composing).
+  defp grid_mode?(%{minibuffer: %Minibuffer{mode: :grid}}), do: true
+  defp grid_mode?(_state), do: false
+
+  # The x-axis **ruler** (ADR-0027 amendment) on the reserved top row: a spreadsheet-style
+  # display-column header over the text columns `[gw, gw + text_w)`, locked to `hscroll`. Each
+  # column shows its 1-based **display** column's units digit (`…7890123…`), the tens marks
+  # (multiples of 10) brightened — so the number you read off the ruler *is* the grid `x`.
+  defp draw_ruler(screen, false, _gw, _text_w, _hscroll, _theme), do: screen
+
+  defp draw_ruler(screen, true, gw, text_w, hscroll, %Theme{palette: pal}) do
+    screen =
+      Screen.fill_rect(screen, 0, 0, gw + text_w, 1, %Cell{
+        char: " ",
+        fg: pal.line_number,
+        bg: pal.bg
+      })
+
+    Enum.reduce(0..(text_w - 1)//1, screen, fn i, acc ->
+      d = i + hscroll + 1
+      fg = if rem(d, 10) == 0, do: pal.active_line_number, else: pal.line_number
+
+      Screen.set_cell(acc, gw + i, 0, %Cell{
+        char: Integer.to_string(rem(d, 10)),
+        fg: fg,
+        bg: pal.bg
+      })
+    end)
+  end
+
+  # The **grid-line overlay** (the user's marking aid): faint dotted vertical rules every 5th
+  # display column across the text rows, the every-10th rules brightened (the accent colour) —
+  # two-tone "multicoloured", palette-derived. Drawn only on **blank** cells (indent gaps, short-
+  # line tails, empty lines) — indent-guide style, so a glyph is never overwritten; a wide glyph's
+  # continuation cell (char "") is skipped too. The rule sits under its ruler tick (same column).
+  defp draw_grid_lines(screen, false, _gw, _text_w, _h_text, _top, _hscroll, _theme), do: screen
+  defp draw_grid_lines(screen, true, _gw, 0, _h_text, _top, _hscroll, _theme), do: screen
+
+  defp draw_grid_lines(screen, true, gw, text_w, h_text, top, hscroll, %Theme{palette: pal}) do
+    rows = top..(top + h_text - 1)//1
+
+    Enum.reduce((hscroll + 1)..(hscroll + text_w)//1, screen, fn d, acc ->
+      if rem(d, 5) == 0 do
+        sx = gw + (d - 1 - hscroll)
+        fg = if rem(d, 10) == 0, do: pal.cursor, else: pal.line_number
+
+        Enum.reduce(rows, acc, fn row, acc2 ->
+          if Screen.get_cell(acc2, sx, row).char == " ",
+            do:
+              Screen.set_cell(acc2, sx, row, %{Screen.get_cell(acc2, sx, row) | char: "┊", fg: fg}),
+            else: acc2
+        end)
+      else
+        acc
+      end
+    end)
+  end
+
   # Resolve a key to an action and apply it. The event-shaped results ({:move, ...},
   # {:edit, ...}, :minibuffer, :ignore) are handled here; every plain action atom goes
   # through apply_action/4 — the **shared action vocabulary** the typed verbs
@@ -586,6 +661,12 @@ defmodule Geex.Loop do
 
       :minibuffer ->
         open_minibuffer(state)
+
+      :grid ->
+        # Open the minibuffer in grid mode; the repaint shows the ruler + grid-line overlay
+        # (ADR-0027). Handled here (not apply_action) so it is never reached from a typed verb,
+        # where submit_minibuffer's trailing close would immediately clobber the mode.
+        schedule_repaint(%{state | minibuffer: Minibuffer.open(:grid)})
 
       {:move, new_cursor} ->
         schedule_repaint(apply_move(state, event, new_cursor, text))
@@ -893,6 +974,10 @@ defmodule Geex.Loop do
   # old in-loop go-to-line hack is retired), and plain verbs (`copy`, `undo`, `save`,
   # …) apply through the same apply_action/4 the chords use. Unknown input is a no-op.
   # Grid commands (ADR-0027), search, the palette, and the finder are the next modes.
+  defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :grid}} = state) do
+    close_minibuffer(do_grid(Verbs.parse_grid(Minibuffer.value(state.minibuffer)), state))
+  end
+
   defp submit_minibuffer(state) do
     state =
       case Verbs.parse(Minibuffer.value(state.minibuffer)) do
@@ -904,6 +989,57 @@ defmodule Geex.Loop do
 
     close_minibuffer(state)
   end
+
+  ## Grid commands (ADR-0027). The coordinates typed in `:grid` mode are **display columns**
+  ## (the ruler is up); cast `x` to a grapheme against the target line, resolve to a caret /
+  ## span (pure `Geex.Coord`), then apply — `goto` moves the cursor, `copy`/`cut` run over the
+  ## resolved range through the existing clipboard ops (which also shows it as a selection).
+
+  defp do_grid(:cancel, state), do: state
+  defp do_grid(:unknown, state), do: state
+  defp do_grid({:goto, coord}, state), do: grid_goto(coord, state)
+  defp do_grid({:copy, range}, state), do: grid_clip(range, state, :copy)
+  defp do_grid({:cut, range}, state), do: grid_clip(range, state, :cut)
+
+  defp grid_goto(coord, state) do
+    with {:ok, %{text: text}} <- safe_session_snapshot(),
+         {:ok, cursor} <- Coord.to_caret(cast_coord(coord, text), Doc.new(text)) do
+      set_cursor(cursor)
+      %{state | goal: Keymap.goal_column(cursor, text), selection: nil}
+    else
+      _ -> state
+    end
+  end
+
+  defp grid_clip(range, state, op) do
+    with {:ok, %{text: text}} <- safe_session_snapshot(),
+         {:ok, {from, to}} <- Coord.to_span(cast_range(range, text), Doc.new(text)) do
+      if from == to do
+        # Both endpoints clamped to the same caret (each overshot a short line, the "to end of
+        # line" idiom on both ends) → a genuine no-op. Clear the selection so the next motion has
+        # nothing stale to extend: do_copy/do_cut's collapsed guard would *return state unchanged*,
+        # leaving a truthy-but-collapsed %Selection{} that apply_move would turn into a phantom
+        # highlight. (The non-grid path never synthesizes a selection, so it can't hit this.)
+        %{state | selection: nil}
+      else
+        # Set the resolved span as the selection (so the region is visible), then reuse the
+        # clipboard op — copy = slice+push, cut = push + a recorded delete; both clear it.
+        state = %{state | selection: Selection.new(from) |> Selection.extend(to)}
+        if op == :copy, do: do_copy(state, text), else: do_cut(state, text)
+      end
+    else
+      _ -> state
+    end
+  end
+
+  # Cast a display-column coordinate to a grapheme one against its target line (ADR-0027 §"display
+  # ruler"). `y` past EOF leaves `x` cast against "" — harmless, since `to_caret`/`to_span` reject
+  # the out-of-range `y` anyway.
+  defp cast_coord(%Coord{x: x, y: y}, text),
+    do: %Coord{x: Width.col_at_display(line_at(text, y - 1), x), y: y}
+
+  defp cast_range(%Coord.Range{from: from, to: to} = range, text),
+    do: %{range | from: cast_coord(from, text), to: cast_coord(to, text)}
 
   # Go-to-line through the one shared resolution (ViewActions sets the cursor); on
   # success refresh the view-local goal from the landing. A jump clears the selection
