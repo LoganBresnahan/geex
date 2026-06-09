@@ -114,6 +114,49 @@ defmodule Geex.Buffer.DocTest do
     end
   end
 
+  describe "slice/2 — read a range (the sibling of replace/3)" do
+    test "a single-line, half-open range returns the graphemes in [c1, c2)" do
+      assert {:ok, "ell"} = Doc.slice(Doc.new("hello"), {{0, 1}, {0, 4}})
+    end
+
+    test "an empty range yields an empty string" do
+      assert {:ok, ""} = Doc.slice(Doc.new("hello"), {{0, 2}, {0, 2}})
+    end
+
+    test "a whole single line" do
+      assert {:ok, "hello"} = Doc.slice(Doc.new("hello\nworld"), {{0, 0}, {0, 5}})
+    end
+
+    test "a multi-line range joins the tail of the first line, full middle lines, and the head of the last" do
+      doc = Doc.new("hello\nbig\nworld")
+      assert {:ok, "llo\nbig\nwo"} = Doc.slice(doc, {{0, 2}, {2, 2}})
+    end
+
+    test "an adjacent-line range has no middle lines" do
+      assert {:ok, "lo\nwo"} = Doc.slice(Doc.new("hello\nworld"), {{0, 3}, {1, 2}})
+    end
+
+    test "slice is grapheme-correct for multibyte content" do
+      assert {:ok, "中文"} = Doc.slice(Doc.new("a中文b"), {{0, 1}, {0, 3}})
+    end
+
+    test "slice then replace-with-empty over the same range is a cut (round-trips)" do
+      doc = Doc.new("hello\nworld")
+      range = {{0, 2}, {1, 3}}
+      assert {:ok, cut_text} = Doc.slice(doc, range)
+      assert {:ok, after_cut} = Doc.replace(doc, range, "")
+      # what was sliced out, plus what remains, reconstructs the original around the cut
+      assert cut_text == "llo\nwor"
+      assert Doc.text(after_cut) == "held"
+    end
+
+    test "rejects reversed and out-of-range" do
+      assert {:error, :range_reversed} = Doc.slice(Doc.new("ab"), {{0, 2}, {0, 0}})
+      assert {:error, :row_out_of_range} = Doc.slice(Doc.new("ab"), {{0, 0}, {5, 0}})
+      assert {:error, :col_out_of_range} = Doc.slice(Doc.new("ab"), {{0, 0}, {0, 9}})
+    end
+  end
+
   describe "byte_offset/2" do
     test "counts bytes before a caret, with one byte per newline" do
       d = Doc.new("ab\ncd\nef")

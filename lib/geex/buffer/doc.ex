@@ -130,6 +130,38 @@ defmodule Geex.Buffer.Doc do
     end
   end
 
+  @doc """
+  The text in the (grapheme-indexed, 0-based) **half-open** range `{{r1, c1}, {r2, c2}}`
+  — the read-only sibling of `replace/3` (same range model, so `slice` then `replace`
+  with `""` is a cut). The grapheme at the start caret is included, the one at the end is
+  not; an empty range yields `""`. Returns `{:ok, text}` or the same `{:error, …}` as
+  `replace/3`. This is what `copy`/`cut` read ([ADR-0029](../../../doc/adr/0029-selection-primitive.md)).
+  """
+  @spec slice(t(), {pos(), pos()}) :: {:ok, String.t()} | {:error, atom()}
+  def slice(%__MODULE__{lines: lines}, {{r1, c1} = from, {r2, c2} = to})
+      when is_integer(r1) and is_integer(c1) and is_integer(r2) and is_integer(c2) do
+    with :ok <- ordered(from, to),
+         {:ok, start_graphemes} <- fetch_graphemes(lines, r1),
+         {:ok, end_graphemes} <- fetch_graphemes(lines, r2),
+         true <- c1 >= 0 and c1 <= length(start_graphemes),
+         true <- c2 >= 0 and c2 <= length(end_graphemes) do
+      text =
+        if r1 == r2 do
+          start_graphemes |> Enum.slice(c1, c2 - c1) |> Enum.join()
+        else
+          first = start_graphemes |> Enum.drop(c1) |> Enum.join()
+          middle = Enum.slice(lines, r1 + 1, r2 - r1 - 1)
+          last = end_graphemes |> Enum.take(c2) |> Enum.join()
+          Enum.join([first | middle] ++ [last], "\n")
+        end
+
+      {:ok, text}
+    else
+      {:error, _} = e -> e
+      false -> {:error, :col_out_of_range}
+    end
+  end
+
   # --- helpers ---
 
   defp ordered(from, to) when from <= to, do: :ok

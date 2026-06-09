@@ -14,7 +14,10 @@ defmodule Geex.Application do
            Geex.Commands.Delete,
            Geex.Commands.Replace,
            Geex.Commands.Edit
-         ]}
+         ]},
+        # The global clipboard register (ADR-0015) — a cheap always-on singleton, so an
+        # interactive copy and a later paste (or an agent's) share one ring.
+        Geex.Clipboard
       ] ++
         terminal_io_child() ++
         [
