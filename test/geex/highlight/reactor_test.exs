@@ -82,60 +82,39 @@ defmodule Geex.Highlight.ReactorTest do
     assert Reactor.render(reactor).version == 2
   end
 
-  test "a :reset (undo) change drops the optimistic overlay so render re-derives (ADR-0031)", %{
+  test "an undo-shaped change (removing bytes) shifts the overlay like any edit (ADR-0031)", %{
     buf: buf,
     reactor: reactor
   } do
     {:ok, exact} = Reactor.await(reactor, 0)
-    fp = %{at: 0, removed: 0, added: 1}
-    send(reactor, {:geex_buffer_change, buf, 1, fp})
-    send(reactor, {:geex_buffer_change, buf, 2, fp})
-    assert Reactor.render(reactor).version == 2
+    refute exact.spans == []
 
-    # Undo emits a :reset at a LOWER version. Unlike :unknown, the optimistic overlay must be
-    # DROPPED (undo moved the version backwards — keeping it would freeze stale colours across a
-    # run of undos), so render falls back to the exact result rather than the version-2 overlay.
-    send(reactor, {:geex_buffer_change, buf, 0, :reset})
-    assert Reactor.render(reactor) == exact
-    assert Reactor.render(reactor).version == 0
+    # Undo/redo are ordinary byte-footprint changes now (not a :reset). A shrinking footprint
+    # (remove 2 bytes at offset 0) must shift the overlay exactly, never drop it to nil/stale.
+    fp = %{at: 0, removed: 2, added: 0}
+    send(reactor, {:geex_buffer_change, buf, 1, fp})
+
+    render = Reactor.render(reactor)
+    assert render.version == 1
+    assert render.spans == Geex.Highlight.Span.shift_all(exact.spans, fp)
   end
 
-  describe "render_overlay/1 — the paint-overlay selection (pure)" do
-    test "the optimistic overlay always wins when present" do
-      opt = %{version: 3, spans: [:o]}
+  test "undo re-highlights through the normal path on the monotonic seq (ADR-0031)", %{
+    buf: buf,
+    reactor: reactor
+  } do
+    {:ok, _} = Reactor.await(reactor, 0)
 
-      assert Reactor.render_overlay(%{
-               optimistic: opt,
-               result: %{version: 1, spans: [:r]},
-               in_flight: nil
-             }) == opt
-    end
+    # Add a comment (seq 1) -> "comment" capture appears.
+    {:ok, _} = Buffer.dispatch(buf, insert(1, 0, "  # note\n"))
+    {:ok, after_ins} = Reactor.await(reactor, 1)
+    assert "comment" in captures(after_ins)
 
-    test "serves the exact result when no pass is in flight" do
-      res = %{version: 2, spans: [:r]}
-      assert Reactor.render_overlay(%{optimistic: nil, result: res, in_flight: nil}) == res
-    end
-
-    test "serves the result while an in-flight pass is at or ahead of it (forward editing)" do
-      res = %{version: 1, spans: [:r]}
-
-      assert Reactor.render_overlay(%{optimistic: nil, result: res, in_flight: %{version: 2}}) ==
-               res
-    end
-
-    test "suppresses a result stranded AHEAD of an in-flight pass at a lower version (post-undo)" do
-      # undo moved the version backwards: `result` holds the pre-undo (v2) spans while the
-      # corrective pass runs at v0 — painting them would be byte-misaligned, so serve nil.
-      res = %{version: 2, spans: [:stale]}
-
-      assert Reactor.render_overlay(%{optimistic: nil, result: res, in_flight: %{version: 0}}) ==
-               nil
-    end
-
-    test "nil result with a pass in flight yields nil (the initial pass)" do
-      assert Reactor.render_overlay(%{optimistic: nil, result: nil, in_flight: %{version: 0}}) ==
-               nil
-    end
+    # Undo it: seq advances to 2 (even though history shrinks), so the reactor re-highlights and
+    # `await(2)` resolves — the comment is gone. (A :reset/backwards version would never reach 2.)
+    {:ok, _, _} = Buffer.undo(buf)
+    {:ok, after_undo} = Reactor.await(reactor, 2)
+    refute "comment" in captures(after_undo)
   end
 
   test "subscribe/2 returns the current overlay so a subscriber can paint immediately", %{

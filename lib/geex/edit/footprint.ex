@@ -21,6 +21,32 @@ defmodule Geex.Edit.Footprint do
 
   @type t :: %{at: non_neg_integer(), removed: non_neg_integer(), added: non_neg_integer()}
 
+  @doc """
+  The byte footprint **between two texts** — the minimal single splice (the longest
+  common byte prefix + suffix) that turns `before` into `after`.
+
+  Used for undo/redo ([ADR-0031](../../../doc/adr/0031-undo-redo-history-operations.md)),
+  which revert/replay the document wholesale rather than running a command with a known
+  `of/2` footprint: each undo/redo step reverts exactly one contiguous command, so this
+  splice is **exact**, and the reactor shifts its overlay by it just like a forward edit —
+  so undo no longer flashes the whole region uncoloured while the re-highlight catches up.
+  The footprint is expressed in `before`'s byte frame (the frame the live overlay is in).
+  """
+  @spec between(String.t(), String.t()) :: t()
+  def between(before, aft) when is_binary(before) and is_binary(aft) do
+    prefix = :binary.longest_common_prefix([before, aft])
+    # Cap the suffix so the common prefix and suffix can't overlap in the shorter string
+    # (e.g. "aa" -> "aaa": prefix 2, suffix must be 0, giving an insert of 1 byte at 2).
+    max_suffix = min(byte_size(before), byte_size(aft)) - prefix
+    suffix = min(:binary.longest_common_suffix([before, aft]), max_suffix)
+
+    %{
+      at: prefix,
+      removed: byte_size(before) - prefix - suffix,
+      added: byte_size(aft) - prefix - suffix
+    }
+  end
+
   @doc "The byte footprint of `command` applied to the pre-edit `doc`, or `:unknown`."
   @spec of(Doc.t(), struct()) :: t() | :unknown
   def of(%Doc{} = doc, %Insert{line: line, col: col, text: text}),

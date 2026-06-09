@@ -14,10 +14,11 @@ defmodule Geex.Buffer do
   **Undo/redo** (`undo/1` / `redo/1`, [ADR-0031](`e:doc/adr/0031-undo-redo-history-operations.md`))
   are *history operations*, not recorded edits: `undo/1` drops the newest command onto a redo
   stack and replays `base + the remainder` to reconstruct the document (the §15c replay backbone);
-  `redo/1` re-applies it; a fresh `dispatch/2` clears the redo stack. They emit a `:reset` change
-  so byte-oriented overlays re-derive rather than try to shift across a wholesale revert, and they
-  return the affected `%Command{}` so the *view* can place the cursor (the cursor stays view-local,
-  ADR-0014).
+  `redo/1` re-applies it; a fresh `dispatch/2` clears the redo stack. They emit a normal byte-
+  footprint change (the minimal splice between the pre- and post-revert text — exact, since each
+  step reverts one contiguous command) on a **monotonic `seq`**, so a byte-oriented overlay shifts
+  across the revert just like a forward edit (no re-highlight flash); and they return the affected
+  `%Command{}` so the *view* can place the cursor (the cursor stays view-local, ADR-0014).
 
   `snapshot/1` / `get_text/1` / `history/1` are the **read-only** query surface
   (§15b): they return buffer text + the provenance-tagged command history *as data*,
@@ -125,7 +126,7 @@ defmodule Geex.Buffer do
   backbone (ADR-0014), so the reverted state is exactly what produced it. Returns
   `{:ok, snapshot, command}` (the snapshot of the reverted buffer + the **undone** command, so
   the view can place its cursor where the edit was), or `{:error, :nothing_to_undo}` when there
-  is nothing to undo. Not itself a recorded edit; emits a `:reset` change so overlays re-derive.
+  is nothing to undo. Not itself a recorded edit; emits a byte-footprint change so overlays shift.
   """
   @spec undo(GenServer.server()) :: {:ok, map(), struct()} | {:error, :nothing_to_undo}
   def undo(server), do: GenServer.call(server, :undo)
@@ -165,8 +166,9 @@ defmodule Geex.Buffer do
   def unsubscribe(server, pid) when is_pid(pid), do: GenServer.cast(server, {:unsubscribe, pid})
 
   @doc """
-  Read-only snapshot: text, lines, version, dirty, path, the `synced` disk baseline (what
-  reconcile compares against), and command history.
+  Read-only snapshot: text, lines, version (`length(history)`), the monotonic change `seq`
+  (ADR-0031), dirty, path, the `synced` disk baseline (what reconcile compares against), and
+  command history.
   """
   @spec snapshot(GenServer.server()) :: map()
   def snapshot(server), do: GenServer.call(server, :snapshot)
@@ -199,6 +201,11 @@ defmodule Geex.Buffer do
           # Undone commands, newest-first — the redo future. A new edit clears it (the
           # redone branch is discarded once you edit past the undo point). ADR-0031.
           redo: [],
+          # A **monotonic** change clock — incremented on every dispatch/undo/redo. Distinct
+          # from `version` (= `length(history)`, which goes *backwards* on undo): the reactor
+          # orders optimistic overlays by `seq`, so its "newer = higher" assumption survives an
+          # undo and the overlay byte-shifts (no re-highlight flash) instead of resetting. ADR-0031.
+          seq: 0,
           # Change-stream subscribers (ADR-0022): %{monitor_ref => pid}. Empty by
           # default — the buffer notifies no one unless something subscribes.
           subscribers: %{},
@@ -246,7 +253,8 @@ defmodule Geex.Buffer do
           | editor: editor,
             history: [command | state.history],
             redo: [],
-            dirty: true
+            dirty: true,
+            seq: state.seq + 1
         }
 
         notify_change(new_state, footprint)
@@ -267,7 +275,7 @@ defmodule Geex.Buffer do
     case Geex.Dispatch.replay(state.base, Enum.reverse(rest)) do
       {:ok, editor} ->
         new_state = revert(state, editor, rest, [command | state.redo])
-        notify_change(new_state, :reset)
+        notify_change(new_state, revert_footprint(state.editor, editor))
         {:reply, {:ok, build_snapshot(new_state), command}, new_state}
 
       {:error, _reason} ->
@@ -284,7 +292,7 @@ defmodule Geex.Buffer do
     case Geex.Dispatch.apply_command(command, state.editor) do
       {:ok, editor} ->
         new_state = revert(state, editor, [command | state.history], rest_redo)
-        notify_change(new_state, :reset)
+        notify_change(new_state, revert_footprint(state.editor, editor))
         {:reply, {:ok, build_snapshot(new_state), command}, new_state}
 
       {:error, _reason} = error ->
@@ -366,28 +374,36 @@ defmodule Geex.Buffer do
     end)
   end
 
-  # Post-dispatch emit (ADR-0022): tell each subscriber the buffer changed, tagged
-  # with the new version **and the edit's byte footprint** (`%{at, removed, added}`,
-  # or `:unknown`) so a byte-oriented overlay can shift optimistically across the
+  # Post-dispatch emit (ADR-0022): tell each subscriber the buffer changed, tagged with the
+  # monotonic **`seq`** (NOT `length(history)` — that goes backwards on undo, breaking the
+  # reactor's "newer = higher" ordering) **and the edit's byte footprint** (`%{at, removed,
+  # added}`, or `:unknown`) so a byte-oriented overlay can shift optimistically across the
   # edit. A plain `send` — the buffer never blocks on a reactor.
   defp notify_change(state, footprint) do
-    version = length(state.history)
-    msg = {:geex_buffer_change, self(), version, footprint}
+    msg = {:geex_buffer_change, self(), state.seq, footprint}
     for {_ref, pid} <- state.subscribers, do: send(pid, msg)
     :ok
   end
 
+  # The byte footprint of an undo/redo, computed by diffing the pre- and post-transition text
+  # (ADR-0031). A single undo/redo reverts exactly one contiguous command, so the minimal splice
+  # is exact — the overlay shifts like a forward edit rather than resetting (no re-highlight flash).
+  defp revert_footprint(before_editor, after_editor),
+    do: Footprint.between(EditorState.text(before_editor), EditorState.text(after_editor))
+
   # Apply an undo/redo transition: swap in the reconstructed `editor`, set `history` and the
-  # `redo` stack, and recompute `dirty` against the `synced` disk baseline — so undoing back to
-  # the saved content clears the dirty flag (a forward `dispatch/2` is unconditionally dirty;
-  # an undo/redo can land *on* the baseline, which is genuinely clean).
+  # `redo` stack, bump the monotonic `seq` (an undo/redo *is* a forward step on the change clock,
+  # even though it lowers `version`), and recompute `dirty` against the `synced` disk baseline —
+  # so undoing back to the saved content clears the dirty flag (a forward `dispatch/2` is
+  # unconditionally dirty; an undo/redo can land *on* the baseline, which is genuinely clean).
   defp revert(state, editor, history, redo) do
     %{
       state
       | editor: editor,
         history: history,
         redo: redo,
-        dirty: EditorState.text(editor) != state.synced
+        dirty: EditorState.text(editor) != state.synced,
+        seq: state.seq + 1
     }
   end
 
@@ -399,6 +415,9 @@ defmodule Geex.Buffer do
       text: EditorState.text(state.editor),
       lines: EditorState.lines(state.editor),
       version: length(history),
+      # The monotonic change clock (ADR-0031): the reactor reads this (not `version`) so its
+      # overlay ordering survives an undo, which lowers `version` but advances `seq`.
+      seq: state.seq,
       dirty: state.dirty,
       synced: state.synced,
       history: history

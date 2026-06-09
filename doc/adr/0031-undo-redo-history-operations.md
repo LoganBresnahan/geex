@@ -62,15 +62,24 @@ is already per-command; coalescing is a boundary-detection layer on top.
 Replace, the point for Delete), clamped to the post-op text, and clears the selection. The cursor never
 enters `EditorState` / `Buffer` ([ADR-0014](0014-editor-state-and-dispatch-ownership.md) §2).
 
-**5. Overlays: emit a `:reset` change.** Undo/redo are a **wholesale revert/replay**, not a located byte
-splice, so the change notification carries footprint **`:reset`**. The highlight reactor
-([ADR-0022](0022-capability-reactor.md)) **drops its optimistic overlay** on `:reset` and re-highlights.
-This is load-bearing, not cosmetic: undo makes the buffer **`version` (= `length(history)`) go
-backwards**, and the reactor's `keep_optimistic` retains an optimistic overlay while `ov > version` — so
-a *higher-version* pre-undo overlay would **freeze**, stale, across an entire run of undos. `:reset`
-forces the next exact pass to be authoritative (a one-frame fall-back to the prior exact result, then
-correct). Distinct from the `edit` tool's `:unknown` (which *retains* the prefix — there version only
-moves forward).
+**5. Overlays: undo/redo are ordinary byte-footprint changes on a monotonic `seq`.** An undo/redo step
+reverts *exactly one contiguous command*, so its effect on the text is a single byte splice — computed by
+diffing the pre- and post-revert text (`Geex.Edit.Footprint.between/2`, the longest common prefix + suffix).
+Undo/redo emit *that* footprint, so the highlight reactor ([ADR-0022](0022-capability-reactor.md)) **shifts
+its optimistic overlay** across the revert exactly as it does for forward typing — no re-highlight flash.
+
+The one obstacle is that undo makes `version` (= `length(history)`) go **backwards**, and the reactor's
+`keep_optimistic` (`ov > version`) assumes "newer = higher version" — so a backwards jump would make it drop
+the freshest optimistic overlay across a run of undos. The buffer therefore carries a **monotonic `seq`**
+(incremented on every dispatch/undo/redo, *distinct* from `version`), and the reactor orders overlays by
+`seq`. With the byte-footprint shift + the monotonic `seq`, undo/redo need **no special reactor case at all** —
+they *are* forward changes to the overlay machinery.
+
+> *Revised from the first cut.* The initial implementation emitted a `:reset` footprint that made the reactor
+> drop its overlay and re-highlight from scratch. It was correct but **flashed** the reverted region unstyled
+> for the whole async re-highlight window (a more visible flicker than the near-aligned stale frame it
+> replaced). Riding the normal byte-shift path removes the flash; the `:reset` clause and the interim
+> render-time guard are gone.
 
 **6. `dirty` recomputed against the synced baseline.** A forward `dispatch/2` is unconditionally dirty;
 an undo/redo can land **exactly on the saved content**, which is genuinely clean — so undo/redo set
@@ -89,6 +98,9 @@ an undo/redo can land **exactly on the saved content**, which is genuinely clean
   they a view-action, an operation, or a *fifth* "history-operation" category? Their text effect says
   not view-action; their not-recorded nature says not edit. Leaning toward a history-op command twin,
   decided when the catalog lands.
+- **Undo/redo are flicker-free** because they reuse the forward-edit overlay path (the byte-footprint shift
+  + the monotonic `seq`), and that path also gained a reusable primitive (`Footprint.between/2`) and a clean
+  monotonic change clock that future overlay consumers (LSP) can order by.
 - **Deferred:** insert coalescing (per-keystroke undo for now); the `O(n)` replay (snapshot-stack if it
   bites); an undo *tree* that preserves the redo branch across a new edit (we discard it — the
   conventional choice).
@@ -97,8 +109,10 @@ an undo/redo can land **exactly on the saved content**, which is genuinely clean
 
 [ADR-0014](0014-editor-state-and-dispatch-ownership.md) (history ownership; view-local cursor),
 [ADR-0003](0003-one-shared-path.md) (`replay/2`), [ADR-0030](0030-view-action-tool-category.md) (the
-taxonomy + the typed twin's future home), [ADR-0022](0022-capability-reactor.md) (the reactor + `:reset`),
-`lib/geex/buffer.ex` (`undo/1`, `redo/1`, `revert/4`, `base`/`redo` state),
+taxonomy + the typed twin's future home), [ADR-0022](0022-capability-reactor.md) (the reactor the overlay
+shift rides),
+`lib/geex/buffer.ex` (`undo/1`, `redo/1`, `revert/4`, `base`/`redo`/`seq` state, `revert_footprint`),
+`lib/geex/edit/footprint.ex` (`between/2` — the undo/redo splice),
 `lib/geex/loop.ex` (`do_undo`/`do_redo`, `edit_start`/`edit_landing`, `clamp_cursor`),
-`lib/geex/highlight/reactor.ex` (the `:reset` `shift_overlay` clause),
+`lib/geex/highlight/reactor.ex` (orders overlays by `seq`),
 `lib/geex/loop/keymap.ex` (`Alt+Z`/`Alt+Shift+Z`/`Alt+B`).

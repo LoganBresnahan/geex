@@ -59,14 +59,12 @@ defmodule Geex.Highlight.Reactor do
   def highlights(reactor), do: GenServer.call(reactor, :highlights)
 
   @doc """
-  The overlay to **paint** — the optimistically-shifted overlay if one is live (a
-  recent edit whose exact re-highlight hasn't landed yet), else the exact `highlights/1`
-  result, **except** a result left stranded *ahead* of an in-flight pass at a lower
-  version (an undo moved the buffer version backwards), which is suppressed to `nil` so
-  the loop paints unstyled text rather than byte-misaligned pre-undo colours until the
-  corrective pass lands ([ADR-0031](`e:doc/adr/0031-undo-redo-history-operations.md`)).
-  Use this from the render loop; use `highlights/1`/`await/3` when the *exact* overlay
-  is wanted. See `render_overlay/1` for the selection logic.
+  The overlay to **paint** — the optimistically-shifted overlay if one is live (a recent
+  edit whose exact re-highlight hasn't landed yet), else the exact `highlights/1` result.
+  Every edit — forward, undo, or redo — carries a byte footprint and advances the buffer's
+  monotonic `seq` ([ADR-0031](`e:doc/adr/0031-undo-redo-history-operations.md`)), so the
+  shifted overlay stays the freshest one and there is no special undo case. Use this from the
+  render loop; use `highlights/1`/`await/3` when the *exact* overlay is wanted.
   """
   @spec render(GenServer.server()) :: %{version: non_neg_integer(), spans: [map()]} | nil
   def render(reactor), do: GenServer.call(reactor, :render)
@@ -206,7 +204,10 @@ defmodule Geex.Highlight.Reactor do
   @impl true
   def handle_call(:highlights, _from, state), do: {:reply, state.result, state}
 
-  def handle_call(:render, _from, state), do: {:reply, render_overlay(state), state}
+  # The optimistically-shifted overlay if one is live (any edit — forward, undo, or redo — shifts
+  # it; ADR-0031 made undo/redo ordinary byte-footprint changes), else the exact result. The
+  # buffer's monotonic `seq` keeps "optimistic is the freshest" true even across an undo.
+  def handle_call(:render, _from, state), do: {:reply, state.optimistic || state.result, state}
 
   def handle_call({:subscribe, pid}, _from, state) do
     ref = Process.monitor(pid)
@@ -287,29 +288,12 @@ defmodule Geex.Highlight.Reactor do
     Enum.each(Map.values(subs), &send(&1, msg))
   end
 
-  @doc false
-  # The overlay `render/1` serves (pure; exposed for unit tests). Optimistic — a forward edit's
-  # shifted overlay — always wins. Otherwise the exact `result`, **unless** it is stranded *ahead*
-  # of an in-flight pass at a lower version: that only happens after an undo moved the buffer
-  # version backwards (a `:reset` dropped the optimistic overlay), so `result` holds pre-undo spans
-  # that would paint byte-misaligned onto the restored text. Serve `nil` (the loop paints unstyled)
-  # for that window until the corrective pass lands and notifies a repaint — blank beats wrong.
-  def render_overlay(%{optimistic: %{} = optimistic}), do: optimistic
-  def render_overlay(%{result: %{version: rv}, in_flight: %{version: iv}}) when rv > iv, do: nil
-  def render_overlay(%{result: result}), do: result
-
   # Byte-shift the freshest overlay we have (optimistic, else exact result) across the
-  # edit's `footprint`, tagging it with the new `version` — the optimistic overlay the
-  # render loop paints until the exact re-highlight for `version` lands.
+  # edit's `footprint`, tagging it with the new `version` (the buffer's monotonic `seq`) —
+  # the optimistic overlay the render loop paints until the exact re-highlight lands. Undo/redo
+  # ride this path too (ADR-0031): their footprint is the minimal splice between the pre- and
+  # post-revert text, so the overlay shifts in step rather than resetting.
   #
-  # `:reset` footprint (undo/redo — a wholesale revert/replay, not a located byte splice).
-  # **Drop** the optimistic overlay: it holds the pre-undo spans at a *higher* version, and
-  # because undo makes the buffer version go *backwards*, `keep_optimistic` (`ov > version`)
-  # would otherwise freeze that stale overlay for an entire run of undos. The `result` is *also*
-  # stale across the revert (it is the pre-undo exact spans, now byte-misaligned), so dropping
-  # optimistic is only half the fix — `render_overlay/1` suppresses that stranded `result` too.
-  defp shift_overlay(_state, _version, :reset), do: nil
-
   # `:unknown` footprint (the multi-block `edit` tool) can't be byte-shifted, so we
   # **keep** the prior overlay *at its own version* rather than dropping to `nil`:
   # dropping would regress render to the (possibly much older) exact `result`,
@@ -376,9 +360,13 @@ defmodule Geex.Highlight.Reactor do
     end
   end
 
+  # The reactor's "version" (the tag on every overlay and in-flight pass) is the buffer's
+  # **monotonic `seq`**, NOT `length(history)`: it must keep increasing across an undo (which
+  # lowers `length(history)`) so `keep_optimistic`'s "newer = higher" ordering holds (ADR-0031).
+  # For a forward-only history the two coincide, so existing version assertions are unaffected.
   defp safe_snapshot(buffer) do
     snap = Geex.Buffer.snapshot(buffer)
-    {snap.version, snap.text}
+    {snap.seq, snap.text}
   catch
     :exit, _ -> :down
   end

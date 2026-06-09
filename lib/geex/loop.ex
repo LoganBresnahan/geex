@@ -758,8 +758,8 @@ defmodule Geex.Loop do
   end
 
   # Move the cursor to `target` (clamped to the post-op text), refresh the goal, drop any
-  # selection. The buffer's `:reset` change also scheduled a repaint and cleared the selection;
-  # positioning the cursor is what undo/redo add on top.
+  # selection. The buffer's change notification also scheduled a repaint and cleared the
+  # selection; positioning the cursor is what undo/redo add on top.
   defp place_after_history_op(state, target, text) do
     cursor = clamp_cursor(target, text)
     set_cursor(cursor)

@@ -197,13 +197,28 @@ defmodule Geex.BufferTest do
       assert r3.text == "X\nYree"
     end
 
-    test "undo emits a :reset change so overlays re-derive (not a byte-shiftable footprint)", %{
+    test "undo emits a byte-footprint change on the monotonic seq (overlays shift, not reset)", %{
       buf: buf
     } do
       {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "a"))
       {:ok, _v} = Buffer.subscribe(buf, self())
       {:ok, _, _} = Buffer.undo(buf)
-      assert_receive {:geex_buffer_change, ^buf, 0, :reset}, 500
+      # Undo of insert "a" is a delete of 1 byte at offset 0; the seq advanced 1 -> 2 even though
+      # version (length history) dropped 1 -> 0 — so the reactor shifts its overlay (ADR-0031).
+      assert_receive {:geex_buffer_change, ^buf, 2, %{at: 0, removed: 1, added: 0}}, 500
+    end
+
+    test "seq advances monotonically across dispatch/undo/redo while version tracks history length",
+         %{buf: buf} do
+      {:ok, s1} = Buffer.dispatch(buf, insert(0, 0, "a"))
+      assert {s1.version, s1.seq} == {1, 1}
+      {:ok, s2} = Buffer.dispatch(buf, insert(0, 1, "b"))
+      assert {s2.version, s2.seq} == {2, 2}
+      # undo lowers version (fewer applied commands) but seq keeps climbing
+      {:ok, u, _} = Buffer.undo(buf)
+      assert {u.version, u.seq} == {1, 3}
+      {:ok, r, _} = Buffer.redo(buf)
+      assert {r.version, r.seq} == {2, 4}
     end
   end
 end

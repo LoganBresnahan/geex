@@ -1093,3 +1093,39 @@ tests fail). **541 tests + 9 doctests** green, `--warnings-as-errors` clean.
 **Scoping:** the **typed** `undo`/`redo` verbs (agent/palette twin) ride the catalog + view-action build
 ([ADR-0030](adr/0030-view-action-tool-category.md)); insert **coalescing** (per-keystroke undo for now) and
 the `O(n)` replay-per-undo are documented deferrals.
+
+### 2026-06-09 — Undo/redo flicker fix: ride the forward-edit overlay path (ADR-0031 §5 revised)
+
+The user reported a **flicker on undo/redo**. Diagnosis (and honest self-correction): the first cut emitted a
+`:reset` change → the reactor dropped its optimistic overlay and re-highlighted from scratch → the reverted
+region painted **unstyled** for the whole async re-highlight window. That was *more* visible than the
+near-aligned stale frame it replaced — the review fix optimized correctness over flicker. The proper fix makes
+undo/redo ride the **same optimistic byte-shift path as forward typing** (which doesn't flicker — BUG-2's win):
+
+- **`Geex.Edit.Footprint.between/2`** — the minimal byte splice between two texts (`:binary.longest_common_
+  prefix`/`suffix`, capped so they can't overlap), in the *before* frame. A single undo/redo reverts exactly
+  one contiguous command, so this splice is **exact**; undo/redo emit it instead of `:reset`, and the reactor
+  shifts its overlay across the revert just like a forward edit.
+- **A monotonic `seq` on `Geex.Buffer`** (incremented on every dispatch/undo/redo; *distinct* from `version =
+  length(history)`, which goes backwards on undo). The reactor now orders overlays by `seq`, so its
+  `keep_optimistic` "newer = higher" assumption survives an undo — which is exactly why the blunt `:reset` was
+  needed before. With the byte-shift + the monotonic seq, undo/redo need **no special reactor case**: the
+  `:reset` `shift_overlay` clause AND the interim `render_overlay/1` version-guard are both **removed**
+  (`render` is back to `optimistic || result`).
+
+**Live-verified** (tmux, demo `.ex` buffer): typing `x` before `defmodule` breaks the keyword (no longer
+keyword-red); `Alt+Z` undo **restores** the keyword colour and the text — undo re-highlights correctly through
+the normal path. (The flicker itself is an intermediate frame `capture-pane` can't show, so the "flicker gone"
+call is the user's — same caveat as BUG-1/BUG-2; the mechanism is proven by the unit tests below.)
+
+**Tests:** 7 `Footprint.between/2` cases (append/inverse/middle/replace/multibyte/overlap-cap/empty); buffer
+tests for the byte-footprint emit on undo + `seq` monotonic across dispatch/undo/redo while `version` tracks
+history length; reactor tests that an undo-shaped (removing) footprint **shifts** the overlay (not reset) and
+that undo re-highlights end-to-end on the monotonic seq (`await(seq=2)` after an undo, comment capture gone).
+Removed the now-obsolete `:reset` + `render_overlay/1` tests. **545 tests + 9 doctests** green,
+`--warnings-as-errors` clean.
+
+**Adversarial review** (`undo-flicker-fix-review`, 4 dimensions × find→verify, 7 agents): **0 of 3 confirmed**
+— all three findings refuted on verification (the `between/2` splice validity, the `seq` increment paths, and
+the `optimistic || result` simplification all held up). ADR-0031 §5 rewritten (byte-footprint + monotonic seq;
+the `:reset` first cut kept as a revised-from note).

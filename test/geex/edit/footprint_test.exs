@@ -10,19 +10,32 @@ defmodule Geex.Edit.FootprintTest do
   describe "of/2 — Insert" do
     test "byte offset at the position; added = byte_size(text), removed = 0" do
       d = doc("abc\ndef")
-      assert Footprint.of(d, %Insert{line: 1, col: 1, text: "XY"}) == %{at: 5, removed: 0, added: 2}
+
+      assert Footprint.of(d, %Insert{line: 1, col: 1, text: "XY"}) == %{
+               at: 5,
+               removed: 0,
+               added: 2
+             }
     end
 
     test "multibyte text counts bytes, not graphemes" do
       d = doc("abc")
       # "中" is 3 bytes; inserted at col 3 (byte 3).
-      assert Footprint.of(d, %Insert{line: 0, col: 3, text: "中"}) == %{at: 3, removed: 0, added: 3}
+      assert Footprint.of(d, %Insert{line: 0, col: 3, text: "中"}) == %{
+               at: 3,
+               removed: 0,
+               added: 3
+             }
     end
 
     test "a multibyte glyph before the caret advances the byte offset by its byte size" do
       d = doc("中b")
       # caret after the wide glyph (grapheme col 1) is byte 3.
-      assert Footprint.of(d, %Insert{line: 0, col: 1, text: "x"}) == %{at: 3, removed: 0, added: 1}
+      assert Footprint.of(d, %Insert{line: 0, col: 1, text: "x"}) == %{
+               at: 3,
+               removed: 0,
+               added: 1
+             }
     end
   end
 
@@ -57,5 +70,39 @@ defmodule Geex.Edit.FootprintTest do
   test "of/2 — a non-contiguous command (Edit) is :unknown" do
     d = doc("abc")
     assert Footprint.of(d, %Edit{edits: [%{search: "a", replace: "b"}]}) == :unknown
+  end
+
+  describe "between/2 — the splice between two texts (undo/redo, ADR-0031)" do
+    test "an appended insert: removed = 0, added = the new bytes, at = common prefix" do
+      assert Footprint.between("hello", "hello world") == %{at: 5, removed: 0, added: 6}
+    end
+
+    test "its inverse (the undo) is the mirror delete" do
+      assert Footprint.between("hello world", "hello") == %{at: 5, removed: 6, added: 0}
+    end
+
+    test "a change in the middle: common prefix AND suffix bound the splice" do
+      assert Footprint.between("abcXYZdef", "abcdef") == %{at: 3, removed: 3, added: 0}
+      assert Footprint.between("abcdef", "abcXYZdef") == %{at: 3, removed: 0, added: 3}
+    end
+
+    test "a same-length in-place replace" do
+      assert Footprint.between("hello", "help!") == %{at: 3, removed: 2, added: 2}
+    end
+
+    test "counts bytes, not graphemes" do
+      assert Footprint.between("a", "a中") == %{at: 1, removed: 0, added: 3}
+    end
+
+    test "the prefix and suffix never overlap (repeated bytes)" do
+      # "aa" -> "aaa": prefix is 2, so the suffix is capped to 0 — an insert of 1 byte at 2,
+      # not a double-counted overlap.
+      assert Footprint.between("aa", "aaa") == %{at: 2, removed: 0, added: 1}
+    end
+
+    test "empty edges" do
+      assert Footprint.between("", "x") == %{at: 0, removed: 0, added: 1}
+      assert Footprint.between("x", "") == %{at: 0, removed: 1, added: 0}
+    end
   end
 end
