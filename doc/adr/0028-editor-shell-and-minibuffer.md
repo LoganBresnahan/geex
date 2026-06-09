@@ -82,6 +82,58 @@ indicator** — the one shared path made visible.
   arrow-key alternative (arrows aren't on every keyboard) — both per [ADR-0026](0026-terminal-input-model.md)
   (Alt is the secondary namespace; on tiling WMs Alt is often the mod key, so these stay remappable).
 
+## Amendment (2026-06-08): the exit convention & keybinding↔typed-command parity
+
+**1. Closing the minibuffer: `Esc`, `Alt+N`, and the typed `no`.** Three ways to back out,
+all reaching `close/1`: `Esc` (conventional), `Alt+N` (the no/op chord, ADR-0026), and
+**typing `no` + Enter** — the *typed twin* of `Alt+N`, same no/op mnemonic, for a user
+whose hands are already on the keys. (`no` is reserved as a minibuffer cancel verb; it is
+not a buffer-name or coordinate, so there's no clash.) Submitting any unrecognized empty
+intent is a no-op close, not an error.
+
+**2. The parity principle — capability parity, not literal per-key twins.** Every
+*capability* reachable from the keyboard should also be reachable as a typed command on the
+one shared path (§2), so a human and an agent drive the same verbs. But "twin" is at the
+**capability** level, not a literal "every chord ⇒ a same-named command": the canonical
+*typed* form of a capability may differ from its chord. The parity map (2026-06-08) shows
+where this stands:
+
+- **Edits already have parity** — typing / Enter / Tab / Backspace resolve to
+  `insert`/`delete`/`replace`, the exact `%Command{}`s an agent emits (`keymap.ex`); the
+  pair differs only in `Meta` provenance (`human` vs `llm`). This is the model to extend.
+- **Motion's typed form is *addressing*, not "move-left".** Arrow / `Alt+WASD` / word /
+  line-start-end chords are interactive *relative* motion; their typed twin is the
+  **grid/`goto` absolute coordinate** ([ADR-0027](0027-grid-command-addressing.md)) and the
+  `line N` view-action — you don't type "move left one", you type where to go. So parity
+  here means "a typed way to position the cursor exists," satisfied by grid + `line`, not a
+  literal twin per motion chord.
+- **Gaps to close (the parity backlog):** **quit** has no typed verb (chords call
+  `System.stop` directly — add a `quit`/`exit` command); the six **operation tools**
+  (`save`/`open`/`close`/…) have no chords yet (`save` is already slated for **Ctrl-O** in
+  [ADR-0026](0026-terminal-input-model.md) §1 — just unbuilt); and **go-to-line** is still a
+  hardcoded hack in `loop.ex` rather than a registered view-action (see §4).
+
+**3. Palette & highlight modes — the new minibuffer modes and their twins.** The palette
+(§3) is opened by **`Alt+P`** *or* by typing **`palette`** / **`catalog`** at the `Alt+M`
+prompt — the same widget in browse mode over the command catalog (the `tools/list` union),
+not a new component. **Highlight mode** is entered by **`Alt+H`** or the typed
+**`highlight`** / **`select`**, and exited the same way every mode is — `Esc` / `Alt+N` /
+`no`. The **grid-line overlay** (the ADR-0027-amendment column-following aid) is a toggle
+with both a chord and a typed twin (e.g. `grid`/`lines`), contextual to grid-command
+composition. **`undo`/`redo`** are history-navigation verbs (not recorded `%Command{}`s) on
+the keys **`Alt+B`** / **`Alt+Shift+B`** — `Alt+Shift+letter` is byte-distinct from
+`Alt+letter` (ESC `B` vs ESC `b`), so it is deliverable on legacy terminals, unlike
+`Ctrl+Shift+letter` (see [notes.md](../notes.md) "Editing & selection bindings").
+
+**4. The view-action tool category — the mechanism for all of the above.** The typed twins
+for motion/scroll/select/undo/`line N` need a home: a **fourth tool category** — *view
+actions* — registered with field-specs like the operation tools, so they render into
+`tools/list` (discoverable in the palette, callable by an agent) **without** being recorded
+edits. Building it is what turns the `line N` hack into a real `line` command and gives the
+palette its non-edit entries. This is a roadmap item ([roadmap.md](../roadmap.md), the
+command-surface track), gated on the catalog/palette build; the parity backlog in §2 is
+discharged as each verb lands in this category.
+
 ## See
 
 [ADR-0027](0027-grid-command-addressing.md) (the grid commands the minibuffer hosts),

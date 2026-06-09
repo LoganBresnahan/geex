@@ -122,6 +122,60 @@ resolver, since `Doc.replace/3` errors rather than clamps; `y` past EOF is a **h
 - **Minor:** the candidate editor-name "a1" (notes.md:845) loses its literal basis (it was
   the `a1` coordinate); the grid is still the differentiator it nodded to.
 
+## Amendment (2026-06-08): the display ruler & the human picking surface
+
+Building the gutter (the `y`-ruler) surfaced the dual question §2 left implicit: **what
+coordinate does the *human* point in when picking a grid cell off the screen?** A grid
+command is unusable if the user can't see which column is `x5`, so an x-axis **ruler** (a
+top row of column ticks, locked to `hscroll` like a spreadsheet header — the x-twin of the
+gutter) is required to make grid picking real. That ruler forces the decision:
+
+**(b) — confirmed. Each surface names positions in the coordinate it can actually observe.**
+
+- A single top ruler is **shared by every row**, so it can only honestly count **display
+  columns** — grapheme index isn't uniform across rows once a wide `中` appears, so a
+  grapheme ruler would disagree with the eye on exactly the lines that matter. The ruler is
+  *unavoidably* display-column.
+- Therefore the ruler **is the visual form of viewport-relative mode** (§3): **ruler
+  visible ⟺ display-column interpretation.** The affordance and the interpretation are
+  locked together, so there is **no footgun** — you never read a display ruler while an
+  unprefixed `x5` is silently interpreted as grapheme-5. This promotes viewport-relative
+  from a fringe deferred mode to **the human's primary picking surface**; buffer-absolute
+  grapheme (§2) remains the **recorded / scripted / agent** form, reached without the ruler.
+- The split is principled, not a compromise. **Screen-watchers** — the eye, the ruler,
+  tmux, an external harness — can *only ever* observe display columns (it's the terminal's
+  native unit). **Text-readers** — the agent over MCP — *only ever* observe graphemes (they
+  read buffer text, never a cell grid). Forcing the agent into display columns (option a)
+  would make it reason in a space it cannot see, re-coupling it to the width table §2
+  exists to decouple. So: **canonical/recorded = grapheme (§2 unchanged); ruler + human
+  pick = display, cast to a grapheme span at parse (the §4 bake).** (b) is the only
+  non-lying option.
+
+**Verification — `cursor_x` as the oracle for the display↔grapheme cast.** The one fragile
+seam in (b) is the `Width.col_at_display/2` cast (the deferred dual of `cursor_xy`). It is
+verified empirically against the real terminal: in the tmux dogfood harness, place the
+logical cursor at grapheme `g` on a wide-glyph line, render, and assert
+`tmux cursor_x == Width.upto(line, g) + x0`. Unit tests with a mocked width table cannot
+prove this; only a real terminal can. The same check **guards `Geex.Width` against the
+terminal's own width opinion** — any drift between geex's table and the terminal's
+(`utf8proc`/wcwidth) shows up as a `cursor_x` mismatch, the canonical TUI emoji-width bug
+made observable.
+
+**tmux is the harness, never shipped** — geex owns the screen model and never reads cursor
+position back at runtime (the terminal is a sink; "geex owns the world"). The runtime
+*cousin* of `cursor_x` is the terminal's own cursor-position report — print a glyph, emit
+`\e[6n` (DSR), read `\e[row;colR`. Every terminal answers it, so geex could learn a
+specific terminal's width opinion with no tmux at all, slotting into ADR-0026's probe
+discipline (`\e[?u\e[c`, read-until-known-reply). **Deferred** — empirical per-terminal
+width detection is the escape hatch for the wcwidth-version mess, pinned here, not built now.
+
+**Render (refines §"Render" of the sketch / Consequences):** the ruler + the easy-motion
+overlay + an optional **grid-line paint** (faint column rules so the eye follows a column
+down to a row) are **contextual** — shown only while a viewport-relative grid command is
+being composed, not permanent chrome (ties the screen cost to the moment it earns its keep,
+same instinct as showing the scroll bars only on overflow). This lands with the deferred
+viewport-relative mode + `Width.col_at_display/2`.
+
 ## See
 
 [doc/notes.md](../notes.md) (the original grid sketch + open questions this settles),

@@ -175,6 +175,14 @@ Each gated on a **named consumer** (the brain/world test, [vision.md](vision.md)
   — when a remote/browser consumer + security model exist (v0.5 already ships loopback
   HTTP, [adr/0018](adr/0018-mcp-transport-streamable-http.md); the trust gate for remote is
   the work).
+- **ACP host / bring-your-own-agent** — a *third* protocol seam alongside the MCP **server**
+  (Direction A) and the MCP **client** (pharos): geex as an Agent Client Protocol *editor*,
+  spawning an agent subprocess over JSON-RPC ("LSP for agents", Zed's
+  [bring-your-own-agent](https://zed.dev/blog/bring-your-own-agent-to-zed)). Gated on a named
+  consumer — the proposed first one is **porting DeepSeek Moby** (today the VS Code extension)
+  to an ACP agent. Currently an open question in [notes.md](notes.md) "Agent integration";
+  *needs an ADR before code.* (Distinct from the already-built Moby *matcher* in the `edit`
+  tool, [adr/0020](adr/0020-diff-edit-tool.md).)
 
 ---
 
@@ -204,12 +212,50 @@ Orthogonal to the AI-layer staging above — this is the *"build the world well"
   config.toml`, precedence + cache ([adr/0025](adr/0025-user-config-layer.md), *Proposed*). The
   theme loader is path-ready; this is the reader that points at it (the userpath-theme install
   story).
-- **The interactive TUI loop** — render the reactor's overlay each frame against an open buffer;
-  the next visible milestone, and what makes the live highlighting dogfood real
+- **The interactive TUI loop** — render the reactor's overlay each frame against an open buffer
   ([adr/0024](adr/0024-tui-core-extractable.md)). Brings the keymap (→ user-config) and the
   cursor/clipboard consumers ([adr/0014](adr/0014-editor-state-and-dispatch-ownership.md),
-  [adr/0015](adr/0015-clipboard-subsystem.md)).
+  [adr/0015](adr/0015-clipboard-subsystem.md)). **In flight:** the loop runs, with a
+  line-number gutter, active-line highlight, vertical + horizontal scroll bars, the
+  Birds-of-Paradise theme, the `Alt`-key keymap (WASD/Q-E/R-F motion, `Alt+M`), and the
+  **minibuffer first slice** (`:command` mode = bare-line-number go-to-line). Syntax overlay
+  rendering + the cursor/clipboard consumers are the remaining pieces.
 - **Remaining toolkit gaps** — truecolor→256/16 degradation (capability detect), mouse input.
+
+### The command surface & shell (in flight — the minibuffer track)
+
+The minibuffer is built (one mode); these are the next steps, ordered by dependency. Shared
+design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
+[adr/0027](adr/0027-grid-command-addressing.md) (grid + ruler), and
+[notes.md](notes.md) "Editing & selection bindings".
+
+1. **The `Selection` primitive** (`%Selection{anchor, active}`) — the shared dependency under
+   both highlight mode (`Alt+H`, interactive) and grid ranges (declarative); one span, two
+   input surfaces. *Needs an ADR — currently only a notes sketch.* Unblocks clipboard
+   `cut`/`copy`/`paste` (`Alt+X/C/V` + typed verbs) and grid-range ops.
+2. **The command catalog + the view-action tool category** — a *fourth* tool category
+   (view actions: `line`/`scroll`/`select`/`undo`) registered with field-specs like the
+   operation tools, so they render into `tools/list` (palette-discoverable, agent-callable)
+   without being recorded edits ([adr/0028](adr/0028-editor-shell-and-minibuffer.md)
+   amendment §4). *Needs an ADR.* This is what the palette and the parity backlog stand on.
+3. **Refactor go-to-line through the real system** — replace the `loop.ex` `run_command`
+   hack with a registered `line N` view-action (the bare-number shortcut preserved as sugar).
+4. **The remaining minibuffer modes** ([adr/0028](adr/0028-editor-shell-and-minibuffer.md) §2):
+   **palette** (`Alt+P` / typed `palette`), **grid** (`:coord`/`:coord_range` cast →
+   `Coord.to_span` → copy/cut/replace, [adr/0027](adr/0027-grid-command-addressing.md)) with
+   the **display ruler + grid-line overlay** (the ADR-0027 amendment; `cursor_x`-verified
+   display↔grapheme cast), incremental **search** (`/`), and the **fuzzy file/buffer finder**
+   (with path tab-completion — one `Completion` abstraction, sources per mode).
+5. **undo / redo** — history-navigation verbs on `Alt+B` / `Alt+Shift+B` + typed `undo`/`redo`.
+   The substrate exists (Buffer owns the recorded-command history, `Dispatch.replay/2`,
+   [adr/0014](adr/0014-editor-state-and-dispatch-ownership.md)); this is the user-facing
+   navigation, never given a positive ADR/roadmap slot before — *a real gap, now homed here.*
+6. **Discharge the parity backlog** ([adr/0028](adr/0028-editor-shell-and-minibuffer.md)
+   amendment §2): a `quit`/`exit` typed verb; chords for the operation tools (`save` = Ctrl-O
+   per [adr/0026](adr/0026-terminal-input-model.md)).
+
+**Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (typing flicker: add synchronized output +
+conditional show-cursor) is open and should land alongside this track.
 
 ---
 

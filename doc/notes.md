@@ -780,6 +780,13 @@ Honest estimates, focused work, solid on Elixir:
 
 ## Phased plan
 
+> **Superseded — see [roadmap.md](roadmap.md) (canonical).** This is the original brainstorm
+> staging; it predates the ADRs and `roadmap.md`, and per this file's header "where this file
+> and a later doc disagree, the later doc wins." Notably: grid commands are **deferred** (not
+> v0.1 — [ADR-0027](adr/0027-grid-command-addressing.md)), undo/redo and themes are no longer
+> non-goals (themes built; undo/redo homed in roadmap.md's command-surface track), and the
+> version numbering is restaged (v0.5 = the LLM-drives-geex headline). Kept for the trail.
+
 - **v0.1 (1-2 wk):** single buffer, prim_tty + virtual-screen renderer + escape parser + minibuffer + grid commands. Goal: validate grid feel.
 - **v0.2 (+1 wk):** multiple buffers + buffer-switch via minibuffer.
 - **v0.3 (+1-2 wk):** pane splits + real file tree pane.
@@ -843,6 +850,80 @@ Examples (original sketch — superseded by ADR-0027's numeric form):
 ### Render
 
 When grid mode is triggered, optionally overlay coordinate labels on visible region (easy-motion-style). Toggle off after the command runs.
+
+> **Ruler / overlay are settled in [ADR-0027 amendment](adr/0027-grid-command-addressing.md#amendment-2026-06-08-the-display-ruler--the-human-picking-surface)** — the x-axis ruler is *display-column* (a shared top ruler can only honestly count cells), so it **is** viewport-relative mode made visible; ruler + grid-line paint are **contextual** (shown only while composing a viewport grid command). The display↔grapheme cast is verified by tmux `cursor_x`; its runtime cousin is `\e[6n`.
+
+---
+
+## Editing & selection bindings (sketch — refines ADR-0026 / ADR-0028)
+
+Forward-looking notes from the 2026-06-08 design pass; not built, captured so we remember the *why*.
+
+**Selection is one concept with two input surfaces.** A cut/copy needs a *region*, and there
+are two honest ways to name one: **interactively** (highlight mode — `Alt+H`, motion
+WASD/Q-E/R-F extends an `anchor → active` span, vim-visual-style) or **declaratively** (grid
+coords `x5 y7`, [ADR-0027](adr/0027-grid-command-addressing.md)). They are **not**
+competitors — they're the human-interactive vs typed/agent surfaces for the *same*
+`Selection` (anchor + active). Build `Selection` once; both feed it. So highlight mode is
+**not** made redundant by grid commands — same primitive, two surfaces, the one-shared-path
+pattern again.
+
+**Proposed bindings** (letters are free — retired from the ERTYUIOP cluster):
+
+| chord | action |
+|---|---|
+| `Alt+H` | enter highlight mode (motion extends the span) |
+| `Alt+Z` | select-all (span = whole buffer) |
+| `Alt+X` / `Alt+C` / `Alt+V` | cut / copy / paste the current span (fall back to current line if none) |
+| `Alt+P` | open the command palette |
+| `Alt+B` / `Alt+Shift+B` | undo / redo (history navigation, not recorded `%Command{}`s) |
+
+**`Alt+Shift+letter` is deliverable on legacy terminals — `Alt+B` ≠ `Alt+Shift+B`.** Alt is
+ESC-prefixed and Shift just makes the letter uppercase, so the bytes differ (`ESC b` vs
+`ESC B`) and the parser already preserves case — unlike `Ctrl+Shift+letter`, which a legacy
+tty can't distinguish from `Ctrl+letter`. So undo on `Alt+B` / redo on `Alt+Shift+B` is a
+real, distinguishable pair. (The keymap lowercases Alt-motion today; undo/redo must branch on
+case *before* `lower/1`.) undo/redo are **history navigation** — they move the buffer's
+history pointer ([ADR-0014](adr/0014-editor-state-and-dispatch-ownership.md)), they are not
+new recorded edits; the substrate (append-only recorded-command list + `Dispatch.replay/2`)
+exists, the user-facing verbs do not yet.
+
+**Every mode exits the same way** — `Esc`, `Alt+N`, or typing **`no`** + Enter (the typed
+twin of `Alt+N`; no/op mnemonic). **Typed twins** of the chords above: `highlight`/`select`
+(= `Alt+H`), `palette`/`catalog` (= `Alt+P`), `undo`/`redo` (= `Alt+B`/`Alt+Shift+B`), and a
+`grid`/`lines` toggle for the [ADR-0027](adr/0027-grid-command-addressing.md) ruler/grid-line
+overlay — so every capability is reachable by key *and* by typed command (the
+[ADR-0028](adr/0028-editor-shell-and-minibuffer.md) amendment §2 parity principle).
+
+**Clipboard on Alt is *forced*, and that's fine.** The CUA homes are taken: `Ctrl-X` = quit,
+`Ctrl-C` = quit (geex scheme), `Ctrl-S` = flow-control. So cut/copy have no good Ctrl home —
+`Alt+X/C/V` is their natural *primary*. This bends ADR-0026 §6 ("Alt isn't load-bearing"),
+**except** the minibuffer verbs (`cut`/`copy`/`paste`) are the always-available non-Alt path,
+so clipboard is never *only* on Alt and the rule holds via the typed surface.
+
+**Completion is one mechanism; the palette and path-complete are special cases.** A
+completion *source per minibuffer mode*: command names (→ palette), file paths (→ `Alt+M`
+then `new lib/testfile.ex⇥`), buffer names. `Tab` triggers it against the active source. The
+workflow `Alt+Z` → `Alt+C` → `Alt+M` `new lib/test.ex⇥` is just "selection span + minibuffer
+with a file-path source." Build one `Completion` abstraction with swappable sources.
+
+**The command palette is the minibuffer in browse mode — not a new component.** `Alt+M` =
+*type-the-verb* (`save`, `line 42`, a bare number, grid coords); `Alt+P` = the *same widget*
+opened with the command catalog as the active completion source and the list rendered =
+*fuzzy-find-the-verb*. Two affordances onto one catalog — **discoverability vs speed** — both
+feeding the same parse → command path.
+
+**What the catalog *is* (what's a command vs not).** The catalog is the `tools/list` union
+already built: **edit tools** (`insert`/`delete`/`replace` — recorded `%Command{}`, undoable),
+**read tools**, **operation tools** (`save`/`open`/`create`/`delete`/`rename`/`close` — *not*
+`%Command{}`, never recorded, but carry a field-spec so they render into `tools/list` —
+[operations.ex](../lib/geex/mcp/operations.ex)), plus a **view-action** category to add
+(`line`/`scroll`/`select` — registered descriptors so they show in the palette *and* an agent
+can call them; today `line N` is a hardcoded hack in `loop.ex`). Discriminator for "recorded
+`%Command{}`?": **does replaying it rebuild buffer text?** Insert/delete/replace yes; save/open/
+line/scroll no. Two layers: **invocation** (catalog / palette / `tools/list`, uniform — save
+lives here) sits *above* **recording** (cassette / undo, edits only). So `save` belongs in
+the palette but is **not** a `%Command{}` — you already made this split, and it was right.
 
 ---
 
