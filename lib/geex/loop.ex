@@ -186,8 +186,11 @@ defmodule Geex.Loop do
   def handle_info({:geex_active_buffer, pid}, state),
     do: {:noreply, schedule_repaint(attach(state, pid))}
 
+  # Any buffer change drops the live selection: our own edits already cleared it, and an
+  # out-of-band edit (agent/reconcile) would otherwise leave a stale selection whose carets
+  # no longer match the text — a later copy/cut would grab the wrong region.
   def handle_info({:geex_buffer_change, buffer, _v, _footprint}, %{buffer: buffer} = state),
-    do: {:noreply, schedule_repaint(state)}
+    do: {:noreply, schedule_repaint(%{state | selection: nil})}
 
   def handle_info({:geex_highlights, buffer, _v}, %{buffer: buffer} = state),
     do: {:noreply, schedule_repaint(state)}
@@ -560,7 +563,10 @@ defmodule Geex.Loop do
   ## recorded delete; paste = a recorded insert (or replace, over a selection) baking the
   ## literal text. All consume + clear the selection.
 
+  # A collapsed selection (e.g. Alt+H with no motion yet) selects nothing — copy/cut are
+  # no-ops that leave you in highlight mode, never pushing "" or recording a no-op delete.
   defp do_copy(%{selection: nil} = state, _text), do: state
+  defp do_copy(%{selection: sel} = state, _text) when is_struct(sel, Selection) and sel.anchor == sel.active, do: state
 
   defp do_copy(%{selection: sel} = state, text) do
     with {:ok, copied} <- Doc.slice(Doc.new(text), Selection.range(sel)), do: Clipboard.push(copied)
@@ -568,6 +574,7 @@ defmodule Geex.Loop do
   end
 
   defp do_cut(%{selection: nil} = state, _text), do: state
+  defp do_cut(%{selection: sel} = state, _text) when is_struct(sel, Selection) and sel.anchor == sel.active, do: state
 
   defp do_cut(%{selection: sel} = state, text) do
     range = Selection.range(sel)

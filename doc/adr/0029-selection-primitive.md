@@ -1,7 +1,7 @@
 # ADR-0029: The selection primitive — one region, two surfaces
 
-- **Status:** Proposed
-- **Date:** 2026-06-09
+- **Status:** Accepted
+- **Date:** 2026-06-09 (Accepted 2026-06-09 when wired into highlight mode + clipboard)
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (a *view* is cursor/scroll/**selection**
   onto a buffer; highlight mode), [ADR-0027](0027-grid-command-addressing.md) (grid coordinates resolve
   to a span), [ADR-0015](0015-clipboard-subsystem.md) (copy/cut/paste consume a region),
@@ -62,9 +62,13 @@ the **view** ([ADR-0028](0028-editor-shell-and-minibuffer.md): view = cursor/scr
 *optional* field (`nil` when nothing is selected). While a selection is live, the **cursor is its
 `active` end** — moving the cursor in highlight mode is `extend/2`; moving it outside highlight mode
 collapses/clears the selection. The selection is **view-local and ephemeral** (like the cursor and
-scroll): it is *not* in `EditorState`, never recorded, never replayed. The interactive wiring (the View
-field, `Alt+H` mode in the keymap, the render highlight via `contains?/2`, the clipboard ops consuming
-`range/1`) is the next build — this ADR fixes only the primitive so those can land against a stable shape.
+scroll): it is *not* in `EditorState`, never recorded, never replayed. **Built (2026-06-09):** the live
+selection lives in `Geex.Loop` state (frontend-local, like the goal column — not in the `View`/`Session`
+struct, consistent with the minibuffer precedent); `Alt+H` starts it, motion extends to the cursor,
+`Alt+Z` selects all, `Alt+N`/`Esc` clear, and an edit / go-to-line / buffer-switch clear; the render
+highlight is `Geex.Highlight.Paint.to_screen`'s optional `selection` arg tinting `contains?/2` cells with
+the (already-defined) `palette.selection` bg; the clipboard ops (`Alt+C`/`X`/`V`) consume `range/1` via
+`Geex.Buffer.Doc.slice/2`.
 
 ## Consequences
 
@@ -75,15 +79,14 @@ field, `Alt+H` mode in the keymap, the render highlight via `contains?/2`, the c
   `cut`/`replace` need no selection→span adapter; `copy` + a future read-only `Doc.slice/2` take the same.
 - **No conflict with the grid notation.** Inclusive `x5 - x12` is a notation property resolved by
   `Coord.to_span/2` into the same half-open span; the selection and the grid converge, they don't clash.
-- **Deferred (the wiring, gated on the catalog/clipboard build):** the optional `selection` field on the
-  view + cursor-is-active-end rule; `Alt+H` highlight mode + the typed `highlight`/`select` twin
-  ([ADR-0028](0028-editor-shell-and-minibuffer.md) amendment); the render highlight (paint
-  `contains?/2` cells with a selection bg — a new palette key); the clipboard registers consuming
-  `range/1` ([ADR-0015](0015-clipboard-subsystem.md)); `Geex.Coord.to_span/2` producing the matching
-  span ([ADR-0027](0027-grid-command-addressing.md)); multi-selection (a list of selections, ADR-0027
-  `,` lists) — the primitive is single-span, a list is a later wrapper.
-- **Status is Proposed** — the primitive is built and tested, but the half-open-vs-inclusive call and
-  the cursor-is-active-end rule are open for review before this is Accepted and wired.
+- **Still deferred:** the typed `highlight`/`select`/`copy`/`cut`/`paste` **verbs** (ride the catalog/
+  palette chunk — they need the command parser; the `Alt` bindings ship now, the minibuffer verbs are
+  the non-`Alt` fallback then, [ADR-0028](0028-editor-shell-and-minibuffer.md) amendment); `Geex.Coord.to_span/2`
+  producing the matching span for grid ranges ([ADR-0027](0027-grid-command-addressing.md)); multi-selection
+  (a list of selections, ADR-0027 `,` lists) — the primitive is single-span, a list is a later wrapper;
+  named / buffer-local clipboard registers + yank-pop ([ADR-0015](0015-clipboard-subsystem.md)).
+- **Status is Accepted** — the half-open caret span and the cursor-is-active-end rule are locked, and the
+  primitive is wired into highlight mode + the clipboard (2026-06-09).
 
 ## See
 

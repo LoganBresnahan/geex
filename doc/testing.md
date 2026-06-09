@@ -1018,3 +1018,35 @@ non-vertical cursor change (a move/edit/go-to-line) and **persists** across a ru
 - **Horizontal move breaks stickiness:** from L3's end, `Left` refreshes the goal to col 12; Up to the
   empty line then Down returns to **col 12, not 13** (`cursor_x` 16, confirming the `:eol` goal was
   correctly replaced). **508 tests + 9 doctests** green.
+
+### 2026-06-09 — Selection + clipboard (highlight mode, copy/cut/paste)
+
+The Selection primitive (ADR-0029, now **Accepted**) wired into the interactive loop + the clipboard
+(ADR-0015), in three verified commits. **A** (`0225098`): `Geex.Clipboard` (global ring register;
+push/top/ring, capped, empty-push is a no-op) + `Doc.slice/2` (the read sibling of `replace/3` — text in
+a half-open grapheme range; `slice` then `replace`-with-`""` is a cut). **B** (`8d7a4c2`): the loop holds
+a live `%Selection{}` (frontend-local, cursor = active end); `Alt+H` starts, motion extends, `Alt+Z`
+select-all, `Alt+N`/Esc clear, and edit / go-to-line / buffer-switch / **any buffer change** clear it;
+`Paint.to_screen` tints selected cells with `palette.selection`, the cursor-line tint suppressed while
+selecting. **C** (`aa47d27`): `Alt+C`/`X`/`V` copy/cut/paste — copy = slice → push (no edit); cut = push
++ a recorded `Replace(range,"")`; paste = `Clipboard.top` baked into an `Insert` (or a `Replace` over a
+selection — paste replaces a selection), cursor lands past the inserted text.
+
+**Live-verified in tmux:** Alt+H + Right×6 tints "defmod" (half-open `[0,6)`) with `48;2;92;50;40` while
+keeping the keyword-red fg; Alt+Z tints the whole visible buffer + jumps to the end; Alt+N clears (SGR
+count 1→0); in a scratch buffer cut→paste round-trips, copy→paste **duplicates** ("hello" → "hellohello"),
+paste **replaces** a selection, a partial cut leaves the remainder.
+
+**Adversarial review** (`selection-clipboard-review`, 4 dimensions × find→verify, 15 agents): **8 of 11
+confirmed.** Fixed: a **collapsed selection** (Alt+H with no motion) copy/cut pushed `""` and (cut)
+recorded a no-op edit + dirty flag → copy/cut now no-op on `collapsed?`, and `Clipboard.push("")` is a
+guarded no-op (defense-in-depth, unit-tested); a **stale selection survived out-of-band agent/reconcile
+edits** (a later copy/cut would slice the wrong region) → the loop now clears the selection on every
+buffer change. Deferred (low, documented in `paint.ex`): a multi-line selection's ragged right edge / no
+tint on empty lines' trailing region; the CRLF `\r` selection-vs-render column mismatch (the pre-existing
+cursor-vs-Paint CRLF gap). **Re-verified live:** after the fixes, a collapsed-selection copy is a no-op
+(paste still yields "abcabc", clipboard not clobbered). **526 tests + 9 doctests** green,
+`--warnings-as-errors` clean.
+
+**Scoping:** the **typed** `copy`/`cut`/`paste` verbs ride the later catalog/palette chunk (they need the
+command parser); the `Alt` bindings ship now.

@@ -47,6 +47,9 @@ defmodule Geex.Clipboard do
   def init(_opts), do: {:ok, []}
 
   @impl true
+  # Never clobber the ring top with an empty copy (defense-in-depth: a collapsed/empty
+  # selection must not bury the previous entry and break the next paste).
+  def handle_call({:push, ""}, _from, ring), do: {:reply, :ok, ring}
   def handle_call({:push, text}, _from, ring), do: {:reply, :ok, Enum.take([text | ring], @max_entries)}
   def handle_call(:top, _from, ring), do: {:reply, List.first(ring, ""), ring}
   def handle_call(:ring, _from, ring), do: {:reply, ring, ring}

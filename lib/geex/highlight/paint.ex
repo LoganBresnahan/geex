@@ -84,6 +84,12 @@ defmodule Geex.Highlight.Paint do
     screen
   end
 
+  # The selection tint covers only the actual selected *graphemes*, so two known v1 gaps:
+  # (1) a multi-line selection has a ragged right edge — the empty space past a short/empty
+  # line's end isn't filled to the width; (2) on a CRLF line the `\r` is a selectable Doc
+  # grapheme but `"\r\n"` is one terminator grapheme here, so a selection that includes the
+  # `\r` (the cursor/Doc model's last column) isn't tinted — the same cursor-vs-Paint CRLF
+  # column mismatch that predates selections. Both are deferred polish, not correctness.
   defp selected?(nil, _row, _col), do: false
   defp selected?(%Selection{} = sel, row, col), do: Selection.contains?(sel, {row, col})
 

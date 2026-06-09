@@ -27,6 +27,13 @@ defmodule Geex.ClipboardTest do
     assert Clipboard.top(clip) == "x"
   end
 
+  test "pushing an empty string is a no-op (never clobbers the ring top)", %{clip: clip} do
+    :ok = Clipboard.push("keep me", clip)
+    :ok = Clipboard.push("", clip)
+    assert Clipboard.top(clip) == "keep me"
+    assert Clipboard.ring(clip) == ["keep me"]
+  end
+
   test "the ring is capped (oldest entries fall off)", %{clip: clip} do
     for n <- 1..130, do: Clipboard.push("e#{n}", clip)
     ring = Clipboard.ring(clip)
