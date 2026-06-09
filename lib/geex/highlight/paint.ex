@@ -37,21 +37,51 @@ defmodule Geex.Highlight.Paint do
   `x0` columns (the line-number gutter — text begins at column `x0`), and scrolled right
   by `hscroll` display columns (the first `hscroll` columns of each line are off-screen).
 
-  Walks the text grapheme by grapheme, tracking the byte offset (so multibyte characters
-  map to the right span) and the line's **virtual column** (its display column had nothing
-  scrolled, starting at `x0`). Each grapheme's screen column is `virtual − hscroll`; it
-  advances the virtual column by the grapheme's **display width** ([`Geex.Width`](`Geex.Width`))
-  — a wide glyph takes two. The **whole pane is filled with the theme's editor background**
+  Splits on `\n` into lines — the **same split `Geex.Buffer.Doc` uses**, so a `\r` is
+  ordinary line content at its Doc column (a CRLF line's `\r` is *not* folded into a `\r\n`
+  terminator grapheme), and Paint's column model matches the cursor's and a selection's.
+  Each line is then walked grapheme by grapheme, tracking the byte offset (so multibyte
+  characters map to the right span — the `\n` between lines is the one byte that keeps these
+  offsets aligned with the original text) and the line's **virtual column** (its display
+  column had nothing scrolled, starting at `x0`). Each grapheme's screen column is
+  `virtual − hscroll`; it advances the virtual column by the grapheme's **display width**
+  ([`Geex.Width`](`Geex.Width`)) — a wide glyph takes two, a zero-width one (a combining
+  mark, or a `\r`) none. The **whole pane is filled with the theme's editor background**
   first, then glyphs overlay it — so blank lines and the gaps after short lines carry the
   theme background. The `x0` gutter columns are left as background for the caller to draw
   over. Text is clipped to the rect `[x0, w)`: the right edge by `Geex.Screen`, the **left
   edge here** (a grapheme scrolled past `x0` is dropped; a wide glyph straddling `x0` — its
-  lead scrolled off, its second column visible — shows a blank in that column). Newlines
-  return to the virtual column `x0`.
+  lead scrolled off, its second column visible — shows a blank in that column).
+
+  When a `selection` is given, each selected grapheme's cell takes the palette's selection
+  background, and a line whose **trailing newline** falls inside the selection (an interior
+  line of a multi-line span) has the run from its content end to the right edge filled with
+  the selection background too — so a spanned line reads as fully selected rather than
+  stopping ragged at its last glyph.
   """
-  @spec to_screen(String.t(), [Geex.Highlight.Span.t()], Theme.t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), Selection.t() | nil) ::
+  @spec to_screen(
+          String.t(),
+          [Geex.Highlight.Span.t()],
+          Theme.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Selection.t() | nil
+        ) ::
           Screen.t()
-  def to_screen(text, spans, %Theme{} = theme, w, h, scroll \\ 0, x0 \\ 0, hscroll \\ 0, selection \\ nil)
+  def to_screen(
+        text,
+        spans,
+        %Theme{} = theme,
+        w,
+        h,
+        scroll \\ 0,
+        x0 \\ 0,
+        hscroll \\ 0,
+        selection \\ nil
+      )
       when is_binary(text) and w >= 0 and h >= 0 and scroll >= 0 and x0 >= 0 and hscroll >= 0 do
     by_byte = styles(theme, spans)
     fg = theme.palette.fg
@@ -63,33 +93,57 @@ defmodule Geex.Highlight.Paint do
     # the buffer all show the theme background, not the terminal's default.
     base = Screen.fill_rect(Screen.new(w, h), 0, 0, w, h, %Cell{char: " ", fg: fg, bg: bg})
 
-    # The accumulator also tracks `col` (grapheme index within the line) so a
-    # `Geex.Selection` (caret coordinates) can tint the selected cells' background.
-    {screen, _byte, _row, _vcol, _col} =
+    # Walk lines the way the Doc does — split on "\n" only, so a "\r" stays a content
+    # grapheme at its Doc column. The outer accumulator carries the running byte offset
+    # (aligned with the original text: +1 per "\n" between lines); the inner walk tracks
+    # `col` (grapheme index) so a `Geex.Selection` (caret coordinates) tints the right cells.
+    {screen, _byte} =
       text
-      |> String.graphemes()
-      |> Enum.reduce({base, 0, 0, x0, 0}, fn
-        # "\r\n" is a single grapheme; both forms terminate the line.
-        g, {screen, byte, row, _vcol, _col} when g in ["\n", "\r\n"] ->
-          {screen, byte + byte_size(g), row + 1, x0, 0}
+      |> String.split("\n")
+      |> Enum.with_index()
+      |> Enum.reduce({base, 0}, fn {line, row}, {screen, byte0} ->
+        sy = row - scroll
 
-        g, {screen, byte, row, vcol, col} ->
-          wd = Width.cells(g)
-          cell = cell_for(g, style_at(by_byte, byte, byte_size(g)), fg, bg)
-          cell = if selected?(selection, row, col), do: %{cell | bg: sel_bg}, else: cell
-          screen = place(screen, vcol - hscroll, row - scroll, cell, wd, x0)
-          {screen, byte + byte_size(g), row, vcol + wd, col + 1}
+        {screen, byte_end, end_vcol, len} =
+          line
+          |> String.graphemes()
+          |> Enum.reduce({screen, byte0, x0, 0}, fn g, {screen, byte, vcol, col} ->
+            wd = Width.cells(g)
+            cell = cell_for(g, style_at(by_byte, byte, byte_size(g)), fg, bg)
+            cell = if selected?(selection, row, col), do: %{cell | bg: sel_bg}, else: cell
+            screen = place(screen, vcol - hscroll, sy, cell, wd, x0)
+            {screen, byte + byte_size(g), vcol + wd, col + 1}
+          end)
+
+        # A multi-line selection covers this line's *newline* (the EOL caret {row, len} is in
+        # range): tint the trailing run from the content end to the right edge so the spanned
+        # line reads as fully selected, not ragged. The last buffer line has no newline, so its
+        # EOL caret is never `< end` — this never fires there. `+1` for the "\n" separator.
+        screen =
+          if selected?(selection, row, len) do
+            fill_eol(screen, sy, max(end_vcol - hscroll, x0), w, %Cell{
+              char: " ",
+              fg: fg,
+              bg: sel_bg
+            })
+          else
+            screen
+          end
+
+        {screen, byte_end + 1}
       end)
 
     screen
   end
 
-  # The selection tint covers only the actual selected *graphemes*, so two known v1 gaps:
-  # (1) a multi-line selection has a ragged right edge — the empty space past a short/empty
-  # line's end isn't filled to the width; (2) on a CRLF line the `\r` is a selectable Doc
-  # grapheme but `"\r\n"` is one terminator grapheme here, so a selection that includes the
-  # `\r` (the cursor/Doc model's last column) isn't tinted — the same cursor-vs-Paint CRLF
-  # column mismatch that predates selections. Both are deferred polish, not correctness.
+  # Tint screen-row `sy` from column `sx` to the right edge `w` with `cell` — the selection
+  # fill for a line whose newline is selected. A no-op above the viewport or once the content
+  # already reaches the edge; `Geex.Screen` drops any cell below it.
+  defp fill_eol(screen, sy, sx, w, cell) when sy >= 0 and sx < w,
+    do: Enum.reduce(sx..(w - 1)//1, screen, fn x, acc -> Screen.set_cell(acc, x, sy, cell) end)
+
+  defp fill_eol(screen, _sy, _sx, _w, _cell), do: screen
+
   defp selected?(nil, _row, _col), do: false
   defp selected?(%Selection{} = sel, row, col), do: Selection.contains?(sel, {row, col})
 
@@ -103,8 +157,13 @@ defmodule Geex.Highlight.Paint do
   #     scrolled off, so its visible column shows a blank in the glyph's style;
   #   * anything fully left of `x0` — dropped.
   defp place(screen, _x, _row, _cell, 0, _x0), do: screen
-  defp place(screen, x, row, cell, _wd, x0) when x >= x0, do: elem(Screen.put_grapheme(screen, x, row, cell), 0)
-  defp place(screen, x, row, cell, 2, x0) when x == x0 - 1, do: Screen.set_cell(screen, x0, row, %{cell | char: " "})
+
+  defp place(screen, x, row, cell, _wd, x0) when x >= x0,
+    do: elem(Screen.put_grapheme(screen, x, row, cell), 0)
+
+  defp place(screen, x, row, cell, 2, x0) when x == x0 - 1,
+    do: Screen.set_cell(screen, x0, row, %{cell | char: " "})
+
   defp place(screen, _x, _row, _cell, _wd, _x0), do: screen
 
   # A grapheme can span several bytes; take the style of the first styled byte in

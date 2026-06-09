@@ -128,6 +128,43 @@ defmodule Geex.Highlight.PaintTest do
       screen = Paint.to_screen("hi", [], theme(), 5, 1, 0, 0, 0, nil)
       assert Screen.get_cell(screen, 0, 0).bg == theme().palette.bg
     end
+
+    test "a multi-line selection fills each spanned line's newline region (no ragged edge)" do
+      # {0,0}..{1,1} covers "ab", line 0's newline, and "c". The newline being selected fills
+      # line 0's trailing run to the right edge; line 1's newline is *not* selected, so "cd"
+      # ends without a trailing fill.
+      sel = Selection.new({0, 0}) |> Selection.extend({1, 1})
+      screen = Paint.to_screen("ab\ncd", [], theme(), 10, 2, 0, 0, 0, sel)
+      sel_bg = theme().palette.selection
+      bg = theme().palette.bg
+
+      assert Screen.get_cell(screen, 0, 0).bg == sel_bg
+      assert Screen.get_cell(screen, 1, 0).bg == sel_bg
+      # the gap past "ab" to the right edge is filled (the selected newline)
+      assert Screen.get_cell(screen, 2, 0).bg == sel_bg
+      assert Screen.get_cell(screen, 9, 0).bg == sel_bg
+      # line 1: only "c" is selected; its newline isn't, so no trailing fill past "cd"
+      assert Screen.get_cell(screen, 0, 1).bg == sel_bg
+      assert Screen.get_cell(screen, 1, 1).bg == bg
+      assert Screen.get_cell(screen, 2, 1).bg == bg
+    end
+
+    test "a CRLF line keeps the \\r as a content column, so a selection over it aligns" do
+      # "ab\r\ncd": Doc splits on \n only, so line 0 is "ab\r" (graphemes a,b,\r — len 3). A
+      # selection {0,0}..{1,0} covers "ab", the zero-width \r, and the newline.
+      sel = Selection.new({0, 0}) |> Selection.extend({1, 0})
+      screen = Paint.to_screen("ab\r\ncd", [], theme(), 10, 2, 0, 0, 0, sel)
+      sel_bg = theme().palette.selection
+
+      assert Screen.get_cell(screen, 0, 0).bg == sel_bg
+      assert Screen.get_cell(screen, 1, 0).bg == sel_bg
+      # the \r is zero-width (no glyph), so content ends at column 2; the selected newline
+      # fills from there to the edge — aligned with the Doc/cursor column model.
+      assert Screen.get_cell(screen, 2, 0).bg == sel_bg
+      assert Screen.get_cell(screen, 9, 0).bg == sel_bg
+      # line 1 "cd" is past the half-open active end {1,0}, so it stays unselected
+      assert Screen.get_cell(screen, 0, 1).bg == theme().palette.bg
+    end
   end
 
   describe "end-to-end: reactor-shaped spans render to truecolor on screen" do
