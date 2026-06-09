@@ -60,13 +60,11 @@ defmodule Geex.Loop.Keymap do
   def resolve({:key, :up}, cursor, text), do: {:move, vert(cursor, text, -1)}
   def resolve({:key, :down}, cursor, text), do: {:move, vert(cursor, text, +1)}
 
-  # Alt+M opens the minibuffer (ADR-0028); every other Alt+letter is motion — keyboard
-  # clusters that need no arrow keys (ADR-0026), case-insensitive:
-  #   W A S D — up / left / down / right (gaming-style left hand)
-  #   E   R   — char back / forward
-  #   T   Y   — word back / forward
-  #   U   I   — line start / end
-  #   O   P   — line up / down
+  # Alt+M opens the minibuffer (ADR-0028); every other Alt+letter is motion — a left-hand
+  # cluster around WASD that needs no arrow keys (ADR-0026), case-insensitive:
+  #   W A S D — up / left / down / right
+  #   Q   E   — word back / forward
+  #   R   F   — line start / end
   def resolve({:alt, c}, _cursor, _text) when c in [?m, ?M], do: :minibuffer
   def resolve({:alt, c}, cursor, text), do: alt_motion(lower(c), cursor, text)
 
@@ -126,14 +124,10 @@ defmodule Geex.Loop.Keymap do
   defp alt_motion(?a, cursor, text), do: {:move, left(cursor, text)}
   defp alt_motion(?s, cursor, text), do: {:move, vert(cursor, text, +1)}
   defp alt_motion(?d, cursor, text), do: {:move, right(cursor, text)}
-  defp alt_motion(?e, cursor, text), do: {:move, left(cursor, text)}
-  defp alt_motion(?r, cursor, text), do: {:move, right(cursor, text)}
-  defp alt_motion(?t, cursor, text), do: {:move, word_back(cursor, text)}
-  defp alt_motion(?y, cursor, text), do: {:move, word_forward(cursor, text)}
-  defp alt_motion(?u, cursor, _text), do: {:move, line_start(cursor)}
-  defp alt_motion(?i, cursor, text), do: {:move, line_end(cursor, text)}
-  defp alt_motion(?o, cursor, text), do: {:move, vert(cursor, text, -1)}
-  defp alt_motion(?p, cursor, text), do: {:move, vert(cursor, text, +1)}
+  defp alt_motion(?q, cursor, text), do: {:move, word_back(cursor, text)}
+  defp alt_motion(?e, cursor, text), do: {:move, word_forward(cursor, text)}
+  defp alt_motion(?r, cursor, _text), do: {:move, line_start(cursor)}
+  defp alt_motion(?f, cursor, text), do: {:move, line_end(cursor, text)}
   defp alt_motion(_c, _cursor, _text), do: :ignore
 
   defp lower(c) when c in ?A..?Z, do: c + 32

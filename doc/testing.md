@@ -918,8 +918,9 @@ reverse-video status bar) and owns the hardware cursor while open. The `Geex.Inp
 **`Alt`/Meta-letter** decoding (`\e`+letter → `{:alt, c}`, atomic so it doesn't clash with bare ESC or
 CSI), and the keymap routes `Alt+M` → open and **`Alt+WASD`** → the same motion as the arrows (the
 arrow-key alternative). v1 command: a bare line number jumps to that line (clamped); **`0` jumps to the last line**. The motion
-keymap grew two arrow-free Alt clusters: **WASD** (up/left/down/right) and **ERTYUIOP** (E/R char back/fwd,
-T/Y word back/fwd, U/I line start/end, O/P line up/down; word motion is whitespace-delimited, within-line).
+keymap grew an arrow-free left-hand Alt cluster: **WASD** (up/left/down/right), **Q/E** (word back/forward,
+whitespace-delimited, within-line), and **R/F** (line start/end). (An earlier ERTYUIOP layout was retired
+at the user's request in favour of this tighter cluster.)
 Cancel is **Alt+N** (paired with Alt+M open) — Ctrl-G dropped at the user's request; Esc still works when it
 arrives (a bare ESC otherwise stays in the parser's leftover). Verified live in a 100×30 pane on loop.ex:
 `Alt+M`→`:200`→Enter jumped to line 200 (viewport scrolled); `:abc`→**Alt+N** cancelled with no jump,
