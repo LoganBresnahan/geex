@@ -151,6 +151,21 @@ defmodule Geex.Screen do
     end)
   end
 
+  @doc """
+  Shift every cell down by `dy` rows (negative = up), dropping any that fall outside the
+  screen. Used to reserve a row at the top — the contextual grid ruler
+  ([ADR-0027](../../doc/adr/0027-grid-command-addressing.md)) pushes the text down one row.
+  """
+  @spec translate_y(t(), integer()) :: t()
+  def translate_y(%__MODULE__{} = s, 0), do: s
+
+  def translate_y(%__MODULE__{cells: cells, h: h} = s, dy) do
+    moved =
+      for {{x, y}, cell} <- cells, y + dy >= 0 and y + dy < h, into: %{}, do: {{x, y + dy}, cell}
+
+    %{s | cells: moved}
+  end
+
   @doc "Clear the screen — every cell becomes blank."
   @spec clear(t()) :: t()
   def clear(%__MODULE__{} = s), do: %{s | cells: %{}}

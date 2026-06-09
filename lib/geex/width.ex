@@ -63,6 +63,28 @@ defmodule Geex.Width do
     |> Enum.reduce(0, fn g, acc -> acc + cells(g) end)
   end
 
+  @doc """
+  The **1-based grapheme `x`** at display column `display_x` (1-based) of `line` — the cast
+  the grid ruler needs (display column → addressing column, [ADR-0027](../../doc/adr/0027-grid-command-addressing.md)
+  §"display ruler"). The dual of `Geex.Loop.cursor_xy/3`'s width walk: a wide glyph owns two
+  display columns, so **both** map to it; a zero-width grapheme owns none, so it is skipped.
+  A `display_x` past the line's drawn width returns the caret **after** the last grapheme
+  (`graphemes + 1`), which the resolver clamps to the line end ("to end of line"). Pure — a
+  function of the line text only, so it never reaches into view state.
+  """
+  @spec col_at_display(String.t(), pos_integer()) :: pos_integer()
+  def col_at_display(line, display_x) when is_binary(line) and display_x >= 1 do
+    walk_to_display(String.graphemes(line), display_x, 1, 1)
+  end
+
+  # gx = current grapheme's 1-based index; ds = its 1-based display-column start.
+  defp walk_to_display([], _target, gx, _ds), do: gx
+
+  defp walk_to_display([g | rest], target, gx, ds) do
+    w = cells(g)
+    if w > 0 and target < ds + w, do: gx, else: walk_to_display(rest, target, gx + 1, ds + w)
+  end
+
   # `is_wide/1` is a compiled clause table (cheap) and is checked first: a wide
   # glyph is never zero-width, so this avoids the heavier `lookup/1` for CJK. The
   # zero-width path runs only for narrow non-ASCII graphemes.

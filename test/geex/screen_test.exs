@@ -94,7 +94,9 @@ defmodule Geex.ScreenTest do
     end
 
     test "a wide glyph occupies two columns (lead + continuation) and advances by two" do
-      {s, next} = Screen.put_grapheme(Screen.new(5, 1), 0, 0, %Cell{char: "\u{5B57}", fg: {:ansi, 1}})
+      {s, next} =
+        Screen.put_grapheme(Screen.new(5, 1), 0, 0, %Cell{char: "\u{5B57}", fg: {:ansi, 1}})
+
       assert next == 2
       assert Screen.get_cell(s, 0, 0) == %Cell{char: "\u{5B57}", fg: {:ansi, 1}}
       # The continuation shares the glyph's style but carries an empty char.
@@ -169,6 +171,27 @@ defmodule Geex.ScreenTest do
       assert s.cells == %{}
       assert s.w == 5
       assert s.h == 5
+    end
+  end
+
+  describe "translate_y/2" do
+    test "shifts cells down, dropping those that fall off the bottom" do
+      s =
+        Screen.new(3, 3)
+        |> Screen.set_cell(0, 0, %Cell{char: "a"})
+        |> Screen.set_cell(1, 2, %Cell{char: "b"})
+
+      moved = Screen.translate_y(s, 1)
+      assert Screen.get_cell(moved, 0, 0) == Cell.blank()
+      assert Screen.get_cell(moved, 0, 1).char == "a"
+      # "b" was on the last row -> shifted off the bottom -> dropped.
+      assert Screen.get_cell(moved, 1, 3) == Cell.blank()
+      refute Enum.any?(moved.cells, fn {{_x, y}, _} -> y >= 3 end)
+    end
+
+    test "a zero shift is a no-op" do
+      s = Screen.new(2, 2) |> Screen.set_cell(0, 0, %Cell{char: "x"})
+      assert Screen.translate_y(s, 0) == s
     end
   end
 end
