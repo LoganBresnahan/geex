@@ -41,6 +41,7 @@ defmodule Geex.Buffer do
   use GenServer, restart: :temporary
 
   alias Geex.EditorState
+  alias Geex.Edit.Footprint
 
   @doc """
   Start a buffer. Options: `:path` (file path; its contents are loaded if the file
@@ -113,8 +114,10 @@ defmodule Geex.Buffer do
   @doc """
   Subscribe `pid` to this buffer's change stream. After every successful
   `dispatch/2` the buffer sends each subscriber `{:geex_buffer_change, buffer_pid,
-  version}` — the post-dispatch emit that makes the command pipeline the editor's
-  "after change" hook ([ADR-0022](`e:doc/adr/0022-capability-reactor.md`)). The
+  version, footprint}` — the post-dispatch emit that makes the command pipeline the
+  editor's "after change" hook ([ADR-0022](`e:doc/adr/0022-capability-reactor.md`)).
+  `footprint` is the edit's byte footprint `%{at, removed, added}` (or `:unknown`), so
+  a byte-oriented consumer can shift its overlay across the edit. The
   capability reactor (highlighting, later LSP) is the consumer; the buffer knows
   only "subscribers", not what they do, and never blocks on them (it `send`s).
 
@@ -196,8 +199,12 @@ defmodule Geex.Buffer do
   def handle_call({:dispatch, command}, _from, state) do
     case Geex.Dispatch.apply_command(command, state.editor) do
       {:ok, editor} ->
+        # Compute the edit's byte footprint against the *pre-edit* doc, before we
+        # swap in the new editor — it lets a byte-oriented overlay (highlighting)
+        # shift optimistically across the edit (ADR-0022).
+        footprint = Footprint.of(EditorState.doc(state.editor), command)
         new_state = %{state | editor: editor, history: [command | state.history], dirty: true}
-        notify_change(new_state)
+        notify_change(new_state, footprint)
         {:reply, {:ok, build_snapshot(new_state)}, new_state}
 
       {:error, _reason} = error ->
@@ -276,10 +283,13 @@ defmodule Geex.Buffer do
   end
 
   # Post-dispatch emit (ADR-0022): tell each subscriber the buffer changed, tagged
-  # with the new version. A plain `send` — the buffer never blocks on a reactor.
-  defp notify_change(state) do
+  # with the new version **and the edit's byte footprint** (`%{at, removed, added}`,
+  # or `:unknown`) so a byte-oriented overlay can shift optimistically across the
+  # edit. A plain `send` — the buffer never blocks on a reactor.
+  defp notify_change(state, footprint) do
     version = length(state.history)
-    for {_ref, pid} <- state.subscribers, do: send(pid, {:geex_buffer_change, self(), version})
+    msg = {:geex_buffer_change, self(), version, footprint}
+    for {_ref, pid} <- state.subscribers, do: send(pid, msg)
     :ok
   end
 

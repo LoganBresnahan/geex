@@ -960,3 +960,42 @@ frames — but the byte-level fix is proven by `frame/3` and the live run confir
 
 **Deferred (bugs.md note):** trimming per-keystroke damage (`highlight_line/4` re-tints the active
 line's whole-width bg every frame) is a layered perf win on non-2026 terminals, not part of this fix.
+
+### 2026-06-09 — BUG-2 (line-tail flicker) fixed: optimistic highlight-overlay shift
+
+Closed [bugs.md](bugs.md) BUG-2. After BUG-1, the user still saw the **tail of the edited line
+shimmer while typing**, and confirmed the tell: a **no-grammar scratch buffer doesn't flicker**,
+so it was the **highlighter's two-pass repaint**, not the renderer. The immediate post-keystroke
+repaint painted with the *previous* text's spans (byte offsets now shifted by the edit) → colours
+past the cursor misaligned for one frame until the async re-highlight landed; the misalignment
+clusters at token boundaries near line ends.
+
+**Fix.** The buffer emits the edit's **byte footprint** `%{at, removed, added}` on its change event
+(`Geex.Edit.Footprint.of/2` + the new `Doc.byte_offset/2`) — carried on the *event*, so it works
+for human, agent, and reconcile edits alike. The reactor shifts its overlay across the footprint
+(`Geex.Highlight.Span.shift_all/2`) into an **optimistic** overlay exposed by a new `Reactor.render/1`,
+which the loop paints — so the immediate frame is colour-aligned; the exact re-highlight supersedes
+it. `highlights/1`/`await/3` stay exact, so nothing else is perturbed. The loop already repaints on
+every buffer-change, so pointing it at `render/1` was the whole loop change.
+
+**Adversarial review** (`bug2-optimistic-overlay-review`, 4 dimensions × find→verify, 14 agents):
+**5 confirmed of 10, all fixed.** Two `medium` were real residual flicker of the same class — the
+span-shift boundary was asymmetric-wrong (a char typed at a token's *start* stretched the token
+over it; fixed with `shift_start` strict-`<` / `shift_end` inclusive-`<=`, with the symmetric tests),
+and an `:unknown` footprint (multi-block `edit`) regressed the overlay buffer-wide (now retains the
+prior overlay, with a reactor test). Two `low`: the loop's two-read text/overlay version-skew window
+(documented at the read site — one-frame, self-correcting, reachable only via a concurrent MCP/
+reconcile edit) and a stale `subscribe/2` docstring (fixed).
+
+**Verified.** New pure tests pin the shift math (`span_test` incl. the start/end boundary asymmetry
++ the "typed char between two tokens stays neutral" case; `footprint_test` incl. multibyte/CRLF/
+cross-line; `doc_test` `byte_offset`) and the wiring (`reactor_test`: `render/1` returns the shifted
+overlay while `highlights/1` stays exact; `:unknown` keeps the overlay; `buffer_test`: the 4-tuple
+footprint event). **503 tests + 9 doctests** green, `--warnings-as-errors` clean. **Live (100×30 tmux
+on loop.ex):** typing `xyz` then a 13-key burst into highlighted Elixir inserted correctly, the cursor
+tracked `5:0`→`8:0`→`18:0`, the final colouring was correct, nothing crashed, the source on disk was
+untouched. As with BUG-1 the *visual* "flicker gone" is the user's call — `capture-pane` shows only
+the settled frame, not the optimistic one — but the shift math is proven by the unit tests.
+
+**Groundwork:** the `{at, removed, added}` footprint is exactly tree-sitter's `Tree.edit` input — the
+deferred incremental-reparse optimization (ADR-0022) now has its plumbing.

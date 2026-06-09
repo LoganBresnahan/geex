@@ -7,6 +7,46 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-2 — Flicker at the line tail while typing (the highlighter's two-pass)  ✅ FIXED (2026-06-09)
+
+- **Status:** **FIXED** — the optimistic highlight-overlay shift. Verified: 503 tests + 9
+  doctests green, adversarially reviewed (5 findings fixed), live-smoked. See the
+  [testing.md](testing.md) 2026-06-09 entry.
+- **Symptom (user-reported, after BUG-1):** "when I type a character, the end characters or
+  close to the end characters per line flicker a little bit." Confirmed by the user: typing in
+  a **no-grammar scratch buffer does not flicker** — so it's the highlighter, not the renderer.
+
+**Verified cause.** Every keystroke triggers two repaints. The **immediate** one (so the typed
+char appears with no latency) painted with the highlight spans computed for the *previous* text
+— but spans are **byte offsets** ([`Span`](../lib/geex/highlight/span.ex)), and the edit shifted
+every byte after the cursor. So the colours past the edit point were misaligned by the edit's
+byte delta for one frame, until the **async re-highlight** ([`Reactor`](../lib/geex/highlight/reactor.ex))
+landed and corrected them. Misalignment clusters at token boundaries → "the end characters
+flicker." The loop even had the overlay's version available but discarded it.
+
+**Fix (carry the edit, shift the overlay optimistically).** The buffer now emits the edit's
+**byte footprint** `%{at, removed, added}` on its change event ([`Geex.Edit.Footprint`](../lib/geex/edit/footprint.ex)
++ [`Doc.byte_offset/2`](../lib/geex/buffer/doc.ex)) — on the *event*, so it covers human, agent,
+and reconcile edits alike. The reactor shifts its overlay across the footprint
+([`Span.shift_all/2`](../lib/geex/highlight/span.ex)) into an **optimistic** overlay served by a
+new `render/1`, which the loop paints — so the immediate frame is already colour-aligned. The
+exact re-highlight then supersedes it. `highlights/1`/`await/3` stay exact (tests unperturbed).
+
+**Adversarial review fixed 5 issues** (4 dimensions, 14 agents): the span-shift boundary was
+asymmetric-wrong (a char typed at a token's *start* stretched the token over it — fixed with
+`shift_start` strict-`<` / `shift_end` inclusive-`<=`); an `:unknown` footprint (the multi-block
+`edit` tool) regressed the overlay buffer-wide (now retains the prior overlay); plus two low items
+(the loop's two-read version-skew window — documented; a stale `subscribe/2` docstring — fixed).
+
+**Lays the groundwork for incremental reparse:** the same `{at, removed, added}` is what
+tree-sitter's `Tree.edit` needs — a deferred ADR-0022 optimization.
+
+**Deferred (low):** version-reconcile the loop's two reads (text@Session vs spans@Reactor) so a
+concurrent MCP/reconcile edit can't briefly pair mismatched versions — documented at the read
+site, one-frame self-correcting, not worth a guard yet.
+
+---
+
 ## BUG-1 — Flicker while typing  ✅ FIXED (2026-06-09)
 
 - **Status:** **FIXED** — `Geex.Renderer.frame/3` (atomic frames via DEC 2026 + conditional

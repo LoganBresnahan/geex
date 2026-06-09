@@ -38,6 +38,41 @@ defmodule Geex.Highlight.ReactorTest do
     assert "comment" in captures(overlay)
   end
 
+  test "render/1 returns the exact overlay when nothing is pending", %{reactor: reactor} do
+    {:ok, exact} = Reactor.await(reactor, 0)
+    assert Reactor.render(reactor) == exact
+  end
+
+  test "render/1 returns an optimistically byte-shifted overlay across an edit", %{buf: buf, reactor: reactor} do
+    {:ok, exact} = Reactor.await(reactor, 0)
+    refute exact.spans == []
+
+    # Simulate the buffer's post-dispatch emit for a 2-byte insert at offset 0 (version 1),
+    # ahead of the real re-highlight: render/1 must serve the shifted overlay so the painted
+    # colours stay aligned, while highlights/1 keeps the exact result.
+    footprint = %{at: 0, removed: 0, added: 2}
+    send(reactor, {:geex_buffer_change, buf, 1, footprint})
+
+    render = Reactor.render(reactor)
+    assert render.version == 1
+    assert render.spans == Geex.Highlight.Span.shift_all(exact.spans, footprint)
+    # The authoritative overlay is untouched by the optimism (still the exact v0 pass).
+    assert Reactor.highlights(reactor).version == 0
+  end
+
+  test "an :unknown-footprint edit keeps the prior optimistic overlay (no version regression)", %{buf: buf, reactor: reactor} do
+    {:ok, _exact} = Reactor.await(reactor, 0)
+    fp = %{at: 0, removed: 0, added: 1}
+    send(reactor, {:geex_buffer_change, buf, 1, fp})
+    send(reactor, {:geex_buffer_change, buf, 2, fp})
+    assert Reactor.render(reactor).version == 2
+
+    # A non-shiftable (multi-block `edit`) change must NOT drop render back to the old
+    # exact result — it keeps the still-valid shifts the prior edits accumulated.
+    send(reactor, {:geex_buffer_change, buf, 3, :unknown})
+    assert Reactor.render(reactor).version == 2
+  end
+
   test "subscribe/2 returns the current overlay so a subscriber can paint immediately", %{reactor: reactor} do
     {:ok, _} = Reactor.await(reactor, 0)
     assert %{version: 0, spans: _} = Reactor.subscribe(reactor)

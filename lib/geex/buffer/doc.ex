@@ -38,6 +38,30 @@ defmodule Geex.Buffer.Doc do
   def line(%__MODULE__{lines: lines}, row), do: Enum.at(lines, row)
 
   @doc """
+  The **byte** offset of the caret at grapheme position `{row, col}` — the number of
+  bytes in `text/1` that precede it. The dual of the grapheme `{row, col}` the cursor
+  and commands use; tree-sitter / `Geex.Highlight.Span` are byte-oriented, so this is
+  the bridge for mapping an edit to the byte span it touched.
+
+  `row`/`col` are clamped to the document, and a `\\n` counts as one byte between lines.
+  """
+  @spec byte_offset(t(), pos()) :: non_neg_integer()
+  def byte_offset(%__MODULE__{lines: lines}, {row, col}) do
+    row = row |> max(0) |> min(length(lines) - 1)
+    prefix = lines |> Enum.take(row) |> Enum.reduce(0, fn l, acc -> acc + byte_size(l) + 1 end)
+
+    col_bytes =
+      lines
+      |> Enum.at(row, "")
+      |> String.graphemes()
+      |> Enum.take(max(col, 0))
+      |> IO.iodata_to_binary()
+      |> byte_size()
+
+    prefix + col_bytes
+  end
+
+  @doc """
   Insert `text` at `{row, col}`. `text` may contain newlines, which split the
   line. Returns `{:ok, doc}` or `{:error, :row_out_of_range | :col_out_of_range}`.
   """

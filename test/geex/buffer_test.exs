@@ -42,13 +42,14 @@ defmodule Geex.BufferTest do
   test "subscribe/2 notifies on change; unsubscribe/2 stops the notifications", %{buf: buf} do
     {:ok, _v} = Buffer.subscribe(buf, self())
     {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "a"))
-    assert_receive {:geex_buffer_change, ^buf, _}, 500
+    # version + the edit's byte footprint (ADR-0022 optimistic overlay)
+    assert_receive {:geex_buffer_change, ^buf, _, %{at: 0, removed: 0, added: 1}}, 500
 
     :ok = Buffer.unsubscribe(buf, self())
     # A sync round-trip ensures the unsubscribe cast is processed before the next edit.
     _ = Buffer.snapshot(buf)
     {:ok, _} = Buffer.dispatch(buf, insert(0, 1, "b"))
-    refute_receive {:geex_buffer_change, ^buf, _}, 200
+    refute_receive {:geex_buffer_change, ^buf, _, _}, 200
   end
 
   test "dispatch threads a command into the EditorState and records it with provenance", %{buf: buf} do

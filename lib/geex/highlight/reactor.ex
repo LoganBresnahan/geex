@@ -26,6 +26,7 @@ defmodule Geex.Highlight.Reactor do
   require Logger
 
   alias Geex.Highlight
+  alias Geex.Highlight.Span
 
   @default_timeout_ms 5_000
 
@@ -56,6 +57,15 @@ defmodule Geex.Highlight.Reactor do
   """
   @spec highlights(GenServer.server()) :: %{version: non_neg_integer(), spans: [map()]} | nil
   def highlights(reactor), do: GenServer.call(reactor, :highlights)
+
+  @doc """
+  The overlay to **paint** — the optimistically-shifted overlay if one is live (a
+  recent edit whose exact re-highlight hasn't landed yet), else the exact `highlights/1`
+  result. Use this from the render loop so the edited line's colours stay aligned
+  across a keystroke; use `highlights/1`/`await/3` when the *exact* overlay is wanted.
+  """
+  @spec render(GenServer.server()) :: %{version: non_neg_integer(), spans: [map()]} | nil
+  def render(reactor), do: GenServer.call(reactor, :render)
 
   @doc """
   Subscribe `pid` (default: caller) to **overlay-ready** notifications. After each
@@ -173,6 +183,11 @@ defmodule Geex.Highlight.Reactor do
       lang: lang,
       timeout_ms: timeout,
       result: nil,
+      # An optimistically byte-shifted overlay at a version newer than `result`,
+      # painted while the async re-highlight for that version is still in flight
+      # (so the edited line's tail stays colour-aligned and doesn't flicker). `nil`
+      # when `result` is current or the edit's footprint was `:unknown`.
+      optimistic: nil,
       subscribers: %{},
       in_flight: nil,
       # An initial pass over already-loaded content, before any edit.
@@ -185,6 +200,8 @@ defmodule Geex.Highlight.Reactor do
 
   @impl true
   def handle_call(:highlights, _from, state), do: {:reply, state.result, state}
+
+  def handle_call(:render, _from, state), do: {:reply, state.optimistic || state.result, state}
 
   def handle_call({:subscribe, pid}, _from, state) do
     ref = Process.monitor(pid)
@@ -204,8 +221,8 @@ defmodule Geex.Highlight.Reactor do
   end
 
   @impl true
-  def handle_info({:geex_buffer_change, buffer, _version}, %{buffer: buffer} = state) do
-    {:noreply, maybe_start(%{state | pending: true})}
+  def handle_info({:geex_buffer_change, buffer, version, footprint}, %{buffer: buffer} = state) do
+    {:noreply, maybe_start(%{state | pending: true, optimistic: shift_overlay(state, version, footprint)})}
   end
 
   def handle_info({:pass_result, id, version, result}, %{in_flight: %{id: id, ref: ref}} = state) do
@@ -214,7 +231,7 @@ defmodule Geex.Highlight.Reactor do
     state =
       case result do
         {:ok, spans} ->
-          fresh = %{state | in_flight: nil, result: %{version: version, spans: spans}}
+          fresh = %{state | in_flight: nil, result: %{version: version, spans: spans}, optimistic: keep_optimistic(state.optimistic, version)}
           notify(fresh, version)
           fresh
 
@@ -254,6 +271,30 @@ defmodule Geex.Highlight.Reactor do
     msg = {:geex_highlights, buffer, version}
     Enum.each(Map.values(subs), &send(&1, msg))
   end
+
+  # Byte-shift the freshest overlay we have (optimistic, else exact result) across the
+  # edit's `footprint`, tagging it with the new `version` — the optimistic overlay the
+  # render loop paints until the exact re-highlight for `version` lands.
+  #
+  # `:unknown` footprint (the multi-block `edit` tool) can't be byte-shifted, so we
+  # **keep** the prior overlay *at its own version* rather than dropping to `nil`:
+  # dropping would regress render to the (possibly much older) exact `result`,
+  # misaligning the whole buffer until the next pass; keeping it leaves the prefix
+  # before the unknown splice correctly aligned, with only that region stale.
+  defp shift_overlay(state, _version, :unknown), do: state.optimistic || state.result
+
+  defp shift_overlay(state, version, footprint) do
+    case state.optimistic || state.result do
+      %{spans: spans} -> %{version: version, spans: Span.shift_all(spans, footprint)}
+      nil -> nil
+    end
+  end
+
+  # After an exact pass completes for `version`, keep the optimistic overlay only if it
+  # is still *ahead* (more edits arrived while the pass ran); otherwise the exact result
+  # has caught up and supersedes it.
+  defp keep_optimistic(%{version: ov} = optimistic, version) when ov > version, do: optimistic
+  defp keep_optimistic(_optimistic, _version), do: nil
 
   # Remove every subscription held by `pid` and demonitor it — the explicit
   # counterpart to a subscriber's `:DOWN` cleanup (used on `unsubscribe/2`).

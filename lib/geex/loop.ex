@@ -177,7 +177,7 @@ defmodule Geex.Loop do
   def handle_info({:geex_active_buffer, pid}, state),
     do: {:noreply, schedule_repaint(attach(state, pid))}
 
-  def handle_info({:geex_buffer_change, buffer, _v}, %{buffer: buffer} = state),
+  def handle_info({:geex_buffer_change, buffer, _v, _footprint}, %{buffer: buffer} = state),
     do: {:noreply, schedule_repaint(state)}
 
   def handle_info({:geex_highlights, buffer, _v}, %{buffer: buffer} = state),
@@ -278,6 +278,14 @@ defmodule Geex.Loop do
 
         scroll = scroll_for(state.scroll, line, h_text, @scrolloff)
 
+        # `text` (Session.snapshot) and the overlay (Reactor.render) are read from two
+        # processes, so painting assumes they are the same buffer version. That holds in
+        # the single-frontend flow — the buffer emits its change to the reactor *before*
+        # this repaint's render call can reach it, so the optimistic overlay is already at
+        # `text`'s version. A *concurrent* MCP/reconcile edit landing between these two
+        # reads can briefly pair text@vN with spans@v(N+1); the overlay only ever clips
+        # (Paint tolerates out-of-range spans, never crashes) and the change's own repaint
+        # corrects it next frame. Enforce-the-versions-match is a deferred refinement.
         {screen, {cx, cy}, hscroll} =
           frame(text, overlay_spans(state.reactor), state.theme, cursor, tw, h_text, scroll, state.hscroll)
 
@@ -567,8 +575,11 @@ defmodule Geex.Loop do
     :exit, _ -> {:error, :down}
   end
 
+  # The overlay to paint: the optimistically-shifted overlay when a recent edit's
+  # exact re-highlight is still in flight, else the exact result — so the edited
+  # line's colours stay aligned across a keystroke (ADR-0022; no tail flicker).
   defp safe_highlights(reactor) do
-    Reactor.highlights(reactor)
+    Reactor.render(reactor)
   catch
     :exit, _ -> nil
   end

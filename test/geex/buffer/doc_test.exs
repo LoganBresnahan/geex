@@ -113,4 +113,27 @@ defmodule Geex.Buffer.DocTest do
       assert {:error, :col_out_of_range} = Doc.replace(Doc.new("x"), {{0, 9}, {0, 9}}, "y")
     end
   end
+
+  describe "byte_offset/2" do
+    test "counts bytes before a caret, with one byte per newline" do
+      d = Doc.new("ab\ncd\nef")
+      assert Doc.byte_offset(d, {0, 0}) == 0
+      assert Doc.byte_offset(d, {0, 2}) == 2
+      assert Doc.byte_offset(d, {1, 0}) == 3
+      assert Doc.byte_offset(d, {2, 1}) == 7
+    end
+
+    test "counts bytes, not graphemes, for multibyte content" do
+      d = Doc.new("a中b")
+      assert Doc.byte_offset(d, {0, 1}) == 1
+      assert Doc.byte_offset(d, {0, 2}) == 4
+      assert Doc.byte_offset(d, {0, 3}) == 5
+    end
+
+    test "clamps an out-of-range row/col to the document end" do
+      d = Doc.new("ab\ncd")
+      assert Doc.byte_offset(d, {9, 0}) == 3
+      assert Doc.byte_offset(d, {0, 99}) == 2
+    end
+  end
 end
