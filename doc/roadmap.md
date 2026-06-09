@@ -231,10 +231,11 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
 
 1. **The `Selection` primitive** (`%Selection{anchor, active}`) — the shared dependency under
    both highlight mode (`Alt+H`, interactive) and grid ranges (declarative); one span, two
-   input surfaces. **Pure core + tests built** ([adr/0029](adr/0029-selection-primitive.md),
-   *Proposed*); the interactive wiring (view field, `Alt+H`, render highlight, clipboard
-   consuming `range/1`) is the remaining build. Unblocks clipboard `cut`/`copy`/`paste`
-   (`Alt+X/C/V` + typed verbs) and grid-range ops.
+   input surfaces. **Built and live-verified** ([adr/0029](adr/0029-selection-primitive.md),
+   *Accepted*): the pure core, the interactive wiring (loop selection field, `Alt+H` +
+   `Alt+B` select-all, render highlight incl. the multi-line / CRLF cases, `Alt+N`/Esc clear),
+   and clipboard `cut`/`copy`/`paste` (`Alt+X/C/V`) consuming `range/1`. The **typed** verbs
+   and grid-range ops remain (they ride item 2).
 2. **The command catalog + the view-action tool category** — a *fourth* tool category
    (view actions: `line`/`scroll`/`select`/`undo`) registered with field-specs like the
    operation tools, so they render into `tools/list` (palette-discoverable, agent-callable)
@@ -249,16 +250,18 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    the **display ruler + grid-line overlay** (the ADR-0027 amendment; `cursor_x`-verified
    display↔grapheme cast), incremental **search** (`/`), and the **fuzzy file/buffer finder**
    (with path tab-completion — one `Completion` abstraction, sources per mode).
-5. **undo / redo** — history-navigation verbs on `Alt+B` / `Alt+Shift+B` + typed `undo`/`redo`.
-   The substrate exists (Buffer owns the recorded-command history, `Dispatch.replay/2`,
-   [adr/0014](adr/0014-editor-state-and-dispatch-ownership.md)); this is the user-facing
-   navigation, never given a positive ADR/roadmap slot before — *a real gap, now homed here.*
+5. **undo / redo** — **built** ([adr/0031](adr/0031-undo-redo-history-operations.md)): history
+   operations on `Alt+Z` / `Alt+Shift+Z` (replay-from-base over the recorded history + the loaded
+   `base`, [adr/0014](adr/0014-editor-state-and-dispatch-ownership.md)); a fresh edit clears the
+   redo stack, the cursor lands from the returned command, and overlays re-derive via a `:reset`
+   change (undo lowers `version`). The **typed `undo`/`redo` verbs** (the agent/palette twin) ride
+   the catalog + view-action build (item 2); insert coalescing is deferred polish.
 6. **Discharge the parity backlog** ([adr/0028](adr/0028-editor-shell-and-minibuffer.md)
    amendment §2): a `quit`/`exit` typed verb; chords for the operation tools (`save` = Ctrl-O
    per [adr/0026](adr/0026-terminal-input-model.md)).
 
-**Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (typing flicker: add synchronized output +
-conditional show-cursor) is open and should land alongside this track.
+**Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
+tail flicker) are both **FIXED** (2026-06-09); the shelf is currently clear.
 
 ---
 

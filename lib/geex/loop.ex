@@ -35,10 +35,25 @@ defmodule Geex.Loop do
   use GenServer
   require Logger
 
-  alias Geex.{Buffer, Cell, Clipboard, Command, Dispatch, Minibuffer, Renderer, Screen, Selection, Session, TerminalIO, Theme, Width}
+  alias Geex.{
+    Buffer,
+    Cell,
+    Clipboard,
+    Command,
+    Dispatch,
+    Minibuffer,
+    Renderer,
+    Screen,
+    Selection,
+    Session,
+    TerminalIO,
+    Theme,
+    Width
+  }
+
   alias Geex.Buffer.Doc
   alias Geex.Command.Meta
-  alias Geex.Commands.{Insert, Replace}
+  alias Geex.Commands.{Delete, Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
   alias Geex.Loop.Keymap
 
@@ -89,10 +104,28 @@ defmodule Geex.Loop do
   `@hscrolloff` margin); the cursor's `x` is shifted by the gutter width and the horizontal
   scroll to match. Returns the resolved `hscroll` so the caller can persist it.
   """
-  @spec frame(String.t(), [map()], Theme.t(), {non_neg_integer(), non_neg_integer()},
-          non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+  @spec frame(
+          String.t(),
+          [map()],
+          Theme.t(),
+          {non_neg_integer(), non_neg_integer()},
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) ::
           {Screen.t(), {non_neg_integer(), integer()}, non_neg_integer()}
-  def frame(text, spans, %Theme{} = theme, {cursor_line, _} = cursor, w, h, scroll, hscroll \\ 0, selection \\ nil) do
+  def frame(
+        text,
+        spans,
+        %Theme{} = theme,
+        {cursor_line, _} = cursor,
+        w,
+        h,
+        scroll,
+        hscroll \\ 0,
+        selection \\ nil
+      ) do
     gw = gutter_width(text)
     text_w = max(w - gw, 0)
     {dcol, cy} = cursor_xy(text, cursor, scroll)
@@ -111,6 +144,7 @@ defmodule Geex.Loop do
   # cursor-line tint only when nothing is selected (Paint already drew the selection),
   # so the two never fight over the cursor's row.
   defp cursor_line_overlay(screen, _theme, _w, _cy, %Selection{}), do: screen
+
   defp cursor_line_overlay(screen, theme, w, cy, nil),
     do: highlight_line(screen, w, cy, theme.palette.active_line_bg)
 
@@ -174,7 +208,20 @@ defmodule Geex.Loop do
     {w, h} = safe_window_size()
 
     state =
-      %{w: w, h: h, scroll: 0, hscroll: 0, goal: 0, selection: nil, theme: Theme.default(), buffer: nil, buffer_ref: nil, reactor: nil, repaint?: false, minibuffer: Minibuffer.new()}
+      %{
+        w: w,
+        h: h,
+        scroll: 0,
+        hscroll: 0,
+        goal: 0,
+        selection: nil,
+        theme: Theme.default(),
+        buffer: nil,
+        buffer_ref: nil,
+        reactor: nil,
+        repaint?: false,
+        minibuffer: Minibuffer.new()
+      }
       |> attach(active)
 
     {:ok, schedule_repaint(state)}
@@ -255,8 +302,12 @@ defmodule Geex.Loop do
 
     reactor =
       case Reactor.for_buffer(pid) do
-        {:ok, r} -> Reactor.subscribe(r); r
-        :error -> nil
+        {:ok, r} ->
+          Reactor.subscribe(r)
+          r
+
+        :error ->
+          nil
       end
 
     %{state | buffer: pid, buffer_ref: ref, reactor: reactor}
@@ -300,7 +351,17 @@ defmodule Geex.Loop do
         # (Paint tolerates out-of-range spans, never crashes) and the change's own repaint
         # corrects it next frame. Enforce-the-versions-match is a deferred refinement.
         {screen, {cx, cy}, hscroll} =
-          frame(text, overlay_spans(state.reactor), state.theme, cursor, tw, h_text, scroll, state.hscroll, state.selection)
+          frame(
+            text,
+            overlay_spans(state.reactor),
+            state.theme,
+            cursor,
+            tw,
+            h_text,
+            scroll,
+            state.hscroll,
+            state.selection
+          )
 
         gw = gutter_width(text)
         text_w = max(tw - gw, 0)
@@ -312,7 +373,9 @@ defmodule Geex.Loop do
           |> maybe_vscrollbar(vbar?, state.w - 1, h_text, scroll, total, state.theme)
           |> draw_hbar(state, gw, text_w, content_w, hscroll)
 
-        {screen, cursor} = draw_bottom(screen, state, snap, cursor_target(state.w, h_text, cx, cy))
+        {screen, cursor} =
+          draw_bottom(screen, state, snap, cursor_target(state.w, h_text, cx, cy))
+
         Renderer.flush(screen, cursor)
         %{state | scroll: scroll, hscroll: hscroll}
 
@@ -360,7 +423,14 @@ defmodule Geex.Loop do
   # (theme fg/bg swapped — always-readable, theme-faithful chrome).
   defp draw_status(screen, %{w: w, h: h, theme: theme}, snap) do
     left = status_label(snap.path) <> if(snap.dirty, do: " [+]", else: "")
-    Screen.draw_text(screen, 0, h - 1, status_text(left, position(snap.cursor), w), status_style(theme))
+
+    Screen.draw_text(
+      screen,
+      0,
+      h - 1,
+      status_text(left, position(snap.cursor), w),
+      status_style(theme)
+    )
   end
 
   defp draw_empty_status(screen, %{w: w, h: h, theme: theme}) do
@@ -454,7 +524,14 @@ defmodule Geex.Loop do
   # theme background (so the reserved space is themed even with no bar), then — only when a
   # visible line is wider than the text area — draw a dim track + bright thumb across the text
   # columns `[gw, gw + text_w)`, the thumb sized/placed by `hscroll` over the widest line.
-  defp draw_hbar(screen, %{w: w, h: h, theme: %Theme{palette: pal}}, gw, text_w, content_w, hscroll) do
+  defp draw_hbar(
+         screen,
+         %{w: w, h: h, theme: %Theme{palette: pal}},
+         gw,
+         text_w,
+         content_w,
+         hscroll
+       ) do
     row = h - 2
     screen = Screen.fill_rect(screen, 0, row, w, 1, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
 
@@ -466,7 +543,12 @@ defmodule Geex.Loop do
       thumb = %Cell{char: "━", fg: pal.cursor, bg: pal.bg}
 
       Enum.reduce(0..(text_w - 1)//1, screen, fn i, acc ->
-        Screen.set_cell(acc, gw + i, row, if(i >= left and i < left + len, do: thumb, else: track))
+        Screen.set_cell(
+          acc,
+          gw + i,
+          row,
+          if(i >= left and i < left + len, do: thumb, else: track)
+        )
       end)
     else
       screen
@@ -511,6 +593,12 @@ defmodule Geex.Loop do
       :paste ->
         schedule_repaint(do_paste(state, cursor))
 
+      :undo ->
+        schedule_repaint(do_undo(state))
+
+      :redo ->
+        schedule_repaint(do_redo(state))
+
       :quit ->
         System.stop()
         state
@@ -550,7 +638,10 @@ defmodule Geex.Loop do
 
     set_cursor(final)
     state = %{state | goal: goal}
-    if state.selection, do: %{state | selection: Selection.extend(state.selection, final)}, else: state
+
+    if state.selection,
+      do: %{state | selection: Selection.extend(state.selection, final)},
+      else: state
   end
 
   # The caret at the very end of the buffer — `{last line, its length}` — for select-all.
@@ -566,15 +657,21 @@ defmodule Geex.Loop do
   # A collapsed selection (e.g. Alt+H with no motion yet) selects nothing — copy/cut are
   # no-ops that leave you in highlight mode, never pushing "" or recording a no-op delete.
   defp do_copy(%{selection: nil} = state, _text), do: state
-  defp do_copy(%{selection: sel} = state, _text) when is_struct(sel, Selection) and sel.anchor == sel.active, do: state
+
+  defp do_copy(%{selection: sel} = state, _text)
+       when is_struct(sel, Selection) and sel.anchor == sel.active, do: state
 
   defp do_copy(%{selection: sel} = state, text) do
-    with {:ok, copied} <- Doc.slice(Doc.new(text), Selection.range(sel)), do: Clipboard.push(copied)
+    with {:ok, copied} <- Doc.slice(Doc.new(text), Selection.range(sel)),
+         do: Clipboard.push(copied)
+
     %{state | selection: nil}
   end
 
   defp do_cut(%{selection: nil} = state, _text), do: state
-  defp do_cut(%{selection: sel} = state, _text) when is_struct(sel, Selection) and sel.anchor == sel.active, do: state
+
+  defp do_cut(%{selection: sel} = state, _text)
+       when is_struct(sel, Selection) and sel.anchor == sel.active, do: state
 
   defp do_cut(%{selection: sel} = state, text) do
     range = Selection.range(sel)
@@ -642,6 +739,65 @@ defmodule Geex.Loop do
     end
   end
 
+  ## Undo/redo (ADR-0031). History operations on the active buffer — not recorded edits. The
+  ## buffer reverts/replays the text and hands back the affected command; the *view* (here)
+  ## places the cursor: undo lands where the edit began, redo where it originally left off.
+
+  defp do_undo(state) do
+    case safe_undo() do
+      {:ok, %{text: text}, command} -> place_after_history_op(state, edit_start(command), text)
+      _ -> state
+    end
+  end
+
+  defp do_redo(state) do
+    case safe_redo() do
+      {:ok, %{text: text}, command} -> place_after_history_op(state, edit_landing(command), text)
+      _ -> state
+    end
+  end
+
+  # Move the cursor to `target` (clamped to the post-op text), refresh the goal, drop any
+  # selection. The buffer's `:reset` change also scheduled a repaint and cleared the selection;
+  # positioning the cursor is what undo/redo add on top.
+  defp place_after_history_op(state, target, text) do
+    cursor = clamp_cursor(target, text)
+    set_cursor(cursor)
+    %{state | selection: nil, goal: Keymap.goal_column(cursor, text)}
+  end
+
+  # Where an undone/redone edit sits, from the command's baked coordinates. Undo lands at the
+  # edit's *start* (its effect is gone); redo lands where the edit originally left the cursor.
+  defp edit_start(%Insert{line: l, col: c}), do: {l, c}
+  defp edit_start(%Delete{line: l, col: c}), do: {l, c}
+  defp edit_start(%Replace{start_line: l, start_col: c}), do: {l, c}
+
+  defp edit_landing(%Insert{line: l, col: c, text: t}), do: cursor_after_insert({l, c}, t)
+  defp edit_landing(%Delete{line: l, col: c}), do: {l, c}
+
+  defp edit_landing(%Replace{start_line: l, start_col: c, text: t}),
+    do: cursor_after_insert({l, c}, t)
+
+  # Clamp a {line, col} to a valid caret in `text` (a restored/removed line may be shorter).
+  defp clamp_cursor({line, col}, text) do
+    lines = String.split(text, "\n")
+    line = line |> max(0) |> min(length(lines) - 1)
+    col = col |> max(0) |> min(String.length(Enum.at(lines, line, "")))
+    {line, col}
+  end
+
+  defp safe_undo, do: on_active_buffer(&Buffer.undo/1)
+  defp safe_redo, do: on_active_buffer(&Buffer.redo/1)
+
+  defp on_active_buffer(fun) do
+    case Session.active_buffer() do
+      {:ok, pid} -> fun.(pid)
+      :error -> {:error, :no_active_buffer}
+    end
+  catch
+    :exit, _ -> {:error, :down}
+  end
+
   defp safe_dispatch(cmd) do
     Dispatch.run(Command.put_meta(cmd, Meta.human()))
   catch
@@ -650,22 +806,42 @@ defmodule Geex.Loop do
 
   ## Minibuffer (the command surface, ADR-0028)
 
-  defp open_minibuffer(state), do: schedule_repaint(%{state | minibuffer: Minibuffer.open(:command)})
+  defp open_minibuffer(state),
+    do: schedule_repaint(%{state | minibuffer: Minibuffer.open(:command)})
+
   defp close_minibuffer(state), do: schedule_repaint(%{state | minibuffer: Minibuffer.new()})
 
   # Keys while the minibuffer is open go to its input; Enter submits, Alt+N / Esc cancels,
   # and Ctrl-X still quits (so you are never trapped). Everything else is ignored.
   defp apply_minibuffer_key(event, %{minibuffer: mb} = state) do
     case event do
-      {:char, g} -> schedule_repaint(%{state | minibuffer: Minibuffer.insert(mb, g)})
-      {:key, :backspace} -> schedule_repaint(%{state | minibuffer: Minibuffer.backspace(mb)})
-      {:key, :left} -> schedule_repaint(%{state | minibuffer: Minibuffer.left(mb)})
-      {:key, :right} -> schedule_repaint(%{state | minibuffer: Minibuffer.right(mb)})
-      {:key, :enter} -> submit_minibuffer(state)
-      {:key, :esc} -> close_minibuffer(state)
-      {:alt, c} when c in [?n, ?N] -> close_minibuffer(state)
-      {:ctrl, ?x} -> System.stop(); state
-      _ -> state
+      {:char, g} ->
+        schedule_repaint(%{state | minibuffer: Minibuffer.insert(mb, g)})
+
+      {:key, :backspace} ->
+        schedule_repaint(%{state | minibuffer: Minibuffer.backspace(mb)})
+
+      {:key, :left} ->
+        schedule_repaint(%{state | minibuffer: Minibuffer.left(mb)})
+
+      {:key, :right} ->
+        schedule_repaint(%{state | minibuffer: Minibuffer.right(mb)})
+
+      {:key, :enter} ->
+        submit_minibuffer(state)
+
+      {:key, :esc} ->
+        close_minibuffer(state)
+
+      {:alt, c} when c in [?n, ?N] ->
+        close_minibuffer(state)
+
+      {:ctrl, ?x} ->
+        System.stop()
+        state
+
+      _ ->
+        state
     end
   end
 

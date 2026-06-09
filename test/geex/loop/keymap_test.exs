@@ -30,7 +30,8 @@ defmodule Geex.Loop.KeymapTest do
     end
 
     test "Backspace at column 0 joins onto the previous line (Replace across the boundary)" do
-      assert {:edit, %Replace{start_line: 0, start_col: 2, end_line: 1, end_col: 0, text: ""}, {0, 2}} =
+      assert {:edit, %Replace{start_line: 0, start_col: 2, end_line: 1, end_col: 0, text: ""},
+              {0, 2}} =
                Keymap.resolve({:key, :backspace}, {1, 0}, "ab\ncd")
     end
 
@@ -129,10 +130,11 @@ defmodule Geex.Loop.KeymapTest do
   end
 
   describe "resolve/3 — selection (ADR-0029)" do
-    test "Alt+H starts a selection, Alt+Z selects all, Alt+N / Esc clear" do
+    test "Alt+H starts a selection, Alt+B selects all, Alt+N / Esc clear" do
       assert :select_start = Keymap.resolve({:alt, ?h}, {0, 0}, "abc")
       assert :select_start = Keymap.resolve({:alt, ?H}, {0, 0}, "abc")
-      assert :select_all = Keymap.resolve({:alt, ?z}, {0, 0}, "abc")
+      assert :select_all = Keymap.resolve({:alt, ?b}, {0, 0}, "abc")
+      assert :select_all = Keymap.resolve({:alt, ?B}, {0, 0}, "abc")
       assert :select_clear = Keymap.resolve({:alt, ?n}, {0, 0}, "abc")
       assert :select_clear = Keymap.resolve({:key, :esc}, {0, 0}, "abc")
     end
@@ -145,6 +147,13 @@ defmodule Geex.Loop.KeymapTest do
     end
   end
 
+  describe "resolve/3 — undo/redo (ADR-0031)" do
+    test "Alt+Z undoes, Alt+Shift+Z redoes — case-sensitive (the one shift-distinct Alt chord)" do
+      assert :undo = Keymap.resolve({:alt, ?z}, {0, 0}, "abc")
+      assert :redo = Keymap.resolve({:alt, ?Z}, {0, 0}, "abc")
+    end
+  end
+
   describe "resolve/3 — Alt chords" do
     test "Alt+M opens the minibuffer" do
       assert :minibuffer = Keymap.resolve({:alt, ?m}, {0, 0}, "")
@@ -153,10 +162,17 @@ defmodule Geex.Loop.KeymapTest do
 
     test "Alt+WASD moves like the arrows (arrow-key alternative)" do
       text = "abc\ndef"
-      assert Keymap.resolve({:alt, ?d}, {0, 0}, text) == Keymap.resolve({:key, :right}, {0, 0}, text)
-      assert Keymap.resolve({:alt, ?a}, {0, 1}, text) == Keymap.resolve({:key, :left}, {0, 1}, text)
+
+      assert Keymap.resolve({:alt, ?d}, {0, 0}, text) ==
+               Keymap.resolve({:key, :right}, {0, 0}, text)
+
+      assert Keymap.resolve({:alt, ?a}, {0, 1}, text) ==
+               Keymap.resolve({:key, :left}, {0, 1}, text)
+
       assert Keymap.resolve({:alt, ?w}, {1, 1}, text) == Keymap.resolve({:key, :up}, {1, 1}, text)
-      assert Keymap.resolve({:alt, ?s}, {0, 1}, text) == Keymap.resolve({:key, :down}, {0, 1}, text)
+
+      assert Keymap.resolve({:alt, ?s}, {0, 1}, text) ==
+               Keymap.resolve({:key, :down}, {0, 1}, text)
     end
 
     test "Alt+R/F jump to line start / end" do

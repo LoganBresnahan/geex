@@ -33,6 +33,8 @@ defmodule Geex.Loop.Keymap do
           | :copy
           | :cut
           | :paste
+          | :undo
+          | :redo
           | :quit
           | :ignore
 
@@ -77,10 +79,16 @@ defmodule Geex.Loop.Keymap do
   #   Q   E   — word back / forward
   #   R   F   — line start / end
   def resolve({:alt, c}, _cursor, _text) when c in [?m, ?M], do: :minibuffer
+  # Undo / redo (ADR-0031): Alt+Z undoes, Alt+Shift+Z redoes — these are case-*sensitive*
+  # (the terminal sends `M-z` vs `M-Z`), the one Alt chord where shift means something other
+  # than the same action. History operations, not edits; the loop runs them on the buffer.
+  def resolve({:alt, ?z}, _cursor, _text), do: :undo
+  def resolve({:alt, ?Z}, _cursor, _text), do: :redo
   # Selection (ADR-0029): Alt+H starts a selection at the cursor (motion then extends it),
-  # Alt+Z selects the whole buffer, Esc clears. The loop owns the live selection.
+  # Alt+B selects the whole buffer ("highlight all"), Alt+N / Esc clear. The loop owns the
+  # live selection.
   def resolve({:alt, c}, _cursor, _text) when c in [?h, ?H], do: :select_start
-  def resolve({:alt, c}, _cursor, _text) when c in [?z, ?Z], do: :select_all
+  def resolve({:alt, c}, _cursor, _text) when c in [?b, ?B], do: :select_all
   # Clear the selection: Alt+N (the reliable, atomic "no/cancel" — a bare Esc lingers in
   # the parser's leftover, so it only lands when the next key arrives) and Esc.
   def resolve({:alt, c}, _cursor, _text) when c in [?n, ?N], do: :select_clear
@@ -113,7 +121,13 @@ defmodule Geex.Loop.Keymap do
 
   defp join(line, prev) do
     {:ok, cmd} =
-      Replace.parse(%{start_line: line - 1, start_col: prev, end_line: line, end_col: 0, text: ""})
+      Replace.parse(%{
+        start_line: line - 1,
+        start_col: prev,
+        end_line: line,
+        end_col: 0,
+        text: ""
+      })
 
     cmd
   end

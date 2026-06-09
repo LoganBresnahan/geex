@@ -46,6 +46,7 @@ Each ADR: **Status** · **Context** (the forces) · **Decision** · **Consequenc
 | [0028](0028-editor-shell-and-minibuffer.md) | The editor shell — region/buffer/view/pane model; the minibuffer as the command surface (next build, `Alt+M`); command palette not a menu bar; no file cap; tabs/file-tree deferred behind panes; status-bar segments | Accepted |
 | [0029](0029-selection-primitive.md) | The selection primitive — `%Selection{anchor, active}` grapheme carets; half-open span matching `Doc.replace` (not grid's inclusive notation); one region built by highlight mode + grid; wired into `Alt+H` highlight mode + clipboard | Accepted |
 | [0030](0030-view-action-tool-category.md) | View actions — a fourth tool category (cursor/scroll/selection; field-spec → `tools/list`; not recorded); retires the go-to-line hack into a `line` command; targets the active view; multi-view + journal deferred | Proposed |
+| [0031](0031-undo-redo-history-operations.md) | Undo/redo — history operations (not edits, not view-actions): replay-from-base reusing `replay/2`; redo stack cleared by a new edit; cursor view-local from the returned command; `:reset` overlay re-derive (undo lowers `version`); `Alt+Z`/`Alt+Shift+Z`, select-all → `Alt+B` | Accepted |
 
 ## Adding one
 

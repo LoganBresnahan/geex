@@ -61,8 +61,12 @@ defmodule Geex.Highlight.Reactor do
   @doc """
   The overlay to **paint** — the optimistically-shifted overlay if one is live (a
   recent edit whose exact re-highlight hasn't landed yet), else the exact `highlights/1`
-  result. Use this from the render loop so the edited line's colours stay aligned
-  across a keystroke; use `highlights/1`/`await/3` when the *exact* overlay is wanted.
+  result, **except** a result left stranded *ahead* of an in-flight pass at a lower
+  version (an undo moved the buffer version backwards), which is suppressed to `nil` so
+  the loop paints unstyled text rather than byte-misaligned pre-undo colours until the
+  corrective pass lands ([ADR-0031](`e:doc/adr/0031-undo-redo-history-operations.md`)).
+  Use this from the render loop; use `highlights/1`/`await/3` when the *exact* overlay
+  is wanted. See `render_overlay/1` for the selection logic.
   """
   @spec render(GenServer.server()) :: %{version: non_neg_integer(), spans: [map()]} | nil
   def render(reactor), do: GenServer.call(reactor, :render)
@@ -78,7 +82,8 @@ defmodule Geex.Highlight.Reactor do
   can paint immediately and then receive updates. The subscriber is monitored and
   dropped on exit.
   """
-  @spec subscribe(GenServer.server(), pid()) :: %{version: non_neg_integer(), spans: [map()]} | nil
+  @spec subscribe(GenServer.server(), pid()) ::
+          %{version: non_neg_integer(), spans: [map()]} | nil
   def subscribe(reactor, pid \\ self()), do: GenServer.call(reactor, {:subscribe, pid})
 
   @doc """
@@ -201,7 +206,7 @@ defmodule Geex.Highlight.Reactor do
   @impl true
   def handle_call(:highlights, _from, state), do: {:reply, state.result, state}
 
-  def handle_call(:render, _from, state), do: {:reply, state.optimistic || state.result, state}
+  def handle_call(:render, _from, state), do: {:reply, render_overlay(state), state}
 
   def handle_call({:subscribe, pid}, _from, state) do
     ref = Process.monitor(pid)
@@ -222,7 +227,8 @@ defmodule Geex.Highlight.Reactor do
 
   @impl true
   def handle_info({:geex_buffer_change, buffer, version, footprint}, %{buffer: buffer} = state) do
-    {:noreply, maybe_start(%{state | pending: true, optimistic: shift_overlay(state, version, footprint)})}
+    {:noreply,
+     maybe_start(%{state | pending: true, optimistic: shift_overlay(state, version, footprint)})}
   end
 
   def handle_info({:pass_result, id, version, result}, %{in_flight: %{id: id, ref: ref}} = state) do
@@ -231,12 +237,21 @@ defmodule Geex.Highlight.Reactor do
     state =
       case result do
         {:ok, spans} ->
-          fresh = %{state | in_flight: nil, result: %{version: version, spans: spans}, optimistic: keep_optimistic(state.optimistic, version)}
+          fresh = %{
+            state
+            | in_flight: nil,
+              result: %{version: version, spans: spans},
+              optimistic: keep_optimistic(state.optimistic, version)
+          }
+
           notify(fresh, version)
           fresh
 
         {:error, reason} ->
-          Logger.debug("geex highlight reactor: pass failed (#{inspect(reason)}); keeping prior overlay")
+          Logger.debug(
+            "geex highlight reactor: pass failed (#{inspect(reason)}); keeping prior overlay"
+          )
+
           %{state | in_flight: nil}
       end
 
@@ -272,10 +287,29 @@ defmodule Geex.Highlight.Reactor do
     Enum.each(Map.values(subs), &send(&1, msg))
   end
 
+  @doc false
+  # The overlay `render/1` serves (pure; exposed for unit tests). Optimistic — a forward edit's
+  # shifted overlay — always wins. Otherwise the exact `result`, **unless** it is stranded *ahead*
+  # of an in-flight pass at a lower version: that only happens after an undo moved the buffer
+  # version backwards (a `:reset` dropped the optimistic overlay), so `result` holds pre-undo spans
+  # that would paint byte-misaligned onto the restored text. Serve `nil` (the loop paints unstyled)
+  # for that window until the corrective pass lands and notifies a repaint — blank beats wrong.
+  def render_overlay(%{optimistic: %{} = optimistic}), do: optimistic
+  def render_overlay(%{result: %{version: rv}, in_flight: %{version: iv}}) when rv > iv, do: nil
+  def render_overlay(%{result: result}), do: result
+
   # Byte-shift the freshest overlay we have (optimistic, else exact result) across the
   # edit's `footprint`, tagging it with the new `version` — the optimistic overlay the
   # render loop paints until the exact re-highlight for `version` lands.
   #
+  # `:reset` footprint (undo/redo — a wholesale revert/replay, not a located byte splice).
+  # **Drop** the optimistic overlay: it holds the pre-undo spans at a *higher* version, and
+  # because undo makes the buffer version go *backwards*, `keep_optimistic` (`ov > version`)
+  # would otherwise freeze that stale overlay for an entire run of undos. The `result` is *also*
+  # stale across the revert (it is the pre-undo exact spans, now byte-misaligned), so dropping
+  # optimistic is only half the fix — `render_overlay/1` suppresses that stranded `result` too.
+  defp shift_overlay(_state, _version, :reset), do: nil
+
   # `:unknown` footprint (the multi-block `edit` tool) can't be byte-shifted, so we
   # **keep** the prior overlay *at its own version* rather than dropping to `nil`:
   # dropping would regress render to the (possibly much older) exact `result`,
@@ -300,8 +334,12 @@ defmodule Geex.Highlight.Reactor do
   # counterpart to a subscriber's `:DOWN` cleanup (used on `unsubscribe/2`).
   defp drop_subscriber(subscribers, pid) do
     Enum.reduce(subscribers, subscribers, fn
-      {ref, ^pid}, acc -> Process.demonitor(ref, [:flush]); Map.delete(acc, ref)
-      {_ref, _other}, acc -> acc
+      {ref, ^pid}, acc ->
+        Process.demonitor(ref, [:flush])
+        Map.delete(acc, ref)
+
+      {_ref, _other}, acc ->
+        acc
     end)
   end
 
@@ -328,7 +366,13 @@ defmodule Geex.Highlight.Reactor do
           end)
 
         ref = Process.monitor(pid)
-        %{state | in_flight: %{id: id, ref: ref, version: version}, pending: false, pass_counter: id}
+
+        %{
+          state
+          | in_flight: %{id: id, ref: ref, version: version},
+            pending: false,
+            pass_counter: id
+        }
     end
   end
 

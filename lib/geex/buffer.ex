@@ -11,6 +11,14 @@ defmodule Geex.Buffer do
   **record** the command in history. A failing command leaves the state and history
   untouched.
 
+  **Undo/redo** (`undo/1` / `redo/1`, [ADR-0031](`e:doc/adr/0031-undo-redo-history-operations.md`))
+  are *history operations*, not recorded edits: `undo/1` drops the newest command onto a redo
+  stack and replays `base + the remainder` to reconstruct the document (the §15c replay backbone);
+  `redo/1` re-applies it; a fresh `dispatch/2` clears the redo stack. They emit a `:reset` change
+  so byte-oriented overlays re-derive rather than try to shift across a wholesale revert, and they
+  return the affected `%Command{}` so the *view* can place the cursor (the cursor stays view-local,
+  ADR-0014).
+
   `snapshot/1` / `get_text/1` / `history/1` are the **read-only** query surface
   (§15b): they return buffer text + the provenance-tagged command history *as data*,
   so headless callers (an LLM, a test) inspect state without a renderer. They never
@@ -112,6 +120,26 @@ defmodule Geex.Buffer do
     do: GenServer.call(server, {:dispatch, command})
 
   @doc """
+  Undo the most recent edit (ADR-0031). Drops the newest command from history onto the redo
+  stack and replays `base + the remainder` to reconstruct the document — the §15c replay
+  backbone (ADR-0014), so the reverted state is exactly what produced it. Returns
+  `{:ok, snapshot, command}` (the snapshot of the reverted buffer + the **undone** command, so
+  the view can place its cursor where the edit was), or `{:error, :nothing_to_undo}` when there
+  is nothing to undo. Not itself a recorded edit; emits a `:reset` change so overlays re-derive.
+  """
+  @spec undo(GenServer.server()) :: {:ok, map(), struct()} | {:error, :nothing_to_undo}
+  def undo(server), do: GenServer.call(server, :undo)
+
+  @doc """
+  Redo the most recently undone edit (ADR-0031) — re-applies it to the current state and moves
+  it from the redo stack back onto history. Returns `{:ok, snapshot, command}` (the **redone**
+  command, for cursor placement) or `{:error, :nothing_to_redo}`. The redo stack is cleared by
+  any fresh `dispatch/2`, so redo is only available on an unbroken run of undos.
+  """
+  @spec redo(GenServer.server()) :: {:ok, map(), struct()} | {:error, :nothing_to_redo}
+  def redo(server), do: GenServer.call(server, :redo)
+
+  @doc """
   Subscribe `pid` to this buffer's change stream. After every successful
   `dispatch/2` the buffer sends each subscriber `{:geex_buffer_change, buffer_pid,
   version, footprint}` — the post-dispatch emit that makes the command pipeline the
@@ -157,11 +185,20 @@ defmodule Geex.Buffer do
 
     case load_text(opts, path) do
       {:ok, text} ->
+        editor = EditorState.new(text)
+
         state = %{
           path: path,
-          editor: EditorState.new(text),
+          editor: editor,
+          # The loaded baseline `EditorState` — undo replays `base + remaining history` to
+          # reconstruct the document after dropping the newest command (the §15c replay
+          # backbone, ADR-0014). Never changes; load is the only thing that sets it.
+          base: editor,
           # newest-first internally (O(1) prepend); exposed oldest-first via snapshot.
           history: [],
+          # Undone commands, newest-first — the redo future. A new edit clears it (the
+          # redone branch is discarded once you edit past the undo point). ADR-0031.
+          redo: [],
           # Change-stream subscribers (ADR-0022): %{monitor_ref => pid}. Empty by
           # default — the buffer notifies no one unless something subscribes.
           subscribers: %{},
@@ -203,9 +240,52 @@ defmodule Geex.Buffer do
         # swap in the new editor — it lets a byte-oriented overlay (highlighting)
         # shift optimistically across the edit (ADR-0022).
         footprint = Footprint.of(EditorState.doc(state.editor), command)
-        new_state = %{state | editor: editor, history: [command | state.history], dirty: true}
+        # A fresh edit invalidates the redo future (you can't redo past a new divergence).
+        new_state = %{
+          state
+          | editor: editor,
+            history: [command | state.history],
+            redo: [],
+            dirty: true
+        }
+
         notify_change(new_state, footprint)
         {:reply, {:ok, build_snapshot(new_state)}, new_state}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call(:undo, _from, %{history: []} = state),
+    do: {:reply, {:error, :nothing_to_undo}, state}
+
+  def handle_call(:undo, _from, %{history: [command | rest]} = state) do
+    # Reconstruct the pre-`command` document by replaying base + the remaining (older)
+    # commands. These all applied successfully once, so replay cannot fail here; guard it
+    # anyway so a (theoretically impossible) failure leaves state and history untouched.
+    case Geex.Dispatch.replay(state.base, Enum.reverse(rest)) do
+      {:ok, editor} ->
+        new_state = revert(state, editor, rest, [command | state.redo])
+        notify_change(new_state, :reset)
+        {:reply, {:ok, build_snapshot(new_state), command}, new_state}
+
+      {:error, _reason} ->
+        {:reply, {:error, :nothing_to_undo}, state}
+    end
+  end
+
+  def handle_call(:redo, _from, %{redo: []} = state),
+    do: {:reply, {:error, :nothing_to_redo}, state}
+
+  def handle_call(:redo, _from, %{redo: [command | rest_redo]} = state) do
+    # Re-apply the undone command to the current editor (which, after the matching undo,
+    # equals the state it was first applied to — so this succeeds), moving it back onto history.
+    case Geex.Dispatch.apply_command(command, state.editor) do
+      {:ok, editor} ->
+        new_state = revert(state, editor, [command | state.history], rest_redo)
+        notify_change(new_state, :reset)
+        {:reply, {:ok, build_snapshot(new_state), command}, new_state}
 
       {:error, _reason} = error ->
         {:reply, error, state}
@@ -277,8 +357,12 @@ defmodule Geex.Buffer do
   # counterpart to a subscriber's `:DOWN` cleanup (used on `unsubscribe/2`).
   defp drop_subscriber(subscribers, pid) do
     Enum.reduce(subscribers, subscribers, fn
-      {ref, ^pid}, acc -> Process.demonitor(ref, [:flush]); Map.delete(acc, ref)
-      {_ref, _other}, acc -> acc
+      {ref, ^pid}, acc ->
+        Process.demonitor(ref, [:flush])
+        Map.delete(acc, ref)
+
+      {_ref, _other}, acc ->
+        acc
     end)
   end
 
@@ -291,6 +375,20 @@ defmodule Geex.Buffer do
     msg = {:geex_buffer_change, self(), version, footprint}
     for {_ref, pid} <- state.subscribers, do: send(pid, msg)
     :ok
+  end
+
+  # Apply an undo/redo transition: swap in the reconstructed `editor`, set `history` and the
+  # `redo` stack, and recompute `dirty` against the `synced` disk baseline — so undoing back to
+  # the saved content clears the dirty flag (a forward `dispatch/2` is unconditionally dirty;
+  # an undo/redo can land *on* the baseline, which is genuinely clean).
+  defp revert(state, editor, history, redo) do
+    %{
+      state
+      | editor: editor,
+        history: history,
+        redo: redo,
+        dirty: EditorState.text(editor) != state.synced
+    }
   end
 
   defp build_snapshot(state) do

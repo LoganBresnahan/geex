@@ -1050,3 +1050,46 @@ cursor-vs-Paint CRLF gap). **Re-verified live:** after the fixes, a collapsed-se
 
 **Scoping:** the **typed** `copy`/`cut`/`paste` verbs ride the later catalog/palette chunk (they need the
 command parser); the `Alt` bindings ship now.
+
+### 2026-06-09 — Undo/redo engine (ADR-0031) + the two deferred Paint selection fixes
+
+Two threads in one pass. **(1) The deferred selection-render polish from the 2026-06-09 selection chunk**
+(documented in `paint.ex`): `Paint.to_screen` now **splits on `\n` like `Doc`** and walks each line's
+graphemes, so a `\r` is content at its Doc column (CRLF lines keep the cursor/selection column model;
+`\r\n` is no longer folded into one terminator grapheme) — and a line whose **trailing newline** falls in
+the selection fills from its content end to the right edge, so a multi-line selection reads as fully
+selected instead of ragged. Byte offsets stay aligned (`+1` per `\n`), so span colouring is unchanged.
+New paint tests cover both (the multi-line newline fill + the CRLF `\r` column); the existing CRLF test
+still passes (the `\r` is zero-width, so it draws nothing — only the column model moved).
+
+**(2) Undo/redo, freshly built** ([ADR-0031](adr/0031-undo-redo-history-operations.md), **Accepted**) — the
+history existed (ADR-0014) but nothing reverted it. `Geex.Buffer.undo/1` / `redo/1` via **replay-from-base**
+(an immutable `base` `EditorState` + `Dispatch.replay/2` over the remaining history — the §15c backbone's
+second use); a `redo` stack cleared by any fresh `dispatch/2`; `dirty` recomputed against the `synced`
+baseline (undoing back to saved is clean); each returns the **affected command** so the *view* places the
+cursor (undo → the edit's start, redo → its landing) — the cursor stays view-local (ADR-0014). Undo/redo
+emit a `:reset` change; the reactor **drops its optimistic overlay** on `:reset` (undo makes `version =
+length(history)` go *backwards*, which would otherwise freeze a stale higher-version overlay across a run
+of undos). Keys: `Alt+Z` undo, `Alt+Shift+Z` redo (the one case-sensitive Alt chord); select-all moved to
+`Alt+B`.
+
+**Live-verified in tmux** (`/tmp/geex_undo_test.ex`, a real `.ex` buffer → grammar/reactor live): type
+`XYZ` → `Alt+Z`×3 reverts char-by-char with the cursor landing at each undone edit's start and highlighting
+re-deriving; `Alt+Shift+Z`×3 rebuilds with the cursor at each landing; an extra redo and undo-**past-base**
+are clean no-ops (editor stays responsive, types `Q` after); `Alt+B` tints the whole buffer (`48;2;92;50;40`)
+incl. the multi-line newline fill while keeping syntax fg; quit via Ctrl-X; the disk file is **never written**.
+
+**Adversarial review** (`undo-redo-paint-review`, 5 dimensions × find→verify, 10 agents): **2 of 5
+confirmed** (both medium, both the reactor `:reset` path; the undo mechanism, Paint restructure, loop
+cursor, and keymap dimensions found nothing real). Fixed: (a) dropping the optimistic overlay on `:reset`
+was only **half** the fix — `render/1` still served the stale pre-undo **`result`** for the *whole* async
+re-highlight window (not "one frame"), painting byte-misaligned colours on the reverted region until the
+corrective pass landed → a pure `render_overlay/1` now **suppresses a `result` stranded ahead of an
+in-flight pass at a lower version** (serves `nil` → unstyled, which beats wrong colours); (b) the `:reset`
+path had **no test** → added a `:reset` integration test (mirroring the `:unknown` one) + five pure
+`render_overlay/1` branch tests. **Both fixes mutation-confirmed** (reverting either makes exactly those two
+tests fail). **541 tests + 9 doctests** green, `--warnings-as-errors` clean.
+
+**Scoping:** the **typed** `undo`/`redo` verbs (agent/palette twin) ride the catalog + view-action build
+([ADR-0030](adr/0030-view-action-tool-category.md)); insert **coalescing** (per-keystroke undo for now) and
+the `O(n)` replay-per-undo are documented deferrals.

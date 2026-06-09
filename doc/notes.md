@@ -858,10 +858,14 @@ When grid mode is triggered, optionally overlay coordinate labels on visible reg
 ## Editing & selection bindings (sketch — refines ADR-0026 / ADR-0028)
 
 Forward-looking notes from the 2026-06-08 design pass. **Update 2026-06-09 — selection + clipboard
-shipped:** `Alt+H` (highlight) / `Alt+Z` (select-all) / `Alt+N` or Esc (clear) / `Alt+C`/`X`/`V`
+shipped:** `Alt+H` (highlight) / `Alt+N` or Esc (clear) / `Alt+C`/`X`/`V`
 (copy/cut/paste) are **built and live-verified** ([ADR-0029](adr/0029-selection-primitive.md) Accepted,
-[ADR-0015](adr/0015-clipboard-subsystem.md); see [testing.md](testing.md) 2026-06-09). The **typed**
-verbs, `Alt+P` palette, and `Alt+B`/`Alt+Shift+B` undo/redo below remain unbuilt.
+[ADR-0015](adr/0015-clipboard-subsystem.md); see [testing.md](testing.md) 2026-06-09).
+**Update 2026-06-09b — undo/redo shipped + chords resettled:** undo/redo are now **built**
+([ADR-0031](adr/0031-undo-redo-history-operations.md), replay-from-base) on **`Alt+Z` / `Alt+Shift+Z`**
+(the user moved them off `Alt+B`/`Alt+Shift+B`), and **select-all ("highlight all") moved to `Alt+B`** —
+so the table below reflects the *final* assignment. The **typed** verbs and the `Alt+P` palette below
+remain unbuilt.
 
 **Selection is one concept with two input surfaces.** A cut/copy needs a *region*, and there
 are two honest ways to name one: **interactively** (highlight mode — `Alt+H`, motion
@@ -877,25 +881,25 @@ pattern again.
 | chord | action |
 |---|---|
 | `Alt+H` | enter highlight mode (motion extends the span) — **built** |
-| `Alt+Z` | select-all (span = whole buffer) — **built** |
+| `Alt+B` | select-all / "highlight all" (span = whole buffer) — **built** |
 | `Alt+N` / Esc | clear the selection — **built** |
 | `Alt+X` / `Alt+C` / `Alt+V` | cut / copy / paste the selection (copy/cut no-op with no selection; paste replaces a selection) — **built** |
+| `Alt+Z` / `Alt+Shift+Z` | undo / redo (history operations, not recorded `%Command{}`s) — **built** |
 | `Alt+P` | open the command palette |
-| `Alt+B` / `Alt+Shift+B` | undo / redo (history navigation, not recorded `%Command{}`s) |
 
-**`Alt+Shift+letter` is deliverable on legacy terminals — `Alt+B` ≠ `Alt+Shift+B`.** Alt is
-ESC-prefixed and Shift just makes the letter uppercase, so the bytes differ (`ESC b` vs
-`ESC B`) and the parser already preserves case — unlike `Ctrl+Shift+letter`, which a legacy
-tty can't distinguish from `Ctrl+letter`. So undo on `Alt+B` / redo on `Alt+Shift+B` is a
-real, distinguishable pair. (The keymap lowercases Alt-motion today; undo/redo must branch on
-case *before* `lower/1`.) undo/redo are **history navigation** — they move the buffer's
-history pointer ([ADR-0014](adr/0014-editor-state-and-dispatch-ownership.md)), they are not
-new recorded edits; the substrate (append-only recorded-command list + `Dispatch.replay/2`)
-exists, the user-facing verbs do not yet.
+**`Alt+Shift+letter` is deliverable on legacy terminals — `Alt+z` ≠ `Alt+Shift+z`.** Alt is
+ESC-prefixed and Shift just makes the letter uppercase, so the bytes differ (`ESC z` vs
+`ESC Z`) and the parser already preserves case — unlike `Ctrl+Shift+letter`, which a legacy
+tty can't distinguish from `Ctrl+letter`. So undo on `Alt+Z` / redo on `Alt+Shift+Z` is a
+real, distinguishable pair — and it's the **one** Alt chord that branches on case *before*
+`lower/1` (everywhere else `Alt+letter` is case-insensitive; here Shift means a different
+action). undo/redo are **history operations** ([ADR-0031](adr/0031-undo-redo-history-operations.md))
+— they revert/replay the buffer's recorded history (`base` + `Dispatch.replay/2`,
+[ADR-0014](adr/0014-editor-state-and-dispatch-ownership.md)), they are not new recorded edits.
 
 **Every mode exits the same way** — `Esc`, `Alt+N`, or typing **`no`** + Enter (the typed
 twin of `Alt+N`; no/op mnemonic). **Typed twins** of the chords above: `highlight`/`select`
-(= `Alt+H`), `palette`/`catalog` (= `Alt+P`), `undo`/`redo` (= `Alt+B`/`Alt+Shift+B`), and a
+(= `Alt+H`), `palette`/`catalog` (= `Alt+P`), `undo`/`redo` (= `Alt+Z`/`Alt+Shift+Z`), and a
 `grid`/`lines` toggle for the [ADR-0027](adr/0027-grid-command-addressing.md) ruler/grid-line
 overlay — so every capability is reachable by key *and* by typed command (the
 [ADR-0028](adr/0028-editor-shell-and-minibuffer.md) amendment §2 parity principle).
@@ -909,7 +913,7 @@ so clipboard is never *only* on Alt and the rule holds via the typed surface.
 **Completion is one mechanism; the palette and path-complete are special cases.** A
 completion *source per minibuffer mode*: command names (→ palette), file paths (→ `Alt+M`
 then `new lib/testfile.ex⇥`), buffer names. `Tab` triggers it against the active source. The
-workflow `Alt+Z` → `Alt+C` → `Alt+M` `new lib/test.ex⇥` is just "selection span + minibuffer
+workflow `Alt+B` → `Alt+C` → `Alt+M` `new lib/test.ex⇥` is just "selection span + minibuffer
 with a file-path source." Build one `Completion` abstraction with swappable sources.
 
 **The command palette is the minibuffer in browse mode — not a new component.** `Alt+M` =

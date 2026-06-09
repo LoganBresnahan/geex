@@ -25,7 +25,10 @@ defmodule Geex.Highlight.ReactorTest do
     assert "keyword" in captures(overlay)
   end
 
-  test "fires off the command stream: a dispatched edit re-highlights", %{buf: buf, reactor: reactor} do
+  test "fires off the command stream: a dispatched edit re-highlights", %{
+    buf: buf,
+    reactor: reactor
+  } do
     {:ok, _} = Reactor.await(reactor, 0)
 
     # Insert a comment; version goes 0 -> 1.
@@ -43,7 +46,10 @@ defmodule Geex.Highlight.ReactorTest do
     assert Reactor.render(reactor) == exact
   end
 
-  test "render/1 returns an optimistically byte-shifted overlay across an edit", %{buf: buf, reactor: reactor} do
+  test "render/1 returns an optimistically byte-shifted overlay across an edit", %{
+    buf: buf,
+    reactor: reactor
+  } do
     {:ok, exact} = Reactor.await(reactor, 0)
     refute exact.spans == []
 
@@ -60,7 +66,10 @@ defmodule Geex.Highlight.ReactorTest do
     assert Reactor.highlights(reactor).version == 0
   end
 
-  test "an :unknown-footprint edit keeps the prior optimistic overlay (no version regression)", %{buf: buf, reactor: reactor} do
+  test "an :unknown-footprint edit keeps the prior optimistic overlay (no version regression)", %{
+    buf: buf,
+    reactor: reactor
+  } do
     {:ok, _exact} = Reactor.await(reactor, 0)
     fp = %{at: 0, removed: 0, added: 1}
     send(reactor, {:geex_buffer_change, buf, 1, fp})
@@ -73,12 +82,73 @@ defmodule Geex.Highlight.ReactorTest do
     assert Reactor.render(reactor).version == 2
   end
 
-  test "subscribe/2 returns the current overlay so a subscriber can paint immediately", %{reactor: reactor} do
+  test "a :reset (undo) change drops the optimistic overlay so render re-derives (ADR-0031)", %{
+    buf: buf,
+    reactor: reactor
+  } do
+    {:ok, exact} = Reactor.await(reactor, 0)
+    fp = %{at: 0, removed: 0, added: 1}
+    send(reactor, {:geex_buffer_change, buf, 1, fp})
+    send(reactor, {:geex_buffer_change, buf, 2, fp})
+    assert Reactor.render(reactor).version == 2
+
+    # Undo emits a :reset at a LOWER version. Unlike :unknown, the optimistic overlay must be
+    # DROPPED (undo moved the version backwards — keeping it would freeze stale colours across a
+    # run of undos), so render falls back to the exact result rather than the version-2 overlay.
+    send(reactor, {:geex_buffer_change, buf, 0, :reset})
+    assert Reactor.render(reactor) == exact
+    assert Reactor.render(reactor).version == 0
+  end
+
+  describe "render_overlay/1 — the paint-overlay selection (pure)" do
+    test "the optimistic overlay always wins when present" do
+      opt = %{version: 3, spans: [:o]}
+
+      assert Reactor.render_overlay(%{
+               optimistic: opt,
+               result: %{version: 1, spans: [:r]},
+               in_flight: nil
+             }) == opt
+    end
+
+    test "serves the exact result when no pass is in flight" do
+      res = %{version: 2, spans: [:r]}
+      assert Reactor.render_overlay(%{optimistic: nil, result: res, in_flight: nil}) == res
+    end
+
+    test "serves the result while an in-flight pass is at or ahead of it (forward editing)" do
+      res = %{version: 1, spans: [:r]}
+
+      assert Reactor.render_overlay(%{optimistic: nil, result: res, in_flight: %{version: 2}}) ==
+               res
+    end
+
+    test "suppresses a result stranded AHEAD of an in-flight pass at a lower version (post-undo)" do
+      # undo moved the version backwards: `result` holds the pre-undo (v2) spans while the
+      # corrective pass runs at v0 — painting them would be byte-misaligned, so serve nil.
+      res = %{version: 2, spans: [:stale]}
+
+      assert Reactor.render_overlay(%{optimistic: nil, result: res, in_flight: %{version: 0}}) ==
+               nil
+    end
+
+    test "nil result with a pass in flight yields nil (the initial pass)" do
+      assert Reactor.render_overlay(%{optimistic: nil, result: nil, in_flight: %{version: 0}}) ==
+               nil
+    end
+  end
+
+  test "subscribe/2 returns the current overlay so a subscriber can paint immediately", %{
+    reactor: reactor
+  } do
     {:ok, _} = Reactor.await(reactor, 0)
     assert %{version: 0, spans: _} = Reactor.subscribe(reactor)
   end
 
-  test "subscribe/2 pushes {:geex_highlights, buffer, version} when a pass lands", %{buf: buf, reactor: reactor} do
+  test "subscribe/2 pushes {:geex_highlights, buffer, version} when a pass lands", %{
+    buf: buf,
+    reactor: reactor
+  } do
     # Drain the initial pass, then subscribe, so we observe the EDIT's notification.
     {:ok, _} = Reactor.await(reactor, 0)
     Reactor.subscribe(reactor)
@@ -99,10 +169,20 @@ defmodule Geex.Highlight.ReactorTest do
     refute_receive {:geex_highlights, ^buf, _}, 300
   end
 
-  test "a subscriber that exits is dropped without disturbing the reactor", %{buf: buf, reactor: reactor} do
+  test "a subscriber that exits is dropped without disturbing the reactor", %{
+    buf: buf,
+    reactor: reactor
+  } do
     {:ok, _} = Reactor.await(reactor, 0)
     test = self()
-    sub = spawn(fn -> Reactor.subscribe(reactor); send(test, :subscribed); Process.sleep(:infinity) end)
+
+    sub =
+      spawn(fn ->
+        Reactor.subscribe(reactor)
+        send(test, :subscribed)
+        Process.sleep(:infinity)
+      end)
+
     assert_receive :subscribed, 1_000
     Process.exit(sub, :kill)
 
@@ -115,7 +195,10 @@ defmodule Geex.Highlight.ReactorTest do
     assert Process.alive?(reactor)
   end
 
-  test "latest-wins: a burst of edits coalesces to an overlay for the newest text", %{buf: buf, reactor: reactor} do
+  test "latest-wins: a burst of edits coalesces to an overlay for the newest text", %{
+    buf: buf,
+    reactor: reactor
+  } do
     {:ok, _} = Reactor.await(reactor, 0)
 
     final =
@@ -131,7 +214,9 @@ defmodule Geex.Highlight.ReactorTest do
 
   test "highlights/1 is nil before the first pass, then an overlay", %{reactor: reactor} do
     # Either nil (pass in flight) or already an overlay — both are valid shapes.
-    assert Reactor.highlights(reactor) in [nil] or match?(%{spans: _}, Reactor.highlights(reactor))
+    assert Reactor.highlights(reactor) in [nil] or
+             match?(%{spans: _}, Reactor.highlights(reactor))
+
     assert {:ok, %{spans: _}} = Reactor.await(reactor, 0)
   end
 

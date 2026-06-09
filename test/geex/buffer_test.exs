@@ -52,7 +52,9 @@ defmodule Geex.BufferTest do
     refute_receive {:geex_buffer_change, ^buf, _, _}, 200
   end
 
-  test "dispatch threads a command into the EditorState and records it with provenance", %{buf: buf} do
+  test "dispatch threads a command into the EditorState and records it with provenance", %{
+    buf: buf
+  } do
     cmd = insert(0, 0, "hello") |> Command.put_meta(Meta.llm("claude-opus-4-8"))
     assert {:ok, snap} = Buffer.dispatch(buf, cmd)
     assert snap.text == "hello"
@@ -101,10 +103,16 @@ defmodule Geex.BufferTest do
     {:ok, snap} = Buffer.dispatch(buf, replace(0, 1, 2, 2, "X\nY"))
     assert snap.text == "oX\nYree"
     assert snap.version == 2
-    assert Enum.map(snap.history, & &1.__struct__) == [Geex.Commands.Insert, Geex.Commands.Replace]
+
+    assert Enum.map(snap.history, & &1.__struct__) == [
+             Geex.Commands.Insert,
+             Geex.Commands.Replace
+           ]
   end
 
-  test "a raising command is contained: buffer stays alive, state + history untouched", %{buf: buf} do
+  test "a raising command is contained: buffer stays alive, state + history untouched", %{
+    buf: buf
+  } do
     {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "ok"))
     assert {:error, {:command_crashed, _}} = Buffer.dispatch(buf, %Geex.BufferTest.Crashing{})
     assert Process.alive?(buf)
@@ -119,5 +127,83 @@ defmodule Geex.BufferTest do
     assert snap.version == 0
     assert snap.dirty == false
     assert snap.history == []
+  end
+
+  describe "undo/redo (ADR-0031)" do
+    test "undo reverts the newest edit and returns the undone command; redo re-applies it", %{
+      buf: buf
+    } do
+      {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "hello"))
+      {:ok, _} = Buffer.dispatch(buf, insert(0, 5, " world"))
+
+      assert {:ok, snap, %Insert{col: 5, text: " world"}} = Buffer.undo(buf)
+      assert snap.text == "hello"
+      assert snap.version == 1
+      assert Enum.map(snap.history, & &1.__struct__) == [Insert]
+
+      assert {:ok, snap, %Insert{col: 5, text: " world"}} = Buffer.redo(buf)
+      assert snap.text == "hello world"
+      assert snap.version == 2
+    end
+
+    test "undo on empty history / redo with nothing undone are errors", %{buf: buf} do
+      assert {:error, :nothing_to_undo} = Buffer.undo(buf)
+      assert {:error, :nothing_to_redo} = Buffer.redo(buf)
+
+      {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "x"))
+      assert {:error, :nothing_to_redo} = Buffer.redo(buf)
+    end
+
+    test "a fresh edit after an undo clears the redo future", %{buf: buf} do
+      {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "a"))
+      {:ok, _} = Buffer.dispatch(buf, insert(0, 1, "b"))
+      {:ok, _, _} = Buffer.undo(buf)
+      {:ok, snap} = Buffer.dispatch(buf, insert(0, 1, "c"))
+      assert snap.text == "ac"
+      assert {:error, :nothing_to_redo} = Buffer.redo(buf)
+    end
+
+    test "undo back to the synced baseline clears the dirty flag" do
+      buf = start_supervised!(Supervisor.child_spec({Buffer, text: "base"}, id: :baseline_buf))
+      {:ok, snap} = Buffer.dispatch(buf, insert(0, 4, "!"))
+      assert snap.dirty == true
+      assert {:ok, snap, _} = Buffer.undo(buf)
+      assert snap.text == "base"
+      assert snap.dirty == false
+    end
+
+    test "undo/redo round-trips a mixed Insert/Delete/Replace history (replay-from-base)", %{
+      buf: buf
+    } do
+      {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "one\ntwo\nthree"))
+      {:ok, _} = Buffer.dispatch(buf, replace(0, 1, 2, 2, "X\nY"))
+      {:ok, s3} = Buffer.dispatch(buf, delete(0, 0, 1))
+      assert s3.text == "X\nYree"
+
+      {:ok, u1, %Delete{}} = Buffer.undo(buf)
+      assert u1.text == "oX\nYree"
+      {:ok, u2, %Geex.Commands.Replace{}} = Buffer.undo(buf)
+      assert u2.text == "one\ntwo\nthree"
+      {:ok, u3, %Insert{}} = Buffer.undo(buf)
+      assert u3.text == ""
+      assert u3.version == 0
+      assert u3.dirty == false
+
+      {:ok, r1, %Insert{}} = Buffer.redo(buf)
+      assert r1.text == "one\ntwo\nthree"
+      {:ok, r2, %Geex.Commands.Replace{}} = Buffer.redo(buf)
+      assert r2.text == "oX\nYree"
+      {:ok, r3, %Delete{}} = Buffer.redo(buf)
+      assert r3.text == "X\nYree"
+    end
+
+    test "undo emits a :reset change so overlays re-derive (not a byte-shiftable footprint)", %{
+      buf: buf
+    } do
+      {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "a"))
+      {:ok, _v} = Buffer.subscribe(buf, self())
+      {:ok, _, _} = Buffer.undo(buf)
+      assert_receive {:geex_buffer_change, ^buf, 0, :reset}, 500
+    end
   end
 end
