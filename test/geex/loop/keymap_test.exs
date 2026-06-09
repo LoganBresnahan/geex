@@ -73,6 +73,49 @@ defmodule Geex.Loop.KeymapTest do
     end
   end
 
+  describe "goal column — sticky vertical motion" do
+    test "vertical?/1 flags up/down and Alt+W/S, nothing else" do
+      assert Keymap.vertical?({:key, :up})
+      assert Keymap.vertical?({:key, :down})
+      assert Keymap.vertical?({:alt, ?w})
+      assert Keymap.vertical?({:alt, ?S})
+      refute Keymap.vertical?({:key, :left})
+      refute Keymap.vertical?({:alt, ?d})
+      refute Keymap.vertical?({:char, "x"})
+    end
+
+    test "goal_column/2 is the column mid-line, :eol at the line end" do
+      text = "hello\nhi"
+      assert Keymap.goal_column({0, 2}, text) == 2
+      assert Keymap.goal_column({0, 5}, text) == :eol
+      # an empty line: column 0 is already the end
+      assert Keymap.goal_column({1, 2}, "ab\n") == :eol
+    end
+
+    test "apply_goal/3 keeps a numeric column, clamped to the target line" do
+      text = "0123456789\nhi\nlong enough line"
+      # goal 7 on a long line lands at 7; on the 2-char line clamps to 2 (its end)
+      assert Keymap.apply_goal({0, 0}, 7, text) == {0, 7}
+      assert Keymap.apply_goal({1, 0}, 7, text) == {1, 2}
+      assert Keymap.apply_goal({2, 0}, 7, text) == {2, 7}
+    end
+
+    test "apply_goal/3 with :eol tracks the end of each line (empty lines included)" do
+      text = "hello\n\ngoodbye world"
+      assert Keymap.apply_goal({0, 0}, :eol, text) == {0, 5}
+      assert Keymap.apply_goal({1, 0}, :eol, text) == {1, 0}
+      assert Keymap.apply_goal({2, 0}, :eol, text) == {2, 13}
+    end
+
+    test "the goal survives a short line: down through 'hi' and back to a long line restores the column" do
+      text = "0123456789\nhi\nABCDEFGHIJ"
+      goal = Keymap.goal_column({0, 7}, text)
+      # down to the short line clamps, but the goal is unchanged, so down again restores col 7
+      assert Keymap.apply_goal({1, 0}, goal, text) == {1, 2}
+      assert Keymap.apply_goal({2, 0}, goal, text) == {2, 7}
+    end
+  end
+
   describe "resolve/3 — control" do
     test "Ctrl-X / Ctrl-Q / Ctrl-C all quit (flow-control/signal-robust)" do
       assert :quit = Keymap.resolve({:ctrl, ?x}, {0, 0}, "")

@@ -999,3 +999,22 @@ the settled frame, not the optimistic one — but the shift math is proven by th
 
 **Groundwork:** the `{at, removed, added}` footprint is exactly tree-sitter's `Tree.edit` input — the
 deferred incremental-reparse optimization (ADR-0022) now has its plumbing.
+
+### 2026-06-09 — Sticky goal column for vertical motion (a user nice-to-have)
+
+Up/down used to clamp the cursor to each line's end and let the column erode toward the front through
+short lines. Now vertical motion keeps a **goal column**: pure helpers on `Geex.Loop.Keymap`
+(`vertical?/1`, `goal_column/2` → `:eol | col`, `apply_goal/3`) decide what to keep, and `Geex.Loop`
+holds the goal in its state (frontend-local, like scroll). The goal **refreshes** after every
+non-vertical cursor change (a move/edit/go-to-line) and **persists** across a run of up/down; it is
+`:eol` when the cursor sits at a line end, so vertical motion then **tracks the end** of each line
+(empty lines included). 5 new pure keymap tests.
+
+**Live-verified** (100×30 tmux, a crafted file `L0=10 / L1="hi" / L2=empty / L3=13`):
+- **Goal survives short + empty lines:** col 7 → Down clamps to col 2 (`hi`) → Down to the empty line
+  (col 0) → Down **restores col 7** on L3 (`cursor_x` 11→6→4→11).
+- **End-stickiness:** `Alt+F` to L0's end (col 10) → Down to `hi`'s end (col 2) → Down to the empty
+  line (col 0) → Down to **L3's end** (col 13) (`cursor_x` 14→6→4→17).
+- **Horizontal move breaks stickiness:** from L3's end, `Left` refreshes the goal to col 12; Up to the
+  empty line then Down returns to **col 12, not 13** (`cursor_x` 16, confirming the `:eol` goal was
+  correctly replaced). **508 tests + 9 doctests** green.

@@ -165,7 +165,7 @@ defmodule Geex.Loop do
     {w, h} = safe_window_size()
 
     state =
-      %{w: w, h: h, scroll: 0, hscroll: 0, theme: Theme.default(), buffer: nil, buffer_ref: nil, reactor: nil, repaint?: false, minibuffer: Minibuffer.new()}
+      %{w: w, h: h, scroll: 0, hscroll: 0, goal: 0, theme: Theme.default(), buffer: nil, buffer_ref: nil, reactor: nil, repaint?: false, minibuffer: Minibuffer.new()}
       |> attach(active)
 
     {:ok, schedule_repaint(state)}
@@ -481,12 +481,35 @@ defmodule Geex.Loop do
         state
 
       {:move, new_cursor} ->
-        set_cursor(new_cursor)
-        schedule_repaint(state)
+        schedule_repaint(apply_move(state, event, new_cursor, text))
 
       {:edit, cmd, new_cursor} ->
-        with {:ok, _snap} <- safe_dispatch(cmd), do: set_cursor(new_cursor)
+        # An edit is never a vertical move; refresh the goal from the post-edit cursor +
+        # text (so typing at a line end leaves the goal at `:eol`, tracking ends below).
+        state =
+          case safe_dispatch(cmd) do
+            {:ok, %{text: text_after}} ->
+              set_cursor(new_cursor)
+              %{state | goal: Keymap.goal_column(new_cursor, text_after)}
+
+            _ ->
+              state
+          end
+
         schedule_repaint(state)
+    end
+  end
+
+  # A vertical move keeps the goal column (re-derive the landing column from it, so the
+  # horizontal position is preserved across a run of up/down and sticks to line ends);
+  # any other cursor move refreshes the goal from where it landed.
+  defp apply_move(state, event, new_cursor, text) do
+    if Keymap.vertical?(event) do
+      set_cursor(Keymap.apply_goal(new_cursor, state.goal, text))
+      state
+    else
+      set_cursor(new_cursor)
+      %{state | goal: Keymap.goal_column(new_cursor, text)}
     end
   end
 
@@ -522,7 +545,12 @@ defmodule Geex.Loop do
   # (ADR-0027), search, the palette, and the finder are the next modes — each parsing
   # `value/1` into a `%Command{}` or an action.
   defp submit_minibuffer(state) do
-    run_command(String.trim(Minibuffer.value(state.minibuffer)))
+    state =
+      case run_command(String.trim(Minibuffer.value(state.minibuffer))) do
+        {:goal, goal} -> %{state | goal: goal}
+        :noop -> state
+      end
+
     close_minibuffer(state)
   end
 
@@ -530,9 +558,11 @@ defmodule Geex.Loop do
     with {n, ""} when n >= 0 <- Integer.parse(input),
          {:ok, %{text: text}} <- safe_session_snapshot() do
       last = max(line_count(text) - 1, 0)
-      set_cursor({if(n == 0, do: last, else: min(n - 1, last)), 0})
+      cursor = {if(n == 0, do: last, else: min(n - 1, last)), 0}
+      set_cursor(cursor)
+      {:goal, Keymap.goal_column(cursor, text)}
     else
-      _ -> :ok
+      _ -> :noop
     end
   end
 

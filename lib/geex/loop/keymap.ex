@@ -118,6 +118,39 @@ defmodule Geex.Loop.Keymap do
   defp line_len(text, line), do: text |> lines() |> Enum.at(line, "") |> String.length()
   defp clamp(v, lo, hi), do: v |> max(lo) |> min(hi)
 
+  ## Goal column — sticky horizontal position across vertical motion.
+  #
+  # Up/down should keep the column you started a vertical run at (snapping back when a
+  # short line clamped you leftward), and if you were at a line *end* they should track
+  # the end of each line. The keymap is pure, so the **goal** itself is held by the loop;
+  # these helpers are how it decides what to keep and where to land.
+
+  @doc "Is `event` a vertical motion (up/down, incl. Alt+W/S)? Vertical moves keep the goal."
+  @spec vertical?(tuple()) :: boolean()
+  def vertical?({:key, :up}), do: true
+  def vertical?({:key, :down}), do: true
+  def vertical?({:alt, c}) when c in [?w, ?W, ?s, ?S], do: true
+  def vertical?(_event), do: false
+
+  @doc """
+  The goal column for a cursor — `:eol` when it sits at the line end (so a vertical run
+  tracks the end of each line, an empty line included), else the grapheme column. The
+  loop refreshes the goal with this after every *non-vertical* cursor change.
+  """
+  @spec goal_column(cursor(), String.t()) :: :eol | non_neg_integer()
+  def goal_column({line, col}, text), do: if(col >= line_len(text, line), do: :eol, else: col)
+
+  @doc """
+  Resolve the landing column of a vertical move into `{line, _}` from the `goal`: the
+  line end for `:eol`, else the goal clamped to the line. Reused across a run of up/down
+  so the column is preserved instead of eroding toward the front.
+  """
+  @spec apply_goal(cursor(), :eol | non_neg_integer(), String.t()) :: cursor()
+  def apply_goal({line, _col}, :eol, text), do: {line, line_len(text, line)}
+
+  def apply_goal({line, _col}, goal, text) when is_integer(goal),
+    do: {line, min(goal, line_len(text, line))}
+
   ## Alt-letter motion (the arrow-free clusters).
 
   defp alt_motion(?w, cursor, text), do: {:move, vert(cursor, text, -1)}
