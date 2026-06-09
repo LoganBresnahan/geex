@@ -11,7 +11,7 @@ defmodule Geex.Highlight.Paint do
   (`Geex.Ansi`) and the on-screen cell render here.
   """
 
-  alias Geex.{Cell, Screen, Theme, Width}
+  alias Geex.{Cell, Screen, Selection, Theme, Width}
   alias Geex.Theme.Style
 
   @doc """
@@ -49,36 +49,43 @@ defmodule Geex.Highlight.Paint do
   lead scrolled off, its second column visible — shows a blank in that column). Newlines
   return to the virtual column `x0`.
   """
-  @spec to_screen(String.t(), [Geex.Highlight.Span.t()], Theme.t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+  @spec to_screen(String.t(), [Geex.Highlight.Span.t()], Theme.t(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), Selection.t() | nil) ::
           Screen.t()
-  def to_screen(text, spans, %Theme{} = theme, w, h, scroll \\ 0, x0 \\ 0, hscroll \\ 0)
+  def to_screen(text, spans, %Theme{} = theme, w, h, scroll \\ 0, x0 \\ 0, hscroll \\ 0, selection \\ nil)
       when is_binary(text) and w >= 0 and h >= 0 and scroll >= 0 and x0 >= 0 and hscroll >= 0 do
     by_byte = styles(theme, spans)
     fg = theme.palette.fg
     bg = theme.palette.bg
+    sel_bg = theme.palette.selection
 
     # Paint the whole pane with the theme's editor background first, then overlay
     # the glyphs — so blank lines, the gaps after short lines, and the area below
     # the buffer all show the theme background, not the terminal's default.
     base = Screen.fill_rect(Screen.new(w, h), 0, 0, w, h, %Cell{char: " ", fg: fg, bg: bg})
 
-    {screen, _byte, _row, _vcol} =
+    # The accumulator also tracks `col` (grapheme index within the line) so a
+    # `Geex.Selection` (caret coordinates) can tint the selected cells' background.
+    {screen, _byte, _row, _vcol, _col} =
       text
       |> String.graphemes()
-      |> Enum.reduce({base, 0, 0, x0}, fn
+      |> Enum.reduce({base, 0, 0, x0, 0}, fn
         # "\r\n" is a single grapheme; both forms terminate the line.
-        g, {screen, byte, row, _vcol} when g in ["\n", "\r\n"] ->
-          {screen, byte + byte_size(g), row + 1, x0}
+        g, {screen, byte, row, _vcol, _col} when g in ["\n", "\r\n"] ->
+          {screen, byte + byte_size(g), row + 1, x0, 0}
 
-        g, {screen, byte, row, vcol} ->
+        g, {screen, byte, row, vcol, col} ->
           wd = Width.cells(g)
           cell = cell_for(g, style_at(by_byte, byte, byte_size(g)), fg, bg)
+          cell = if selected?(selection, row, col), do: %{cell | bg: sel_bg}, else: cell
           screen = place(screen, vcol - hscroll, row - scroll, cell, wd, x0)
-          {screen, byte + byte_size(g), row, vcol + wd}
+          {screen, byte + byte_size(g), row, vcol + wd, col + 1}
       end)
 
     screen
   end
+
+  defp selected?(nil, _row, _col), do: false
+  defp selected?(%Selection{} = sel, row, col), do: Selection.contains?(sel, {row, col})
 
   # Place a grapheme at screen column `x` on `row`, given its display width `wd` and the
   # left edge `x0` of the text rect (the gutter inset). `Geex.Screen.put_grapheme/4` handles

@@ -35,7 +35,7 @@ defmodule Geex.Loop do
   use GenServer
   require Logger
 
-  alias Geex.{Buffer, Cell, Command, Dispatch, Minibuffer, Renderer, Screen, Session, TerminalIO, Theme, Width}
+  alias Geex.{Buffer, Cell, Command, Dispatch, Minibuffer, Renderer, Screen, Selection, Session, TerminalIO, Theme, Width}
   alias Geex.Command.Meta
   alias Geex.Highlight.{Paint, Reactor}
   alias Geex.Loop.Keymap
@@ -90,7 +90,7 @@ defmodule Geex.Loop do
   @spec frame(String.t(), [map()], Theme.t(), {non_neg_integer(), non_neg_integer()},
           non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
           {Screen.t(), {non_neg_integer(), integer()}, non_neg_integer()}
-  def frame(text, spans, %Theme{} = theme, {cursor_line, _} = cursor, w, h, scroll, hscroll \\ 0) do
+  def frame(text, spans, %Theme{} = theme, {cursor_line, _} = cursor, w, h, scroll, hscroll \\ 0, selection \\ nil) do
     gw = gutter_width(text)
     text_w = max(w - gw, 0)
     {dcol, cy} = cursor_xy(text, cursor, scroll)
@@ -98,12 +98,19 @@ defmodule Geex.Loop do
 
     screen =
       text
-      |> Paint.to_screen(spans, theme, w, h, scroll, gw, hscroll)
+      |> Paint.to_screen(spans, theme, w, h, scroll, gw, hscroll, selection)
       |> draw_gutter(text, theme, h, scroll, gw, cursor_line)
-      |> highlight_line(w, cy, theme.palette.active_line_bg)
+      |> cursor_line_overlay(theme, w, cy, selection)
 
     {screen, {gw + dcol - hscroll, cy}, hscroll}
   end
+
+  # The current-line tint and the selection are two background overlays; show the
+  # cursor-line tint only when nothing is selected (Paint already drew the selection),
+  # so the two never fight over the cursor's row.
+  defp cursor_line_overlay(screen, _theme, _w, _cy, %Selection{}), do: screen
+  defp cursor_line_overlay(screen, theme, w, cy, nil),
+    do: highlight_line(screen, w, cy, theme.palette.active_line_bg)
 
   @doc """
   The width in columns of the line-number gutter for `text`: enough digits for the
@@ -165,7 +172,7 @@ defmodule Geex.Loop do
     {w, h} = safe_window_size()
 
     state =
-      %{w: w, h: h, scroll: 0, hscroll: 0, goal: 0, theme: Theme.default(), buffer: nil, buffer_ref: nil, reactor: nil, repaint?: false, minibuffer: Minibuffer.new()}
+      %{w: w, h: h, scroll: 0, hscroll: 0, goal: 0, selection: nil, theme: Theme.default(), buffer: nil, buffer_ref: nil, reactor: nil, repaint?: false, minibuffer: Minibuffer.new()}
       |> attach(active)
 
     {:ok, schedule_repaint(state)}
@@ -257,7 +264,8 @@ defmodule Geex.Loop do
     # change/overlay messages) until they die — a leak across buffer switches.
     if is_pid(buf), do: Buffer.unsubscribe(buf, self())
     if is_pid(reactor), do: Reactor.unsubscribe(reactor, self())
-    %{state | buffer: nil, buffer_ref: nil, reactor: nil}
+    # A selection is buffer-specific; drop it (and reset the goal) on a buffer switch.
+    %{state | buffer: nil, buffer_ref: nil, reactor: nil, selection: nil, goal: 0}
   end
 
   defp detach(state), do: state
@@ -287,7 +295,7 @@ defmodule Geex.Loop do
         # (Paint tolerates out-of-range spans, never crashes) and the change's own repaint
         # corrects it next frame. Enforce-the-versions-match is a deferred refinement.
         {screen, {cx, cy}, hscroll} =
-          frame(text, overlay_spans(state.reactor), state.theme, cursor, tw, h_text, scroll, state.hscroll)
+          frame(text, overlay_spans(state.reactor), state.theme, cursor, tw, h_text, scroll, state.hscroll, state.selection)
 
         gw = gutter_width(text)
         text_w = max(tw - gw, 0)
@@ -476,6 +484,19 @@ defmodule Geex.Loop do
       :minibuffer ->
         open_minibuffer(state)
 
+      :select_start ->
+        # Anchor a selection at the cursor; subsequent motion extends it (ADR-0029).
+        schedule_repaint(%{state | selection: Selection.new(cursor)})
+
+      :select_all ->
+        last = end_caret(text)
+        set_cursor(last)
+        sel = Selection.new({0, 0}) |> Selection.extend(last)
+        schedule_repaint(%{state | selection: sel, goal: Keymap.goal_column(last, text)})
+
+      :select_clear ->
+        schedule_repaint(%{state | selection: nil})
+
       :quit ->
         System.stop()
         state
@@ -486,11 +507,12 @@ defmodule Geex.Loop do
       {:edit, cmd, new_cursor} ->
         # An edit is never a vertical move; refresh the goal from the post-edit cursor +
         # text (so typing at a line end leaves the goal at `:eol`, tracking ends below).
+        # Editing collapses any selection (you replaced/typed over the region of interest).
         state =
           case safe_dispatch(cmd) do
             {:ok, %{text: text_after}} ->
               set_cursor(new_cursor)
-              %{state | goal: Keymap.goal_column(new_cursor, text_after)}
+              %{state | goal: Keymap.goal_column(new_cursor, text_after), selection: nil}
 
             _ ->
               state
@@ -502,15 +524,25 @@ defmodule Geex.Loop do
 
   # A vertical move keeps the goal column (re-derive the landing column from it, so the
   # horizontal position is preserved across a run of up/down and sticks to line ends);
-  # any other cursor move refreshes the goal from where it landed.
+  # any other cursor move refreshes the goal from where it landed. A live selection
+  # extends to the new cursor (the cursor *is* its active end, ADR-0029).
   defp apply_move(state, event, new_cursor, text) do
-    if Keymap.vertical?(event) do
-      set_cursor(Keymap.apply_goal(new_cursor, state.goal, text))
-      state
-    else
-      set_cursor(new_cursor)
-      %{state | goal: Keymap.goal_column(new_cursor, text)}
-    end
+    {final, goal} =
+      if Keymap.vertical?(event) do
+        {Keymap.apply_goal(new_cursor, state.goal, text), state.goal}
+      else
+        {new_cursor, Keymap.goal_column(new_cursor, text)}
+      end
+
+    set_cursor(final)
+    state = %{state | goal: goal}
+    if state.selection, do: %{state | selection: Selection.extend(state.selection, final)}, else: state
+  end
+
+  # The caret at the very end of the buffer — `{last line, its length}` — for select-all.
+  defp end_caret(text) do
+    lines = String.split(text, "\n")
+    {length(lines) - 1, String.length(List.last(lines))}
   end
 
   defp safe_dispatch(cmd) do
@@ -547,7 +579,7 @@ defmodule Geex.Loop do
   defp submit_minibuffer(state) do
     state =
       case run_command(String.trim(Minibuffer.value(state.minibuffer))) do
-        {:goal, goal} -> %{state | goal: goal}
+        {:goal, goal} -> %{state | goal: goal, selection: nil}
         :noop -> state
       end
 

@@ -124,8 +124,17 @@ defmodule Geex.Loop.KeymapTest do
     end
 
     test "an unknown key is ignored" do
-      assert :ignore = Keymap.resolve({:key, :esc}, {0, 0}, "")
       assert :ignore = Keymap.resolve({:ctrl, ?z}, {0, 0}, "")
+    end
+  end
+
+  describe "resolve/3 — selection (ADR-0029)" do
+    test "Alt+H starts a selection, Alt+Z selects all, Alt+N / Esc clear" do
+      assert :select_start = Keymap.resolve({:alt, ?h}, {0, 0}, "abc")
+      assert :select_start = Keymap.resolve({:alt, ?H}, {0, 0}, "abc")
+      assert :select_all = Keymap.resolve({:alt, ?z}, {0, 0}, "abc")
+      assert :select_clear = Keymap.resolve({:alt, ?n}, {0, 0}, "abc")
+      assert :select_clear = Keymap.resolve({:key, :esc}, {0, 0}, "abc")
     end
   end
 
@@ -161,11 +170,11 @@ defmodule Geex.Loop.KeymapTest do
       assert {:move, {0, 0}} = Keymap.resolve({:alt, ?q}, {0, 2}, text)
     end
 
-    test "the retired ERTYUIOP letters and other Alt letters are ignored" do
+    test "the retired ERTYUIOP letters and other unbound Alt letters are ignored" do
       assert :ignore = Keymap.resolve({:alt, ?t}, {0, 0}, "abc")
       assert :ignore = Keymap.resolve({:alt, ?y}, {0, 0}, "abc")
       assert :ignore = Keymap.resolve({:alt, ?o}, {0, 0}, "abc")
-      assert :ignore = Keymap.resolve({:alt, ?z}, {0, 0}, "abc")
+      assert :ignore = Keymap.resolve({:alt, ?g}, {0, 0}, "abc")
     end
   end
 end

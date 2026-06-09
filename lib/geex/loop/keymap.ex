@@ -23,7 +23,15 @@ defmodule Geex.Loop.Keymap do
   alias Geex.Commands.{Delete, Insert, Replace}
 
   @type cursor :: {non_neg_integer(), non_neg_integer()}
-  @type action :: {:edit, struct(), cursor()} | {:move, cursor()} | :minibuffer | :quit | :ignore
+  @type action ::
+          {:edit, struct(), cursor()}
+          | {:move, cursor()}
+          | :minibuffer
+          | :select_start
+          | :select_all
+          | :select_clear
+          | :quit
+          | :ignore
 
   @doc "Resolve a `Geex.Input.Parser` event against the cursor and buffer text."
   @spec resolve(tuple(), cursor(), String.t()) :: action()
@@ -66,6 +74,14 @@ defmodule Geex.Loop.Keymap do
   #   Q   E   — word back / forward
   #   R   F   — line start / end
   def resolve({:alt, c}, _cursor, _text) when c in [?m, ?M], do: :minibuffer
+  # Selection (ADR-0029): Alt+H starts a selection at the cursor (motion then extends it),
+  # Alt+Z selects the whole buffer, Esc clears. The loop owns the live selection.
+  def resolve({:alt, c}, _cursor, _text) when c in [?h, ?H], do: :select_start
+  def resolve({:alt, c}, _cursor, _text) when c in [?z, ?Z], do: :select_all
+  # Clear the selection: Alt+N (the reliable, atomic "no/cancel" — a bare Esc lingers in
+  # the parser's leftover, so it only lands when the next key arrives) and Esc.
+  def resolve({:alt, c}, _cursor, _text) when c in [?n, ?N], do: :select_clear
+  def resolve({:key, :esc}, _cursor, _text), do: :select_clear
   def resolve({:alt, c}, cursor, text), do: alt_motion(lower(c), cursor, text)
 
   # Quit. Ctrl-X is the reliable key — Ctrl-Q is XON (software flow control) and

@@ -94,6 +94,42 @@ defmodule Geex.Highlight.PaintTest do
     end
   end
 
+  describe "to_screen/9 — selection background overlay" do
+    alias Geex.Selection
+
+    test "cells inside the selection get the palette selection bg; outside keep the editor bg" do
+      sel = Selection.new({0, 1}) |> Selection.extend({0, 4})
+      screen = Paint.to_screen("hello", [], theme(), 10, 1, 0, 0, 0, sel)
+      sel_bg = theme().palette.selection
+      bg = theme().palette.bg
+
+      # half-open [1, 4): graphemes 1,2,3 selected; 0 and 4 not
+      assert Screen.get_cell(screen, 0, 0).bg == bg
+      assert Screen.get_cell(screen, 1, 0).bg == sel_bg
+      assert Screen.get_cell(screen, 3, 0).bg == sel_bg
+      assert Screen.get_cell(screen, 4, 0).bg == bg
+    end
+
+    test "the selection bg spans lines but keeps each cell's syntax fg" do
+      src = "def f\nx = 1"
+      {:ok, spans} = Highlight.spans(src, "elixir")
+      sel = Selection.new({0, 0}) |> Selection.extend({1, 1})
+      screen = Paint.to_screen(src, spans, theme(), 20, 2, 0, 0, 0, sel)
+
+      # "def" keyword keeps its red fg AND gains the selection bg
+      assert %{fg: @keyword_red, bg: sel_bg} = Screen.get_cell(screen, 0, 0)
+      assert sel_bg == theme().palette.selection
+      # line 1, col 0 is selected (it's < the {1,1} active end); col 1 is not
+      assert Screen.get_cell(screen, 0, 1).bg == theme().palette.selection
+      assert Screen.get_cell(screen, 1, 1).bg == theme().palette.bg
+    end
+
+    test "no selection (nil) leaves backgrounds at the editor bg" do
+      screen = Paint.to_screen("hi", [], theme(), 5, 1, 0, 0, 0, nil)
+      assert Screen.get_cell(screen, 0, 0).bg == theme().palette.bg
+    end
+  end
+
   describe "end-to-end: reactor-shaped spans render to truecolor on screen" do
     test "real elixir highlighting projects + renders as 24-bit SGR" do
       src = "def f, do: :ok\n"
