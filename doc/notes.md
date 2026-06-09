@@ -857,7 +857,11 @@ When grid mode is triggered, optionally overlay coordinate labels on visible reg
 
 ## Editing & selection bindings (sketch — refines ADR-0026 / ADR-0028)
 
-Forward-looking notes from the 2026-06-08 design pass; not built, captured so we remember the *why*.
+Forward-looking notes from the 2026-06-08 design pass. **Update 2026-06-09 — selection + clipboard
+shipped:** `Alt+H` (highlight) / `Alt+Z` (select-all) / `Alt+N` or Esc (clear) / `Alt+C`/`X`/`V`
+(copy/cut/paste) are **built and live-verified** ([ADR-0029](adr/0029-selection-primitive.md) Accepted,
+[ADR-0015](adr/0015-clipboard-subsystem.md); see [testing.md](testing.md) 2026-06-09). The **typed**
+verbs, `Alt+P` palette, and `Alt+B`/`Alt+Shift+B` undo/redo below remain unbuilt.
 
 **Selection is one concept with two input surfaces.** A cut/copy needs a *region*, and there
 are two honest ways to name one: **interactively** (highlight mode — `Alt+H`, motion
@@ -872,9 +876,10 @@ pattern again.
 
 | chord | action |
 |---|---|
-| `Alt+H` | enter highlight mode (motion extends the span) |
-| `Alt+Z` | select-all (span = whole buffer) |
-| `Alt+X` / `Alt+C` / `Alt+V` | cut / copy / paste the current span (fall back to current line if none) |
+| `Alt+H` | enter highlight mode (motion extends the span) — **built** |
+| `Alt+Z` | select-all (span = whole buffer) — **built** |
+| `Alt+N` / Esc | clear the selection — **built** |
+| `Alt+X` / `Alt+C` / `Alt+V` | cut / copy / paste the selection (copy/cut no-op with no selection; paste replaces a selection) — **built** |
 | `Alt+P` | open the command palette |
 | `Alt+B` / `Alt+Shift+B` | undo / redo (history navigation, not recorded `%Command{}`s) |
 
