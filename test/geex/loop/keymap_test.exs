@@ -124,6 +124,11 @@ defmodule Geex.Loop.KeymapTest do
       assert :quit = Keymap.resolve({:ctrl, ?c}, {0, 0}, "")
     end
 
+    test "Ctrl-O saves (ADR-0026's reserved save chord — Ctrl-S is XOFF)" do
+      assert :save = Keymap.resolve({:ctrl, ?o}, {0, 0}, "")
+      assert :save = Keymap.resolve({:ctrl, ?O}, {0, 0}, "")
+    end
+
     test "an unknown key is ignored" do
       assert :ignore = Keymap.resolve({:ctrl, ?z}, {0, 0}, "")
     end

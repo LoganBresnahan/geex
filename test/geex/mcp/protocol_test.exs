@@ -107,7 +107,7 @@ defmodule Geex.MCP.ProtocolTest do
   end
 
   describe "tools/list (projected from the live registry, merged with operation tools)" do
-    test "lists the registered edit commands plus the operation tools (ADR-0019)" do
+    test "lists the edit commands plus the operation and view-action tools (ADR-0019/0030)" do
       %{"result" => %{"tools" => tools}} = frame(request(1, "tools/list"))
       names = Enum.map(tools, & &1["name"]) |> Enum.sort()
 
@@ -118,6 +118,7 @@ defmodule Geex.MCP.ProtocolTest do
                "delete_file",
                "edit",
                "insert",
+               "line",
                "open_file",
                "rename_file",
                "replace",
@@ -137,6 +138,47 @@ defmodule Geex.MCP.ProtocolTest do
 
       save = Enum.find(tools, &(&1["name"] == "save_file"))
       assert save["inputSchema"]["required"] == []
+    end
+
+    test "view-action tools carry a field-spec-projected inputSchema (ADR-0030)" do
+      %{"result" => %{"tools" => tools}} = frame(request(1, "tools/list"))
+
+      line = Enum.find(tools, &(&1["name"] == "line"))
+      assert line["inputSchema"]["required"] == ["line"]
+      assert line["inputSchema"]["properties"]["line"]["type"] == "integer"
+    end
+  end
+
+  describe "tools/call — view actions (the fourth category, ADR-0030)" do
+    setup do
+      buf = start_supervised!({Buffer, text: "a\nb\nc"})
+      Session.set_active_buffer(buf)
+      on_exit(fn -> Session.set_active_buffer(nil) end)
+      %{buf: buf}
+    end
+
+    test "`line` moves the active view's cursor; not recorded in history" do
+      params = %{"name" => "line", "arguments" => %{"line" => 2}}
+      %{"result" => result} = frame(request(1, "tools/call", params))
+
+      assert result["isError"] == false
+      assert [%{"type" => "text", "text" => "cursor at line 2, column 1"}] = result["content"]
+      assert {:ok, %{cursor: {1, 0}, history: []}} = Session.snapshot()
+    end
+
+    test "invalid arguments ride isError (SEP-1303), not a JSON-RPC error" do
+      params = %{"name" => "line", "arguments" => %{}}
+      %{"result" => result} = frame(request(1, "tools/call", params))
+      assert result["isError"] == true
+    end
+
+    test "with no active buffer the failure is a clean isError result" do
+      Session.set_active_buffer(nil)
+      params = %{"name" => "line", "arguments" => %{"line" => 1}}
+      %{"result" => result} = frame(request(1, "tools/call", params))
+      assert result["isError"] == true
+      assert [%{"text" => text}] = result["content"]
+      assert text =~ "no_active_buffer"
     end
   end
 

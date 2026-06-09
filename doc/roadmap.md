@@ -236,14 +236,16 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    `Alt+B` select-all, render highlight incl. the multi-line / CRLF cases, `Alt+N`/Esc clear),
    and clipboard `cut`/`copy`/`paste` (`Alt+X/C/V`) consuming `range/1`. The **typed** verbs
    and grid-range ops remain (they ride item 2).
-2. **The command catalog + the view-action tool category** — a *fourth* tool category
-   (view actions: `line`/`scroll`/`select`/`undo`) registered with field-specs like the
-   operation tools, so they render into `tools/list` (palette-discoverable, agent-callable)
-   without being recorded edits ([adr/0030](adr/0030-view-action-tool-category.md),
-   *Proposed*). This is what the palette and the parity backlog stand on.
-3. **Refactor go-to-line through the real system** — replace the `loop.ex` `run_command`
-   hack with a registered `line N` view-action (the bare-number shortcut preserved as sugar);
-   the first member of the view-action category ([adr/0030](adr/0030-view-action-tool-category.md)).
+2. **The command catalog + the view-action tool category** — **built, first slice**
+   ([adr/0030](adr/0030-view-action-tool-category.md), *Accepted*): `Geex.MCP.ViewActions`
+   (field-spec → `tools/list`; the fourth `tools/call` route) with **`line`** as the first
+   member, and the **typed-verb surface** `Geex.Loop.Verbs` — chords and typed verbs share one
+   action vocabulary through the loop's `apply_action` (the parity mechanism); an agent-moved
+   cursor now repaints (`{:geex_cursor}` notify). Remaining: `scroll` / coordinate `select` /
+   grid `goto` members, and re-basing the verb table on the catalog when the palette lands.
+3. ~~**Refactor go-to-line through the real system**~~ — **done** (rode item 2): the
+   `run_command` hack is deleted; bare `N`, typed `line N`, and `tools/call line` converge on
+   `ViewActions.line/1`.
 4. **The remaining minibuffer modes** ([adr/0028](adr/0028-editor-shell-and-minibuffer.md) §2):
    **palette** (`Alt+P` / typed `palette`), **grid** (`:coord`/`:coord_range` cast →
    `Coord.to_span` → copy/cut/replace, [adr/0027](adr/0027-grid-command-addressing.md)) with
@@ -253,12 +255,15 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
 5. **undo / redo** — **built** ([adr/0031](adr/0031-undo-redo-history-operations.md)): history
    operations on `Alt+Z` / `Alt+Shift+Z` (replay-from-base over the recorded history + the loaded
    `base`, [adr/0014](adr/0014-editor-state-and-dispatch-ownership.md)); a fresh edit clears the
-   redo stack, the cursor lands from the returned command, and overlays re-derive via a `:reset`
-   change (undo lowers `version`). The **typed `undo`/`redo` verbs** (the agent/palette twin) ride
-   the catalog + view-action build (item 2); insert coalescing is deferred polish.
+   redo stack, the cursor lands from the returned command, and overlays shift across the revert
+   on a byte-footprint diff + monotonic `seq` (the ADR-0031 §5 revision — flicker-free). The
+   typed `undo`/`redo` verbs are **built** (item 2's verb surface); insert coalescing is
+   deferred polish.
 6. **Discharge the parity backlog** ([adr/0028](adr/0028-editor-shell-and-minibuffer.md)
-   amendment §2): a `quit`/`exit` typed verb; chords for the operation tools (`save` = Ctrl-O
-   per [adr/0026](adr/0026-terminal-input-model.md)).
+   amendment §2) — **largely done** (rode item 2): `quit`/`exit` typed verbs, `save` on
+   `Ctrl-O` ([adr/0026](adr/0026-terminal-input-model.md)) *and* as a typed verb, the clipboard
+   + selection + undo/redo verb twins. Remaining: typed twins for the other operation tools
+   (`open`/`new`/`close`) — they want the file-path completion of the finder (item 4).
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09); the shelf is currently clear.

@@ -130,14 +130,21 @@ defmodule Geex.Session do
   def active_buffer, do: GenServer.call(__MODULE__, :active_buffer)
 
   @doc """
-  Subscribe `pid` (default: caller) to **active-buffer** changes. When the active
-  buffer pointer moves (a file opened, switched, or closed) the subscriber receives:
+  Subscribe `pid` (default: caller) to **view** changes. When the active buffer
+  pointer moves (a file opened, switched, or closed) the subscriber receives:
 
       {:geex_active_buffer, pid | nil}
 
-  so the editor loop (`Geex.Loop`) can re-attach its render to the new buffer.
-  Returns the current active buffer (`pid` or `nil`) so the subscriber can attach
-  immediately. The subscriber is monitored and dropped on exit.
+  so the editor loop (`Geex.Loop`) can re-attach its render to the new buffer. When
+  the **cursor** is set by someone *other than the subscriber* (an agent's `line`
+  view action, ADR-0030) it receives:
+
+      {:geex_cursor, {line, col}}
+
+  so the move is visible on screen without waiting for an unrelated event (the
+  setter itself is deliberately not echoed — the loop already repaints its own
+  moves). Returns the current active buffer (`pid` or `nil`) so the subscriber can
+  attach immediately. The subscriber is monitored and dropped on exit.
   """
   @spec subscribe(pid()) :: pid() | nil
   def subscribe(pid \\ self()), do: GenServer.call(__MODULE__, {:subscribe, pid})
@@ -167,7 +174,14 @@ defmodule Geex.Session do
     {:reply, :ok, put_active(state, pid)}
   end
 
-  def handle_call({:set_cursor, cursor}, _from, state) do
+  def handle_call({:set_cursor, cursor}, {caller, _ref}, state) do
+    # Tell subscribers the cursor moved — **except the caller**, who already knows
+    # (the loop sets the cursor on every keystroke and repaints itself; echoing it
+    # back would double every repaint). This is what makes an *agent's* cursor move
+    # (the `line` view action over MCP, ADR-0030) visible on screen: the loop hears
+    # {:geex_cursor, cursor} and repaints.
+    msg = {:geex_cursor, cursor}
+    for {_ref, pid} <- state.subscribers, pid != caller, do: send(pid, msg)
     {:reply, :ok, put_in(state.view.cursor, cursor)}
   end
 
@@ -291,8 +305,19 @@ defmodule Geex.Session do
           {:error, :no_active_buffer}
 
         pid ->
-          buffer = Geex.Buffer.snapshot(pid)
-          {:ok, Map.put(buffer, :cursor, state.view.cursor)}
+          # Guarded like dirty?/buffer_status: a stale dead pid (the pointer is
+          # deliberately unmonitored) must degrade to "no active buffer", not take
+          # the Session down. The merged cursor is **clamped to the text** here — the
+          # view cursor is stored unvalidated (set_cursor can race a buffer
+          # switch/shrink, and the pointer move keeps the old cursor), so the point
+          # of *read* is where every consumer is guaranteed an in-range caret.
+          case safe_buffer_snapshot(pid) do
+            {:ok, buffer} ->
+              {:ok, Map.put(buffer, :cursor, clamp_cursor(state.view.cursor, buffer.lines))}
+
+            :error ->
+              {:error, :no_active_buffer}
+          end
       end
 
     {:reply, reply, state}
@@ -432,5 +457,20 @@ defmodule Geex.Session do
     {snapshot.dirty, label || snapshot.path || "active buffer"}
   catch
     :exit, _ -> {false, label || "buffer"}
+  end
+
+  # The full snapshot, guarded the same way: a dead/stale active buffer reads as absent.
+  defp safe_buffer_snapshot(pid) do
+    {:ok, Buffer.snapshot(pid)}
+  catch
+    :exit, _ -> :error
+  end
+
+  # Clamp a stored {line, col} to a valid caret in `lines` — the stored view cursor can be
+  # out of range (a set_cursor racing a shrink; a buffer switch keeping the old position).
+  defp clamp_cursor({line, col}, lines) do
+    line = line |> max(0) |> min(length(lines) - 1)
+    col = col |> max(0) |> min(lines |> Enum.at(line, "") |> String.length())
+    {line, col}
   end
 end

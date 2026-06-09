@@ -1,6 +1,6 @@
 # ADR-0030: View actions — a fourth tool category for view-local commands
 
-- **Status:** Proposed
+- **Status:** Accepted (built 2026-06-09 — see the amendment)
 - **Date:** 2026-06-09
 - **Relates to:** [ADR-0019](0019-file-lifecycle-and-operation-tools.md) (the third category — operation
   tools — and the field-spec→`tools/list` projection this reuses), [ADR-0028](0028-editor-shell-and-minibuffer.md)
@@ -87,9 +87,33 @@ append-only log from per-buffer undo history (the persistence open question, [no
   refactor are the build; multi-view targeting (the `:N/` prefix) waits for panes; a session journal is a
   separate, unresolved question; an agent moving the human's cursor is acceptable single-view but wants
   thought once multiple frontends share a session.
-- **Status is Proposed** — the category and `line`-first are settled in direction by
-  [ADR-0028](0028-editor-shell-and-minibuffer.md) §4, but the not-journalled call and the single-active-view
-  targeting are open for review before this is Accepted and built.
+- ~~**Status is Proposed**~~ — Accepted and built (the amendment below); the not-journalled call and
+  single-active-view targeting stand as decided.
+
+## Amendment (2026-06-09, on build) — what shipped, and the parity mechanism
+
+**Built:** `Geex.MCP.ViewActions` with **`line`** as the first member (field-spec → `tools/list`;
+`tools/call` routes operations → view actions → the edit registry); the loop's `run_command`
+go-to-line hack is **retired** — the bare-number sugar, the typed `line N`, and an agent's
+`tools/call line` all converge on `ViewActions.line/1` (§3 as decided).
+
+**The typed surface's v1 grammar is `Geex.Loop.Verbs`** — a pure parser for the minibuffer's
+`:command` mode. Two findings from building it:
+
+1. **Most typed twins are *not* view actions.** `copy`/`cut`/`paste` (clipboard), `undo`/`redo`
+   (history operations, [ADR-0031](0031-undo-redo-history-operations.md)), `save` (operation),
+   `quit` — each belongs to its own category. The parity mechanism that makes the twins real is
+   **one shared action vocabulary**: `Keymap.resolve/3` (chords) and `Verbs.parse/1` (typed) both
+   produce the same action atoms, applied by one `Geex.Loop` `apply_action/4`. The view-action
+   *category* is only for what mutates view-local state from the *agent* surface too.
+2. **An agent-moved cursor must repaint.** `Session.set_cursor/1` now notifies view subscribers
+   (`{:geex_cursor, cursor}`) — *excluding the setter*, so the loop's own per-keystroke moves are
+   not echoed into double repaints — which is what makes `tools/call line` visible on screen.
+
+The verb table is **hardcoded v1**; when the command **catalog** backs the palette
+([ADR-0028](0028-editor-shell-and-minibuffer.md)), unknown verbs resolve against it instead.
+`Ctrl-O` (the [ADR-0026](0026-terminal-input-model.md) reserved save chord) also landed, completing
+save's chord+verb pair. `scroll` / a coordinate `select` / the grid `goto x y` remain the next members.
 
 ## See
 

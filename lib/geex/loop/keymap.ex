@@ -35,6 +35,7 @@ defmodule Geex.Loop.Keymap do
           | :paste
           | :undo
           | :redo
+          | :save
           | :quit
           | :ignore
 
@@ -99,6 +100,10 @@ defmodule Geex.Loop.Keymap do
   def resolve({:alt, c}, _cursor, _text) when c in [?x, ?X], do: :cut
   def resolve({:alt, c}, _cursor, _text) when c in [?v, ?V], do: :paste
   def resolve({:alt, c}, cursor, text), do: alt_motion(lower(c), cursor, text)
+
+  # Save (ADR-0026 reserved Ctrl-O for it — the CUA Ctrl-S is XOFF/flow-control and
+  # can freeze the tty before a raw-mode app ever sees it). An operation, not an edit.
+  def resolve({:ctrl, c}, _cursor, _text) when c in [?o, ?O], do: :save
 
   # Quit. Ctrl-X is the reliable key — Ctrl-Q is XON (software flow control) and
   # Ctrl-C is SIGINT, both of which can be swallowed by the tty before they ever

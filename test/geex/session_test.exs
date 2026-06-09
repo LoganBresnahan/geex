@@ -69,6 +69,41 @@ defmodule Geex.SessionTest do
     refute_receive {:geex_active_buffer, _}, 200
   end
 
+  test "a cursor set by ANOTHER process notifies subscribers (the agent-moved-cursor repaint)" do
+    Session.subscribe()
+    test = self()
+
+    # An out-of-process mover (an MCP transport calling the `line` view action, ADR-0030).
+    spawn(fn ->
+      :ok = Session.set_cursor({1, 0})
+      send(test, :moved)
+    end)
+
+    assert_receive :moved, 1_000
+    assert_receive {:geex_cursor, {1, 0}}, 1_000
+  end
+
+  test "a subscriber's OWN set_cursor is not echoed back (no double-repaint)" do
+    Session.subscribe()
+    :ok = Session.set_cursor({0, 1})
+    refute_receive {:geex_cursor, _}, 200
+  end
+
+  test "snapshot/0 clamps an out-of-range stored cursor to the text" do
+    {:ok, _} = Dispatch.run(insert(0, 0, "ab\ncd", Meta.human()))
+    # A raced/stale cursor far past the buffer (e.g. set against a previous, larger buffer).
+    :ok = Session.set_cursor({149, 7})
+    assert {:ok, %{cursor: {1, 2}}} = Session.snapshot()
+  end
+
+  test "snapshot/0 with a dead active buffer degrades to no_active_buffer (never exits)", %{
+    buf: buf
+  } do
+    Process.exit(buf, :kill)
+    refute Process.alive?(buf)
+    assert {:error, :no_active_buffer} = Session.snapshot()
+  end
+
   test "set_cursor/1 updates the view-local cursor surfaced by snapshot/0" do
     {:ok, _} = Dispatch.run(insert(0, 0, "abc", Meta.human()))
     :ok = Session.set_cursor({0, 2})

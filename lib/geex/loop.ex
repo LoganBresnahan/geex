@@ -55,7 +55,8 @@ defmodule Geex.Loop do
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
-  alias Geex.Loop.Keymap
+  alias Geex.Loop.{Keymap, Verbs}
+  alias Geex.MCP.ViewActions
 
   # Rows of context kept between the cursor and the top/bottom of the viewport
   # (vim's `scrolloff`). A fixed default for now; a future per-user config knob
@@ -241,6 +242,21 @@ defmodule Geex.Loop do
 
   def handle_info({:geex_highlights, buffer, _v}, %{buffer: buffer} = state),
     do: {:noreply, schedule_repaint(state)}
+
+  # Someone else moved the view cursor (an agent's `line` view action, ADR-0030) — treat
+  # it as the jump it is, mirroring jump_to_line: drop the live selection (its active end
+  # is no longer the cursor — the same staleness rule as the buffer-change handler above)
+  # and refresh the goal from the landing, then repaint so the move is visible. Our own
+  # set_cursor calls are not echoed back, so this fires only for out-of-band moves.
+  def handle_info({:geex_cursor, cursor}, state) do
+    goal =
+      case safe_session_snapshot() do
+        {:ok, %{text: text}} -> Keymap.goal_column(cursor, text)
+        _ -> 0
+      end
+
+    {:noreply, schedule_repaint(%{state | selection: nil, goal: goal})}
+  end
 
   def handle_info({:geex_io, {:resize, rows, cols}}, state) do
     Renderer.resize(cols, rows)
@@ -558,11 +574,11 @@ defmodule Geex.Loop do
   defp cursor_target(w, h_text, x, y) when x >= 0 and x < w and y >= 0 and y < h_text, do: {x, y}
   defp cursor_target(_w, _h_text, _x, _y), do: :hidden
 
-  # Resolve a key to an action and apply it. Edits go through the **one shared path**
-  # (Dispatch.run with human provenance) then move the cursor; a move just sets the
-  # cursor; quit stops the VM so the app's shutdown restores the terminal. The buffer's
-  # post-dispatch change notification will also schedule a repaint, but we schedule one
-  # here too so a pure cursor move (no edit) repaints as well.
+  # Resolve a key to an action and apply it. The event-shaped results ({:move, ...},
+  # {:edit, ...}, :minibuffer, :ignore) are handled here; every plain action atom goes
+  # through apply_action/4 — the **shared action vocabulary** the typed verbs
+  # (`Geex.Loop.Verbs`) also apply through, so `copy` and `Alt+C` converge on one code
+  # path (the ADR-0028 parity principle, ADR-0003 in miniature).
   defp apply_key(event, cursor, text, state) do
     case Keymap.resolve(event, cursor, text) do
       :ignore ->
@@ -571,6 +587,38 @@ defmodule Geex.Loop do
       :minibuffer ->
         open_minibuffer(state)
 
+      {:move, new_cursor} ->
+        schedule_repaint(apply_move(state, event, new_cursor, text))
+
+      {:edit, cmd, new_cursor} ->
+        # An edit is never a vertical move; refresh the goal from the post-edit cursor +
+        # text (so typing at a line end leaves the goal at `:eol`, tracking ends below).
+        # Editing collapses any selection (you replaced/typed over the region of interest).
+        # Edits go through the **one shared path** (Dispatch.run, human provenance); the
+        # buffer's change notification also repaints, but schedule one anyway so a failed
+        # dispatch still refreshes.
+        state =
+          case safe_dispatch(cmd) do
+            {:ok, %{text: text_after}} ->
+              set_cursor(new_cursor)
+              %{state | goal: Keymap.goal_column(new_cursor, text_after), selection: nil}
+
+            _ ->
+              state
+          end
+
+        schedule_repaint(state)
+
+      action when is_atom(action) ->
+        apply_action(action, cursor, text, state)
+    end
+  end
+
+  # Apply one plain action against the current cursor + text — reached from a chord
+  # (apply_key) or a typed verb (submit_minibuffer). Quit stops the VM so the app's
+  # shutdown restores the terminal.
+  defp apply_action(action, cursor, text, state) do
+    case action do
       :select_start ->
         # Anchor a selection at the cursor; subsequent motion extends it (ADR-0029).
         schedule_repaint(%{state | selection: Selection.new(cursor)})
@@ -599,29 +647,23 @@ defmodule Geex.Loop do
       :redo ->
         schedule_repaint(do_redo(state))
 
+      :save ->
+        do_save(state)
+
       :quit ->
         System.stop()
         state
-
-      {:move, new_cursor} ->
-        schedule_repaint(apply_move(state, event, new_cursor, text))
-
-      {:edit, cmd, new_cursor} ->
-        # An edit is never a vertical move; refresh the goal from the post-edit cursor +
-        # text (so typing at a line end leaves the goal at `:eol`, tracking ends below).
-        # Editing collapses any selection (you replaced/typed over the region of interest).
-        state =
-          case safe_dispatch(cmd) do
-            {:ok, %{text: text_after}} ->
-              set_cursor(new_cursor)
-              %{state | goal: Keymap.goal_column(new_cursor, text_after), selection: nil}
-
-            _ ->
-              state
-          end
-
-        schedule_repaint(state)
     end
+  end
+
+  # Save the active buffer (Ctrl-O / the `save` verb) — an operation, not an edit
+  # (ADR-0019): no command, no history. Visible feedback is the status line's dirty
+  # marker clearing; `Buffer.save/1` emits no change event, so repaint explicitly. A
+  # failure (`{:error, :no_path}` on a scratch buffer, a posix error) leaves the marker
+  # set — a real echo/message area is a deferred minibuffer slice.
+  defp do_save(state) do
+    _ = on_active_buffer(&Buffer.save/1)
+    schedule_repaint(state)
   end
 
   # A vertical move keeps the goal column (re-derive the landing column from it, so the
@@ -845,29 +887,53 @@ defmodule Geex.Loop do
     end
   end
 
-  # Run the typed command, then close. v1: a bare line number jumps to that line (clamped to
-  # the buffer); **`0` jumps to the last line**. Anything else is a no-op. Grid commands
-  # (ADR-0027), search, the palette, and the finder are the next modes — each parsing
-  # `value/1` into a `%Command{}` or an action.
+  # Run the typed command, then close. The grammar is `Geex.Loop.Verbs` (the keymap's
+  # typed twin, ADR-0028 parity): `line N` / a bare number resolve through the same
+  # `Geex.MCP.ViewActions.line/1` an agent's `tools/call line` hits (ADR-0030 — the
+  # old in-loop go-to-line hack is retired), and plain verbs (`copy`, `undo`, `save`,
+  # …) apply through the same apply_action/4 the chords use. Unknown input is a no-op.
+  # Grid commands (ADR-0027), search, the palette, and the finder are the next modes.
   defp submit_minibuffer(state) do
     state =
-      case run_command(String.trim(Minibuffer.value(state.minibuffer))) do
-        {:goal, goal} -> %{state | goal: goal, selection: nil}
-        :noop -> state
+      case Verbs.parse(Minibuffer.value(state.minibuffer)) do
+        {:line, n} -> jump_to_line(n, state)
+        {:action, action} -> apply_verb(action, state)
+        :cancel -> state
+        :unknown -> state
       end
 
     close_minibuffer(state)
   end
 
-  defp run_command(input) do
-    with {n, ""} when n >= 0 <- Integer.parse(input),
+  # Go-to-line through the one shared resolution (ViewActions sets the cursor); on
+  # success refresh the view-local goal from the landing. A jump clears the selection
+  # (it is a jump, not motion — only motion extends a selection, ADR-0029).
+  defp jump_to_line(n, state) do
+    with {:ok, cursor} <- safe_view_line(n),
          {:ok, %{text: text}} <- safe_session_snapshot() do
-      last = max(line_count(text) - 1, 0)
-      cursor = {if(n == 0, do: last, else: min(n - 1, last)), 0}
-      set_cursor(cursor)
-      {:goal, Keymap.goal_column(cursor, text)}
+      %{state | goal: Keymap.goal_column(cursor, text), selection: nil}
     else
-      _ -> :noop
+      _ -> state
+    end
+  end
+
+  # ViewActions.line/1 makes bare Session calls (the MCP door has the protocol's -32603
+  # containment); on the loop's door, contain an exit like every other Session/Buffer
+  # touch here — a typed `line N` must never crash the loop.
+  defp safe_view_line(n) do
+    ViewActions.line(n)
+  catch
+    :exit, _ -> {:error, :down}
+  end
+
+  # A typed verb needs the same cursor + text context a keystroke has — fetch it fresh.
+  # :quit must work with no buffer open (you can always type `quit`); the rest no-op.
+  defp apply_verb(:quit, state), do: apply_action(:quit, {0, 0}, "", state)
+
+  defp apply_verb(action, state) do
+    case safe_session_snapshot() do
+      {:ok, %{text: text, cursor: cursor}} -> apply_action(action, cursor, text, state)
+      _ -> state
     end
   end
 

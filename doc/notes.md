@@ -853,6 +853,18 @@ When grid mode is triggered, optionally overlay coordinate labels on visible reg
 
 > **Ruler / overlay are settled in [ADR-0027 amendment](adr/0027-grid-command-addressing.md#amendment-2026-06-08-the-display-ruler--the-human-picking-surface)** — the x-axis ruler is *display-column* (a shared top ruler can only honestly count cells), so it **is** viewport-relative mode made visible; ruler + grid-line paint are **contextual** (shown only while composing a viewport grid command). The display↔grapheme cast is verified by tmux `cursor_x`; its runtime cousin is `\e[6n`.
 
+**Grid-line *styling* brain-dump (2026-06-09, user)** — open design for the grid-mode build:
+the contextual overlay could be a **hotkey-toggled grid-line paint** (the `grid`/`lines`
+verb/chord) drawing **multicoloured and/or dotted rules** so a user can visually *mark* the
+region they're about to name — e.g. every-5th-column rule dotted dim, every-10th solid +
+colour-cycled, so "x37" is findable by eye without counting. Colour-cycling rules double as a
+legend (the ruler digit colour matches its rule). Constraints to respect when building: it is
+an **overlay on the cell grid's bg/fg only** (like the selection tint — never reflows text);
+it must stay legible on the theme background (derive rule colours from the palette, don't
+hardcode); and it stays **contextual** (auto-off after the command runs, per the ADR-0027
+amendment) with the toggle as the manual override. How many distinct rule colours before it
+becomes noise (2? 4?) is a "build it and look" question for the grid chunk.
+
 ---
 
 ## Editing & selection bindings (sketch — refines ADR-0026 / ADR-0028)
@@ -898,10 +910,14 @@ action). undo/redo are **history operations** ([ADR-0031](adr/0031-undo-redo-his
 [ADR-0014](adr/0014-editor-state-and-dispatch-ownership.md)), they are not new recorded edits.
 
 **Every mode exits the same way** — `Esc`, `Alt+N`, or typing **`no`** + Enter (the typed
-twin of `Alt+N`; no/op mnemonic). **Typed twins** of the chords above: `highlight`/`select`
-(= `Alt+H`), `palette`/`catalog` (= `Alt+P`), `undo`/`redo` (= `Alt+Z`/`Alt+Shift+Z`), and a
-`grid`/`lines` toggle for the [ADR-0027](adr/0027-grid-command-addressing.md) ruler/grid-line
-overlay — so every capability is reachable by key *and* by typed command (the
+twin of `Alt+N`; no/op mnemonic). **Typed twins** of the chords above — **built 2026-06-09**
+(`Geex.Loop.Verbs`, the keymap's pure typed twin; one shared action vocabulary applied by the
+loop's `apply_action`, ADR-0030 amendment): `line N` + bare `N` (through the `line` view
+action), `copy`/`cut`/`paste`, `undo`/`redo`, `highlight`/`select` (+ `highlight all` /
+`select all` = `Alt+B`), `save` (= the new `Ctrl-O` chord), `quit`/`exit`, `no`. Still to
+come: `palette`/`catalog` (= `Alt+P`) and a `grid`/`lines` toggle for the
+[ADR-0027](adr/0027-grid-command-addressing.md) ruler/grid-line overlay — so every capability
+is reachable by key *and* by typed command (the
 [ADR-0028](adr/0028-editor-shell-and-minibuffer.md) amendment §2 parity principle).
 
 **Clipboard on Alt is *forced*, and that's fine.** The CUA homes are taken: `Ctrl-X` = quit,

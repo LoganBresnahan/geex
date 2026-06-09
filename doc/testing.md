@@ -1129,3 +1129,42 @@ Removed the now-obsolete `:reset` + `render_overlay/1` tests. **545 tests + 9 do
 — all three findings refuted on verification (the `between/2` splice validity, the `seq` increment paths, and
 the `optimistic || result` simplification all held up). ADR-0031 §5 rewritten (byte-footprint + monotonic seq;
 the `:reset` first cut kept as a revised-from note).
+
+### 2026-06-09 — The typed command surface: `line` view action + minibuffer verbs (ADR-0030 → Accepted)
+
+The user green-lit "commands starting with `line 1` etc." — the ADR-0030 build. **(1) The fourth tool
+category is real:** `Geex.MCP.ViewActions` ([view_actions.ex](../lib/geex/mcp/view_actions.ex)), field-spec
+→ `tools/list` (now 11 tools: 4 edit + 6 operation + `line`), a fourth `tools/call` route. `line/1` is **the**
+go-to-line resolution: 1-based, `0` = last line, clamped; the loop's `run_command` hack is **deleted** — bare
+`N`, typed `line N`, and `tools/call line` converge on it (ADR-0030 §3 as decided). **(2) The typed verb
+surface:** `Geex.Loop.Verbs` (pure parser) + the loop's extracted `apply_action/4` — chords (`Keymap`) and
+verbs share **one action vocabulary**, so `copy` ≡ `Alt+C` by construction. Verbs: `line N`/bare `N`,
+`copy`/`cut`/`paste`, `undo`/`redo`, `highlight`/`select` (+ ` all`), `save`, `quit`/`exit`, `no`. **(3)
+Parity extras:** `Ctrl-O` = save (the ADR-0026 reserved chord — the TUI previously had *no* save path);
+typed `save`/`quit`. **(4) Agent visibility:** `Session.set_cursor` now notifies view subscribers
+(`{:geex_cursor, cursor}`, **excluding the setter** so the loop's own moves aren't echoed into double
+repaints) — an agent's `line` call repaints the TUI.
+
+**Live-verified in tmux:** `:3`, `:line 1`, `:0` (last) all jump (status 3:1/1:1/4:1); typed
+`copy`→`paste` duplicates and `undo` reverts; `Ctrl-O` clears the dirty marker and writes disk; typed
+`quit` exits; an in-VM "agent" calling `ViewActions.line(3)` at t+12s moved the cursor 1:1→3:1 **with zero
+keystrokes**, and (after the review fix) **cleared a live selection** (tinted rows 1→0).
+
+**Adversarial review** (`typed-commands-review`, 4 dimensions × find→verify, 17 agents): **7 of 13
+confirmed** (3 were one defect found thrice). Fixed: (a) MEDIUM — the `{:geex_cursor}` handler only
+repainted, leaving the loop's **selection and goal stale** (a following motion would extend a phantom
+selection across the jump; a cut would grab anchor→landing) → the handler now mirrors `jump_to_line`
+(clear selection, refresh goal); (b) MEDIUM — `ViewActions.line/1` makes bare Session calls, so typed
+`line N` **lost the loop's exit-containment** (a dead Session/stale buffer pid could crash the Loop, a
+regression vs the deleted hack) → `safe_view_line` catch on the loop door (the MCP door already had
+-32603 containment), plus the root hardening: Session's `:snapshot` now **guards the buffer call**
+(dead pid → `:no_active_buffer`, never takes Session down) and **clamps the merged cursor to the text**
+(the stored view cursor is unvalidated and can be stale-of-range after a race or buffer switch); (c) LOW
+— `Verbs` accepted **signed** numbers (`-0` would silently mean "last line", `+5` parse as 5) → digit-
+gated; (d) LOW — typed `no` parsed as a plain cancel, so the typed surface **couldn't clear a selection**
+→ `no` is now the true `Alt+N` twin (`:select_clear`; degrades to cancel with nothing selected).
+**576 tests + 9 doctests** green, `--warnings-as-errors` clean.
+
+**Scoping:** the verb table is hardcoded v1 — it re-bases on the **catalog** when the palette lands
+(ADR-0028); `scroll` / coordinate `select` / grid `goto x y` are the next view-action members; typed
+`open`/`new`/`close` wait for path completion (the finder).

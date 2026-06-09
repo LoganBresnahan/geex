@@ -15,9 +15,10 @@ defmodule Geex.MCP.Protocol do
   Methods: `initialize` (negotiate protocol version), `notifications/initialized`
   and `notifications/cancelled` (ack, no reply), `tools/list` (edit tools projected
   from the command registry via `Geex.MCP.Schema`, merged with the hand-written
-  operation tools), `tools/call` (routes by category: an operation name →
-  `Geex.MCP.Operations`; else the same `parse/1` + `Geex.Dispatch.run/1` a human
-  hits — ADR-0019), `ping` (`{}` — pharos omits this; geex does not). Unknown
+  operation and view-action tools), `tools/call` (routes by category: an operation
+  name → `Geex.MCP.Operations`; a view-action name → `Geex.MCP.ViewActions`
+  (ADR-0030); else the same `parse/1` + `Geex.Dispatch.run/1` a human hits —
+  ADR-0019), `ping` (`{}` — pharos omits this; geex does not). Unknown
   methods → `-32601`. Any handler fault — a raise, or a dependency process
   (registry/session/buffer) being down — is contained as a `-32603` internal-error
   frame; `handle_line/1` never crashes the process running it (the three-outcome
@@ -32,7 +33,7 @@ defmodule Geex.MCP.Protocol do
   alias Geex.Command
   alias Geex.Command.Meta
   alias Geex.{CommandRegistry, Dispatch}
-  alias Geex.MCP.{Operations, Schema}
+  alias Geex.MCP.{Operations, Schema, ViewActions}
 
   # The MCP revision geex implements (§11). Negotiated against the client's request;
   # the preferred (latest) supported version is the fallback. 2025-11-25 is current;
@@ -123,16 +124,17 @@ defmodule Geex.MCP.Protocol do
 
   defp negotiate(_), do: @protocol_version
 
-  # tools/list merges all three tool categories (ADR-0019): macro-projected edit
-  # tools (from the registry) + the hand-written operation tools. Both project their
-  # inputSchema through the same Schema renderer, so neither hand-syncs JSON.
+  # tools/list merges all four tool categories (ADR-0019 + ADR-0030): macro-projected
+  # edit tools (from the registry) + the hand-written operation tools + the view-action
+  # tools. All project their inputSchema through the same Schema renderer, so none
+  # hand-syncs JSON.
   defp tools_list do
     modules = Enum.map(CommandRegistry.all(), & &1.module)
-    %{"tools" => Schema.tools(modules) ++ Operations.tools()}
+    %{"tools" => Schema.tools(modules) ++ Operations.tools() ++ ViewActions.tools()}
   end
 
-  # tools/call routes by category: an operation name → its hand-written handler;
-  # otherwise the edit-command registry. Names across the two are disjoint.
+  # tools/call routes by category: an operation or view-action name → its hand-written
+  # handler; otherwise the edit-command registry. Names across the categories are disjoint.
   defp tool_call(%{"name" => name} = params) when is_binary(name) do
     # Coalesce an explicit `"arguments": null` (some clients serialize omitted optional
     # fields as null) to the empty object, mirroring the `params` handling above. A
@@ -144,9 +146,15 @@ defmodule Geex.MCP.Protocol do
         call_operation(op, args)
 
       :error ->
-        case lookup_tool(name) do
-          {:ok, module} -> call_command(module, args)
-          :error -> {:error, -32602, "Unknown tool: #{name}"}
+        case ViewActions.lookup(name) do
+          {:ok, action} ->
+            call_view_action(action, args)
+
+          :error ->
+            case lookup_tool(name) do
+              {:ok, module} -> call_command(module, args)
+              :error -> {:error, -32602, "Unknown tool: #{name}"}
+            end
         end
     end
   end
@@ -196,6 +204,20 @@ defmodule Geex.MCP.Protocol do
   end
 
   defp call_operation(_op, _args),
+    do: {:error, -32602, ~s(Invalid params: "arguments" must be an object)}
+
+  # View-action tools (`line`, ADR-0030): the same result contract as operations —
+  # invalid args / clean failures ride isError; a down dependency is contained as
+  # -32603 by handle_request/1.
+  defp call_view_action(action, args) when is_map(args) do
+    case ViewActions.call(action, args) do
+      {:invalid_args, why} -> tool_result("Invalid arguments: #{why}", true)
+      {:ok, text} -> tool_result(text, false)
+      {:error, message} -> tool_result("error: #{message}", true)
+    end
+  end
+
+  defp call_view_action(_action, _args),
     do: {:error, -32602, ~s(Invalid params: "arguments" must be an object)}
 
   # An unknown tool name may not even be an existing atom — that is still just an
