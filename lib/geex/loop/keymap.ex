@@ -12,6 +12,7 @@ defmodule Geex.Loop.Keymap do
     * `{:edit, command, new_cursor}` — dispatch the (unstamped) command, then move
       the cursor to `new_cursor`.
     * `{:move, new_cursor}` — a view-local cursor move, no edit.
+    * `:minibuffer` — open the minibuffer (the command surface, ADR-0028).
     * `:quit` — exit the editor.
     * `:ignore` — an unhandled key.
 
@@ -22,7 +23,7 @@ defmodule Geex.Loop.Keymap do
   alias Geex.Commands.{Delete, Insert, Replace}
 
   @type cursor :: {non_neg_integer(), non_neg_integer()}
-  @type action :: {:edit, struct(), cursor()} | {:move, cursor()} | :quit | :ignore
+  @type action :: {:edit, struct(), cursor()} | {:move, cursor()} | :minibuffer | :quit | :ignore
 
   @doc "Resolve a `Geex.Input.Parser` event against the cursor and buffer text."
   @spec resolve(tuple(), cursor(), String.t()) :: action()
@@ -58,6 +59,14 @@ defmodule Geex.Loop.Keymap do
   def resolve({:key, :right}, cursor, text), do: {:move, right(cursor, text)}
   def resolve({:key, :up}, cursor, text), do: {:move, vert(cursor, text, -1)}
   def resolve({:key, :down}, cursor, text), do: {:move, vert(cursor, text, +1)}
+
+  # Alt+M opens the minibuffer (ADR-0028). Alt+WASD is the arrow-key alternative for
+  # keyboards without arrows (ADR-0026) — the same clamped, wrapping motion as the arrows.
+  def resolve({:alt, c}, _cursor, _text) when c in [?m, ?M], do: :minibuffer
+  def resolve({:alt, c}, cursor, text) when c in [?w, ?W], do: {:move, vert(cursor, text, -1)}
+  def resolve({:alt, c}, cursor, text) when c in [?s, ?S], do: {:move, vert(cursor, text, +1)}
+  def resolve({:alt, c}, cursor, text) when c in [?a, ?A], do: {:move, left(cursor, text)}
+  def resolve({:alt, c}, cursor, text) when c in [?d, ?D], do: {:move, right(cursor, text)}
 
   # Quit. Ctrl-X is the reliable key — Ctrl-Q is XON (software flow control) and
   # Ctrl-C is SIGINT, both of which can be swallowed by the tty before they ever

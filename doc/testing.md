@@ -911,6 +911,18 @@ long line slid the thumb off the left edge (`───████───`); a
 view down to line 163, travelled from the top to the middle of its track — confirming both bars track the
 viewport (not the cursor) and move on real scrolling. 442 tests + 8 doctests green.
 
+**Minibuffer (first slice) + Alt keys — added + verified live (ADR-0028).** The bottom row now doubles
+as a **modal command input**: `Geex.Minibuffer` (a pure struct — mode / input / grapheme cursor) opened by
+**`Alt+M`**, which takes over the status row (a `:` prompt on the plain theme bg, distinct from the
+reverse-video status bar) and owns the hardware cursor while open. The `Geex.Input.Parser` learned
+**`Alt`/Meta-letter** decoding (`\e`+letter → `{:alt, c}`, atomic so it doesn't clash with bare ESC or
+CSI), and the keymap routes `Alt+M` → open and **`Alt+WASD`** → the same motion as the arrows (the
+arrow-key alternative). v1 command: a bare line number jumps to that line (clamped). Verified live in a
+100×30 pane on loop.ex: `Alt+M` → `:` → typed `200` → Enter jumped to line 200 (`200:1`, viewport
+scrolled); `Alt+M` → `:5` → **Ctrl-G** cancelled with no jump and restored the status bar; `Alt+S`×3 +
+`Alt+D`×2 moved the cursor to `203:3`. 455 tests + 9 doctests green. (Submit/cancel keys: Enter submits,
+Ctrl-G or Esc cancels — Ctrl-G is the reliable one since a bare ESC stays in the parser's leftover.)
+
 **Still unverified live / not built:** the keymap-capability/Kitty-protocol model
 ([ADR-0026](adr/0026-terminal-input-model.md)); **mouse** (so the scroll bars can't be dragged yet —
 captured as a follow-up); **scroll keybindings** (PageUp/Down, line-scroll, horizontal — part of the

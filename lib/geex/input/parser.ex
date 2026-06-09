@@ -20,12 +20,14 @@ defmodule Geex.Input.Parser do
              :backspace | :esc}
       {:char, <<utf8 grapheme>>}
       {:ctrl, ?a..?z}            # Ctrl-letter as the lowercase atom
+      {:alt, ?a..?z | ?A..?Z}   # Alt/Meta-letter (ESC-prefixed)
   """
 
   @type event ::
           {:key, atom()}
           | {:char, binary()}
           | {:ctrl, byte()}
+          | {:alt, byte()}
 
   @doc """
   Parse a binary chunk into events plus any unparsed leftover bytes.
@@ -41,6 +43,9 @@ defmodule Geex.Input.Parser do
 
       iex> Geex.Input.Parser.parse("ab\\e[Cd")
       {[{:char, "a"}, {:char, "b"}, {:key, :right}, {:char, "d"}], ""}
+
+      iex> Geex.Input.Parser.parse("\\em")
+      {[{:alt, ?m}], ""}
   """
   @spec parse(binary()) :: {[event()], binary()}
   def parse(bytes) when is_binary(bytes), do: do_parse(bytes, [])
@@ -56,6 +61,12 @@ defmodule Geex.Input.Parser do
   # Partial CSI — keep it as leftover, await more bytes.
   defp do_parse(<<"\e[", _::binary>> = partial, acc) when byte_size(partial) < 3,
     do: {Enum.reverse(acc), partial}
+
+  # ESC + a letter = Alt/Meta-letter. A terminal sends an Alt chord atomically, so it
+  # arrives in one chunk (`\em`); a bare ESC stays leftover (clause below) until more bytes
+  # come. `[` is not a letter, so CSI sequences match the clauses above, not this one.
+  defp do_parse(<<"\e", c, rest::binary>>, acc) when c in ?a..?z or c in ?A..?Z,
+    do: do_parse(rest, [{:alt, c} | acc])
 
   # ESC followed by another byte we don't recognise — emit ESC, reparse rest.
   # (Real impl would use a small timeout to decide; v0.1 leans on "if more

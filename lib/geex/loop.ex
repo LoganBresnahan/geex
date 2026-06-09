@@ -35,7 +35,7 @@ defmodule Geex.Loop do
   use GenServer
   require Logger
 
-  alias Geex.{Buffer, Cell, Command, Dispatch, Renderer, Screen, Session, TerminalIO, Theme, Width}
+  alias Geex.{Buffer, Cell, Command, Dispatch, Minibuffer, Renderer, Screen, Session, TerminalIO, Theme, Width}
   alias Geex.Command.Meta
   alias Geex.Highlight.{Paint, Reactor}
   alias Geex.Loop.Keymap
@@ -165,7 +165,7 @@ defmodule Geex.Loop do
     {w, h} = safe_window_size()
 
     state =
-      %{w: w, h: h, scroll: 0, hscroll: 0, theme: Theme.default(), buffer: nil, buffer_ref: nil, reactor: nil, repaint?: false}
+      %{w: w, h: h, scroll: 0, hscroll: 0, theme: Theme.default(), buffer: nil, buffer_ref: nil, reactor: nil, repaint?: false, minibuffer: Minibuffer.new()}
       |> attach(active)
 
     {:ok, schedule_repaint(state)}
@@ -196,12 +196,17 @@ defmodule Geex.Loop do
     {:noreply, state}
   end
 
-  # A key: resolve it against the current text + cursor (read fresh from Session) and
-  # apply via the one shared path (edits) or a view-local cursor move.
+  # A key. When the minibuffer is open it captures input; otherwise resolve the key against
+  # the current text + cursor (read fresh from Session) and apply via the one shared path
+  # (edits) or a view-local cursor move.
   def handle_info({:geex_io, event}, state) do
-    case safe_session_snapshot() do
-      {:ok, %{text: text, cursor: cursor}} -> {:noreply, apply_key(event, cursor, text, state)}
-      _ -> {:noreply, state}
+    if Minibuffer.active?(state.minibuffer) do
+      {:noreply, apply_minibuffer_key(event, state)}
+    else
+      case safe_session_snapshot() do
+        {:ok, %{text: text, cursor: cursor}} -> {:noreply, apply_key(event, cursor, text, state)}
+        _ -> {:noreply, state}
+      end
     end
   end
 
@@ -285,9 +290,9 @@ defmodule Geex.Loop do
           |> Screen.resize(state.w, state.h)
           |> maybe_vscrollbar(vbar?, state.w - 1, h_text, scroll, total, state.theme)
           |> draw_hbar(state, gw, text_w, content_w, hscroll)
-          |> draw_status(state, snap)
 
-        Renderer.flush(screen, cursor_target(state.w, h_text, cx, cy))
+        {screen, cursor} = draw_bottom(screen, state, snap, cursor_target(state.w, h_text, cx, cy))
+        Renderer.flush(screen, cursor)
         %{state | scroll: scroll, hscroll: hscroll}
 
       _ ->
@@ -301,6 +306,33 @@ defmodule Geex.Loop do
   # bar (h-2). The horizontal-bar row is *always* reserved — even when no line overflows —
   # so showing/hiding the bar never reflows the text vertically. The buffer gets the rest.
   defp text_height(h), do: max(h - 2, 0)
+
+  # The bottom row is the status line, or the **minibuffer** when it is open — which takes
+  # over the status row and owns the hardware cursor while active.
+  defp draw_bottom(screen, %{minibuffer: mb} = state, snap, buffer_cursor) do
+    if Minibuffer.active?(mb) do
+      {draw_minibuffer(screen, state), minibuffer_cursor(state)}
+    else
+      {draw_status(screen, state, snap), buffer_cursor}
+    end
+  end
+
+  # Draw the minibuffer over the bottom row: the mode prompt + the typed input, plain on the
+  # theme background (distinct from the reverse-video status bar, so command mode is obvious).
+  defp draw_minibuffer(screen, %{w: w, h: h, theme: %Theme{palette: pal}, minibuffer: mb}) do
+    line = Minibuffer.prompt(mb) <> Minibuffer.value(mb)
+
+    screen
+    |> Screen.fill_rect(0, h - 1, w, 1, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
+    |> Screen.draw_text(0, h - 1, line, %Cell{fg: pal.fg, bg: pal.bg})
+  end
+
+  # The hardware cursor position within the minibuffer: after the prompt, at the input cursor
+  # (counted in display columns so a wide glyph in the input shifts it by two).
+  defp minibuffer_cursor(%{h: h, minibuffer: mb}) do
+    before = Minibuffer.value(mb) |> String.graphemes() |> Enum.take(mb.cursor) |> Enum.join()
+    {Width.string(Minibuffer.prompt(mb)) + Width.string(before), h - 1}
+  end
 
   # Overlay the status line on the bottom row of `screen`: the buffer label + dirty
   # marker on the left, the 1-based `line:col` flush right, on a reverse-video bar
@@ -433,6 +465,9 @@ defmodule Geex.Loop do
       :ignore ->
         state
 
+      :minibuffer ->
+        open_minibuffer(state)
+
       :quit ->
         System.stop()
         state
@@ -451,6 +486,44 @@ defmodule Geex.Loop do
     Dispatch.run(Command.put_meta(cmd, Meta.human()))
   catch
     :exit, _ -> {:error, :down}
+  end
+
+  ## Minibuffer (the command surface, ADR-0028)
+
+  defp open_minibuffer(state), do: schedule_repaint(%{state | minibuffer: Minibuffer.open(:command)})
+  defp close_minibuffer(state), do: schedule_repaint(%{state | minibuffer: Minibuffer.new()})
+
+  # Keys while the minibuffer is open go to its input; Enter submits, Ctrl-G / Esc cancels,
+  # and Ctrl-X still quits (so you are never trapped). Everything else is ignored.
+  defp apply_minibuffer_key(event, %{minibuffer: mb} = state) do
+    case event do
+      {:char, g} -> schedule_repaint(%{state | minibuffer: Minibuffer.insert(mb, g)})
+      {:key, :backspace} -> schedule_repaint(%{state | minibuffer: Minibuffer.backspace(mb)})
+      {:key, :left} -> schedule_repaint(%{state | minibuffer: Minibuffer.left(mb)})
+      {:key, :right} -> schedule_repaint(%{state | minibuffer: Minibuffer.right(mb)})
+      {:key, :enter} -> submit_minibuffer(state)
+      {:key, :esc} -> close_minibuffer(state)
+      {:ctrl, ?g} -> close_minibuffer(state)
+      {:ctrl, ?x} -> System.stop(); state
+      _ -> state
+    end
+  end
+
+  # Run the typed command, then close. v1: a bare line number jumps to that line (clamped to
+  # the buffer); anything else is a no-op. Grid commands (ADR-0027), search, the palette, and
+  # the finder are the next modes — each parsing `value/1` into a `%Command{}` or an action.
+  defp submit_minibuffer(state) do
+    run_command(String.trim(Minibuffer.value(state.minibuffer)))
+    close_minibuffer(state)
+  end
+
+  defp run_command(input) do
+    with {n, ""} when n >= 1 <- Integer.parse(input),
+         {:ok, %{text: text}} <- safe_session_snapshot() do
+      set_cursor({min(n - 1, max(line_count(text) - 1, 0)), 0})
+    else
+      _ -> :ok
+    end
   end
 
   defp set_cursor(cursor) do

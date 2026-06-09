@@ -1,6 +1,6 @@
 # ADR-0028: The editor shell — screen regions, the minibuffer, and the buffer/view/pane model
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-08
 - **Relates to:** [ADR-0027](0027-grid-command-addressing.md) (grid commands — the minibuffer's
   marquee mode), [ADR-0019](0019-file-lifecycle-and-operation-tools.md) (multi-buffer / `max_children`),

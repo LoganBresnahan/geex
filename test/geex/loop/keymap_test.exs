@@ -85,4 +85,19 @@ defmodule Geex.Loop.KeymapTest do
       assert :ignore = Keymap.resolve({:ctrl, ?z}, {0, 0}, "")
     end
   end
+
+  describe "resolve/3 — Alt chords" do
+    test "Alt+M opens the minibuffer" do
+      assert :minibuffer = Keymap.resolve({:alt, ?m}, {0, 0}, "")
+      assert :minibuffer = Keymap.resolve({:alt, ?M}, {0, 0}, "")
+    end
+
+    test "Alt+WASD moves like the arrows (arrow-key alternative)" do
+      text = "abc\ndef"
+      assert Keymap.resolve({:alt, ?d}, {0, 0}, text) == Keymap.resolve({:key, :right}, {0, 0}, text)
+      assert Keymap.resolve({:alt, ?a}, {0, 1}, text) == Keymap.resolve({:key, :left}, {0, 1}, text)
+      assert Keymap.resolve({:alt, ?w}, {1, 1}, text) == Keymap.resolve({:key, :up}, {1, 1}, text)
+      assert Keymap.resolve({:alt, ?s}, {0, 1}, text) == Keymap.resolve({:key, :down}, {0, 1}, text)
+    end
+  end
 end

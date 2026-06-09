@@ -1,6 +1,6 @@
 # ADR-0027: Grid command addressing — the coordinate model
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-08
 - **Relates to:** [ADR-0002](0002-commands-as-values.md) / [ADR-0003](0003-one-shared-path.md)
   (commands are recorded, replayable values on one path), [ADR-0014](0014-editor-state-and-dispatch-ownership.md)

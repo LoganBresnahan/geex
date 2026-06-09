@@ -68,6 +68,24 @@ defmodule Geex.Input.ParserTest do
     end
   end
 
+  describe "Alt/Meta-letter (ESC-prefixed)" do
+    test "ESC + lowercase letter" do
+      assert {[{:alt, ?m}], ""} = Parser.parse("\em")
+    end
+
+    test "ESC + uppercase letter" do
+      assert {[{:alt, ?M}], ""} = Parser.parse("\eM")
+    end
+
+    test "an Alt chord followed by typing parses both" do
+      assert {[{:alt, ?d}, {:char, "x"}], ""} = Parser.parse("\edx")
+    end
+
+    test "CSI still wins over Alt (the `[` is not a letter)" do
+      assert {[{:key, :up}], ""} = Parser.parse("\e[A")
+    end
+  end
+
   describe "mixed input in a single chunk" do
     test "chars + arrow + chars" do
       assert {[{:char, "a"}, {:char, "b"}, {:key, :right}, {:char, "d"}], ""} =
