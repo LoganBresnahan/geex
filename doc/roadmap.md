@@ -231,15 +231,18 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
 
 1. **The `Selection` primitive** (`%Selection{anchor, active}`) — the shared dependency under
    both highlight mode (`Alt+H`, interactive) and grid ranges (declarative); one span, two
-   input surfaces. *Needs an ADR — currently only a notes sketch.* Unblocks clipboard
-   `cut`/`copy`/`paste` (`Alt+X/C/V` + typed verbs) and grid-range ops.
+   input surfaces. **Pure core + tests built** ([adr/0029](adr/0029-selection-primitive.md),
+   *Proposed*); the interactive wiring (view field, `Alt+H`, render highlight, clipboard
+   consuming `range/1`) is the remaining build. Unblocks clipboard `cut`/`copy`/`paste`
+   (`Alt+X/C/V` + typed verbs) and grid-range ops.
 2. **The command catalog + the view-action tool category** — a *fourth* tool category
    (view actions: `line`/`scroll`/`select`/`undo`) registered with field-specs like the
    operation tools, so they render into `tools/list` (palette-discoverable, agent-callable)
-   without being recorded edits ([adr/0028](adr/0028-editor-shell-and-minibuffer.md)
-   amendment §4). *Needs an ADR.* This is what the palette and the parity backlog stand on.
+   without being recorded edits ([adr/0030](adr/0030-view-action-tool-category.md),
+   *Proposed*). This is what the palette and the parity backlog stand on.
 3. **Refactor go-to-line through the real system** — replace the `loop.ex` `run_command`
-   hack with a registered `line N` view-action (the bare-number shortcut preserved as sugar).
+   hack with a registered `line N` view-action (the bare-number shortcut preserved as sugar);
+   the first member of the view-action category ([adr/0030](adr/0030-view-action-tool-category.md)).
 4. **The remaining minibuffer modes** ([adr/0028](adr/0028-editor-shell-and-minibuffer.md) §2):
    **palette** (`Alt+P` / typed `palette`), **grid** (`:coord`/`:coord_range` cast →
    `Coord.to_span` → copy/cut/replace, [adr/0027](adr/0027-grid-command-addressing.md)) with
