@@ -932,3 +932,31 @@ status restored; `:0`→Enter jumped to the last line (576:1, 575 newlines); fro
 ([ADR-0026](adr/0026-terminal-input-model.md)); **mouse** (so the scroll bars can't be dragged yet —
 captured as a follow-up); **scroll keybindings** (PageUp/Down, line-scroll, horizontal — part of the
 keymap work, [ADR-0026](adr/0026-terminal-input-model.md)); truecolor→256/16 degradation.
+
+### 2026-06-09 — BUG-1 (typing flicker) fixed: atomic frames + conditional cursor
+
+Closed [bugs.md](bugs.md) BUG-1. A research workflow's adversarial pass pinned the root cause against
+the code: the renderer already diffs and writes one frame per syscall, but each frame was **not atomic**
+(no synchronized-output) and **re-emitted `\e[?25h`** every frame, resetting the cursor blink — *not*
+the "cursor teleports across changed runs" theory (refuted by 2 of 3 skeptics: the cursor is emitted
+last in a single `:prim_tty.write` *by design*, [renderer.ex](../lib/geex/renderer.ex) `flush/2`). The
+wide-glyph continuation-cell `""` one skeptic flagged was checked and is correct-by-design, not a bug.
+
+**Fix** in `Geex.Renderer`: a pure **`frame/3`** wraps each frame's `[diff, cursor-delta]` in
+`\e[?2026h … \e[?2026l` (DEC mode 2026 — terminals that lack it ignore the unknown private mode), shows
+the cursor (`\e[?25h`) only on a hidden/nil→shown transition, and repositions it only when the diff
+moved it or the cursor itself moved — so a settled cursor on an unchanged frame writes nothing. The
+GenServer remembers the last-emitted cursor (`cursor:` in state); `flush/1` (cells only) invalidates it
+to `nil`.
+
+**Verified.** 8 new `frame/3` unit tests pin every cursor transition + the BSU/ESU wrap (a settled
+no-op frame → `[]`; first frame shows+positions; hidden↔shown; reposition-without-show when only the
+diff moved). **466 tests + 9 doctests** green, `--warnings-as-errors` clean. **Live (100×30 tmux pane
+on loop.ex):** renders normally (gutter / text / vertical scroll bar / status `1:1`); typing `ABC`
+advanced the cursor `5:0`→`8:0` and inserted into row 1; `Alt+S`×3 moved it to `8:3` (column preserved)
+and it held stable; `Ctrl-X` quit clean; the source on disk was untouched (typed, never saved). The
+*visual* "flicker is gone" call is the user's — `capture-pane` shows final cell state, not intermediate
+frames — but the byte-level fix is proven by `frame/3` and the live run confirms no render regression.
+
+**Deferred (bugs.md note):** trimming per-keystroke damage (`highlight_line/4` re-tints the active
+line's whole-width bg every frame) is a layered perf win on non-2026 terminals, not part of this fix.

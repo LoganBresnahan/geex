@@ -24,16 +24,31 @@ defmodule Geex.Renderer do
     * Dimension changes (initial flush, terminal resize) emit `\\e[2J`
       and diff `next` against a blank screen of the new size.
 
+    * **Atomic frames.** Each written frame is wrapped in synchronized-output
+      (`\\e[?2026h` … `\\e[?2026l`, DEC mode 2026) so a multi-run frame is
+      presented all-at-once, never half-drawn (terminals that don't support it
+      ignore the unknown private mode). The hardware cursor is **re-shown only on
+      a hidden→shown transition** and **repositioned only when the frame moved it
+      or the cursor itself moved** — re-emitting `\\e[?25h` every frame resets the
+      cursor blink and reads as flicker. See `frame/3`.
+
   ## Pure vs impure
 
-  `diff/2` is a pure function — given two screens, returns iodata.
-  Test it in isolation. The GenServer wrapper just owns `current` and
-  pipes the result to `Geex.TerminalIO`.
+  `diff/2` and `frame/3` are pure functions — given screens / a prior cursor,
+  they return iodata. Test them in isolation. The GenServer wrapper just owns
+  `current` + the last-emitted cursor and pipes the result to `Geex.TerminalIO`.
   """
 
   use GenServer
 
   alias Geex.{Cell, Screen, Sgr, TerminalIO}
+
+  # Begin/End Synchronized Update (DEC private mode 2026): present a frame atomically.
+  @bsu "\e[?2026h"
+  @esu "\e[?2026l"
+
+  @typedoc "The cursor as last emitted to the terminal: a position, hidden, or unknown."
+  @type cursor_state :: {non_neg_integer(), non_neg_integer()} | :hidden | nil
 
   ## Public API
 
@@ -88,14 +103,43 @@ defmodule Geex.Renderer do
   @doc """
   The escape sequence that positions the hardware cursor: show + move to `{x, y}`
   (0-indexed → 1-indexed), `:hidden` to hide it, `nil`/anything else for no-op.
-  Appended after the cell diff by `flush/2`.
+  The unconditional form — `frame/3` is the stateful one that avoids re-showing.
   """
   @spec cursor_seq({non_neg_integer(), non_neg_integer()} | :hidden | nil) :: iodata()
-  def cursor_seq({x, y}) when x >= 0 and y >= 0,
-    do: ["\e[?25h", "\e[", Integer.to_string(y + 1), ";", Integer.to_string(x + 1), "H"]
-
+  def cursor_seq({x, y}) when x >= 0 and y >= 0, do: ["\e[?25h", cup(x, y)]
   def cursor_seq(:hidden), do: "\e[?25l"
   def cursor_seq(_), do: []
+
+  @doc """
+  The byte stream for one frame: the cell `diff` plus the cursor delta, wrapped in
+  synchronized-output so the terminal presents it atomically. `last` is the cursor
+  emitted on the previous frame (`{x, y} | :hidden | nil`); `cursor` is this frame's.
+
+  Returns `[]` when nothing changed (the caller skips the write). The cursor is
+  **shown** (`\\e[?25h`) only on a `hidden`/`nil` → shown transition, and
+  **repositioned** only when the diff moved the hardware cursor or the cursor moved —
+  so a settled cursor on an unchanged frame emits nothing and never resets its blink.
+  """
+  @spec frame(iodata(), cursor_state(), cursor_state()) :: iodata()
+  def frame(diff, last, cursor) do
+    moved? = IO.iodata_length(diff) > 0
+    body = [diff, cursor_delta(last, cursor, moved?)]
+    if IO.iodata_length(body) == 0, do: [], else: [@bsu, body, @esu]
+  end
+
+  # The cursor bytes given the previously-emitted cursor and whether the diff moved it.
+  defp cursor_delta(last, :hidden, _moved), do: if(last == :hidden, do: [], else: "\e[?25l")
+
+  defp cursor_delta(last, {x, y}, moved) do
+    show = if last in [:hidden, nil], do: "\e[?25h", else: []
+    pos = if moved or last != {x, y}, do: cup(x, y), else: []
+    [show, pos]
+  end
+
+  defp cursor_delta(_last, nil, _moved), do: []
+
+  # Cursor-position escape (0-indexed → 1-indexed).
+  defp cup(x, y), do: ["\e[", Integer.to_string(y + 1), ";", Integer.to_string(x + 1), "H"]
 
   defp rows_diff(_current, %Screen{h: 0}), do: []
   defp rows_diff(_current, %Screen{w: 0}), do: []
@@ -158,22 +202,25 @@ defmodule Geex.Renderer do
   ## GenServer
 
   @impl true
-  def init(_opts), do: {:ok, %{current: Screen.new(0, 0)}}
+  def init(_opts), do: {:ok, %{current: Screen.new(0, 0), cursor: nil}}
 
   @impl true
+  def handle_cast({:flush, %Screen{} = next, cursor}, %{current: current, cursor: last} = state) do
+    case frame(diff(current, next), last, cursor) do
+      [] -> :ok
+      io -> TerminalIO.write(io)
+    end
+
+    {:noreply, %{state | current: next, cursor: cursor}}
+  end
+
+  # Cells only, no cursor management. The diff moves the hardware cursor, so the
+  # remembered cursor is now unknown (`nil`) — the next flush/2 will reposition it.
   def handle_cast({:flush, %Screen{} = next}, %{current: current} = state) do
     case diff(current, next) do
       [] -> {:noreply, %{state | current: next}}
-      iodata -> TerminalIO.write(iodata); {:noreply, %{state | current: next}}
+      d -> TerminalIO.write([@bsu, d, @esu]); {:noreply, %{state | current: next, cursor: nil}}
     end
-  end
-
-  # Cell diff + cursor placement in one write. The cursor is (re)emitted every
-  # frame (it may move without any cell changing — e.g. an arrow key), so unlike
-  # flush/1 this always writes.
-  def handle_cast({:flush, %Screen{} = next, cursor}, %{current: current} = state) do
-    TerminalIO.write([diff(current, next), cursor_seq(cursor)])
-    {:noreply, %{state | current: next}}
   end
 
   def handle_cast({:resize, w, h}, state) do

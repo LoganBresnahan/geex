@@ -7,10 +7,13 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-1 — Flicker while typing
+## BUG-1 — Flicker while typing  ✅ FIXED (2026-06-09)
 
-- **Status:** investigated (root cause verified against the code by an adversarial pass,
-  2026-06-08), **not fixed**.
+- **Status:** **FIXED** — `Geex.Renderer.frame/3` (atomic frames via DEC 2026 + conditional
+  show/position cursor). Verified: 466 tests + 9 doctests green, live-smoked in tmux. See the
+  [testing.md](testing.md) 2026-06-09 entry. *Visual "flicker gone" confirmation is the user's
+  to make — `capture-pane` can't show intermediate frames.* The diagnosis + fix below are kept
+  as the record.
 - **Symptom (user-reported):** visible flicker/jitter on each keystroke.
 
 **What it is NOT** (ruled out by reading the render path):

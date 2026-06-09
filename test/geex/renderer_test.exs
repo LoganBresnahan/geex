@@ -129,6 +129,50 @@ defmodule Geex.RendererTest do
     end
   end
 
+  describe "frame/3 — atomic frames + conditional cursor" do
+    test "a settled cursor on an unchanged frame emits nothing (no blink reset)" do
+      assert Renderer.frame([], {2, 0}, {2, 0}) == []
+    end
+
+    test "a non-empty frame is wrapped in synchronized-output (BSU…ESU)" do
+      out = render(Renderer.frame("\e[1;1Hx", {0, 0}, {2, 0}))
+      assert String.starts_with?(out, "\e[?2026h")
+      assert String.ends_with?(out, "\e[?2026l")
+    end
+
+    test "the diff repositions the cursor (moved it) without re-showing it" do
+      # cursor unchanged + already shown, but the diff moved the HW cursor → re-place,
+      # no \e[?25h.
+      out = render(Renderer.frame("\e[1;1Hx", {2, 0}, {2, 0}))
+      assert out == "\e[?2026h\e[1;1Hx\e[1;3H\e[?2026l"
+      refute out =~ "\e[?25h"
+    end
+
+    test "the cursor moving with no cell change still repositions" do
+      out = render(Renderer.frame([], {2, 0}, {5, 0}))
+      assert out == "\e[?2026h\e[1;6H\e[?2026l"
+      refute out =~ "\e[?25h"
+    end
+
+    test "the first frame (no prior cursor) shows + positions the cursor" do
+      out = render(Renderer.frame([], nil, {2, 0}))
+      assert out == "\e[?2026h\e[?25h\e[1;3H\e[?2026l"
+    end
+
+    test "a hidden→shown transition re-shows the cursor" do
+      out = render(Renderer.frame([], :hidden, {2, 0}))
+      assert out =~ "\e[?25h"
+    end
+
+    test "a shown→hidden transition hides the cursor" do
+      assert render(Renderer.frame([], {2, 0}, :hidden)) == "\e[?2026h\e[?25l\e[?2026l"
+    end
+
+    test "hidden→hidden with no diff emits nothing" do
+      assert Renderer.frame([], :hidden, :hidden) == []
+    end
+  end
+
   describe "diff/2 — wide glyphs" do
     test "a wide glyph emits its bytes once; the continuation cell adds no character" do
       next = Screen.new(3, 1) |> Screen.draw_text(0, 0, "\u{4E2D}b")
