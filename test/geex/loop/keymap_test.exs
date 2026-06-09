@@ -136,6 +136,13 @@ defmodule Geex.Loop.KeymapTest do
       assert :select_clear = Keymap.resolve({:alt, ?n}, {0, 0}, "abc")
       assert :select_clear = Keymap.resolve({:key, :esc}, {0, 0}, "abc")
     end
+
+    test "Alt+C / Alt+X / Alt+V are copy / cut / paste (Alt+X distinct from Ctrl-X quit)" do
+      assert :copy = Keymap.resolve({:alt, ?c}, {0, 0}, "abc")
+      assert :cut = Keymap.resolve({:alt, ?x}, {0, 0}, "abc")
+      assert :paste = Keymap.resolve({:alt, ?v}, {0, 0}, "abc")
+      assert :quit = Keymap.resolve({:ctrl, ?x}, {0, 0}, "abc")
+    end
   end
 
   describe "resolve/3 — Alt chords" do

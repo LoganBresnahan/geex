@@ -35,8 +35,10 @@ defmodule Geex.Loop do
   use GenServer
   require Logger
 
-  alias Geex.{Buffer, Cell, Command, Dispatch, Minibuffer, Renderer, Screen, Selection, Session, TerminalIO, Theme, Width}
+  alias Geex.{Buffer, Cell, Clipboard, Command, Dispatch, Minibuffer, Renderer, Screen, Selection, Session, TerminalIO, Theme, Width}
+  alias Geex.Buffer.Doc
   alias Geex.Command.Meta
+  alias Geex.Commands.{Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
   alias Geex.Loop.Keymap
 
@@ -497,6 +499,15 @@ defmodule Geex.Loop do
       :select_clear ->
         schedule_repaint(%{state | selection: nil})
 
+      :copy ->
+        schedule_repaint(do_copy(state, text))
+
+      :cut ->
+        schedule_repaint(do_cut(state, text))
+
+      :paste ->
+        schedule_repaint(do_paste(state, cursor))
+
       :quit ->
         System.stop()
         state
@@ -543,6 +554,85 @@ defmodule Geex.Loop do
   defp end_caret(text) do
     lines = String.split(text, "\n")
     {length(lines) - 1, String.length(List.last(lines))}
+  end
+
+  ## Clipboard ops (ADR-0015). copy = ring push only (no edit); cut = ring push + a
+  ## recorded delete; paste = a recorded insert (or replace, over a selection) baking the
+  ## literal text. All consume + clear the selection.
+
+  defp do_copy(%{selection: nil} = state, _text), do: state
+
+  defp do_copy(%{selection: sel} = state, text) do
+    with {:ok, copied} <- Doc.slice(Doc.new(text), Selection.range(sel)), do: Clipboard.push(copied)
+    %{state | selection: nil}
+  end
+
+  defp do_cut(%{selection: nil} = state, _text), do: state
+
+  defp do_cut(%{selection: sel} = state, text) do
+    range = Selection.range(sel)
+    {from, _to} = range
+
+    with {:ok, cut_text} <- Doc.slice(Doc.new(text), range) do
+      Clipboard.push(cut_text)
+      apply_clipboard_edit(state, replace_cmd(range, ""), from)
+    else
+      _ -> %{state | selection: nil}
+    end
+  end
+
+  defp do_paste(state, cursor) do
+    case Clipboard.top() do
+      "" ->
+        state
+
+      pasted ->
+        {cmd, landing} =
+          case state.selection do
+            %Selection{} = sel ->
+              {from, _to} = range = Selection.range(sel)
+              {replace_cmd(range, pasted), cursor_after_insert(from, pasted)}
+
+            nil ->
+              {insert_cmd(cursor, pasted), cursor_after_insert(cursor, pasted)}
+          end
+
+        apply_clipboard_edit(state, cmd, landing)
+    end
+  end
+
+  # Dispatch a clipboard-produced edit on the one shared path, then place the cursor and
+  # refresh the goal from the post-edit text; always clears the selection.
+  defp apply_clipboard_edit(state, cmd, landing) do
+    case safe_dispatch(cmd) do
+      {:ok, %{text: after_text}} ->
+        set_cursor(landing)
+        %{state | selection: nil, goal: Keymap.goal_column(landing, after_text)}
+
+      _ ->
+        %{state | selection: nil}
+    end
+  end
+
+  defp replace_cmd({{r1, c1}, {r2, c2}}, text) do
+    {:ok, cmd} =
+      Replace.parse(%{start_line: r1, start_col: c1, end_line: r2, end_col: c2, text: text})
+
+    cmd
+  end
+
+  defp insert_cmd({line, col}, text) do
+    {:ok, cmd} = Insert.parse(%{line: line, col: col, text: text})
+    cmd
+  end
+
+  # Where the cursor lands after inserting `text` at a caret — past the inserted bytes,
+  # accounting for any newlines (a multi-line paste ends on the last inserted line).
+  defp cursor_after_insert({line, col}, text) do
+    case String.split(text, "\n") do
+      [single] -> {line, col + String.length(single)}
+      segments -> {line + length(segments) - 1, String.length(List.last(segments))}
+    end
   end
 
   defp safe_dispatch(cmd) do

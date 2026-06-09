@@ -30,6 +30,9 @@ defmodule Geex.Loop.Keymap do
           | :select_start
           | :select_all
           | :select_clear
+          | :copy
+          | :cut
+          | :paste
           | :quit
           | :ignore
 
@@ -82,6 +85,11 @@ defmodule Geex.Loop.Keymap do
   # the parser's leftover, so it only lands when the next key arrives) and Esc.
   def resolve({:alt, c}, _cursor, _text) when c in [?n, ?N], do: :select_clear
   def resolve({:key, :esc}, _cursor, _text), do: :select_clear
+  # Clipboard (ADR-0015): copy/cut act on the selection (or do nothing), paste inserts at
+  # the cursor — or replaces the selection. Alt+X is distinct from Ctrl-X (quit).
+  def resolve({:alt, c}, _cursor, _text) when c in [?c, ?C], do: :copy
+  def resolve({:alt, c}, _cursor, _text) when c in [?x, ?X], do: :cut
+  def resolve({:alt, c}, _cursor, _text) when c in [?v, ?V], do: :paste
   def resolve({:alt, c}, cursor, text), do: alt_motion(lower(c), cursor, text)
 
   # Quit. Ctrl-X is the reliable key — Ctrl-Q is XON (software flow control) and
