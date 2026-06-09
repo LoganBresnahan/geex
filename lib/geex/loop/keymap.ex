@@ -60,13 +60,15 @@ defmodule Geex.Loop.Keymap do
   def resolve({:key, :up}, cursor, text), do: {:move, vert(cursor, text, -1)}
   def resolve({:key, :down}, cursor, text), do: {:move, vert(cursor, text, +1)}
 
-  # Alt+M opens the minibuffer (ADR-0028). Alt+WASD is the arrow-key alternative for
-  # keyboards without arrows (ADR-0026) — the same clamped, wrapping motion as the arrows.
+  # Alt+M opens the minibuffer (ADR-0028); every other Alt+letter is motion — keyboard
+  # clusters that need no arrow keys (ADR-0026), case-insensitive:
+  #   W A S D — up / left / down / right (gaming-style left hand)
+  #   E   R   — char back / forward
+  #   T   Y   — word back / forward
+  #   U   I   — line start / end
+  #   O   P   — line up / down
   def resolve({:alt, c}, _cursor, _text) when c in [?m, ?M], do: :minibuffer
-  def resolve({:alt, c}, cursor, text) when c in [?w, ?W], do: {:move, vert(cursor, text, -1)}
-  def resolve({:alt, c}, cursor, text) when c in [?s, ?S], do: {:move, vert(cursor, text, +1)}
-  def resolve({:alt, c}, cursor, text) when c in [?a, ?A], do: {:move, left(cursor, text)}
-  def resolve({:alt, c}, cursor, text) when c in [?d, ?D], do: {:move, right(cursor, text)}
+  def resolve({:alt, c}, cursor, text), do: alt_motion(lower(c), cursor, text)
 
   # Quit. Ctrl-X is the reliable key — Ctrl-Q is XON (software flow control) and
   # Ctrl-C is SIGINT, both of which can be swallowed by the tty before they ever
@@ -117,4 +119,54 @@ defmodule Geex.Loop.Keymap do
   defp last_line(text), do: length(lines(text)) - 1
   defp line_len(text, line), do: text |> lines() |> Enum.at(line, "") |> String.length()
   defp clamp(v, lo, hi), do: v |> max(lo) |> min(hi)
+
+  ## Alt-letter motion (the arrow-free clusters).
+
+  defp alt_motion(?w, cursor, text), do: {:move, vert(cursor, text, -1)}
+  defp alt_motion(?a, cursor, text), do: {:move, left(cursor, text)}
+  defp alt_motion(?s, cursor, text), do: {:move, vert(cursor, text, +1)}
+  defp alt_motion(?d, cursor, text), do: {:move, right(cursor, text)}
+  defp alt_motion(?e, cursor, text), do: {:move, left(cursor, text)}
+  defp alt_motion(?r, cursor, text), do: {:move, right(cursor, text)}
+  defp alt_motion(?t, cursor, text), do: {:move, word_back(cursor, text)}
+  defp alt_motion(?y, cursor, text), do: {:move, word_forward(cursor, text)}
+  defp alt_motion(?u, cursor, _text), do: {:move, line_start(cursor)}
+  defp alt_motion(?i, cursor, text), do: {:move, line_end(cursor, text)}
+  defp alt_motion(?o, cursor, text), do: {:move, vert(cursor, text, -1)}
+  defp alt_motion(?p, cursor, text), do: {:move, vert(cursor, text, +1)}
+  defp alt_motion(_c, _cursor, _text), do: :ignore
+
+  defp lower(c) when c in ?A..?Z, do: c + 32
+  defp lower(c), do: c
+
+  defp line_start({line, _col}), do: {line, 0}
+  defp line_end({line, _col}, text), do: {line, line_len(text, line)}
+
+  # Word motion within the line, whitespace-delimited. Forward lands on the next word's
+  # start (skip the rest of this word, then the spaces); backward lands on the previous
+  # word's start. Clamped to the line ends; line-crossing is a later refinement.
+  defp word_forward({line, col}, text) do
+    gs = line_tuple(text, line)
+    n = tuple_size(gs)
+    i = skip_fwd(min(col, n), gs, n, &non_space?/1)
+    {line, skip_fwd(i, gs, n, &space?/1)}
+  end
+
+  defp word_back({line, col}, text) do
+    gs = line_tuple(text, line)
+    i = skip_bwd(min(col, tuple_size(gs)), gs, &space?/1)
+    {line, skip_bwd(i, gs, &non_space?/1)}
+  end
+
+  defp skip_fwd(i, gs, n, pred),
+    do: if(i < n and pred.(elem(gs, i)), do: skip_fwd(i + 1, gs, n, pred), else: i)
+
+  defp skip_bwd(i, gs, pred),
+    do: if(i > 0 and pred.(elem(gs, i - 1)), do: skip_bwd(i - 1, gs, pred), else: i)
+
+  defp line_tuple(text, line),
+    do: text |> lines() |> Enum.at(line, "") |> String.graphemes() |> List.to_tuple()
+
+  defp space?(g), do: g == " " or g == "\t"
+  defp non_space?(g), do: not space?(g)
 end

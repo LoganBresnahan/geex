@@ -493,7 +493,7 @@ defmodule Geex.Loop do
   defp open_minibuffer(state), do: schedule_repaint(%{state | minibuffer: Minibuffer.open(:command)})
   defp close_minibuffer(state), do: schedule_repaint(%{state | minibuffer: Minibuffer.new()})
 
-  # Keys while the minibuffer is open go to its input; Enter submits, Ctrl-G / Esc cancels,
+  # Keys while the minibuffer is open go to its input; Enter submits, Alt+N / Esc cancels,
   # and Ctrl-X still quits (so you are never trapped). Everything else is ignored.
   defp apply_minibuffer_key(event, %{minibuffer: mb} = state) do
     case event do
@@ -503,24 +503,26 @@ defmodule Geex.Loop do
       {:key, :right} -> schedule_repaint(%{state | minibuffer: Minibuffer.right(mb)})
       {:key, :enter} -> submit_minibuffer(state)
       {:key, :esc} -> close_minibuffer(state)
-      {:ctrl, ?g} -> close_minibuffer(state)
+      {:alt, c} when c in [?n, ?N] -> close_minibuffer(state)
       {:ctrl, ?x} -> System.stop(); state
       _ -> state
     end
   end
 
   # Run the typed command, then close. v1: a bare line number jumps to that line (clamped to
-  # the buffer); anything else is a no-op. Grid commands (ADR-0027), search, the palette, and
-  # the finder are the next modes — each parsing `value/1` into a `%Command{}` or an action.
+  # the buffer); **`0` jumps to the last line**. Anything else is a no-op. Grid commands
+  # (ADR-0027), search, the palette, and the finder are the next modes — each parsing
+  # `value/1` into a `%Command{}` or an action.
   defp submit_minibuffer(state) do
     run_command(String.trim(Minibuffer.value(state.minibuffer)))
     close_minibuffer(state)
   end
 
   defp run_command(input) do
-    with {n, ""} when n >= 1 <- Integer.parse(input),
+    with {n, ""} when n >= 0 <- Integer.parse(input),
          {:ok, %{text: text}} <- safe_session_snapshot() do
-      set_cursor({min(n - 1, max(line_count(text) - 1, 0)), 0})
+      last = max(line_count(text) - 1, 0)
+      set_cursor({if(n == 0, do: last, else: min(n - 1, last)), 0})
     else
       _ -> :ok
     end

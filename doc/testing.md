@@ -917,11 +917,15 @@ as a **modal command input**: `Geex.Minibuffer` (a pure struct — mode / input 
 reverse-video status bar) and owns the hardware cursor while open. The `Geex.Input.Parser` learned
 **`Alt`/Meta-letter** decoding (`\e`+letter → `{:alt, c}`, atomic so it doesn't clash with bare ESC or
 CSI), and the keymap routes `Alt+M` → open and **`Alt+WASD`** → the same motion as the arrows (the
-arrow-key alternative). v1 command: a bare line number jumps to that line (clamped). Verified live in a
-100×30 pane on loop.ex: `Alt+M` → `:` → typed `200` → Enter jumped to line 200 (`200:1`, viewport
-scrolled); `Alt+M` → `:5` → **Ctrl-G** cancelled with no jump and restored the status bar; `Alt+S`×3 +
-`Alt+D`×2 moved the cursor to `203:3`. 455 tests + 9 doctests green. (Submit/cancel keys: Enter submits,
-Ctrl-G or Esc cancels — Ctrl-G is the reliable one since a bare ESC stays in the parser's leftover.)
+arrow-key alternative). v1 command: a bare line number jumps to that line (clamped); **`0` jumps to the last line**. The motion
+keymap grew two arrow-free Alt clusters: **WASD** (up/left/down/right) and **ERTYUIOP** (E/R char back/fwd,
+T/Y word back/fwd, U/I line start/end, O/P line up/down; word motion is whitespace-delimited, within-line).
+Cancel is **Alt+N** (paired with Alt+M open) — Ctrl-G dropped at the user's request; Esc still works when it
+arrives (a bare ESC otherwise stays in the parser's leftover). Verified live in a 100×30 pane on loop.ex:
+`Alt+M`→`:200`→Enter jumped to line 200 (viewport scrolled); `:abc`→**Alt+N** cancelled with no jump,
+status restored; `:0`→Enter jumped to the last line (576:1, 575 newlines); from line 1, `Alt+I`→`1:23`
+(line end), `Alt+U`→`1:1` (start), `Alt+Y`→`1:11` (word forward, start of `Geex.Loop`). 459 tests +
+9 doctests green.
 
 **Still unverified live / not built:** the keymap-capability/Kitty-protocol model
 ([ADR-0026](adr/0026-terminal-input-model.md)); **mouse** (so the scroll bars can't be dragged yet —

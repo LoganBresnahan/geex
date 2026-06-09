@@ -99,5 +99,32 @@ defmodule Geex.Loop.KeymapTest do
       assert Keymap.resolve({:alt, ?w}, {1, 1}, text) == Keymap.resolve({:key, :up}, {1, 1}, text)
       assert Keymap.resolve({:alt, ?s}, {0, 1}, text) == Keymap.resolve({:key, :down}, {0, 1}, text)
     end
+
+    test "Alt+E/R = char back/forward; Alt+O/P = line up/down (arrow-equivalent)" do
+      text = "abc\ndef"
+      assert Keymap.resolve({:alt, ?e}, {0, 1}, text) == Keymap.resolve({:key, :left}, {0, 1}, text)
+      assert Keymap.resolve({:alt, ?r}, {0, 0}, text) == Keymap.resolve({:key, :right}, {0, 0}, text)
+      assert Keymap.resolve({:alt, ?o}, {1, 1}, text) == Keymap.resolve({:key, :up}, {1, 1}, text)
+      assert Keymap.resolve({:alt, ?p}, {0, 1}, text) == Keymap.resolve({:key, :down}, {0, 1}, text)
+    end
+
+    test "Alt+U/I jump to line start / end" do
+      text = "foo bar baz"
+      assert {:move, {0, 0}} = Keymap.resolve({:alt, ?u}, {0, 5}, text)
+      assert {:move, {0, 11}} = Keymap.resolve({:alt, ?i}, {0, 5}, text)
+    end
+
+    test "Alt+Y/T move by word (whitespace-delimited, clamped to the line)" do
+      text = "foo bar baz"
+      assert {:move, {0, 4}} = Keymap.resolve({:alt, ?y}, {0, 0}, text)
+      assert {:move, {0, 4}} = Keymap.resolve({:alt, ?y}, {0, 1}, text)
+      assert {:move, {0, 4}} = Keymap.resolve({:alt, ?t}, {0, 8}, text)
+      assert {:move, {0, 11}} = Keymap.resolve({:alt, ?y}, {0, 8}, text)
+      assert {:move, {0, 0}} = Keymap.resolve({:alt, ?t}, {0, 2}, text)
+    end
+
+    test "an unmapped Alt letter is ignored" do
+      assert :ignore = Keymap.resolve({:alt, ?z}, {0, 0}, "abc")
+    end
   end
 end
