@@ -9,7 +9,7 @@ defmodule Geex.MinibufferTest do
     assert Minibuffer.active?(mb)
     assert Minibuffer.value(mb) == ""
     assert mb.cursor == 0
-    assert Minibuffer.prompt(mb) == ":"
+    assert Minibuffer.prompt(mb) == "geex:"
   end
 
   test "the grid mode prompt is the colon-suffixed label" do

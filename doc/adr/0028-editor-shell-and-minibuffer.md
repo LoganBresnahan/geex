@@ -139,8 +139,8 @@ discharged as each verb lands in this category.
 Driving grid mode surfaced three small legibility calls about how the minibuffer *looks*,
 settled here so the convention is fixed before search/palette/finder modes inherit it:
 
-- **A per-mode prompt that names the mode.** `:` for `:command` (the bare vi/Emacs delimiter),
-  **`grid:`** for `:grid` (the colon-suffixed label) — the prompt *is* the mode indicator, so the
+- **A per-mode prompt that names the mode.** **`geex:`** for `:command` (the editor's own name as the
+  default-mode label), **`grid:`** for `:grid` — the prompt *is* the mode indicator, so the
   user always sees which language the line parses in. Search/palette/finder follow the same shape
   (`/`, `palette:`, etc.). The prompt is never part of the typed `value`, so it never reaches a
   parser.
