@@ -121,9 +121,9 @@ not a new component. **Highlight mode** is entered by **`Alt+H`** or the typed
 `no`. The **grid-line overlay** (the ADR-0027-amendment column-following aid) is a toggle
 with both a chord and a typed twin (e.g. `grid`/`lines`), contextual to grid-command
 composition. **`undo`/`redo`** are history-navigation verbs (not recorded `%Command{}`s) on
-the keys **`Alt+B`** / **`Alt+Shift+B`** — `Alt+Shift+letter` is byte-distinct from
-`Alt+letter` (ESC `B` vs ESC `b`), so it is deliverable on legacy terminals, unlike
-`Ctrl+Shift+letter` (see [notes.md](../notes.md) "Editing & selection bindings").
+the keys **`Alt+Z`** / **`Alt+Shift+Z`** (`Alt+B` is **select-all**) — `Alt+Shift+letter` is
+byte-distinct from `Alt+letter` (ESC `Z` vs ESC `z`), so it is deliverable on legacy
+terminals, unlike `Ctrl+Shift+letter` (see [notes.md](../notes.md) "Editing & selection bindings").
 
 **4. The view-action tool category — the mechanism for all of the above.** The typed twins
 for motion/scroll/select/undo/`line N` need a home: a **fourth tool category** — *view
@@ -133,6 +133,27 @@ edits. Building it is what turns the `line N` hack into a real `line` command an
 palette its non-edit entries. This is a roadmap item ([roadmap.md](../roadmap.md), the
 command-surface track), gated on the catalog/palette build; the parity backlog in §2 is
 discharged as each verb lands in this category.
+
+## Amendment (2026-06-09): the minibuffer's rendered surface
+
+Driving grid mode surfaced three small legibility calls about how the minibuffer *looks*,
+settled here so the convention is fixed before search/palette/finder modes inherit it:
+
+- **A per-mode prompt that names the mode.** `:` for `:command` (the bare vi/Emacs delimiter),
+  **`grid:`** for `:grid` (the colon-suffixed label) — the prompt *is* the mode indicator, so the
+  user always sees which language the line parses in. Search/palette/finder follow the same shape
+  (`/`, `palette:`, etc.). The prompt is never part of the typed `value`, so it never reaches a
+  parser.
+- **The input row is painted on the active-line background, not the theme bg.** The minibuffer
+  reuses `palette.active_line_bg` — the exact tint the cursor's row gets — so the field reads as a
+  *focused surface* (where your attention now is) while staying clearly distinct from the
+  reverse-video **status bar** it replaces. Three visually separable states on one row: idle status
+  (reverse-video), active input (active-line tint), text (plain bg).
+- **The ruler labels tens columns with the tens digit** ([ADR-0027](0027-grid-command-addressing.md)
+  amendment) so a two-digit `x` is read at a glance, not counted off anonymous `0`-marks.
+
+These are rendering conventions, not new structure — `draw_minibuffer/2` and `Minibuffer.prompt/1`
+in `lib/geex/loop.ex` / `lib/geex/minibuffer.ex`.
 
 ## See
 

@@ -195,6 +195,10 @@ primary), end-to-end and live-verified.
   cells — indent-guide style, never over a glyph). `copy`/`cut <range>`, `goto`/bare `<coord>`; the
   transport casts display→grapheme (`col_at_display`) then resolves via `Coord`, and `copy`/`cut` reuse
   the clipboard ops by setting the resolved span as the selection (so the region is briefly visible).
+- **Ruler legibility (refined 2026-06-09):** units columns show their units digit (`…789…`); every
+  **tens** column shows its *tens* digit instead, brightened — so column 40 reads `4` and `x45` is "the
+  5th cell past the bright 4", not a count of anonymous `0`-marks. (Past 99 the tens digit cycles:
+  100 → `0`, 110 → `1` — a logical line wide enough to ambiguate is the rare case, deferred.)
 - **Verified live** against a real wide glyph (the one fragile seam, §"Verification"): on `x中yz hello`,
   `goto x4` lands on grapheme 3 (`y`), both of `中`'s cells (`x2`/`x3`) map to its grapheme, and
   `cut x7-x11` removes `hello` — the cast honours the wide glyph exactly. (The `cursor_x` tmux-oracle

@@ -12,6 +12,10 @@ defmodule Geex.MinibufferTest do
     assert Minibuffer.prompt(mb) == ":"
   end
 
+  test "the grid mode prompt is the colon-suffixed label" do
+    assert Minibuffer.open(:grid) |> Minibuffer.prompt() == "grid:"
+  end
+
   test "close/1 deactivates" do
     assert Minibuffer.open(:command) |> Minibuffer.close() |> Minibuffer.active?() == false
   end

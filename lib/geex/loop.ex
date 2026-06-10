@@ -433,14 +433,16 @@ defmodule Geex.Loop do
     end
   end
 
-  # Draw the minibuffer over the bottom row: the mode prompt + the typed input, plain on the
-  # theme background (distinct from the reverse-video status bar, so command mode is obvious).
+  # Draw the minibuffer over the bottom row: the mode prompt + the typed input, on the
+  # **active-line background** (the same tint the cursor's row gets — see highlight_line/4) so
+  # the input field reads as a focused, distinct surface, yet stays clearly different from the
+  # reverse-video status bar it replaces.
   defp draw_minibuffer(screen, %{w: w, h: h, theme: %Theme{palette: pal}, minibuffer: mb}) do
     line = Minibuffer.prompt(mb) <> Minibuffer.value(mb)
 
     screen
-    |> Screen.fill_rect(0, h - 1, w, 1, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
-    |> Screen.draw_text(0, h - 1, line, %Cell{fg: pal.fg, bg: pal.bg})
+    |> Screen.fill_rect(0, h - 1, w, 1, %Cell{char: " ", fg: pal.fg, bg: pal.active_line_bg})
+    |> Screen.draw_text(0, h - 1, line, %Cell{fg: pal.fg, bg: pal.active_line_bg})
   end
 
   # The hardware cursor position within the minibuffer: after the prompt, at the input cursor
@@ -596,9 +598,11 @@ defmodule Geex.Loop do
   defp grid_mode?(_state), do: false
 
   # The x-axis **ruler** (ADR-0027 amendment) on the reserved top row: a spreadsheet-style
-  # display-column header over the text columns `[gw, gw + text_w)`, locked to `hscroll`. Each
-  # column shows its 1-based **display** column's units digit (`…7890123…`), the tens marks
-  # (multiples of 10) brightened — so the number you read off the ruler *is* the grid `x`.
+  # display-column header over the text columns `[gw, gw + text_w)`, locked to `hscroll`. Most
+  # columns show their 1-based **display** column's units digit (`…789…`); every **tens** column
+  # (a multiple of 10) shows its *tens* digit instead, brightened — so column 40 reads `4`, 45 is
+  # five cells past it, and a two-digit `x` like `45` is legible at a glance rather than counting
+  # 0-markers. (Past 99 the tens digit cycles: 100 → `0`, 110 → `1`.)
   defp draw_ruler(screen, false, _gw, _text_w, _hscroll, _theme), do: screen
 
   defp draw_ruler(screen, true, gw, text_w, hscroll, %Theme{palette: pal}) do
@@ -611,10 +615,12 @@ defmodule Geex.Loop do
 
     Enum.reduce(0..(text_w - 1)//1, screen, fn i, acc ->
       d = i + hscroll + 1
-      fg = if rem(d, 10) == 0, do: pal.active_line_number, else: pal.line_number
+      tens? = rem(d, 10) == 0
+      digit = if tens?, do: rem(div(d, 10), 10), else: rem(d, 10)
+      fg = if tens?, do: pal.active_line_number, else: pal.line_number
 
       Screen.set_cell(acc, gw + i, 0, %Cell{
-        char: Integer.to_string(rem(d, 10)),
+        char: Integer.to_string(digit),
         fg: fg,
         bg: pal.bg
       })

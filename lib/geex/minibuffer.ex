@@ -46,7 +46,7 @@ defmodule Geex.Minibuffer do
   @doc "The prompt shown before the input, per mode."
   @spec prompt(t()) :: String.t()
   def prompt(%__MODULE__{mode: :command}), do: ":"
-  def prompt(%__MODULE__{mode: :grid}), do: "grid "
+  def prompt(%__MODULE__{mode: :grid}), do: "grid:"
   def prompt(%__MODULE__{}), do: ""
 
   @doc "Insert grapheme(s) `g` at the cursor, advancing it past them."
