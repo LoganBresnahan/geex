@@ -19,9 +19,11 @@ defmodule Geex.Loop.Verbs do
     * `no` — the typed twin of `Alt+N`: clears a live selection (a plain cancel when
       nothing is selected). An empty line just cancels.
 
-  Anything else is `:unknown` (a no-op today; once the command **catalog** backs the
-  palette, unknown verbs will resolve against it instead of a hardcoded table — this
-  table is the v1 the catalog replaces).
+  Anything else is `:unknown` (a no-op today). The command **catalog**
+  ([`Geex.Command.Catalog`](../command/catalog.ex)) now backs the **palette** (ADR-0028 §3, built); the
+  remaining consolidation — having *this* parser resolve against that catalog instead of the
+  hardcoded clauses below — lands with the grid-agent-parity work, when the action-verbs become
+  catalog/tool entries in their own right. Until then this table is the typed-mode v1.
   """
 
   alias Geex.Coord

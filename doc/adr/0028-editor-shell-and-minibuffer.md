@@ -155,6 +155,39 @@ settled here so the convention is fixed before search/palette/finder modes inher
 These are rendering conventions, not new structure — `draw_minibuffer/2` and `Minibuffer.prompt/1`
 in `lib/geex/loop.ex` / `lib/geex/minibuffer.ex`.
 
+## Amendment (2026-06-09): the command palette — built (decision "A")
+
+The palette (§3) shipped — the first **discovery** surface, and the seam the verb tables will
+eventually re-base on. Scope **A** of the build choice: a human-side catalog that dispatches the
+existing action vocabulary, *not* a full migration of every verb into agent-visible tools (that
+folds into the grid-agent-parity work next).
+
+- **`Geex.Fuzzy`** — a pure subsequence matcher (`score/2`): a single greedy O(n) walk where a
+  contiguous run compounds and a word-boundary match earns a bonus, so prefixes float over
+  scattered acronyms (`sa` → `save` above `select all`). Content-only, so the file finder reuses it.
+- **`Geex.Command.Catalog`** (+ `Catalog.Entry`) — the one structured list the palette browses:
+  each entry is `{name, description, invoke}` where `invoke` is `{:action, atom}` (dispatched
+  through the loop's shared `apply_action/4`) or `{:typed, prefix}` (hand off to `:command` mode
+  pre-filled). v1 lists the clipboard / history / selection verbs + `save` / `quit` / `line` — the
+  vocabulary that was implicit in the hardcoded `Geex.Loop.Verbs` table, now a browsable value.
+  `search/1` bands name matches above description-only matches so typing `clip` still finds
+  `copy`/`cut`/`paste` (by description) but never above a literal name hit.
+- **`:palette` minibuffer mode** — `Alt+P` opens it; the `input` is the fuzzy filter, `sel` the
+  highlighted candidate (reset to the top match on every edit). A **candidate popup** renders over
+  the rows just above the input (paint-over, no reflow), top-to-bottom best-first, the highlighted
+  row wearing the active-line tint (so eye and Enter agree). `Alt+W`/`Alt+S` (the editor's own
+  up/down — *not* Ctrl-N/P; the Alt modifier is what separates "move" from "type into the filter")
+  and the arrow alias move the highlight, wrapping at the ends; `Enter` runs the highlighted command
+  (zero-arg → dispatch; arg-taker → pre-filled hand-off); `Esc`/`Alt+N` close.
+- **Deferred (unchanged direction):** the path-operations (`open`/`close`/`create`/…) wait on the
+  **fuzzy finder** to supply a path; the raw edit primitives stay agent-only (you *type* to edit);
+  and exposing the action-verbs as agent-visible MCP tools — so `tools/list` and the palette read
+  one fully-unified catalog and `Verbs` resolves against it — is the **grid-agent-parity** chunk.
+
+Live-verified via tmux (open → filter → `Alt+W/S` navigate → `Enter` on both an `{:action}` and a
+`{:typed}` hand-off → `Alt+N` close). `lib/geex/fuzzy.ex`, `lib/geex/command/catalog.ex`,
+`lib/geex/minibuffer.ex`, `lib/geex/loop.ex` (`draw_palette/2`, `move_palette/2`, `dispatch_palette/2`).
+
 ## See
 
 [ADR-0027](0027-grid-command-addressing.md) (the grid commands the minibuffer hosts),

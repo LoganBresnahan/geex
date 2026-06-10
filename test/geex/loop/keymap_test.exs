@@ -203,6 +203,11 @@ defmodule Geex.Loop.KeymapTest do
       assert :grid = Keymap.resolve({:alt, ?G}, {0, 0}, "abc")
     end
 
+    test "Alt+P opens the command palette (ADR-0028 §3)" do
+      assert :palette = Keymap.resolve({:alt, ?p}, {0, 0}, "abc")
+      assert :palette = Keymap.resolve({:alt, ?P}, {0, 0}, "abc")
+    end
+
     test "the retired ERTYUIOP letters and other unbound Alt letters are ignored" do
       assert :ignore = Keymap.resolve({:alt, ?t}, {0, 0}, "abc")
       assert :ignore = Keymap.resolve({:alt, ?y}, {0, 0}, "abc")

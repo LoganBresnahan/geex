@@ -53,6 +53,7 @@ defmodule Geex.Loop do
   }
 
   alias Geex.Buffer.Doc
+  alias Geex.Command.Catalog
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
@@ -68,6 +69,11 @@ defmodule Geex.Loop do
   # (vim's `sidescrolloff`) — the horizontal analogue, applied via the same
   # `scroll_for/4` along the column axis.
   @hscrolloff 8
+
+  # Most candidate rows the command palette (ADR-0028 §3) shows at once; a longer match list
+  # scrolls to keep the highlighted row in view. The column the command name is padded to.
+  @palette_rows 8
+  @palette_name_col 14
 
   ## Public API
 
@@ -408,6 +414,10 @@ defmodule Geex.Loop do
 
         {screen, cursor} = draw_bottom(screen, state, snap, target)
 
+        # The palette popup (ADR-0028 §3) overlays the rows just above the minibuffer input —
+        # painted last so it sits on top of the text; a no-op outside `:palette` mode.
+        screen = draw_palette(screen, state)
+
         Renderer.flush(screen, cursor)
         %{state | scroll: scroll, hscroll: hscroll}
 
@@ -451,6 +461,85 @@ defmodule Geex.Loop do
     before = Minibuffer.value(mb) |> String.graphemes() |> Enum.take(mb.cursor) |> Enum.join()
     {Width.string(Minibuffer.prompt(mb)) + Width.string(before), h - 1}
   end
+
+  # The command-palette popup (ADR-0028 §3): the fuzzy candidate list, drawn over the rows
+  # directly **above** the minibuffer input row. The list reads top-to-bottom (best match at
+  # the top of the block); pressing Alt+S moves the highlight *down on screen* toward the
+  # input, Alt+W up — the on-screen direction matches the editor's own up/down. The highlighted
+  # row takes the active-line tint (the same the input row wears), so eye + Enter agree.
+  defp draw_palette(screen, %{minibuffer: %Minibuffer{mode: :palette} = mb} = state) do
+    candidates = Catalog.search(Minibuffer.value(mb))
+    rows = min(length(candidates), min(@palette_rows, max(state.h - 1, 0)))
+
+    cond do
+      candidates == [] ->
+        draw_palette_empty(screen, state)
+
+      # No vertical room for even one candidate row (a degenerate ≤1-row terminal): draw nothing
+      # rather than the empty hint, which would mislead.
+      rows == 0 ->
+        screen
+
+      true ->
+        # Scroll the window so the highlighted row (`mb.sel`) stays visible: once the selection
+        # passes the first page it rides the bottom of the window.
+        start = mb.sel |> Kernel.-(rows - 1) |> max(0) |> min(max(length(candidates) - rows, 0))
+        top = state.h - 1 - rows
+
+        candidates
+        |> Enum.slice(start, rows)
+        |> Enum.with_index()
+        |> Enum.reduce(screen, fn {entry, i}, acc ->
+          draw_palette_row(acc, entry, top + i, start + i == mb.sel, state)
+        end)
+    end
+  end
+
+  defp draw_palette(screen, _state), do: screen
+
+  # One candidate row: `name` padded to a column, then its description, on the theme bg —
+  # or the active-line tint when highlighted (the Enter target).
+  defp draw_palette_row(screen, entry, y, selected?, %{w: w, theme: %Theme{palette: pal}}) do
+    bg = if selected?, do: pal.active_line_bg, else: pal.bg
+    name_fg = if selected?, do: pal.fg, else: pal.active_line_number
+    label = String.pad_trailing(entry.name, @palette_name_col)
+
+    screen
+    |> Screen.fill_rect(0, y, w, 1, %Cell{char: " ", fg: pal.fg, bg: bg})
+    |> Screen.draw_text(0, y, palette_clip(label <> entry.description, w), %Cell{
+      fg: name_fg,
+      bg: bg
+    })
+    # Re-tint the description (past the name column) in the dimmer fg so the name stands out.
+    |> Screen.draw_text(
+      @palette_name_col,
+      y,
+      palette_clip(entry.description, w - @palette_name_col),
+      %Cell{
+        fg: pal.line_number,
+        bg: bg
+      }
+    )
+  end
+
+  # No command matches the filter: a single dim hint row just above the input.
+  defp draw_palette_empty(screen, %{w: w, h: h, theme: %Theme{palette: pal}}) do
+    y = h - 2
+
+    if y >= 0 do
+      screen
+      |> Screen.fill_rect(0, y, w, 1, %Cell{char: " ", fg: pal.line_number, bg: pal.bg})
+      |> Screen.draw_text(0, y, palette_clip("(no commands match)", w), %Cell{
+        fg: pal.line_number,
+        bg: pal.bg
+      })
+    else
+      screen
+    end
+  end
+
+  defp palette_clip(text, w),
+    do: text |> String.graphemes() |> Enum.take(max(w, 0)) |> Enum.join()
 
   # Overlay the status line on the bottom row of `screen`: the buffer label + dirty
   # marker on the left, the 1-based `line:col` flush right, on a reverse-video bar
@@ -673,6 +762,12 @@ defmodule Geex.Loop do
         # (ADR-0027). Handled here (not apply_action) so it is never reached from a typed verb,
         # where submit_minibuffer's trailing close would immediately clobber the mode.
         schedule_repaint(%{state | minibuffer: Minibuffer.open(:grid)})
+
+      :palette ->
+        # Open the command palette (ADR-0028 §3): the repaint shows the fuzzy candidate popup
+        # over `Geex.Command.Catalog`. Like grid, handled here (not apply_action) so it is a
+        # chord-only opener, never re-entered from a typed verb.
+        schedule_repaint(%{state | minibuffer: Minibuffer.open(:palette)})
 
       {:move, new_cursor} ->
         schedule_repaint(apply_move(state, event, new_cursor, text))
@@ -942,8 +1037,19 @@ defmodule Geex.Loop do
 
   # Keys while the minibuffer is open go to its input; Enter submits, Alt+N / Esc cancels,
   # and Ctrl-X still quits (so you are never trapped). Everything else is ignored.
+  #
+  # In `:palette` mode two extra chords navigate the candidate list — **Alt+W/Alt+S** (the
+  # editor's own up/down, ADR-0028 §3) and the arrow Up/Down alias — handled *before* the
+  # text-input cases so they move the highlight instead of typing. A plain `w`/`s` still types
+  # into the fuzzy filter; the Alt modifier is what separates "move" from "type".
   defp apply_minibuffer_key(event, %{minibuffer: mb} = state) do
     case event do
+      _ when mb.mode == :palette and event in [{:alt, ?w}, {:alt, ?W}, {:key, :up}] ->
+        move_palette(state, -1)
+
+      _ when mb.mode == :palette and event in [{:alt, ?s}, {:alt, ?S}, {:key, :down}] ->
+        move_palette(state, +1)
+
       {:char, g} ->
         schedule_repaint(%{state | minibuffer: Minibuffer.insert(mb, g)})
 
@@ -979,9 +1085,20 @@ defmodule Geex.Loop do
   # `Geex.MCP.ViewActions.line/1` an agent's `tools/call line` hits (ADR-0030 — the
   # old in-loop go-to-line hack is retired), and plain verbs (`copy`, `undo`, `save`,
   # …) apply through the same apply_action/4 the chords use. Unknown input is a no-op.
-  # Grid commands (ADR-0027), search, the palette, and the finder are the next modes.
+  # Grid commands (ADR-0027) and the palette (ADR-0028 §3); search and the finder are next.
   defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :grid}} = state) do
     close_minibuffer(do_grid(Verbs.parse_grid(Minibuffer.value(state.minibuffer)), state))
+  end
+
+  # The palette: Enter runs the **highlighted** candidate. Re-derive the candidate list from
+  # the current input (the same pure `Catalog.search` the popup renders, so what Enter runs is
+  # exactly what is highlighted), pick the `sel`-th, and dispatch it (`dispatch_palette/2`).
+  # No match under the cursor (empty list) just closes.
+  defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :palette} = mb} = state) do
+    case Enum.at(Catalog.search(Minibuffer.value(mb)), mb.sel) do
+      %Catalog.Entry{invoke: invoke} -> dispatch_palette(invoke, state)
+      nil -> close_minibuffer(state)
+    end
   end
 
   defp submit_minibuffer(state) do
@@ -995,6 +1112,32 @@ defmodule Geex.Loop do
 
     close_minibuffer(state)
   end
+
+  # Move the palette highlight by `delta` (Alt+W/S, arrows), **wrapping** at the ends so a long
+  # list cycles. Clamp against the *current* candidate count (the filter may have narrowed it);
+  # an empty list leaves `sel` untouched.
+  defp move_palette(%{minibuffer: mb} = state, delta) do
+    case length(Catalog.search(Minibuffer.value(mb))) do
+      0 ->
+        state
+
+      count ->
+        schedule_repaint(%{
+          state
+          | minibuffer: Minibuffer.select(mb, Integer.mod(mb.sel + delta, count))
+        })
+    end
+  end
+
+  # Run a picked palette command. A zero-arg `{:action, atom}` dispatches through the shared
+  # `apply_verb`/`apply_action` vocabulary (the same path `Alt+C` / a typed `copy` take) then
+  # closes. A `{:typed, prefix}` command still needs an argument, so instead of running it we
+  # **hand off** to `:command` mode pre-filled with the verb (e.g. `line `) for the user to
+  # complete — the palette is a launcher, the typed parser finishes the job.
+  defp dispatch_palette({:action, action}, state), do: close_minibuffer(apply_verb(action, state))
+
+  defp dispatch_palette({:typed, prefix}, state),
+    do: schedule_repaint(%{state | minibuffer: Minibuffer.open(:command, prefix <> " ")})
 
   ## Grid commands (ADR-0027). The coordinates typed in `:grid` mode are **display columns**
   ## (the ruler is up); cast `x` to a grapheme against the target line, resolve to a caret /

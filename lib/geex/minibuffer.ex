@@ -9,26 +9,40 @@ defmodule Geex.Minibuffer do
   `active?/1`, renders `prompt/1 <> value/1` over the status row, and `close/1`s it on
   submit or cancel.
 
-  Modes grow with the command surface — `:command` (typed verbs / a bare line number) and
-  `:grid` (coordinate commands, [ADR-0027](../../doc/adr/0027-grid-command-addressing.md) —
-  the loop shows the display-column ruler + grid-line overlay while it is open, so the `x`
-  the user types is a display column). Incremental search, the palette, and the fuzzy finder
-  are the next modes.
+  Modes grow with the command surface — `:command` (typed verbs / a bare line number), `:grid`
+  (coordinate commands, [ADR-0027](../../doc/adr/0027-grid-command-addressing.md) — the loop shows
+  the display-column ruler + grid-line overlay while it is open, so the `x` the user types is a
+  display column), and `:palette` (the command palette, [ADR-0028](../../doc/adr/0028-editor-shell-and-minibuffer.md)
+  §3 — the `input` is a fuzzy filter over `Geex.Command.Catalog` and `sel` is the highlighted
+  candidate row). Incremental search and the fuzzy finder are the next modes.
+
+  `sel` is the only non-text state: the palette's highlighted-candidate index. Editing the input
+  resets it to `0` (the top match) — the loop owns moving it (it knows the candidate count to
+  clamp against), the struct just carries and resets it.
   """
 
-  defstruct mode: :inactive, input: "", cursor: 0
+  defstruct mode: :inactive, input: "", cursor: 0, sel: 0
 
-  @type mode :: :inactive | :command | :grid
-  @type t :: %__MODULE__{mode: mode(), input: String.t(), cursor: non_neg_integer()}
+  @type mode :: :inactive | :command | :grid | :palette
+  @type t :: %__MODULE__{
+          mode: mode(),
+          input: String.t(),
+          cursor: non_neg_integer(),
+          sel: non_neg_integer()
+        }
 
   @doc "A closed (inactive) minibuffer."
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
-  @doc "Open the minibuffer in `mode` with an empty input."
-  @spec open(mode()) :: t()
-  def open(mode \\ :command) when mode != :inactive,
-    do: %__MODULE__{mode: mode, input: "", cursor: 0}
+  @doc """
+  Open the minibuffer in `mode`, optionally **pre-filled** with `input` (cursor at its end) —
+  the palette uses this to drop into `:command` mode with a verb already typed (e.g. `line `)
+  when a picked command still needs an argument.
+  """
+  @spec open(mode(), String.t()) :: t()
+  def open(mode \\ :command, input \\ "") when mode != :inactive and is_binary(input),
+    do: %__MODULE__{mode: mode, input: input, cursor: length(String.graphemes(input))}
 
   @doc "Whether the minibuffer is capturing input."
   @spec active?(t()) :: boolean()
@@ -47,24 +61,32 @@ defmodule Geex.Minibuffer do
   @spec prompt(t()) :: String.t()
   def prompt(%__MODULE__{mode: :command}), do: "geex:"
   def prompt(%__MODULE__{mode: :grid}), do: "grid:"
+  def prompt(%__MODULE__{mode: :palette}), do: "palette:"
   def prompt(%__MODULE__{}), do: ""
 
-  @doc "Insert grapheme(s) `g` at the cursor, advancing it past them."
+  @doc """
+  Insert grapheme(s) `g` at the cursor, advancing it past them. Editing the input changes the
+  candidate set, so the palette's highlight resets to the top match (`sel: 0`).
+  """
   @spec insert(t(), String.t()) :: t()
   def insert(%__MODULE__{input: input, cursor: cursor} = mb, g) when is_binary(g) do
     {before, rest} = split(input, cursor)
-    %{mb | input: before <> g <> rest, cursor: cursor + length(String.graphemes(g))}
+    %{mb | input: before <> g <> rest, cursor: cursor + length(String.graphemes(g)), sel: 0}
   end
 
-  @doc "Delete the grapheme before the cursor (a no-op at the start)."
+  @doc "Delete the grapheme before the cursor (a no-op at the start); resets the palette highlight."
   @spec backspace(t()) :: t()
   def backspace(%__MODULE__{cursor: 0} = mb), do: mb
 
   def backspace(%__MODULE__{input: input, cursor: cursor} = mb) do
     {before, rest} = split(input, cursor)
     kept = before |> String.graphemes() |> Enum.drop(-1) |> Enum.join()
-    %{mb | input: kept <> rest, cursor: cursor - 1}
+    %{mb | input: kept <> rest, cursor: cursor - 1, sel: 0}
   end
+
+  @doc "Set the palette's highlighted-candidate index (the loop clamps it to the candidate count)."
+  @spec select(t(), non_neg_integer()) :: t()
+  def select(%__MODULE__{} = mb, i) when is_integer(i) and i >= 0, do: %{mb | sel: i}
 
   @doc "Move the cursor one grapheme left (clamped to the start)."
   @spec left(t()) :: t()

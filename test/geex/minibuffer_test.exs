@@ -16,6 +16,28 @@ defmodule Geex.MinibufferTest do
     assert Minibuffer.open(:grid) |> Minibuffer.prompt() == "grid:"
   end
 
+  test "the palette mode prompt is the colon-suffixed label" do
+    assert Minibuffer.open(:palette) |> Minibuffer.prompt() == "palette:"
+  end
+
+  test "open/2 pre-fills the input with the cursor at its end" do
+    mb = Minibuffer.open(:command, "line ")
+    assert Minibuffer.value(mb) == "line "
+    assert mb.cursor == 5
+  end
+
+  test "editing the input resets the palette highlight to the top match" do
+    mb = Minibuffer.open(:palette) |> Minibuffer.select(3)
+    assert mb.sel == 3
+    assert Minibuffer.insert(mb, "c").sel == 0
+    assert Minibuffer.open(:palette) |> Minibuffer.select(2) |> Minibuffer.insert("x") |> Map.fetch!(:sel) == 0
+  end
+
+  test "backspace also resets the palette highlight" do
+    mb = Minibuffer.open(:palette, "cop") |> Minibuffer.select(2)
+    assert Minibuffer.backspace(mb).sel == 0
+  end
+
   test "close/1 deactivates" do
     assert Minibuffer.open(:command) |> Minibuffer.close() |> Minibuffer.active?() == false
   end
