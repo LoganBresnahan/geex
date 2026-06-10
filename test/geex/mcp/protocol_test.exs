@@ -107,16 +107,18 @@ defmodule Geex.MCP.ProtocolTest do
   end
 
   describe "tools/list (projected from the live registry, merged with operation tools)" do
-    test "lists the edit commands plus the operation and view-action tools (ADR-0019/0030)" do
+    test "lists the edit commands plus the operation, view-action, and grid tools (ADR-0019/0030/0027)" do
       %{"result" => %{"tools" => tools}} = frame(request(1, "tools/list"))
       names = Enum.map(tools, & &1["name"]) |> Enum.sort()
 
       assert names == [
                "close_file",
+               "copy",
                "create_file",
                "delete",
                "delete_file",
                "edit",
+               "goto",
                "insert",
                "line",
                "open_file",
@@ -179,6 +181,37 @@ defmodule Geex.MCP.ProtocolTest do
       assert result["isError"] == true
       assert [%{"text" => text}] = result["content"]
       assert text =~ "no_active_buffer"
+    end
+  end
+
+  describe "tools/call — grid commands (the agent's coordinate surface, ADR-0027)" do
+    setup do
+      buf = start_supervised!({Buffer, text: "hello world\nsecond"})
+      Session.set_active_buffer(buf)
+      on_exit(fn -> Session.set_active_buffer(nil) end)
+      %{buf: buf}
+    end
+
+    test "`goto` routes to the grid handler and moves the cursor by grapheme coordinate" do
+      params = %{"name" => "goto", "arguments" => %{"pos" => "x3 y2"}}
+      %{"result" => result} = frame(request(1, "tools/call", params))
+
+      assert result["isError"] == false
+      assert {:ok, %{cursor: {1, 2}, history: []}} = Session.snapshot()
+    end
+
+    test "`copy` routes to the grid handler and pushes onto the clipboard" do
+      params = %{"name" => "copy", "arguments" => %{"range" => "x1 y1 - x5 y1"}}
+      %{"result" => result} = frame(request(1, "tools/call", params))
+
+      assert result["isError"] == false
+      assert Geex.Clipboard.top() == "hello"
+    end
+
+    test "a coordinate shape error rides isError, not a JSON-RPC error" do
+      params = %{"name" => "goto", "arguments" => %{"pos" => "x1 y1 - x2 y1"}}
+      %{"result" => result} = frame(request(1, "tools/call", params))
+      assert result["isError"] == true
     end
   end
 

@@ -52,4 +52,43 @@ defmodule Geex.Command.TypeTest do
       assert {:error, _} = Type.cast(:edits, [%{"search" => "a", "replace" => 5}])
     end
   end
+
+  describe ":coord / :coord_range — the grid coordinate types (ADR-0027 agent half)" do
+    alias Geex.Coord
+
+    test ":coord parses a single coordinate via the shared Geex.Coord grammar" do
+      assert Type.cast(:coord, "x5 y7") == {:ok, %Coord{x: 5, y: 7}}
+    end
+
+    test ":coord rejects a range with a shape error (not a generic parse error)" do
+      assert {:error, msg} = Type.cast(:coord, "x5 y7 - x9 y7")
+      assert msg =~ "single coordinate"
+    end
+
+    test ":coord_range parses a range" do
+      assert {:ok, %Coord.Range{from: %Coord{x: 5, y: 7}, to: %Coord{x: 9, y: 7}}} =
+               Type.cast(:coord_range, "x5 y7 - x9 y7")
+    end
+
+    test ":coord_range rejects a single point with a shape error" do
+      assert {:error, msg} = Type.cast(:coord_range, "x5 y7")
+      assert msg =~ "range"
+    end
+
+    test "a reversed / empty range gives a specific message" do
+      assert {:error, msg} = Type.cast(:coord_range, "x9 y7 - x5 y7")
+      assert msg =~ "before its start"
+      assert {:error, e} = Type.cast(:coord_range, "x5 y7 - x5 y7")
+      assert e =~ "same point"
+    end
+
+    test "garbage is a coordinate-shaped error" do
+      assert {:error, msg} = Type.cast(:coord, "nope")
+      assert msg =~ ~s("x5 y7")
+    end
+
+    test "a non-binary value falls through to the generic cast error" do
+      assert {:error, _} = Type.cast(:coord, 42)
+    end
+  end
 end

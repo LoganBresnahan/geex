@@ -76,6 +76,24 @@ defmodule Geex.MCP.Schema do
   defp json_type(:integer), do: %{"type" => "integer"}
   defp json_type(:boolean), do: %{"type" => "boolean"}
 
+  # Grid coordinates (ADR-0027) ride a string in the canonical `x<col> y<line>` syntax — the
+  # same a human types in `:grid` mode — cast to a `Geex.Coord` / `Coord.Range` by the agent's
+  # grapheme path. A string (not a nested object) keeps the agent's tool-call ergonomic and the
+  # two surfaces literally share the grammar.
+  defp json_type(:coord),
+    do: %{
+      "type" => "string",
+      "description" => ~s|A coordinate "x5 y7": 1-based grapheme column x, line y.|
+    }
+
+  defp json_type(:coord_range) do
+    %{
+      "type" => "string",
+      "description" =>
+        ~s|A coordinate range "x5 y7 - x12 y9" (inclusive): 1-based grapheme x, line y; end not before start.|
+    }
+  end
+
   # The `edit` tool's search/replace array (ADR-0020): an array of objects, each with
   # the verbatim text to find and its replacement.
   defp json_type(:edits) do

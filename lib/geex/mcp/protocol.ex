@@ -33,7 +33,7 @@ defmodule Geex.MCP.Protocol do
   alias Geex.Command
   alias Geex.Command.Meta
   alias Geex.{CommandRegistry, Dispatch}
-  alias Geex.MCP.{Operations, Schema, ViewActions}
+  alias Geex.MCP.{Grid, Operations, Schema, ViewActions}
 
   # The MCP revision geex implements (§11). Negotiated against the client's request;
   # the preferred (latest) supported version is the fallback. 2025-11-25 is current;
@@ -124,42 +124,44 @@ defmodule Geex.MCP.Protocol do
 
   defp negotiate(_), do: @protocol_version
 
-  # tools/list merges all four tool categories (ADR-0019 + ADR-0030): macro-projected
-  # edit tools (from the registry) + the hand-written operation tools + the view-action
-  # tools. All project their inputSchema through the same Schema renderer, so none
-  # hand-syncs JSON.
+  # tools/list merges the tool categories: macro-projected edit tools (from the registry) +
+  # the hand-written operation tools + the view-action tools + the grid commands (ADR-0019 +
+  # ADR-0030 + ADR-0027). All project their inputSchema through the same Schema renderer, so
+  # none hand-syncs JSON.
   defp tools_list do
     modules = Enum.map(CommandRegistry.all(), & &1.module)
-    %{"tools" => Schema.tools(modules) ++ Operations.tools() ++ ViewActions.tools()}
+
+    %{
+      "tools" =>
+        Schema.tools(modules) ++ Operations.tools() ++ ViewActions.tools() ++ Grid.tools()
+    }
   end
 
-  # tools/call routes by category: an operation or view-action name → its hand-written
-  # handler; otherwise the edit-command registry. Names across the categories are disjoint.
+  # tools/call routes by category: an operation / view-action / grid-command name → its
+  # hand-written handler; otherwise the edit-command registry. Names across the categories are
+  # disjoint, so first-match-wins is unambiguous.
   defp tool_call(%{"name" => name} = params) when is_binary(name) do
     # Coalesce an explicit `"arguments": null` (some clients serialize omitted optional
     # fields as null) to the empty object, mirroring the `params` handling above. A
     # genuinely non-object value (array/string) still falls to the is_map guards → -32602.
     args = Map.get(params, "arguments") || %{}
 
-    case Operations.lookup(name) do
-      {:ok, op} ->
-        call_operation(op, args)
-
-      :error ->
-        case ViewActions.lookup(name) do
-          {:ok, action} ->
-            call_view_action(action, args)
-
-          :error ->
-            case lookup_tool(name) do
-              {:ok, module} -> call_command(module, args)
-              :error -> {:error, -32602, "Unknown tool: #{name}"}
-            end
-        end
+    # Try each category in turn, looking each up exactly once. `on_lookup/2` runs the handler on
+    # a hit and passes a miss (`:error`) along the `with` chain; no category's handler ever
+    # returns the bare `:error` atom, so the chain falls through to "unknown tool" only when
+    # every lookup missed.
+    with :error <- on_lookup(Operations.lookup(name), &call_operation(&1, args)),
+         :error <- on_lookup(ViewActions.lookup(name), &call_view_action(&1, args)),
+         :error <- on_lookup(Grid.lookup(name), &call_grid(&1, args)),
+         :error <- on_lookup(lookup_tool(name), &call_command(&1, args)) do
+      {:error, -32602, "Unknown tool: #{name}"}
     end
   end
 
   defp tool_call(_params), do: {:error, -32602, "Invalid params: \"name\" (string) is required"}
+
+  defp on_lookup({:ok, found}, handler), do: handler.(found)
+  defp on_lookup(:error, _handler), do: :error
 
   defp call_command(module, args) when is_map(args) do
     case module.parse(args) do
@@ -218,6 +220,20 @@ defmodule Geex.MCP.Protocol do
   end
 
   defp call_view_action(_action, _args),
+    do: {:error, -32602, ~s(Invalid params: "arguments" must be an object)}
+
+  # Grid commands (`goto`/`copy`, ADR-0027 agent half): the same result contract again —
+  # invalid args / a clean coordinate failure (line past EOF, empty range) ride isError; a
+  # down dependency is contained as -32603 by handle_request/1.
+  defp call_grid(command, args) when is_map(args) do
+    case Grid.call(command, args) do
+      {:invalid_args, why} -> tool_result("Invalid arguments: #{why}", true)
+      {:ok, text} -> tool_result(text, false)
+      {:error, message} -> tool_result("error: #{message}", true)
+    end
+  end
+
+  defp call_grid(_command, _args),
     do: {:error, -32602, ~s(Invalid params: "arguments" must be an object)}
 
   # An unknown tool name may not even be an existing atom — that is still just an

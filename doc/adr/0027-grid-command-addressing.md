@@ -204,10 +204,40 @@ primary), end-to-end and live-verified.
   `cut x7-x11` removes `hello` — the cast honours the wide glyph exactly. (The `cursor_x` tmux-oracle
   assertion in §"Verification" remains the deferred *automated* guard; this was a manual confirmation.)
 
-**Still deferred** (unchanged): the **buffer-absolute grapheme** form on the agent/MCP surface (the
-`Geex.Command.Type` `:coord` cast + a grid edit tool — this slice is the *human* surface only; the agent
-already edits by grapheme `line/col`); **block** (`:`) and **multi-selection** (`,`) ranges;
-easy-motion **jump labels**; the `\e[6n` empirical per-terminal width detection; pane targeting.
+**Still deferred** (unchanged): **block** (`:`) and **multi-selection** (`,`) ranges; easy-motion
+**jump labels**; the `\e[6n` empirical per-terminal width detection; pane targeting.
+
+## Amendment (2026-06-10): built — the agent's grapheme-coordinate surface
+
+The deferred *agent half* shipped: the **buffer-absolute grapheme** form on the MCP surface, so an
+agent speaks the same `x y` grammar a human types in `:grid` mode — the parity the whole ADR exists
+to make possible.
+
+- **`Geex.Command.Type` `:coord` / `:coord_range`** — the named cast, now built: a string in the
+  canonical `"x5 y7"` / `"x5 y7 - x12 y9"` syntax → `%Coord{}` / `Coord.Range{}` via the **same**
+  `Geex.Coord.parse/1` the human path uses (`Geex.MCP.Schema` renders them as string args, so the
+  agent's tool-call stays flat and the two surfaces share one grammar). A wrong shape (a range where
+  a point is wanted, or vice versa) is a clean argument error.
+- **`Geex.MCP.Grid`** — the agent's grid command tools, `tools/list`-merged and routed alongside the
+  operation / view-action categories:
+  - **`goto x y`** — move the active cursor (a view action, the 2-D `line`); reuses
+    `Coord.to_caret/2` + `Session.set_cursor`, so it rides the exact cursor-notify path `line` does.
+  - **`copy x1 y1 - x2 y2`** — `Coord.to_span/2` → `Doc.slice/2` → `Clipboard.push/1`, onto the
+    **same** ring the human pastes from (`Alt+V`): an agent `copy` and a human paste meet on one
+    surface. No buffer change, no cursor move.
+- **The crux, realised:** the agent resolves the *identical* `Geex.Coord` the human does, with **no
+  display cast at all** — the §"display ruler" asymmetry made concrete. Screen-watchers (the human at
+  the ruler) cast display→grapheme; text-readers (the agent) are already in graphemes. Same grammar,
+  same `Coord`, different (or absent) cast — exactly decision **(b)**.
+- **Still deferred here:** **`cut`** (= `copy` + a recorded `replace` over the range — composable from
+  primitives the agent already has, so a dedicated atomic verb waits for a workflow that wants it) and
+  a coordinate **`select`** (the live selection is loop-local; an agent-set selection needs the notify
+  path that arrives with the pane model). Exposing the *non-coordinate* action-verbs (`undo`/`paste`/…)
+  as agent tools — the full catalog unification behind `Geex.Loop.Verbs` — is its own follow-up.
+
+Verified through the real protocol path (`tools/call goto` / `copy` via `Protocol.handle_request`) +
+`Geex.MCP.Grid` / `Geex.Command.Type` unit tests. `lib/geex/mcp/grid.ex`, `lib/geex/command/type.ex`,
+`lib/geex/mcp/schema.ex`, `lib/geex/mcp/protocol.ex`.
 
 ## See
 

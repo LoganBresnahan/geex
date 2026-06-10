@@ -181,8 +181,10 @@ folds into the grid-agent-parity work next).
   (zero-arg → dispatch; arg-taker → pre-filled hand-off); `Esc`/`Alt+N` close.
 - **Deferred (unchanged direction):** the path-operations (`open`/`close`/`create`/…) wait on the
   **fuzzy finder** to supply a path; the raw edit primitives stay agent-only (you *type* to edit);
-  and exposing the action-verbs as agent-visible MCP tools — so `tools/list` and the palette read
-  one fully-unified catalog and `Verbs` resolves against it — is the **grid-agent-parity** chunk.
+  and exposing the *non-coordinate* action-verbs (`undo`/`paste`/…) as agent-visible MCP tools — so
+  `tools/list` and the palette read one fully-unified catalog and `Verbs` resolves against it — is a
+  follow-up. (The grid-agent-parity chunk that came next built the *coordinate* tools `goto`/`copy` —
+  ADR-0027 amendment 2026-06-10 — and the `:coord` type they share, but not this verb unification.)
 
 Live-verified via tmux (open → filter → `Alt+W/S` navigate → `Enter` on both an `{:action}` and a
 `{:typed}` hand-off → `Alt+N` close). `lib/geex/fuzzy.ex`, `lib/geex/command/catalog.ex`,

@@ -91,9 +91,9 @@ defmodule Geex.MCP.SchemaTest do
 
     test "an unknown arg type fails loudly (drift between Type and Schema)" do
       assert_raise ArgumentError,
-                   ~r/no JSON-Schema mapping for command arg type :coord_range/,
+                   ~r/no JSON-Schema mapping for command arg type :nonexistent_type/,
                    fn ->
-                     Schema.from_fields([%Field{name: :r, type: :coord_range}])
+                     Schema.from_fields([%Field{name: :r, type: :nonexistent_type}])
                    end
     end
 

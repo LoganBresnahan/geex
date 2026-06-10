@@ -8,10 +8,12 @@ defmodule Geex.Command.Type do
   for `"a1-g3"`, per mcp-ai-integration.md §3a) is a new clause here plus a row in
   the JSON-Schema mapping when that renderer is built — nothing else changes.
 
-  v0.1 ships the scalar types the first commands need; richer editor types
-  (`:coord`, `:coord_range`) land with the commands that use them. `:edits` (the
-  structured search/replace array for the `edit` tool, ADR-0020) is the first
-  non-scalar type — a JSON array of `{search, replace}` objects.
+  v0.1 ships the scalar types the first commands need. `:edits` (the structured search/replace
+  array for the `edit` tool, ADR-0020) is the first non-scalar type — a JSON array of
+  `{search, replace}` objects. The editor coordinate types **`:coord`** (`"x5 y7"`) and
+  **`:coord_range`** (`"x5 y7 - x12 y9"`) parse via `Geex.Coord` — the agent's grapheme-addressed
+  half of the grid commands ([ADR-0027](../../../doc/adr/0027-grid-command-addressing.md), the
+  human display-addressed half lives in the loop's `:grid` mode).
   """
 
   @type t :: atom()
@@ -72,7 +74,41 @@ defmodule Geex.Command.Type do
 
   def cast(:edits, _), do: {:error, "expected an array of {search, replace} edit blocks"}
 
+  # Grid coordinates (ADR-0027): a single `:coord` (`"x5 y7"`) or a `:coord_range`
+  # (`"x5 y7 - x12 y9"`), parsed by the **same** `Geex.Coord.parse/1` a human types in the
+  # minibuffer's `:grid` mode — the one syntax both surfaces share. The only difference is
+  # downstream: a human's `x` is a *display* column (the loop casts it to a grapheme against
+  # the ruler), an agent's `x` is already a **grapheme** (it reads text, not a screen), so the
+  # cast here is the agent's, used as-is. The shape is enforced so a range where a point is
+  # wanted (or vice versa) is a clean argument error, not a surprise.
+  def cast(:coord, v) when is_binary(v) do
+    case Geex.Coord.parse(v) do
+      {:ok, %Geex.Coord{} = coord} -> {:ok, coord}
+      {:ok, %Geex.Coord.Range{}} -> {:error, "expected a single coordinate (x y), got a range"}
+      {:error, why} -> {:error, coord_error(why, v)}
+    end
+  end
+
+  def cast(:coord_range, v) when is_binary(v) do
+    case Geex.Coord.parse(v) do
+      {:ok, %Geex.Coord.Range{} = range} ->
+        {:ok, range}
+
+      {:ok, %Geex.Coord{}} ->
+        {:error, "expected a coordinate range (x y - x y), got a single point"}
+
+      {:error, why} ->
+        {:error, coord_error(why, v)}
+    end
+  end
+
   def cast(type, v), do: {:error, "cannot cast #{inspect(v)} to #{inspect(type)}"}
+
+  defp coord_error(:reversed, _v), do: "the range end is before its start"
+  defp coord_error(:empty_range, _v), do: "the range start and end are the same point"
+
+  defp coord_error(_bad_coord, v),
+    do: ~s|expected a coordinate like "x5 y7" (1-based grapheme x, line y), got #{inspect(v)}|
 
   defp cast_edit_block(block) when is_map(block) do
     with {:ok, search} <- fetch_string(block, "search"),
