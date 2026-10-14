@@ -161,11 +161,16 @@ defmodule Geex.Reconcile do
   # --- watcher GenServer ---
 
   @impl true
-  def init(_opts) do
+  def init(opts) do
     # Trap exits: `FileSystem.start_link/1` links the watcher to us, and a backend that
     # dies must not take the reconciler down — handle_info({:EXIT, …}) cleans it up.
     Process.flag(:trap_exit, true)
-    {:ok, %{watched: MapSet.new(), watchers: %{}}}
+
+    # `:start_watcher` (dir -> {:ok, pid} | :ignore | {:error, _}) is the backend seam;
+    # the default is the real `:file_system` worker. Tests inject a stub so the degrade
+    # path doesn't depend on whether this host has inotify-tools installed.
+    start_watcher = Keyword.get(opts, :start_watcher, &start_filesystem/1)
+    {:ok, %{watched: MapSet.new(), watchers: %{}, start_watcher: start_watcher}}
   end
 
   @impl true
@@ -232,7 +237,7 @@ defmodule Geex.Reconcile do
   end
 
   defp start_watcher(dir, state) do
-    case start_filesystem(dir) do
+    case state.start_watcher.(dir) do
       {:ok, watcher} ->
         FileSystem.subscribe(watcher)
 

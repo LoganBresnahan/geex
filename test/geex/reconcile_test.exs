@@ -300,12 +300,18 @@ defmodule Geex.ReconcileTest do
     end
 
     test "watch/2 degrades gracefully when the watch backend is unavailable" do
-      recon = start_supervised!({Reconcile, name: :"recon_#{System.unique_integer([:positive])}"})
+      # Stub the backend as unbootstrappable (what `FileSystem.start_link` returns when
+      # inotify-tools is missing) so this holds on any host; watch must still return :ok
+      # and leave the reconciler alive (logged degradation).
+      recon =
+        start_supervised!(
+          {Reconcile,
+           name: :"recon_#{System.unique_integer([:positive])}", start_watcher: fn _dir -> :ignore end}
+        )
+
       path = tmp_path()
       File.write!(path, "")
 
-      # inotify-tools is absent here, so FileSystem.start_link returns :ignore; watch
-      # must still return :ok and leave the reconciler alive (logged degradation).
       log =
         capture_log(fn ->
           assert Reconcile.watch(recon, path) == :ok
@@ -315,7 +321,43 @@ defmodule Geex.ReconcileTest do
       assert Process.alive?(recon)
       # the dir was not added to the watched set (backend couldn't start)
       assert :sys.get_state(recon).watched == MapSet.new()
-      assert log =~ "cannot watch" or log =~ "inotify"
+      assert log =~ "cannot watch"
+    end
+
+    test "watch/2 records the directory once when the backend starts" do
+      test_pid = self()
+
+      # A stand-in worker that answers FileSystem.subscribe/1's :subscribe call.
+      start_watcher = fn dir ->
+        send(test_pid, {:started, dir})
+
+        {:ok,
+         spawn_link(fn ->
+           receive do
+             {:"$gen_call", from, :subscribe} -> GenServer.reply(from, :ok)
+           end
+
+           Process.sleep(:infinity)
+         end)}
+      end
+
+      recon =
+        start_supervised!(
+          {Reconcile,
+           name: :"recon_#{System.unique_integer([:positive])}", start_watcher: start_watcher}
+        )
+
+      path = tmp_path()
+      dir = Path.dirname(Path.expand(path))
+
+      assert Reconcile.watch(recon, path) == :ok
+      assert Reconcile.watch(recon, path) == :ok
+      state = :sys.get_state(recon)
+
+      assert state.watched == MapSet.new([dir])
+      assert map_size(state.watchers) == 1
+      assert_received {:started, ^dir}
+      refute_received {:started, _}
     end
   end
 end
