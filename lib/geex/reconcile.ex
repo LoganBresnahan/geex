@@ -37,13 +37,16 @@ defmodule Geex.Reconcile do
       worker that ends (its `:stop`, or a trapped `:EXIT`) frees its directory so the
       next open re-watches it. If the platform watch backend is unavailable
       (`inotify-tools` not installed) the watcher degrades to a logged no-op; the
-      core is unaffected. (A burst of `:modified` events for one write reconciles once
-      then baseline-compares to `:ignored`; a non-atomic mid-write read is adopted as
-      `:external` and corrected by the settling event — coarse but undoable, never
-      silently lost. geex's *own* writes — a `save/1`, or a `Geex.Session.rename_file/2`
+      core is unaffected. Events for one path are settled: the file is read once the
+      path has been quiet for `settle_ms` (default 50ms, `:settle_ms`
+      option / `:reconcile_settle_ms` app env), so a burst for one write reconciles once
+      and a non-atomic write is not read half-done. A write that outlasts the quiet
+      period is still adopted in pieces, each undoable, never silently lost. The
+      change is recorded as **one `replace` per changed hunk** (`Geex.Edit.LineDiff`),
+      dispatched as one atomic group stamped with a shared group id and the sha256 of
+      the disk bytes read (ADR-0032). geex's *own* writes — a `save/1`, or a `Geex.Session.rename_file/2`
       whose re-keyed buffer carries its baseline along — leave disk equal to that baseline,
-      so their events baseline-compare to `:ignored` with no rename-specific handling.
-      Close-event filtering / debounce is a later refinement.)
+      so their events baseline-compare to `:ignored` with no rename-specific handling.)
 
   ## Honesty (ADR-0012 / ADR-0017)
 
@@ -69,6 +72,9 @@ defmodule Geex.Reconcile do
   alias Geex.Command.Meta
   alias Geex.Commands.Replace
   alias Geex.{Buffer, BufferSupervisor, Command}
+  alias Geex.Edit.LineDiff
+
+  @default_settle_ms 50
 
   # --- public API ---
 
@@ -113,9 +119,9 @@ defmodule Geex.Reconcile do
     if snapshot.synced == disk_text do
       :ignored
     else
-      command = external_replace(snapshot, disk_text)
+      commands = external_commands(snapshot.text, snapshot.synced, disk_text)
 
-      case Buffer.dispatch(pid, command) do
+      case Buffer.dispatch_group(pid, commands) do
         {:ok, _new_snapshot} ->
           # The buffer now equals disk — re-baseline it (mark_synced sets `synced` to the
           # current text and clears the dirty flag that dispatch/2 set; that text is the new
@@ -142,20 +148,44 @@ defmodule Geex.Reconcile do
   # full disk content. Coarse but always state-equivalent — the lossy diff→command step
   # ADR-0017 flags, isolated here so a finer line-level diff (the ADR-0020 myers work)
   # can replace it without touching the watcher or the echo-suppression.
-  defp external_replace(snapshot, disk_text) do
-    last_line = max(length(snapshot.lines) - 1, 0)
-    last_col = snapshot.lines |> List.last() |> Kernel.||("") |> String.length()
+  # One `replace` per changed hunk (bottom-up, so each is valid after the ones before
+  # it), all sharing one reconcile group: an id, the sha256 of the disk bytes just read,
+  # and the sha256 of the baseline disk bytes this write replaced (`synced`). An
+  # attestation must match both hashes (ADR-0032 amendments). If the line diff can't
+  # reproduce the disk text exactly, fall back to one whole-text replace.
+  defp external_commands(buffer_text, baseline, disk_text) do
+    meta =
+      Meta.new(:external,
+        reconcile: %{
+          group: System.unique_integer([:positive, :monotonic]),
+          before_sha256: sha256(baseline),
+          sha256: sha256(disk_text)
+        }
+      )
 
+    spans =
+      case LineDiff.spans(buffer_text, disk_text) do
+        {:ok, [_ | _] = spans} -> spans
+        _ -> [whole_text_span(buffer_text, disk_text)]
+      end
+
+    Enum.map(spans, &replace_command(&1, meta))
+  end
+
+  # Lowercase hex, 64 chars — the attestation contract's format (what `sha256sum` prints).
+  defp sha256(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+
+  defp whole_text_span(buffer_text, disk_text) do
+    lines = String.split(buffer_text, "\n")
+    last = length(lines) - 1
+    {{{0, 0}, {last, lines |> List.last() |> String.length()}}, disk_text}
+  end
+
+  defp replace_command({{{sl, sc}, {el, ec}}, text}, meta) do
     {:ok, command} =
-      Replace.parse(%{
-        start_line: 0,
-        start_col: 0,
-        end_line: last_line,
-        end_col: last_col,
-        text: disk_text
-      })
+      Replace.parse(%{start_line: sl, start_col: sc, end_line: el, end_col: ec, text: text})
 
-    Command.put_meta(command, Meta.new(:external))
+    Command.put_meta(command, meta)
   end
 
   # --- watcher GenServer ---
@@ -170,7 +200,22 @@ defmodule Geex.Reconcile do
     # the default is the real `:file_system` worker. Tests inject a stub so the degrade
     # path doesn't depend on whether this host has inotify-tools installed.
     start_watcher = Keyword.get(opts, :start_watcher, &start_filesystem/1)
-    {:ok, %{watched: MapSet.new(), watchers: %{}, start_watcher: start_watcher}}
+
+    # `:settle_ms` — the per-path quiet period before reading a changed file (0 = read on
+    # the event itself). See `handle_info/2` for why it exists.
+    settle_ms =
+      Keyword.get_lazy(opts, :settle_ms, fn ->
+        Application.get_env(:geex, :reconcile_settle_ms, @default_settle_ms)
+      end)
+
+    {:ok,
+     %{
+       watched: MapSet.new(),
+       watchers: %{},
+       start_watcher: start_watcher,
+       settle_ms: settle_ms,
+       settling: %{}
+     }}
   end
 
   @impl true
@@ -184,10 +229,34 @@ defmodule Geex.Reconcile do
     end
   end
 
+  # Write completion (ADR-0032 amendment item 4). A non-atomic write fires several events
+  # and can be read half-written; on the primary agent path that would record a half-edit
+  # hunk. `file_system` reports both MODIFY and CLOSE_WRITE as `:modified`, so "the write
+  # finished" can't be read off the event — instead wait until a path has been quiet for
+  # `settle_ms`, then read it once. Each event re-arms the path's timer; a stale timer
+  # message is recognized by its ref and dropped.
   @impl true
-  def handle_info({:file_event, _watcher, {path, _events}}, state) do
+  def handle_info({:file_event, _watcher, {path, _events}}, %{settle_ms: 0} = state) do
     on_disk_change(Path.expand(path))
     {:noreply, state}
+  end
+
+  def handle_info({:file_event, _watcher, {path, _events}}, state) do
+    path = Path.expand(path)
+    ref = make_ref()
+    Process.send_after(self(), {:settled, path, ref}, state.settle_ms)
+    {:noreply, %{state | settling: Map.put(state.settling, path, ref)}}
+  end
+
+  def handle_info({:settled, path, ref}, state) do
+    case state.settling do
+      %{^path => ^ref} ->
+        on_disk_change(path)
+        {:noreply, %{state | settling: Map.delete(state.settling, path)}}
+
+      _superseded ->
+        {:noreply, state}
+    end
   end
 
   # A watcher told us it stopped. This is the *authoritative* signal: the `:file_system`

@@ -122,7 +122,14 @@ undoable hunks, attributed to the harness, session and tool call by a captAInHoo
 
 The ledger track, in order (each builds on the one before):
 
-1. **Line-level reconcile diffs.** Replace the whole-buffer `replace` with a myers line diff →
+1. **Line-level reconcile diffs** — **built 2026-10-14**: `Geex.Edit.LineDiff` (myers over
+   lines → bottom-up `replace` spans, verified to reproduce the disk bytes or fall back to one
+   whole-text replace), `Buffer.dispatch_group/2` (all-or-nothing, one history entry per hunk,
+   one change notification), each reconcile stamped `meta.reconcile = %{group, before_sha256,
+   sha256}` (baseline and new disk bytes, 64 lowercase hex), and
+   the per-path quiet period (`settle_ms`, default 50, 0 under test). Live-verified: a native
+   Claude Code `Write` touching two lines appeared live as two hunks; `Alt+Z` undid them one
+   at a time. Original plan: replace the whole-buffer `replace` with a myers line diff →
    one minimal `replace` per hunk, dispatched as one atomic group, so undoing an agent's
    change undoes *that hunk*, not the file. (Pairs with ADR-0020's diff work; pure, so
    table-testable.) **Plus write completion** (ADR-0032 amendment item 4): a per-path quiet

@@ -148,6 +148,96 @@ defmodule Geex.ReconcileTest do
     end
   end
 
+  describe "line-level hunks (ADR-0032)" do
+    test "a multi-hunk write is one group: one command per hunk, shared group + disk sha256" do
+      buf = start_supervised!({Buffer, text: "1\n2\n3\n4\n5\n"})
+      disk = "1\nTWO\n3\n4\nFIVE\n"
+
+      assert {:reconciled, snap} = Reconcile.reconcile(buf, disk)
+      assert snap.text == disk
+      assert [first, second] = snap.history
+
+      for cmd <- [first, second] do
+        assert cmd.meta.actor == :external
+        assert %Geex.Commands.Replace{} = cmd
+      end
+
+      assert first.meta.reconcile == second.meta.reconcile
+      hex = &Base.encode16(:crypto.hash(:sha256, &1), case: :lower)
+      assert first.meta.reconcile.sha256 == hex.(disk)
+      # the baseline the write replaced, not the buffer text
+      assert first.meta.reconcile.before_sha256 == hex.("1\n2\n3\n4\n5\n")
+      assert first.meta.reconcile.sha256 =~ ~r/\A[0-9a-f]{64}\z/
+      # each hunk touches only its own line
+      assert Enum.sort([first.text, second.text]) == ["FIVE", "TWO"]
+    end
+
+    test "before_sha256 is the synced disk baseline, even when the buffer is dirty" do
+      buf = start_supervised!({Buffer, text: "base\n"})
+      dirty_edit(buf, "EDIT-")
+
+      assert {:reconciled, snap} = Reconcile.reconcile(buf, "external\n")
+      [_human, ext] = snap.history
+      hex = &Base.encode16(:crypto.hash(:sha256, &1), case: :lower)
+      assert ext.meta.reconcile.before_sha256 == hex.("base\n")
+    end
+
+    test "separate writes are separate groups" do
+      buf = start_supervised!({Buffer, text: "a\n"})
+      assert {:reconciled, _} = Reconcile.reconcile(buf, "b\n")
+      assert {:reconciled, snap} = Reconcile.reconcile(buf, "c\n")
+      [one, two] = snap.history
+      refute one.meta.reconcile.group == two.meta.reconcile.group
+    end
+
+    test "undo walks an external write back hunk by hunk" do
+      buf = start_supervised!({Buffer, text: "1\n2\n3\n"})
+      assert {:reconciled, _} = Reconcile.reconcile(buf, "ONE\n2\nTHREE\n")
+
+      assert {:ok, snap, _} = Buffer.undo(buf)
+      assert snap.text in ["1\n2\nTHREE\n", "ONE\n2\n3\n"]
+      assert {:ok, snap, _} = Buffer.undo(buf)
+      assert snap.text == "1\n2\n3\n"
+    end
+  end
+
+  describe "write completion: the per-path quiet period (ADR-0032)" do
+    @settle 40
+
+    setup do
+      recon =
+        start_supervised!(
+          {Reconcile, name: :"recon_#{System.unique_integer([:positive])}", settle_ms: @settle}
+        )
+
+      %{recon: recon}
+    end
+
+    test "nothing is read until the path is quiet; a burst reconciles once, to the final bytes",
+         %{recon: recon} do
+      path = tmp_path()
+      File.write!(path, "v1\n")
+      buf = open_registered(path)
+
+      File.write!(path, "v2 half")
+      send(recon, {:file_event, self(), {path, [:modified]}})
+      File.write!(path, "v2 done\n")
+      send(recon, {:file_event, self(), {path, [:modified]}})
+      :sys.get_state(recon)
+
+      # still inside the quiet period: the half-written state was never read
+      assert Buffer.get_text(buf) == "v1\n"
+
+      Process.sleep(@settle * 3)
+      :sys.get_state(recon)
+
+      assert Buffer.get_text(buf) == "v2 done\n"
+      groups = buf |> Buffer.history() |> Enum.map(& &1.meta.reconcile.group) |> Enum.uniq()
+      assert length(groups) == 1
+      assert :sys.get_state(recon).settling == %{}
+    end
+  end
+
   describe "the watcher glue (injected :file_event — no inotify backend needed)" do
     # The reconciler under test; the global one is gated off in test config, so this
     # named instance owns the glue without contending for the default name.

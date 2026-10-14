@@ -10,7 +10,12 @@ import Config
 # The highlight reactor (ADR-0022) fires off the command stream in dev/prod; off
 # under `mix test` so existing buffer/session tests don't spin up reactors +
 # tree-sitter passes on every open. Highlight tests start a reactor explicitly.
+#
+# The reconcile quiet period (ADR-0032) is 0 under test: tests inject `:file_event`s and
+# assert right after, so a delayed read would make "nothing changed" assertions pass
+# vacuously. Settle tests pass `settle_ms:` explicitly.
 config :geex,
+  reconcile_settle_ms: if(config_env() == :test, do: 0, else: 50),
   start_terminal: config_env() != :test,
   start_reconcile: config_env() != :test,
   start_highlight: config_env() != :test

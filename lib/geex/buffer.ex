@@ -121,6 +121,16 @@ defmodule Geex.Buffer do
     do: GenServer.call(server, {:dispatch, command})
 
   @doc """
+  Apply `commands` in order as **one atomic group**: all of them land, or none do.
+  Each is recorded as its own history entry (so undo walks back one at a time), the
+  redo stack is cleared, and subscribers get **one** change notification covering the
+  whole group. Reconcile uses this to record one out-of-band write as one command per
+  changed hunk (ADR-0032). Returns `{:ok, snapshot}` or the first command's error.
+  """
+  def dispatch_group(server, [_ | _] = commands),
+    do: GenServer.call(server, {:dispatch_group, commands})
+
+  @doc """
   Undo the most recent edit (ADR-0031). Drops the newest command from history onto the redo
   stack and replays `base + the remainder` to reconstruct the document — the §15c replay
   backbone (ADR-0014), so the reverted state is exactly what produced it. Returns
@@ -252,6 +262,39 @@ defmodule Geex.Buffer do
           state
           | editor: editor,
             history: [command | state.history],
+            redo: [],
+            dirty: true,
+            seq: state.seq + 1
+        }
+
+        notify_change(new_state, footprint)
+        {:reply, {:ok, build_snapshot(new_state)}, new_state}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:dispatch_group, commands}, _from, state) do
+    applied =
+      Enum.reduce_while(commands, {:ok, state.editor}, fn command, {:ok, editor} ->
+        case Geex.Dispatch.apply_command(command, editor) do
+          {:ok, next} -> {:cont, {:ok, next}}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+
+    case applied do
+      {:ok, editor} ->
+        # One notification for the group: the byte footprint is the diff of the whole
+        # transition (the same exact splice undo/redo uses), not a per-command footprint.
+        footprint =
+          Footprint.between(EditorState.text(state.editor), EditorState.text(editor))
+
+        new_state = %{
+          state
+          | editor: editor,
+            history: Enum.reverse(commands) ++ state.history,
             redo: [],
             dirty: true,
             seq: state.seq + 1

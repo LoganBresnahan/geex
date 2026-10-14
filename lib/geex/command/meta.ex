@@ -13,13 +13,19 @@ defmodule Geex.Command.Meta do
     * `prompt_hash` — for LLM-authored commands; `nil` for humans
     * `origin`      — `%{turn_id, seq}` linking a *sequence* of commands to one
                       agent turn (§13 composite provenance); `nil` for ad-hoc input
+    * `reconcile`   — for a reconciled (`:external`) command:
+                      `%{group, before_sha256, sha256}`. Every hunk of one out-of-band
+                      write shares the `group` id, the sha256 of the baseline disk
+                      bytes the write replaced, and the sha256 of the disk bytes
+                      reconcile read (64 lowercase hex). An attestation must match
+                      both hashes (ADR-0032). `nil` otherwise
 
   `at` is stamped at creation and **preserved** when a recorded command is
   replayed — replay re-runs the same values, it does not re-stamp them. That is
   what makes replay deterministic (§15c).
   """
 
-  defstruct actor: :human, at: nil, prompt_hash: nil, origin: nil
+  defstruct actor: :human, at: nil, prompt_hash: nil, origin: nil, reconcile: nil
 
   @type actor ::
           :human
@@ -30,11 +36,15 @@ defmodule Geex.Command.Meta do
 
   @type origin :: nil | %{turn_id: String.t(), seq: non_neg_integer()}
 
+  @type reconcile ::
+          nil | %{group: pos_integer(), before_sha256: String.t(), sha256: String.t()}
+
   @type t :: %__MODULE__{
           actor: actor(),
           at: DateTime.t() | nil,
           prompt_hash: String.t() | nil,
-          origin: origin()
+          origin: origin(),
+          reconcile: reconcile()
         }
 
   @doc """
@@ -50,7 +60,8 @@ defmodule Geex.Command.Meta do
       actor: actor,
       at: Keyword.get(opts, :at) || DateTime.utc_now(),
       prompt_hash: Keyword.get(opts, :prompt_hash),
-      origin: Keyword.get(opts, :origin)
+      origin: Keyword.get(opts, :origin),
+      reconcile: Keyword.get(opts, :reconcile)
     }
   end
 

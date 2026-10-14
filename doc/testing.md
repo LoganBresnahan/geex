@@ -1272,3 +1272,39 @@ First session back since `c643941`. Suite re-run first: **649 tests + 9 doctests
 **Not tested:** no TUI-visible geex code changed, so no new TUI behaviour to verify; the live Claude Code
 preset run (Handle 3 of `/dogfood`) is still the open v0.5 item; provenance of the reconciled edit was not
 read from the in-process history this pass (the log line + buffer text are the evidence).
+
+### 2026-10-14 — Ledger step (a): line-level reconcile hunks + the write-completion quiet period (ADR-0032)
+
+Reconcile no longer adopts an out-of-band write as one whole-buffer `replace`. New pure module
+`Geex.Edit.LineDiff`: `List.myers_difference/2` over the two texts' lines → hunks → `Doc.replace/3`
+spans ordered **bottom-up** (each stays valid as the ones below it apply); `spans/2` checks that the
+spans reproduce the disk text byte for byte and otherwise returns `:error`, and reconcile falls back to
+one whole-text replace. New `Buffer.dispatch_group/2`: applies a list of commands all-or-nothing, records
+each as its own history entry (so undo walks back hunk by hunk), clears redo, and sends **one** change
+notification whose footprint is the whole transition's byte diff. Every command from one reconcile carries
+`meta.reconcile = %{group, before_sha256, sha256}`: a shared monotonic group id, the sha256 of the
+**baseline disk bytes** the write replaced (`synced`, not the possibly-dirty buffer text), and the sha256
+of the **disk bytes read**, both 64 lowercase hex. A future attestation must match both (ADR-0032). The watcher now waits for a per-path
+**quiet period** (`settle_ms`, default 50 ms; `0` under test via `config.exs`, so "nothing changed"
+assertions can't pass vacuously) before reading, re-arming on each event and dropping superseded timers
+by ref. `:crypto` added to `extra_applications`.
+
+**Live-verified:**
+- **How Claude Code writes** (the amendment's dogfood question), observed with `inotifywait` on a scratch
+  dir while this session used its own tools: both `Edit` and `Write` create `<name>.tmp.<pid>.<hex>`, write
+  and close it, then **rename it over the target** (`MOVED_FROM` tmp → `MOVED_TO <name>`). So Claude Code's
+  writes reach reconcile as one complete `moved_to`; the quiet period matters for in-place writers (shell,
+  other editors). The temp-file events hit no open buffer and are ignored.
+- **The ledger end to end, in the TUI:** geex open (tmux pty) on a 6-line file; this session's native
+  `Write` changed lines 2 and 5; the TUI showed both live; one `Alt+Z` reverted only line 2, a second
+  reverted line 5, cursor landed on the reverted hunk, status `[+]` (buffer ≠ disk). Disk untouched.
+
+**Automated:** `line_diff_test` (table cases at top/middle/end, trailing newline, empty doc, CRLF + wide
+graphemes, bottom-up order, a 500-pair seeded randomized round-trip; an ad-hoc 3,000-pair fuzz also gave
+zero fallbacks), `buffer_test` `dispatch_group/2` (applies + one notify, all-or-nothing, undo per command),
+`reconcile_test` (multi-hunk group shares group + both hashes; `before_sha256` is the synced baseline even on a dirty buffer; separate writes are separate groups; undo
+walks hunks; a burst inside the quiet period reconciles once, to the final bytes, never reading the
+half-write). **669 tests + 10 doctests**, green twice, `--warnings-as-errors` clean.
+
+**Not tested:** a write that outlasts the quiet period (adopted in pieces, by design); a large-file
+performance check of the line diff; conflict handling on a dirty buffer (step b: still last-writer-wins).

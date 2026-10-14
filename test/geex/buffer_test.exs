@@ -221,4 +221,41 @@ defmodule Geex.BufferTest do
       assert {r.version, r.seq} == {2, 4}
     end
   end
+
+  describe "dispatch_group/2 (ADR-0032)" do
+    setup do
+      %{buf: start_supervised!({Buffer, text: "a\nb\nc\n"}, id: :group_buf)}
+    end
+
+    test "applies every command, records each, notifies once", %{buf: buf} do
+      {:ok, _v} = Buffer.subscribe(buf, self())
+
+      assert {:ok, snap} =
+               Buffer.dispatch_group(buf, [replace(2, 0, 2, 1, "C"), replace(0, 0, 0, 1, "A")])
+
+      assert snap.text == "A\nb\nC\n"
+      assert length(snap.history) == 2
+      assert snap.dirty
+      assert_receive {:geex_buffer_change, ^buf, _seq, %{}}, 500
+      refute_receive {:geex_buffer_change, ^buf, _, _}, 100
+    end
+
+    test "is all-or-nothing: a failing command leaves text and history untouched", %{buf: buf} do
+      assert {:error, _} =
+               Buffer.dispatch_group(buf, [replace(0, 0, 0, 1, "A"), replace(9, 0, 9, 1, "?")])
+
+      assert Buffer.get_text(buf) == "a\nb\nc\n"
+      assert Buffer.history(buf) == []
+    end
+
+    test "undo walks the group back one command at a time", %{buf: buf} do
+      {:ok, _} = Buffer.dispatch_group(buf, [replace(2, 0, 2, 1, "C"), replace(0, 0, 0, 1, "A")])
+
+      assert {:ok, snap, _cmd} = Buffer.undo(buf)
+      assert snap.text == "a\nb\nC\n"
+      assert {:ok, snap, _cmd} = Buffer.undo(buf)
+      assert snap.text == "a\nb\nc\n"
+    end
+  end
+
 end
