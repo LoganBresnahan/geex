@@ -261,3 +261,66 @@ none changes the direction.
      geex's leftover discovery file would add latency to every agent edit. The discovery file
      records geex's OS pid; geex removes its file on clean exit, and the payload **skips any
      entry whose pid is gone** (crashes skip cleanup), with a short connect timeout either way.
+
+## Amendment — 2026-10-14 (later): the before/after match, fixture-verified fields, arrival order
+
+From captAInHook's real-envelope fixtures (captAInHook commit `3ddb467`,
+`examples/fixtures/claude-code/`, Claude Code 2.1.299), the step (a) build, and a further
+coordination review. This note **supersedes the residual holes** stated in the previous
+amendment's items 2 and 3.
+
+1. **An attestation must match both hashes.** The message gains `before`: the sha256 of the
+   file's contents *before* the tool call. Every reconcile group already records
+   `before_sha256` (the synced baseline the write replaced) and `sha256` (the disk bytes read).
+   `Buffer.attest/2`, and the pending-table consumption, upgrade the buffer's newest reconcile
+   group only when **both** match. That one rule covers every case the earlier notes
+   handled with residuals:
+   - **Coalesced writes.** Two writes to one path inside one quiet period reconcile as one
+     group whose `before` is the earliest baseline. No single writer's `before` equals it, so
+     the group stays `:external`. That holds for two agent writes, and equally for an agent
+     write merged with a non-attesting writer (`sed -i` H0→H1, then an agent `Edit` H1→H2: the
+     group is H0→H2, and the agent's attestation is H1→H2). A rule based on counting pending
+     attestations would miss the second case.
+   - **Identical-bytes writes.** A no-op write attests `before == sha256`; a group exists only
+     when disk differs from its baseline, so it never matches. No payload-side check is needed.
+   - **Stale pending entries.** An entry must match both hashes too, so a later unrelated write
+     of the same bytes doesn't pick it up.
+
+   **Where `before` comes from (claude-code):** the sha256 of the UTF-8 bytes of
+   `tool_response.originalFile` (`Edit`, `Write` update) or `tool_response.original_file`
+   (`NotebookEdit`), all present in the `PostToolUse` envelope. No `PreToolUse` handler, no
+   `tool_use_id` join. A `Write` that **creates** a file has `originalFile: null`: send no
+   `before`, and geex can't match it (fails safe; revisit only if "the agent creates a file you
+   already have open" turns out to matter). A `NotebookEdit` whose response carries a non-null
+   `error` sends nothing.
+
+   **Exactness caveat:** `originalFile` is Claude Code's decoded text, not raw disk bytes. If
+   they ever differ (CRLF, BOM, encoding), the hashes miss and the group stays `:external`.
+   That fails safe, never wrong. A **dogfood check** confirms a plain UTF-8/LF file round-trips.
+   The fallback, if it doesn't, is the `PreToolUse` disk hash joined by `tool_use_id` (present
+   and identical on Pre and Post).
+
+2. **Fixture-verified fields (claude-code).** Envelope:
+   `{"v":1,"dispatchId","event":{"type","harness","sessionId","cwd","payload":<raw hook JSON>}}`.
+   `harness` = `event.harness` (`"claude-code"`). Path = `payload.tool_input.file_path`
+   (`Write`/`Edit`/`Read`) or `payload.tool_input.notebook_path` (`NotebookEdit`); `Bash` carries
+   none. Writer allowlist observed: `Write`, `Edit`, `NotebookEdit` (`MultiEdit` stays listed,
+   unverified on 2.1.299). `tool_use` = `payload.tool_use_id`. `turn` = `payload.prompt_id`
+   (constant within one user prompt; that it changes on the next prompt is assumed, not yet
+   observed). Envelopes carry **whole file contents** (`content` / `originalFile`), so they can
+   be megabytes: the payload parses with `jq`, never shell regex.
+
+3. **Arrival order is attestation-first.** Decision 3's "the ordering is the expected case"
+   (inotify before the hook) no longer holds. Claude Code writes atomically: observed via
+   `inotifywait`, both `Edit` and `Write` write `<name>.tmp.<pid>.<hex>` and rename it over the
+   target. So reconcile reads once, after the 50 ms quiet period. Meanwhile the `PostToolUse`
+   hop measures ~12–14 ms warm, plus the payload's hash and POST. The **pending table is the
+   primary path**, and step (c) tests it as such. (Skipping the quiet period on `moved_to`,
+   which is complete by definition, is possible but deferred; either order is handled.)
+
+4. **The message, pinned.**
+   `{"v":1, "path", "before"?, "sha256", "harness", "session", "turn"?, "tool_use"?}`.
+   `before` and `sha256` are **exactly 64 lowercase hex characters** (what `sha256sum` and
+   `Base.encode16(case: :lower)` both print). The intake **rejects** any other shape with a 400,
+   rather than accepting a hash that could never match. `before` is absent only for a created
+   file. geex ignores unknown fields.

@@ -138,23 +138,26 @@ The ledger track, in order (each builds on the one before):
 2. **Conflict UX.** A disk change on a **dirty** buffer: today it's last-writer-wins. Decide
    and build the merge/prompt (non-overlapping hunks merge; overlapping ones ask), plus
    deletion handling and burst coalescing.
-3. **Attestation intake.** `meta` gains the reconciled post-state hash; `Buffer.attest/2` (a
-   history operation, ADR-0031-style) upgrades a matching `:external` command to
-   `{:agent, %{harness, session, …}}`; `POST /attest` on the loopback listener, now started
-   in TUI mode too; a `0600` discovery file (URL + token) under `$XDG_RUNTIME_DIR/geex/`.
-   The hash is **`sha256` of the disk bytes reconcile read**, never of the buffer text.
-   Each reconcile's commands share a group id and that hash, and attest upgrades the
-   buffer's **newest reconcile group** whole, once; an early attestation waits in a bounded
-   **pending table** keyed (path, sha256). The discovery file carries geex's pid and is
-   removed on clean exit. A test pins the identical-bytes
-   residual hole (ADR-0032 amendment items 2–3).
+3. **Attestation intake.** `Buffer.attest/2` (a history operation, ADR-0031-style)
+   upgrades the buffer's **newest reconcile group**, whole and once, from `:external` to
+   `{:agent, %{harness, session, …}}`, only when **both** the attestation's `before` and
+   `sha256` equal the group's `before_sha256` and `sha256` (stamped since step 1). That one
+   rule covers coalesced writes, no-op writes and stale entries (ADR-0032's later amendment).
+   **Attestation-first is the primary path:** Claude Code writes atomically and reconcile waits
+   out the quiet period, so an early attestation waits in a bounded **pending table** keyed
+   (path, sha256), consumed by the matching group. `POST /attest` on the loopback listener,
+   now started in TUI mode too; hashes must be 64 lowercase hex, and anything else is rejected
+   with a 400. A `0600` discovery file (URL + token + pid) under `$XDG_RUNTIME_DIR/geex/`,
+   removed on clean exit.
 4. **The captAInHook payload.** A geex-owned `post-tool-use` exec handler script (e.g.
-   `integrations/captainhook/geex-attest.sh`): read the file path from the envelope, hash the
-   file, send the attestation to every live geex. The user registers it in
-   `~/.captainHook/handlers.json`; captAInHook itself stays unaware of geex. Attests only
-   **writer tools** on a per-harness allowlist (unknown means send nothing); POSTs *before*
-   answering, skipping discovery entries whose pid is gone, with a short connect timeout. **Waits on** captAInHook's real-envelope fixtures (`event.harness`, file-path
-   field names, whether a tool-call ID exists for the before/after hash pair).
+   `integrations/captainhook/geex-attest.sh`), registered by the user in
+   `~/.captainHook/handlers.json`; captAInHook itself stays unaware of geex. It attests only
+   **writer tools** on a per-harness allowlist (unknown means send nothing), parses with `jq`,
+   and sends `before` = sha256 of `tool_response.originalFile` / `original_file`, `sha256` =
+   sha256 of the file on disk, plus `tool_use_id` and `prompt_id` (as the turn). It POSTs
+   *before* answering, skipping discovery entries whose pid is gone, with a short connect
+   timeout. Fixtures: captAInHook `3ddb467`, copied into `test/fixtures/` with that source
+   note.
 5. **Surfacing in the TUI.** Show who wrote what: a gutter mark for agent-authored hunks, the
    author on the status line, and undo of a specific agent hunk without touching your own
    edits.
