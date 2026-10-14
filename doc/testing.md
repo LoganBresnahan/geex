@@ -1204,3 +1204,71 @@ tinted cells. **606 tests + 9 doctests** green, `--warnings-as-errors` clean.
 **Scoping:** this is the **human** picking surface only. The **agent/buffer-absolute** grapheme form (a
 `Geex.Command.Type` `:coord` cast + a grid edit tool), **block**/**multi** ranges, easy-motion jump labels,
 and the `cursor_x`-oracle automated cast test are documented deferrals (ADR-0027 amendment).
+
+### 2026-06-09 — Command palette: `Alt+P` fuzzy browser over the catalog (ADR-0028 §3, commit `62d52e0`)
+
+*Entry written 2026-10-14 from the commit record and session notes — the slice shipped without one.*
+
+The first discovery surface. `Geex.Fuzzy` (pure subsequence `score/2`: greedy O(n) walk, compounding
+contiguous-run + word-boundary bonuses, so prefixes beat scattered acronyms — `sa` ranks `save` above
+`select all`); `Geex.Command.Catalog` (+ `Catalog.Entry`, its own file) = the one structured
+`{name, description, invoke}` list, `invoke` either `{:action, atom}` (→ the shared `apply_action/4`) or
+`{:typed, prefix}` (→ hand off to `:command` mode pre-filled, e.g. `line `); `search/1` bands name matches
+above description-only ones. The `:palette` minibuffer mode: `input` = filter, a new `sel` field = the
+highlighted row (reset on every edit), a candidate popup painted over the rows above the input (no reflow),
+`Alt+W`/`Alt+S` + arrows navigate with wrap, Enter runs the pick.
+
+**Live-verified via tmux:** open → filter → `Alt+W`/`Alt+S` → Enter on both an `{:action}` entry and a
+`{:typed}` hand-off → `Alt+N` close. **629 tests + 9 doctests** green.
+
+**Not tested / deferred:** Esc-close inherits the documented bare-ESC linger (all modes); path operations
+(open/close/create) wait on the fuzzy finder; the `Verbs` table is not yet re-based on the catalog.
+
+### 2026-06-10 — Grid-agent parity: the agent's grapheme-coordinate surface (ADR-0027 amendment, commit `c643941`)
+
+*Entry written 2026-10-14 from the commit record and session notes — the slice shipped without one.*
+
+The agent half of grid: an agent speaks the same `"x5 y7"` / `"x5 y7 - x12 y9"` grammar a human types in
+`:grid` mode, resolved as **buffer-absolute graphemes** (no display cast — text readers are already in
+graphemes). `Geex.Command.Type` `:coord`/`:coord_range` cast through the same `Geex.Coord.parse/1`; a wrong
+shape is a clean argument error; the schema renders both as string args. `Geex.MCP.Grid`: `goto` (move the
+active cursor — the 2-D `line`, riding the same cursor-notify repaint path) and `copy` (`Coord.to_span` →
+`Doc.slice` → `Clipboard.push` onto the ring the human pastes from with `Alt+V`). A collapsed span is a
+clean error, not an empty copy. `Protocol.tool_call` became a `with`-chain (one lookup per category).
+
+**Verified through the real protocol path** (`tools/call` `goto`/`copy` via the JSON-RPC handler) + `Grid` /
+`Type` unit tests — **not** live over HTTP at the time. **649 tests + 9 doctests** green. (The 2026-10-14
+entry below confirms `goto`/`copy` appear in a live `tools/list`.)
+
+**Not tested / deferred:** agent `cut` (= copy + a recorded `replace`), coordinate `select` (selection is
+loop-local), and exposing undo/redo/paste as agent tools (the `Verbs` ↔ catalog unification).
+
+### 2026-10-14 — Project tooling, live reconcile, and a sibling-dep fix (after a four-month gap)
+
+First session back since `c643941`. Suite re-run first: **649 tests + 9 doctests**, clean.
+
+- **Repo tooling, in line with the other projects** (captAInHook, pharos-mcp, DeepSeek Moby):
+  `CLAUDE.md` (invariants + where to look) and the skills `/orient`, `/shipshape`, `/dogfood` under
+  `.claude/skills/`. The `/dogfood` recipes were run before being written down: a TUI pass in a
+  private-socket tmux pty (typed into a scratch file, read the grid + `cursor_x,y` back, Ctrl-X quit) and an
+  MCP pass (`mix geex.serve` on an auto port via `GEEX_MCP_PORT_FILE` → `initialize`, `notifications/initialized`
+  → 202, `tools/list` → all 13 tools incl. `line`/`goto`/`copy`, `open_file` → the text; foreign `Origin` → 403,
+  GET → 405).
+- **`inotify-tools` installed on the dev box → the reconcile floor shown live** (the open item from the
+  2026-06-05 presets entry). Under `mix geex.serve`: `open_file` a scratch file (`before`), overwrite it from
+  the shell, and the server logs `geex reconcile: external change to …/t.txt`; the buffer then reads
+  `after (out-of-band)`. First live demonstration of `:external` reconcile against the real watcher.
+- **That install exposed a host-dependent test.** `reconcile_test` "degrades gracefully when the watch backend
+  is unavailable" only passed because inotify was *absent*. Fixed with a backend seam:
+  `Geex.Reconcile` takes a `:start_watcher` option (default: the real `FileSystem.start_link/1`); the test
+  stubs it as `:ignore`, and a new test stubs a successful backend to pin the success path (dir recorded once,
+  second `watch` is a no-op). **650 tests + 9 doctests**, green twice, now with no inotify noise.
+- **`plug` 1.19.2 → 1.20.3** (+ `plug_crypto` 2.2.0), lockfile-only, in-range; suite green twice.
+- **Sibling `../tree_sitter_wasm` committed clean** (`6c4d23c`): an uncommitted fix was sitting in the path
+  dep — reset the cached parser after a cancelled/failed parse (otherwise the next highlight on the same
+  grammar handle resumes the halted parse and returns corrupted spans), with its regression test. Its suite
+  green twice before committing; geex now compiles against a committed sibling.
+
+**Not tested:** no TUI-visible geex code changed, so no new TUI behaviour to verify; the live Claude Code
+preset run (Handle 3 of `/dogfood`) is still the open v0.5 item; provenance of the reconciled edit was not
+read from the in-process history this pass (the log line + buffer text are the evidence).

@@ -8,3 +8,7 @@ erl_crash.dump
 /config/*.secret.exs
 .elixir_ls/
 .history/
+
+# Claude Code local state (skills/ and workflows/ are tracked)
+.claude/scheduled_tasks.lock
+.claude/settings.local.json

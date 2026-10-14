@@ -12,6 +12,13 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
+**Current (2026-10-14):** 650 tests + 9 doctests green, `--warnings-as-errors` clean. Since the
+narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
+minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped —
+the live frontier is the command-surface track at the end of this file. The reconcile watcher is
+now shown live against a real `inotify` backend. (Test counts quoted further down are as of their
+own dates.)
+
 The command system is built **and wired into the running app** (ADR-0014). The
 dispatch "world" is `Geex.EditorState` (today `{doc}`); a command's pure runner is
 `run(command, %EditorState{})`. `Geex.Dispatch` has the pure inner layer
@@ -145,8 +152,9 @@ loopback HTTP and edits buffers; every edit is a provenance-tagged `%Command{}` 
 live shared undo history; out-of-band writes are reconciled as `:external`; sessions
 replay. **Status:** the *connect + edit + provenance + save* clauses are proven live (an
 external loopback MCP client; the named-harness-honoring-the-preset run is the open item);
-`:external` reconcile is core-tested but not yet shown against a live `inotify` backend
-(absent on the dev box); replay is proven by the §15c cassette (`Dispatch.replay/2`), not
+`:external` reconcile is shown live (2026-10-14, once `inotify-tools` was installed on the dev
+box: an out-of-band disk write to an open buffer's file was reconciled into the live buffer via
+the real watcher — see [testing.md](testing.md)); replay is proven by the §15c cassette (`Dispatch.replay/2`), not
 re-shown in the dogfood.
 
 v0.5 **non-goals** (deferred, [mcp-ai-integration.md](mcp-ai-integration.md) §12):
@@ -241,8 +249,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    (field-spec → `tools/list`; the fourth `tools/call` route) with **`line`** as the first
    member, and the **typed-verb surface** `Geex.Loop.Verbs` — chords and typed verbs share one
    action vocabulary through the loop's `apply_action` (the parity mechanism); an agent-moved
-   cursor now repaints (`{:geex_cursor}` notify). Remaining: `scroll` / coordinate `select` /
-   grid `goto` members, and re-basing the verb table on the catalog when the palette lands.
+   cursor now repaints (`{:geex_cursor}` notify). The agent's grid tools (`goto`, `copy`) landed
+   as their own category, `Geex.MCP.Grid` (item 4). Remaining: `scroll` / coordinate `select`
+   members, and re-basing the `Verbs` table on `Geex.Command.Catalog` (the palette shipped the
+   catalog; the verbs don't resolve against it yet, nor are undo/redo/paste agent tools).
 3. ~~**Refactor go-to-line through the real system**~~ — **done** (rode item 2): the
    `run_command` hack is deleted; bare `N`, typed `line N`, and `tools/call line` converge on
    `ViewActions.line/1`.
@@ -251,10 +261,14 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      amendment): `Geex.Coord` (`parse`/`to_caret`/`to_span`) + `Width.col_at_display` (the
      display→grapheme cast) + the contextual display-column **ruler** and dotted **grid-line
      overlay**; `copy`/`cut`/`goto` over coordinates, live-verified against a wide glyph.
-     Remaining: the **agent/buffer-absolute** grapheme form (`Geex.Command.Type` `:coord` cast +
-     a grid edit tool), block/multi ranges, the `cursor_x`-oracle *automated* cast test.
-   - **palette** (`Alt+P` / typed `palette`), incremental **search** (`/`), and the **fuzzy
-     file/buffer finder** (path tab-completion — one `Completion` abstraction, sources per mode).
+     The **agent half is built** too (ADR-0027 grid-agent amendment): `Geex.Command.Type`
+     `:coord`/`:coord_range` (the same `Coord.parse/1` grammar, resolved as buffer-absolute
+     graphemes) + `Geex.MCP.Grid` (`goto`, `copy` onto the shared clipboard ring). Remaining: agent
+     `cut`, coordinate `select`, block/multi ranges, the `cursor_x`-oracle *automated* cast test.
+   - **palette** (`Alt+P`) — **built** (ADR-0028 §3 amendment): `Geex.Fuzzy` + `Geex.Command.Catalog`
+     + the `:palette` minibuffer mode with a candidate popup (`Alt+W`/`Alt+S` navigate, Enter runs).
+   - Remaining: incremental **search** (`/`) and the **fuzzy file/buffer finder** (path
+     tab-completion — one `Completion` abstraction, sources per mode; reuses `Geex.Fuzzy`).
 5. **undo / redo** — **built** ([adr/0031](adr/0031-undo-redo-history-operations.md)): history
    operations on `Alt+Z` / `Alt+Shift+Z` (replay-from-base over the recorded history + the loaded
    `base`, [adr/0014](adr/0014-editor-state-and-dispatch-ownership.md)); a fresh edit clears the
