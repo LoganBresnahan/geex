@@ -324,3 +324,27 @@ amendment's items 2 and 3.
    `Base.encode16(case: :lower)` both print). The intake **rejects** any other shape with a 400,
    rather than accepting a hash that could never match. `before` is absent only for a created
    file. geex ignores unknown fields.
+
+## Amendment — 2026-10-14: step (b) decided — on overlap, disk wins and you're told
+
+The conflict rule for an out-of-band write to a **dirty** buffer (Decision 7b), chosen by the
+maintainer. Reconcile three-way merges base = the synced disk text, ours = the buffer, theirs =
+the new disk text (`Geex.Edit.Merge`):
+
+- **Every disk hunk lands.** Disk is the writer's ground truth for its next tool call, so geex
+  never lets the buffer silently disagree with what an agent just wrote.
+- **Your unsaved hunks that don't overlap are kept**, and the buffer stays dirty: the merge
+  re-baselines `synced` to the disk bytes and recomputes `dirty`, atomically with the apply.
+- **An overlapping hunk of yours takes the disk version.** It stays one undo away, and the
+  human gets a status-line notice (`{:geex_buffer_notice, …}`): "disk changed: N of your
+  unsaved hunks took the disk version (Alt+Z restores yours)". The identical change on both
+  sides is not counted.
+- The merge lands as an ordinary reconcile group (buffer text → merged text, hunk by hunk)
+  stamped with the **disk-bytes** hashes, so attestation is unaffected by your unsaved edits.
+
+Rejected: "you win" (the agent's overlapping text would never enter the history, so a save
+would overwrite it, a hole in the ledger) and "ask each time" (it blocks the human while the
+agent keeps writing against disk). Also added: hunks are applied with `expect_seq`, so a
+keystroke landing between reconcile's snapshot and its apply makes the buffer refuse
+(`:stale`) and reconcile retries on a fresh snapshot. This closes a race the whole-buffer
+replace had too.

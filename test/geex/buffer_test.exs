@@ -248,6 +248,30 @@ defmodule Geex.BufferTest do
       assert Buffer.history(buf) == []
     end
 
+    test "expect_seq refuses a group computed from a stale snapshot", %{buf: buf} do
+      seq = Buffer.snapshot(buf).seq
+      {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "x"))
+
+      assert Buffer.dispatch_group(buf, [replace(0, 0, 0, 1, "A")], expect_seq: seq) ==
+               {:error, :stale}
+
+      assert Buffer.get_text(buf) == "xa\nb\nc\n"
+    end
+
+    test "baseline: re-syncs and recomputes dirty; a notice reaches subscribers", %{buf: buf} do
+      {:ok, _v} = Buffer.subscribe(buf, self())
+
+      assert {:ok, snap} =
+               Buffer.dispatch_group(buf, [replace(0, 0, 0, 1, "A")],
+                 baseline: "A\nb\nc\n",
+                 notice: "hello"
+               )
+
+      refute snap.dirty
+      assert snap.synced == "A\nb\nc\n"
+      assert_receive {:geex_buffer_notice, ^buf, "hello"}, 500
+    end
+
     test "undo walks the group back one command at a time", %{buf: buf} do
       {:ok, _} = Buffer.dispatch_group(buf, [replace(2, 0, 2, 1, "C"), replace(0, 0, 0, 1, "A")])
 

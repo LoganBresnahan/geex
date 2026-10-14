@@ -1308,3 +1308,34 @@ half-write). **669 tests + 10 doctests**, green twice, `--warnings-as-errors` cl
 
 **Not tested:** a write that outlasts the quiet period (adopted in pieces, by design); a large-file
 performance check of the line diff; conflict handling on a dirty buffer (step b: still last-writer-wins).
+
+### 2026-10-14 — Ledger step (b): merging a disk change into a dirty buffer (ADR-0032)
+
+The maintainer's rule: **disk wins on overlap, and you're told.** New pure `Geex.Edit.Merge.merge/3`
+(base = synced disk text, ours = buffer, theirs = new disk text, all as `LineDiff` hunks in base
+coordinates): every disk hunk is applied; each unsaved hunk of yours is kept unless it overlaps one
+(intersecting removed ranges, inserts at the same point, or an insert strictly inside the other's range;
+adjacent-line changes don't conflict); the count of replaced hunks excludes identical changes.
+Reconcile now diffs the buffer text against the merged text (so it lands as the usual hunk group,
+stamped with the **disk-bytes** hashes) and passes three new `Buffer.dispatch_group/3` options:
+`baseline:` (re-sync `synced` to the disk bytes and recompute `dirty` in the same call), `notice:`
+(broadcast `{:geex_buffer_notice, buffer, text}`), and `expect_seq:` (refuse with `:stale` if an edit
+landed after reconcile's snapshot; reconcile retries up to 3 times — closes a race the whole-buffer
+replace also had). The TUI shows the notice on the status line until the next key; the status line now
+keeps at least one space before `line:col` (a long notice had run into it).
+
+**Live-verified in the TUI** (tmux pty, 100×12): typed unsaved edits on lines 1 and 5 (`MINE alpha`,
+`epsilalso-mine on`); this session's native `Write` then changed lines 1 and 4. Result: line 1 took the
+disk text `ALPHA (agent)` (overlap), line 4 merged `DELTA (agent)`, line 5 kept the unsaved edit, status
+`doc.txt [+]  disk changed: 1 of your unsaved hunks took the disk version (Alt+Z restores yours)`; one
+`Alt+Z` restored `MINE alpha` (and dismissed the notice) while line 4's agent change stayed.
+
+**Automated:** `merge_test` (disjoint, adjacent, overlap + count, identical change, delete-vs-edit,
+same-point inserts, different-point inserts, a 300-case seeded identity check; doctests), `reconcile_test`
+(disjoint merge keeps yours and stays dirty with no notice; overlap → disk + notice + undo restores;
+disk equal to buffer records nothing and re-syncs; merged group keeps disk-bytes hashes), `buffer_test`
+(`expect_seq` refuses stale; `baseline` re-syncs + `notice` reaches subscribers), `loop_test` (status gap).
+**684 tests + 12 doctests**, green twice, `--warnings-as-errors` clean.
+
+**Not tested:** the `:stale` retry under a real keystroke race (the guard itself is unit-tested); a
+notice when the buffer isn't the active one (only the attached loop shows it).

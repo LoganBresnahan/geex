@@ -72,9 +72,10 @@ defmodule Geex.Reconcile do
   alias Geex.Command.Meta
   alias Geex.Commands.Replace
   alias Geex.{Buffer, BufferSupervisor, Command}
-  alias Geex.Edit.LineDiff
+  alias Geex.Edit.{LineDiff, Merge}
 
   @default_settle_ms 50
+  @stale_retries 3
 
   # --- public API ---
 
@@ -101,10 +102,18 @@ defmodule Geex.Reconcile do
 
     * **equal** → `:ignored` (the file is unchanged from geex's last sync: its own
       `save/1`, a no-op, or unsaved edits sitting on top of an otherwise-unchanged file);
-    * **differ** → a genuine external change: synthesize an `:external` whole-buffer
-      `replace` to `disk_text`, dispatch it into `pid`'s history (adopting over any unsaved
-      edits — the geex-as-observer posture), returning `{:reconciled, snapshot}`;
+    * **differ** → a genuine external change, recorded as one `:external` group of hunk
+      `replace`s (ADR-0032), returning `{:reconciled, snapshot}`:
+      * a **clean** buffer adopts `disk_text`;
+      * a **dirty** buffer is three-way merged (`Geex.Edit.Merge`: base = `synced`, ours =
+        the buffer, theirs = disk). The disk change always lands; your unsaved hunks that
+        don't overlap it are kept (the buffer stays dirty); an overlapping one takes the
+        disk version, stays one undo away, and the human gets a notice
+        (`{:geex_buffer_notice, …}`) saying how many were replaced;
     * a dispatch failure → `{:error, reason}`.
+
+  The hunks are computed from a snapshot and applied with `expect_seq`, so an edit landing
+  in between makes the buffer refuse (`:stale`) and reconcile retries on a fresh snapshot.
 
   Comparing against the baseline (not the live text) is what makes a dirty buffer's unsaved
   edits survive an event for an *unchanged* file — including the destination event from
@@ -113,22 +122,37 @@ defmodule Geex.Reconcile do
   """
   @spec reconcile(pid(), String.t()) ::
           :ignored | {:reconciled, map()} | {:error, term()}
-  def reconcile(pid, disk_text) when is_pid(pid) and is_binary(disk_text) do
+  def reconcile(pid, disk_text) when is_pid(pid) and is_binary(disk_text),
+    do: reconcile(pid, disk_text, @stale_retries)
+
+  defp reconcile(pid, disk_text, retries) do
     snapshot = Buffer.snapshot(pid)
 
     if snapshot.synced == disk_text do
       :ignored
     else
-      commands = external_commands(snapshot.text, snapshot.synced, disk_text)
+      {target, conflicts} =
+        if snapshot.text == snapshot.synced,
+          do: {disk_text, 0},
+          else: Merge.merge(snapshot.synced, snapshot.text, disk_text)
 
-      case Buffer.dispatch_group(pid, commands) do
-        {:ok, _new_snapshot} ->
-          # The buffer now equals disk — re-baseline it (mark_synced sets `synced` to the
-          # current text and clears the dirty flag that dispatch/2 set; that text is the new
-          # on-disk truth).
-          synced = Buffer.mark_synced(pid)
-          Logger.info("geex reconcile: external change to #{snapshot.path || "buffer"}")
-          {:reconciled, synced}
+      commands = external_commands(snapshot.text, target, snapshot.synced, disk_text)
+
+      opts =
+        [baseline: disk_text, expect_seq: snapshot.seq] ++
+          if conflicts > 0, do: [notice: conflict_notice(conflicts)], else: []
+
+      case Buffer.dispatch_group(pid, commands, opts) do
+        {:ok, new_snapshot} ->
+          Logger.info(
+            "geex reconcile: external change to #{snapshot.path || "buffer"}" <>
+              if(conflicts > 0, do: " (#{conflicts} unsaved hunk(s) took disk)", else: "")
+          )
+
+          {:reconciled, new_snapshot}
+
+        {:error, :stale} when retries > 0 ->
+          reconcile(pid, disk_text, retries - 1)
 
         {:error, reason} = error ->
           Logger.warning("geex reconcile: failed to apply external change: #{inspect(reason)}")
@@ -153,7 +177,7 @@ defmodule Geex.Reconcile do
   # and the sha256 of the baseline disk bytes this write replaced (`synced`). An
   # attestation must match both hashes (ADR-0032 amendments). If the line diff can't
   # reproduce the disk text exactly, fall back to one whole-text replace.
-  defp external_commands(buffer_text, baseline, disk_text) do
+  defp external_commands(buffer_text, target, baseline, disk_text) do
     meta =
       Meta.new(:external,
         reconcile: %{
@@ -164,13 +188,19 @@ defmodule Geex.Reconcile do
       )
 
     spans =
-      case LineDiff.spans(buffer_text, disk_text) do
-        {:ok, [_ | _] = spans} -> spans
-        _ -> [whole_text_span(buffer_text, disk_text)]
+      case LineDiff.spans(buffer_text, target) do
+        {:ok, spans} -> spans
+        :error -> [whole_text_span(buffer_text, target)]
       end
 
     Enum.map(spans, &replace_command(&1, meta))
   end
+
+  defp conflict_notice(1),
+    do: "disk changed: 1 of your unsaved hunks took the disk version (Alt+Z restores yours)"
+
+  defp conflict_notice(n),
+    do: "disk changed: #{n} of your unsaved hunks took the disk version (Alt+Z restores yours)"
 
   # Lowercase hex, 64 chars — the attestation contract's format (what `sha256sum` prints).
   defp sha256(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)

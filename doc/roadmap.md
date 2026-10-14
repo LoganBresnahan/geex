@@ -135,7 +135,10 @@ The ledger track, in order (each builds on the one before):
    table-testable.) **Plus write completion** (ADR-0032 amendment item 4): a per-path quiet
    period before diffing, so a mid-write read never lands as a half-edit hunk (`file_system`
    reports `MODIFY` and `CLOSE_WRITE` as the same `:modified` event).
-2. **Conflict UX.** A disk change on a **dirty** buffer: today it's last-writer-wins. Decide
+2. **Conflict UX** — **built 2026-10-14** (ADR-0032 step-b amendment): a three-way merge
+   (`Geex.Edit.Merge`) — disk hunks always land, your non-overlapping unsaved hunks are kept
+   (still dirty), an overlapping one takes disk with a status-line notice and stays one undo
+   away; applied with `expect_seq` (stale snapshot → retry). Original plan: decide
    and build the merge/prompt (non-overlapping hunks merge; overlapping ones ask), plus
    deletion handling and burst coalescing.
 3. **Attestation intake.** `Buffer.attest/2` (a history operation, ADR-0031-style)

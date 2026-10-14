@@ -126,9 +126,26 @@ defmodule Geex.Buffer do
   redo stack is cleared, and subscribers get **one** change notification covering the
   whole group. Reconcile uses this to record one out-of-band write as one command per
   changed hunk (ADR-0032). Returns `{:ok, snapshot}` or the first command's error.
+
+  Options, both applied in the same call so nothing can interleave:
+
+    * `:baseline` — the disk text the buffer is now in sync with (reconcile passes the
+      bytes it read). `synced` becomes it and `dirty` is recomputed, so a merge that keeps
+      your unsaved edits stays dirty. Without it the buffer is simply marked dirty. With a
+      baseline, `commands` may be empty (disk changed to what the buffer already holds).
+    * `:notice` — a one-line message for the human, broadcast to subscribers as
+      `{:geex_buffer_notice, buffer, text}` after the change notification.
+    * `:expect_seq` — apply only if the buffer's change clock (`snapshot.seq`) still equals
+      this; otherwise return `{:error, :stale}` and change nothing. For a caller that
+      computed `commands` from a snapshot (reconcile), so an edit that landed in between
+      can't make them apply at the wrong place.
   """
-  def dispatch_group(server, [_ | _] = commands),
-    do: GenServer.call(server, {:dispatch_group, commands})
+  def dispatch_group(server, commands, opts \\ []) when is_list(commands) do
+    if commands == [] and not Keyword.has_key?(opts, :baseline),
+      do: raise(ArgumentError, "dispatch_group/3 needs commands, or a :baseline")
+
+    GenServer.call(server, {:dispatch_group, commands, opts})
+  end
 
   @doc """
   Undo the most recent edit (ADR-0031). Drops the newest command from history onto the redo
@@ -275,36 +292,10 @@ defmodule Geex.Buffer do
     end
   end
 
-  def handle_call({:dispatch_group, commands}, _from, state) do
-    applied =
-      Enum.reduce_while(commands, {:ok, state.editor}, fn command, {:ok, editor} ->
-        case Geex.Dispatch.apply_command(command, editor) do
-          {:ok, next} -> {:cont, {:ok, next}}
-          {:error, _reason} = error -> {:halt, error}
-        end
-      end)
-
-    case applied do
-      {:ok, editor} ->
-        # One notification for the group: the byte footprint is the diff of the whole
-        # transition (the same exact splice undo/redo uses), not a per-command footprint.
-        footprint =
-          Footprint.between(EditorState.text(state.editor), EditorState.text(editor))
-
-        new_state = %{
-          state
-          | editor: editor,
-            history: Enum.reverse(commands) ++ state.history,
-            redo: [],
-            dirty: true,
-            seq: state.seq + 1
-        }
-
-        notify_change(new_state, footprint)
-        {:reply, {:ok, build_snapshot(new_state)}, new_state}
-
-      {:error, _reason} = error ->
-        {:reply, error, state}
+  def handle_call({:dispatch_group, commands, opts}, _from, state) do
+    case Keyword.fetch(opts, :expect_seq) do
+      {:ok, seq} when seq != state.seq -> {:reply, {:error, :stale}, state}
+      _ -> apply_group(commands, opts, state)
     end
   end
 
@@ -422,6 +413,52 @@ defmodule Geex.Buffer do
   # reactor's "newer = higher" ordering) **and the edit's byte footprint** (`%{at, removed,
   # added}`, or `:unknown`) so a byte-oriented overlay can shift optimistically across the
   # edit. A plain `send` — the buffer never blocks on a reactor.
+  defp apply_group(commands, opts, state) do
+    applied =
+      Enum.reduce_while(commands, {:ok, state.editor}, fn command, {:ok, editor} ->
+        case Geex.Dispatch.apply_command(command, editor) do
+          {:ok, next} -> {:cont, {:ok, next}}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+
+    case applied do
+      {:ok, editor} ->
+        # One notification for the group: the byte footprint is the diff of the whole
+        # transition (the same exact splice undo/redo uses), not a per-command footprint.
+        footprint =
+          Footprint.between(EditorState.text(state.editor), EditorState.text(editor))
+
+        {synced, dirty} =
+          case Keyword.fetch(opts, :baseline) do
+            {:ok, baseline} -> {baseline, EditorState.text(editor) != baseline}
+            :error -> {state.synced, true}
+          end
+
+        new_state = %{
+          state
+          | editor: editor,
+            history: Enum.reverse(commands) ++ state.history,
+            redo: if(commands == [], do: state.redo, else: []),
+            synced: synced,
+            dirty: dirty,
+            seq: state.seq + 1
+        }
+
+        notify_change(new_state, footprint)
+        if notice = opts[:notice], do: notify_notice(new_state, notice)
+        {:reply, {:ok, build_snapshot(new_state)}, new_state}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  defp notify_notice(state, text) do
+    for {_ref, pid} <- state.subscribers, do: send(pid, {:geex_buffer_notice, self(), text})
+    :ok
+  end
+
   defp notify_change(state, footprint) do
     msg = {:geex_buffer_change, self(), state.seq, footprint}
     for {_ref, pid} <- state.subscribers, do: send(pid, msg)

@@ -201,6 +201,57 @@ defmodule Geex.ReconcileTest do
     end
   end
 
+  describe "a disk change on a dirty buffer: merge, disk wins overlaps (ADR-0032 step b)" do
+    test "a disjoint disk change merges in; your unsaved edit is kept and still unsaved" do
+      buf = start_supervised!({Buffer, text: "1\n2\n3\n"})
+      dirty_edit(buf, "MY-")
+      {:ok, _v} = Buffer.subscribe(buf, self())
+
+      assert {:reconciled, snap} = Reconcile.reconcile(buf, "1\n2\nDISK\n")
+      assert snap.text == "MY-1\n2\nDISK\n"
+      assert snap.synced == "1\n2\nDISK\n"
+      assert snap.dirty
+      refute_receive {:geex_buffer_notice, ^buf, _}, 100
+    end
+
+    test "an overlapping hunk takes disk, the human is told, and undo restores theirs" do
+      buf = start_supervised!({Buffer, text: "keep\nedit me\n"})
+      {:ok, cmd} = Insert.parse(%{line: 1, col: 0, text: "MINE "})
+      {:ok, _} = Buffer.dispatch(buf, Command.put_meta(cmd, Meta.human()))
+      {:ok, _v} = Buffer.subscribe(buf, self())
+
+      assert {:reconciled, snap} = Reconcile.reconcile(buf, "keep\nDISK\n")
+      assert snap.text == "keep\nDISK\n"
+      refute snap.dirty
+      assert_receive {:geex_buffer_notice, ^buf, notice}, 500
+      assert notice =~ "1 of your unsaved hunks"
+
+      assert {:ok, snap, _} = Buffer.undo(buf)
+      assert snap.text == "keep\nMINE edit me\n"
+    end
+
+    test "disk changing to exactly what the buffer holds records nothing, just re-syncs" do
+      buf = start_supervised!({Buffer, text: "a\n"})
+      dirty_edit(buf, "b")
+      history = Buffer.history(buf)
+
+      assert {:reconciled, snap} = Reconcile.reconcile(buf, "ba\n")
+      assert snap.history == history
+      assert snap.synced == "ba\n"
+      refute snap.dirty
+    end
+
+    test "the merged group keeps the disk-bytes hashes (attestation stays exact)" do
+      buf = start_supervised!({Buffer, text: "1\n2\n"})
+      dirty_edit(buf, "MY-")
+      assert {:reconciled, snap} = Reconcile.reconcile(buf, "1\nTWO\n")
+      ext = List.last(snap.history)
+      hex = &Base.encode16(:crypto.hash(:sha256, &1), case: :lower)
+      assert ext.meta.reconcile.before_sha256 == hex.("1\n2\n")
+      assert ext.meta.reconcile.sha256 == hex.("1\nTWO\n")
+    end
+  end
+
   describe "write completion: the per-path quiet period (ADR-0032)" do
     @settle 40
 

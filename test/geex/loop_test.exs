@@ -221,5 +221,9 @@ defmodule Geex.LoopTest do
       bar = Loop.status_text("a-very-long-name.ex", "999:42", 8)
       assert String.length(bar) > 8
     end
+
+    test "a too-long left segment still keeps a space before the position" do
+      assert Loop.status_text("doc.txt  a long notice", "5:16", 20) =~ "notice 5:16"
+    end
   end
 end

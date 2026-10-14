@@ -203,7 +203,8 @@ defmodule Geex.Loop do
   def status_text(left, right, w) do
     l = " " <> left
     r = right <> " "
-    pad = max(w - Width.string(l) - Width.string(r), 0)
+    # At least one space, so a long left segment (a notice) never runs into the position.
+    pad = max(w - Width.string(l) - Width.string(r), 1)
     l <> String.duplicate(" ", pad) <> r
   end
 
@@ -228,7 +229,10 @@ defmodule Geex.Loop do
         buffer_ref: nil,
         reactor: nil,
         repaint?: false,
-        minibuffer: Minibuffer.new()
+        minibuffer: Minibuffer.new(),
+        # A one-line message from the buffer (`{:geex_buffer_notice, …}`, e.g. a reconcile
+        # conflict, ADR-0032), shown on the status line until the next key.
+        notice: nil
       }
       |> attach(active)
 
@@ -246,6 +250,9 @@ defmodule Geex.Loop do
   # no longer match the text — a later copy/cut would grab the wrong region.
   def handle_info({:geex_buffer_change, buffer, _v, _footprint}, %{buffer: buffer} = state),
     do: {:noreply, schedule_repaint(%{state | selection: nil})}
+
+  def handle_info({:geex_buffer_notice, buffer, text}, %{buffer: buffer} = state),
+    do: {:noreply, schedule_repaint(%{state | notice: text})}
 
   def handle_info({:geex_highlights, buffer, _v}, %{buffer: buffer} = state),
     do: {:noreply, schedule_repaint(state)}
@@ -282,6 +289,9 @@ defmodule Geex.Loop do
   # the current text + cursor (read fresh from Session) and apply via the one shared path
   # (edits) or a view-local cursor move.
   def handle_info({:geex_io, event}, state) do
+    # Any key dismisses a notice (it has been seen).
+    state = if state.notice, do: schedule_repaint(%{state | notice: nil}), else: state
+
     if Minibuffer.active?(state.minibuffer) do
       {:noreply, apply_minibuffer_key(event, state)}
     else
@@ -544,8 +554,11 @@ defmodule Geex.Loop do
   # Overlay the status line on the bottom row of `screen`: the buffer label + dirty
   # marker on the left, the 1-based `line:col` flush right, on a reverse-video bar
   # (theme fg/bg swapped — always-readable, theme-faithful chrome).
-  defp draw_status(screen, %{w: w, h: h, theme: theme}, snap) do
-    left = status_label(snap.path) <> if(snap.dirty, do: " [+]", else: "")
+  defp draw_status(screen, %{w: w, h: h, theme: theme} = state, snap) do
+    left =
+      status_label(snap.path) <>
+        if(snap.dirty, do: " [+]", else: "") <>
+        if(state.notice, do: "  " <> state.notice, else: "")
 
     Screen.draw_text(
       screen,
