@@ -125,7 +125,9 @@ The ledger track, in order (each builds on the one before):
 1. **Line-level reconcile diffs.** Replace the whole-buffer `replace` with a myers line diff →
    one minimal `replace` per hunk, dispatched as one atomic group, so undoing an agent's
    change undoes *that hunk*, not the file. (Pairs with ADR-0020's diff work; pure, so
-   table-testable.)
+   table-testable.) **Plus write completion** (ADR-0032 amendment item 4): a per-path quiet
+   period before diffing, so a mid-write read never lands as a half-edit hunk (`file_system`
+   reports `MODIFY` and `CLOSE_WRITE` as the same `:modified` event).
 2. **Conflict UX.** A disk change on a **dirty** buffer: today it's last-writer-wins. Decide
    and build the merge/prompt (non-overlapping hunks merge; overlapping ones ask), plus
    deletion handling and burst coalescing.
@@ -133,10 +135,19 @@ The ledger track, in order (each builds on the one before):
    history operation, ADR-0031-style) upgrades a matching `:external` command to
    `{:agent, %{harness, session, …}}`; `POST /attest` on the loopback listener, now started
    in TUI mode too; a `0600` discovery file (URL + token) under `$XDG_RUNTIME_DIR/geex/`.
+   The hash is **`sha256` of the disk bytes reconcile read**, never of the buffer text.
+   Each reconcile's commands share a group id and that hash, and attest upgrades the
+   buffer's **newest reconcile group** whole, once; an early attestation waits in a bounded
+   **pending table** keyed (path, sha256). The discovery file carries geex's pid and is
+   removed on clean exit. A test pins the identical-bytes
+   residual hole (ADR-0032 amendment items 2–3).
 4. **The captAInHook payload.** A geex-owned `post-tool-use` exec handler script (e.g.
    `integrations/captainhook/geex-attest.sh`): read the file path from the envelope, hash the
    file, send the attestation to every live geex. The user registers it in
-   `~/.captainHook/handlers.json`; captAInHook itself stays unaware of geex.
+   `~/.captainHook/handlers.json`; captAInHook itself stays unaware of geex. Attests only
+   **writer tools** on a per-harness allowlist (unknown means send nothing); POSTs *before*
+   answering, skipping discovery entries whose pid is gone, with a short connect timeout. **Waits on** captAInHook's real-envelope fixtures (`event.harness`, file-path
+   field names, whether a tool-call ID exists for the before/after hash pair).
 5. **Surfacing in the TUI.** Show who wrote what: a gutter mark for agent-authored hunks, the
    author on the status line, and undo of a specific agent hunk without touching your own
    edits.

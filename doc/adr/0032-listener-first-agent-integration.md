@@ -1,6 +1,6 @@
 # ADR-0032: Listener-first agent integration — agents edit natively, geex records, captAInHook attributes; MCP frozen
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-10-14: attestation safety + write completion)
 - **Date:** 2026-10-14
 - **Amends:** [ADR-0016](0016-external-harness-integration.md) (the ladder's recommended
   path), [ADR-0017](0017-reconcile-file-watch.md) (reconcile becomes the primary agent path;
@@ -183,3 +183,81 @@ in the loop — it needs to **listen to the thing that is**.
 [ADR-0016](0016-external-harness-integration.md), [ADR-0017](0017-reconcile-file-watch.md),
 [ADR-0018](0018-mcp-transport-streamable-http.md), [ADR-0031](0031-undo-redo-history-operations.md);
 captAInHook's ADR-0010 (exec handlers: the envelope and payload model the attestation rides).
+
+## Amendment — 2026-10-14: attestation safety, arrival order, write completion
+
+Gaps found by checking this ADR against captAInHook's actual code and config (a
+coordination review) and against geex's watcher dependency. Each refines a Decision item;
+none changes the direction.
+
+1. **Only writer tools attest (refines Decision 3).** Read and Grep carry file paths too.
+   Without a filter: an external write (`sed -i`, another editor) is recorded `:external`
+   with hash H; the agent then *reads* the file; the payload sends (path, H); and an edit the
+   agent never made is upgraded. So the **payload** attests only tool calls on a per-harness
+   **writer allowlist** (Claude Code: `Edit` / `Write` / `MultiEdit` / `NotebookEdit`, to be
+   confirmed against captAInHook's real-envelope fixtures). An unknown harness or tool sends
+   **nothing**, which fails toward `:external`. The harness comes from the exec envelope's
+   `event.harness` (being added on the captAInHook side); the tool name and file path come from
+   the raw harness JSON in `event.payload`.
+
+2. **The hash is of disk bytes, and attest matches only the newest reconcile group (refines
+   Decision 3).**
+   - **What is hashed.** "Post-state hash" in Decision 3 means **`sha256` of the disk bytes
+     reconcile read** (`File.read/1`), exactly what the payload hashes. It is *not* a hash of
+     the buffer's resulting text. Today the two coincide, but once step (b) merges an agent's
+     write into a dirty buffer, the buffer equals disk *plus* your unsaved edits and its hash
+     would never match. Any future normalization between disk bytes and `Doc` text (trailing
+     newline, CRLF, BOM) would break it the same way.
+   - **What is matched.** Step (a) turns one write into one minimal `replace` per hunk,
+     dispatched as one atomic group, so a single agent `Edit` can yield several `:external`
+     commands. Every command from one reconcile carries the **same group id and disk-bytes
+     hash**. `Buffer.attest/2` considers only the buffer's **newest reconcile group**, and
+     upgrades **all of its commands together, atomically, once**, only if the group is
+     unattested and its hash equals the attestation's. Older groups are never touched. Human
+     commands recorded after it don't block it: they change the buffer, not the disk the hash
+     describes.
+   - **Residual hole, stated honestly:** an agent write whose bytes equal the file's current
+     contents changes nothing on disk, so nothing is reconciled, yet its attestation (path, H)
+     still matches the newest reconcile group if that group read H, for example a
+     `sed -i` just before. The exact fix is a **before/after hash pair**: the payload also
+     hashes at `pre-tool-use`, correlates the two by tool-call ID, sends nothing when they are
+     equal, and geex matches the group's pre-write disk hash as well. That depends on the envelope
+     carrying a per-call ID; decide once the fixtures show whether it does. Until then the hole
+     stays open and is **pinned by a test** so it can't widen silently.
+
+3. **Arrival order isn't guaranteed: a bounded pending table (refines Decision 3).** The ADR
+   assumed inotify beats the hook. It usually does: the hook path is shim → daemon → spawn →
+   hash → POST. But it doesn't always, and the settle in item 4 makes reconcile later still. An
+   attestation that finds no matching command is held in a **pending table keyed (path,
+   sha256)**: capped in size (on the order of hundreds of entries) with a short TTL (seconds).
+   When reconcile records a group whose disk-bytes hash matches, it **consumes** the entry and
+   records the whole group already attested. The join stays exact; the TTL and size cap only
+   garbage-collect. Residual: a stale entry (from an identical-bytes write, item 2) could attach
+   to an unrelated later write of the very same bytes within the TTL. That window is bounded by
+   the TTL, and the before/after pair closes it too.
+
+4. **Write completion: a per-path settle, folded into step (a) (refines Decision 7a).**
+   Reconcile's moduledoc admits that a non-atomic write can be adopted mid-write as a partial
+   `:external` command and corrected by the next event. On a floor that was tolerable; on the
+   main path with line diffs it leaves an **unattributable half-edit hunk** in history.
+   Filtering on close-write isn't available as-is: `file_system` 1.1.1's inotify backend
+   subscribes to `close_write` but **maps both `MODIFY` and `CLOSE_WRITE` to the same
+   `:modified` atom**, so the two can't be told apart through the library. Decision: reconcile
+   waits for a **per-path quiet period** (no further event for that path for tens of
+   milliseconds; configurable) before diffing. An atomic rename (`moved_to`) delivers complete
+   content either way. This settles *write completion* only; the edit still renders as soon as
+   the write completes, and attestation still arrives after (Decision 3 is unchanged).
+   Rejected for now: forking the backend to expose `close_write`, or running `inotifywait`
+   directly. Revisit if the quiet period proves too slow or too loose. **Dogfood check:**
+   whether Claude Code's `Write`/`Edit` write in place or via an atomic rename; log the finding
+   in testing.md.
+
+5. **The payload answers after it POSTs (refines Decision 4).** captAInHook's exec contract
+   allows replying first and continuing to work. The attest payload does **not** use that: it
+   hashes and POSTs (with a short timeout, failing open) **before** printing its answer
+   (`{"effect":"noop"}`, or empty stdout + exit 0), so the attestation is in flight before the
+   agent's next tool call. The handler's `budgetMs` must cover hash + POST.
+   - **Stale discovery files.** POSTing to every live instance before answering means a dead
+     geex's leftover discovery file would add latency to every agent edit. The discovery file
+     records geex's OS pid; geex removes its file on clean exit, and the payload **skips any
+     entry whose pid is gone** (crashes skip cleanup), with a short connect timeout either way.
