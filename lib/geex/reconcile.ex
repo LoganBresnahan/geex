@@ -146,6 +146,7 @@ defmodule Geex.Reconcile do
         {:ok, new_snapshot} ->
           Logger.info(
             "geex reconcile: external change to #{snapshot.path || "buffer"}" <>
+              attributed(new_snapshot, commands) <>
               if(conflicts > 0, do: " (#{conflicts} unsaved hunk(s) took disk)", else: "")
           )
 
@@ -194,6 +195,16 @@ defmodule Geex.Reconcile do
       end
 
     Enum.map(spans, &replace_command(&1, meta))
+  end
+
+  # Name the agent when a waiting attestation was consumed as the group was recorded.
+  defp attributed(_snapshot, []), do: ""
+
+  defp attributed(snapshot, _commands) do
+    case List.last(snapshot.history).meta.actor do
+      {:agent, %{harness: harness, session: session}} -> " (attested: #{harness} session #{session})"
+      _ -> ""
+    end
   end
 
   defp conflict_notice(1),

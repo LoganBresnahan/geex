@@ -58,6 +58,12 @@ defmodule Geex.MCP.HTTP do
     end
   end
 
+  # The attestation intake (ADR-0032) shares this listener under `mix geex.serve`; it
+  # checks its own token and Origin.
+  post "/attest" do
+    Geex.Attest.HTTP.call(conn, Geex.Attest.HTTP.init([]))
+  end
+
   # Any non-POST method on /mcp (GET/DELETE/PUT/…) — geex serves no SSE stream and
   # has no session to terminate, so the method is simply not allowed here.
   match "/mcp" do

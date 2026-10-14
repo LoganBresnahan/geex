@@ -348,3 +348,21 @@ agent keeps writing against disk). Also added: hunks are applied with `expect_se
 keystroke landing between reconcile's snapshot and its apply makes the buffer refuse
 (`:stale`) and reconcile retries on a fresh snapshot. This closes a race the whole-buffer
 replace had too.
+
+## Amendment — 2026-10-14: step (c) as built
+
+Implementation choices made building the intake, within the decisions above:
+
+- **The pending table lives in each buffer process**, not in a global table keyed by path:
+  the buffer is already the one place a group is recorded, so parking an attestation and
+  consuming it as a matching group is applied happen in one process, with no window between
+  the check and the record. Size 64 and a 10 s TTL per buffer; both only garbage-collect.
+- **A repeat is ignored, not parked.** An attestation matching the newest group when that
+  group is already attested returns `:ignored`. Parking it could let it match a later,
+  unrelated write of the same transition (a revert and re-apply) within the TTL.
+- **In TUI mode the listener serves only `/attest`** (`Geex.Attest.HTTP`); the frozen MCP
+  surface still needs `mix geex.serve`, where the MCP router hands `/attest` on. Opening the
+  editor does not expose the edit tools.
+- **Statuses:** `attested` / `pending` / `ignored` / `not_open` (200); `400` invalid, with the
+  reason; `401` token; `403` any `Origin` header (the payload is never a browser). The token is
+  compared in constant time.

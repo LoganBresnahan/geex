@@ -30,7 +30,7 @@ defmodule Geex.Application do
         ] ++
         loop_child() ++
         reconcile_child() ++
-        http_mcp_child()
+        http_children()
 
     opts = [strategy: :one_for_one, name: Geex.Supervisor]
     Supervisor.start_link(children, opts)
@@ -79,16 +79,25 @@ defmodule Geex.Application do
   @spec default_http_mcp_port() :: pos_integer()
   def default_http_mcp_port, do: @example_preset_port
 
-  # The loopback MCP HTTP transport (ADR-0018), feature-gated exactly like
-  # terminal_io_child/0. Default OFF; bind 127.0.0.1 only (never 0.0.0.0) so
-  # nothing off-host can reach it. `mix geex.serve` / `GEEX_SERVE=1` flips :start_http_mcp on.
+  # The loopback HTTP listener — one port, two jobs, both bound to 127.0.0.1 only:
   #
-  # Port: default 0 = ask the host for a free port (no hardcoded collision); a
-  # pinned `http_mcp_port` is honoured. The resolved URL is announced (logged +
-  # `GEEX_MCP_PORT_FILE`) so a headless caller can discover a dynamic port.
-  defp http_mcp_child do
-    if Application.get_env(:geex, :start_http_mcp, false) do
+  #   * the MCP transport (ADR-0018, frozen by ADR-0032): `mix geex.serve` / `GEEX_SERVE=1`
+  #     flips :start_http_mcp on, and the listener runs the full `Geex.MCP.HTTP` router
+  #     (which also hands `/attest` on);
+  #   * the attestation intake (ADR-0032): :start_attest, on by default (off under test), so
+  #     the interactive editor listens too, but only on `/attest` (`Geex.Attest.HTTP`) — the
+  #     frozen MCP surface is not exposed just because the editor is open.
+  #
+  # Port: default 0 = ask the host for a free port (no hardcoded collision); a pinned
+  # `http_mcp_port` is honoured. Serve mode announces the MCP URL (logged +
+  # `GEEX_MCP_PORT_FILE`); the attest intake publishes its URL in a discovery file.
+  defp http_children do
+    serve? = Application.get_env(:geex, :start_http_mcp, false)
+    attest? = Application.get_env(:geex, :start_attest, true)
+
+    if serve? or attest? do
       port = Geex.MCP.Port.resolve(Application.get_env(:geex, :http_mcp_port, 0))
+      plug = if serve?, do: Geex.MCP.HTTP, else: Geex.Attest.HTTP
 
       # Announce AFTER Bandit, never before: the announcer is ordered after the
       # listener in this one_for_one tree, so if Bandit fails to bind (a pinned-port
@@ -96,10 +105,15 @@ defmodule Geex.Application do
       # the announcer runs — and no stale URL/port file is left naming a port nothing
       # is actually listening on. A run-once Task (`:temporary`); it logs + writes
       # `GEEX_MCP_PORT_FILE` then exits.
-      [
-        {Bandit, plug: Geex.MCP.HTTP, scheme: :http, ip: {127, 0, 0, 1}, port: port},
-        {Task, fn -> Geex.MCP.Port.announce(port) end}
-      ]
+      #
+      # The discovery file is published after the listener for the same reason: never name
+      # a port nothing is listening on.
+      [{Bandit, plug: plug, scheme: :http, ip: {127, 0, 0, 1}, port: port}] ++
+        if(serve?, do: [{Task, fn -> Geex.MCP.Port.announce(port) end}], else: []) ++
+        if(attest?,
+          do: [{Geex.Attest.Discovery, url: "http://127.0.0.1:#{port}/attest"}],
+          else: []
+        )
     else
       []
     end

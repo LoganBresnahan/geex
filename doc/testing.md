@@ -1339,3 +1339,37 @@ disk equal to buffer records nothing and re-syncs; merged group keeps disk-bytes
 
 **Not tested:** the `:stale` retry under a real keystroke race (the guard itself is unit-tested); a
 notice when the buffer isn't the active one (only the attached loop shows it).
+
+### 2026-10-14 — Ledger step (c): the attestation intake (ADR-0032)
+
+`Buffer.attest/2` upgrades the buffer's **newest reconcile group** (every command, once) from `:external`
+to `{:agent, %{harness, session, turn, tool_use}}` only when the attestation's `before` and `sha256` both
+equal the group's stamped hashes; otherwise the attestation is parked in a per-buffer pending table (64
+entries, 10 s TTL), and `apply_group` consumes a matching one as the group is recorded, so the group lands
+already attested. A repeat for an already-attested group returns `:ignored`; a message with no `before` (a
+created file) is `:ignored`. Subscribers get `{:geex_buffer_attested, buffer, group, actor}`. `Geex.Attest`
+validates the v1 message strictly (hashes exactly 64 lowercase hex, absolute path, harness + session
+required, unknown fields ignored) and routes it to the open buffer (`:not_open` otherwise).
+`Geex.Attest.HTTP` = `POST /attest` (Bearer token, constant-time compare; `Origin` → 403); the listener now
+starts on every non-test boot, serving **only** `/attest` in TUI mode (the full MCP router, which hands
+`/attest` on, under `mix geex.serve`). `Geex.Attest.Discovery` publishes `$XDG_RUNTIME_DIR/geex/<os_pid>.json`
+(`{v, url, token, pid}`, file `0600`, dir `0700`, temp-write + rename) and removes it on a clean stop.
+Reconcile's log line names the agent when a parked attestation was consumed.
+
+**Live-verified** (TUI in a tmux pty, real listener + discovery file, this session's native `Write`, curl as
+the payload): discovery file `0600` in a `0700` dir with a 64-char token; no token → **401**; an attestation
+POSTed **before** the write → `pending`, then the write's group was recorded attested (`geex reconcile:
+external change to …doc.txt (attested: claude-code session live-test)`); a second write, attested **after**
+→ `attested` (logged `attributed to claude-code session live-test`); the same message again → `ignored`;
+quitting removed the discovery file.
+
+**Automated:** `attest_test` (parse: minimal / optional fields / hash format / version / path / identity;
+the both-hashes rule: late, early, coalesced sed+agent stays `:external`, identical-bytes never matches,
+only the newest group, human edits after don't block, no-`before` ignored, pending expiry, replay unchanged
+by an upgrade; `submit` not_open; HTTP 401/403/400/200 incl. end-to-end on an open buffer and via the MCP
+router; discovery file modes, contents and cleanup). **705 tests + 14 doctests**, green twice,
+`--warnings-as-errors` clean.
+
+**Not tested:** the payload itself (step d) and real captAInHook envelopes; whether Claude Code's
+`originalFile` matches the disk bytes for every file (the step-d dogfood check); two geex instances with
+the same file open.

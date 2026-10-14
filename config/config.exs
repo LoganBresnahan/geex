@@ -16,6 +16,8 @@ import Config
 # vacuously. Settle tests pass `settle_ms:` explicitly.
 config :geex,
   reconcile_settle_ms: if(config_env() == :test, do: 0, else: 50),
+  # The attestation intake (ADR-0032): its listener + discovery file. Tests start their own.
+  start_attest: config_env() != :test,
   start_terminal: config_env() != :test,
   start_reconcile: config_env() != :test,
   start_highlight: config_env() != :test

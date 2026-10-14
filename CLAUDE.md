@@ -87,6 +87,8 @@ mix test test/geex/mcp/grid_test.exs
 mix geex.serve                     # headless + loopback MCP on a free port (logged)
 mix geex.serve --port 4000         # pin 4000 to match presets/claude-code/.mcp.json
 mix geex.highlight <file>          # one-shot highlighted dump (engine check)
+# every non-test boot also listens on loopback POST /attest (ADR-0032); in TUI
+# mode that is the ONLY route — the frozen MCP surface needs mix geex.serve
 # the interactive TUI (needs a real tty — /dogfood drives it through tmux):
 elixir --erl "-noshell -noinput +Bd" -S mix run --no-start -e 'Geex.run("path")'
 ```
@@ -148,6 +150,9 @@ session's `Co-Authored-By` trailer.
 
 - app `:geex`, modules `Geex.*`, repo `~/geex`
 - env: `GEEX_SERVE`, `GEEX_MCP_PORT`, `GEEX_MCP_PORT_FILE`
+- attestation discovery file (ADR-0032): `$XDG_RUNTIME_DIR/geex/<os_pid>.json`
+  (`<tmp>/geex-<user>/` without it), `0600`, removed on clean exit; app gate
+  `:start_attest` (off under test)
 - TUI log: `<tmp>/geex.log` (`System.tmp_dir!/0`)
 - sibling path dep: `~/tree_sitter_wasm` (Rustler NIF; must exist to compile)
 - harness presets: `presets/<harness>/` — copy into a *target* project, never

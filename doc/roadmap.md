@@ -141,7 +141,8 @@ The ledger track, in order (each builds on the one before):
    away; applied with `expect_seq` (stale snapshot → retry). Original plan: decide
    and build the merge/prompt (non-overlapping hunks merge; overlapping ones ask), plus
    deletion handling and burst coalescing.
-3. **Attestation intake.** `Buffer.attest/2` (a history operation, ADR-0031-style)
+3. **Attestation intake** — **built 2026-10-14** (live-verified both orders; see testing.md).
+   `Buffer.attest/2` (a history operation, ADR-0031-style)
    upgrades the buffer's **newest reconcile group**, whole and once, from `:external` to
    `{:agent, %{harness, session, …}}`, only when **both** the attestation's `before` and
    `sha256` equal the group's `before_sha256` and `sha256` (stamped since step 1). That one

@@ -208,6 +208,30 @@ defmodule Geex.Buffer do
   @spec history(GenServer.server()) :: [struct()]
   def history(server), do: GenServer.call(server, :history)
 
+  @doc """
+  Attribute an out-of-band write to the agent that made it (ADR-0032). `attestation` is a
+  validated `Geex.Attest` map (`before`, `sha256`, `harness`, `session`, optional `turn` /
+  `tool_use`).
+
+  It upgrades the buffer's **newest reconcile group**, every command of it, once, from
+  `:external` to `{:agent, %{harness, session, turn, tool_use}}`, only when **both**
+  `before` and `sha256` equal the group's `before_sha256` and `sha256`. Otherwise it waits in
+  a bounded pending table and is consumed if a matching group is recorded soon after (the
+  usual order: the hook beats the settled file read). Replay is unaffected: `meta` never
+  feeds a command's `run/2`.
+
+  Returns `:attested`, `:pending`, or `:ignored` (no `before`, so a created file can't match;
+  or the matching group is already attested).
+  """
+  @spec attest(GenServer.server(), map()) :: :attested | :pending | :ignored
+  def attest(server, attestation) when is_map(attestation),
+    do: GenServer.call(server, {:attest, attestation})
+
+  # Pending attestations live this long and this many per buffer (ADR-0032). A match is
+  # exact, so these only garbage-collect: an attestation whose write never reconciles.
+  @pending_ttl_ms 10_000
+  @pending_max 64
+
   @impl true
   def init(opts) do
     path = Keyword.get(opts, :path)
@@ -242,7 +266,12 @@ defmodule Geex.Buffer do
           # event whose disk still equals the baseline is no external change (no spurious revert
           # of unsaved edits), and the baseline travels with a rename's re-key. Set to the
           # loaded content here; updated by `save/1` (to the written bytes) and `mark_synced/1`.
-          synced: text
+          synced: text,
+          # Attestations (ADR-0032) that arrived before the reconcile group they describe:
+          # `[{attestation, received_at_ms}]`, newest first. Consumed when a matching group is
+          # recorded; size and age are bounded, which only garbage-collects (a match is exact).
+          pending: [],
+          pending_ttl_ms: Keyword.get(opts, :pending_ttl_ms, @pending_ttl_ms)
         }
 
         {:ok, state}
@@ -334,6 +363,33 @@ defmodule Geex.Buffer do
     end
   end
 
+  def handle_call({:attest, %{before: nil}}, _from, state), do: {:reply, :ignored, state}
+
+  def handle_call({:attest, attestation}, _from, state) do
+    state = prune_pending(state)
+
+    case newest_group(state.history) do
+      %{group: group} = stamp when not is_nil(group) ->
+        cond do
+          not matches?(attestation, stamp) ->
+            {:reply, :pending, park(state, attestation)}
+
+          unattested?(state.history, group) ->
+            new_state = %{state | history: upgrade(state.history, group, attestation)}
+            notify_attested(new_state, group, agent_actor(attestation))
+            {:reply, :attested, new_state}
+
+          # Already attested: a repeat says nothing new, and parking it could let it match a
+          # later, unrelated write of the same transition.
+          true ->
+            {:reply, :ignored, state}
+        end
+
+      _no_group ->
+        {:reply, :pending, park(state, attestation)}
+    end
+  end
+
   def handle_call({:subscribe, pid}, _from, state) do
     ref = Process.monitor(pid)
     {:reply, {:ok, length(state.history)}, put_in(state.subscribers[ref], pid)}
@@ -414,6 +470,8 @@ defmodule Geex.Buffer do
   # added}`, or `:unknown`) so a byte-oriented overlay can shift optimistically across the
   # edit. A plain `send` — the buffer never blocks on a reactor.
   defp apply_group(commands, opts, state) do
+    {commands, state} = consume_pending(commands, prune_pending(state))
+
     applied =
       Enum.reduce_while(commands, {:ok, state.editor}, fn command, {:ok, editor} ->
         case Geex.Dispatch.apply_command(command, editor) do
@@ -452,6 +510,72 @@ defmodule Geex.Buffer do
       {:error, _reason} = error ->
         {:reply, error, state}
     end
+  end
+
+  # --- attestation (ADR-0032) ---
+
+  # The stamp of the newest reconcile group in `history` (newest-first), or nil.
+  defp newest_group(history) do
+    Enum.find_value(history, fn command -> command.meta.reconcile end)
+  end
+
+  defp matches?(attestation, stamp),
+    do: attestation.before == stamp.before_sha256 and attestation.sha256 == stamp.sha256
+
+  # Only once: every command of the group is still the anonymous `:external`.
+  defp unattested?(history, group) do
+    history
+    |> Enum.filter(&in_group?(&1, group))
+    |> Enum.all?(&(&1.meta.actor == :external))
+  end
+
+  defp upgrade(history, group, attestation) do
+    actor = agent_actor(attestation)
+
+    Enum.map(history, fn command ->
+      if in_group?(command, group), do: put_actor(command, actor), else: command
+    end)
+  end
+
+  defp in_group?(command, group),
+    do: match?(%{reconcile: %{group: ^group}}, command.meta)
+
+  defp put_actor(command, actor), do: %{command | meta: %{command.meta | actor: actor}}
+
+  defp agent_actor(attestation) do
+    {:agent, Map.take(attestation, [:harness, :session, :turn, :tool_use])}
+  end
+
+  # A group about to be recorded consumes a pending attestation that matches it exactly;
+  # its commands are then recorded already attested.
+  defp consume_pending([%{meta: %{reconcile: %{} = stamp}} | _] = commands, state) do
+    case Enum.split_with(state.pending, fn {att, _at} -> matches?(att, stamp) end) do
+      {[{att, _at} | _], rest} ->
+        actor = agent_actor(att)
+        {Enum.map(commands, &put_actor(&1, actor)), %{state | pending: rest}}
+
+      {[], _} ->
+        {commands, state}
+    end
+  end
+
+  defp consume_pending(commands, state), do: {commands, state}
+
+  defp park(state, attestation) do
+    entry = {attestation, System.monotonic_time(:millisecond)}
+    %{state | pending: Enum.take([entry | state.pending], @pending_max)}
+  end
+
+  defp prune_pending(state) do
+    cutoff = System.monotonic_time(:millisecond) - state.pending_ttl_ms
+    %{state | pending: Enum.filter(state.pending, fn {_att, at} -> at >= cutoff end)}
+  end
+
+  defp notify_attested(state, group, actor) do
+    for {_ref, pid} <- state.subscribers,
+        do: send(pid, {:geex_buffer_attested, self(), group, actor})
+
+    :ok
   end
 
   defp notify_notice(state, text) do
