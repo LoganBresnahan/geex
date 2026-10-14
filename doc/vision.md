@@ -107,6 +107,12 @@ every client.) Two legitimate regimes:
 > **Enforcement = removing the other ways in** — a decision made *where the agent
 > lives*: scope an external agent's tools, or host the agent inside geex.
 
+**Update (2026-10-14, [adr/0032](adr/0032-listener-first-agent-integration.md)):** for external
+agents geex no longer pursues the door. Agents edit with their native tools; reconcile records
+every write into the one history; a captAInHook hook payload, already in the agent's loop,
+attests who made it by content hash. The ledger stays complete, and attribution comes from the
+layer that is in the loop rather than from steering the agent.
+
 (Mechanics: [mcp-ai-integration.md](mcp-ai-integration.md) §9 Security, §14 Extension
 & capability model. Decisions: [adr/0007](adr/0007-world-not-brain.md),
 [adr/0012](adr/0012-trust-and-enforcement.md).)

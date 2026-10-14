@@ -31,9 +31,9 @@ Each ADR: **Status** · **Context** (the forces) · **Decision** · **Consequenc
 | [0013](0013-jido-deferred.md) | Jido deferred (not adopted for the command system) | Accepted |
 | [0014](0014-editor-state-and-dispatch-ownership.md) | Editor-state & dispatch ownership (EditorState; cursor view-local; `run/1` gather/scatter) | Accepted |
 | [0015](0015-clipboard-subsystem.md) | Clipboard as a sibling subsystem (registers + ring history) | Accepted |
-| [0016](0016-external-harness-integration.md) | External harness integration & the enforcement ladder (per-harness preset; OS-sandbox rung) | Accepted |
-| [0017](0017-reconcile-file-watch.md) | Reconcile: file-watch + `:external` provenance (the honest floor) | Accepted |
-| [0018](0018-mcp-transport-streamable-http.md) | MCP transport: Streamable HTTP, connect-first, dogfood == production | Accepted |
+| [0016](0016-external-harness-integration.md) | External harness integration & the enforcement ladder (per-harness preset; OS-sandbox rung) | Accepted (presets frozen by 0032) |
+| [0017](0017-reconcile-file-watch.md) | Reconcile: file-watch + `:external` provenance (the honest floor) | Accepted (amended by 0032: the primary agent path) |
+| [0018](0018-mcp-transport-streamable-http.md) | MCP transport: Streamable HTTP, connect-first, dogfood == production | Accepted (frozen by 0032) |
 | [0019](0019-file-lifecycle-and-operation-tools.md) | File lifecycle (load/save, multi-buffer) & MCP operation tools (a third tool category) | Accepted |
 | [0020](0020-diff-edit-tool.md) | Diff / search-replace edit tool (compiles to `replace`; ports Moby's tiered matcher) | Accepted |
 | [0021](0021-capability-connections.md) | Capability connections — contracts, adapters & hosting tiers (consume-MCP model; LSP + highlighting) | Accepted |
@@ -47,6 +47,7 @@ Each ADR: **Status** · **Context** (the forces) · **Decision** · **Consequenc
 | [0029](0029-selection-primitive.md) | The selection primitive — `%Selection{anchor, active}` grapheme carets; half-open span matching `Doc.replace` (not grid's inclusive notation); one region built by highlight mode + grid; wired into `Alt+H` highlight mode + clipboard | Accepted |
 | [0030](0030-view-action-tool-category.md) | View actions — a fourth tool category (cursor/scroll/selection; field-spec → `tools/list`; not recorded); retires the go-to-line hack into a `line` command; typed twins via one shared action vocabulary (`Verbs` + `apply_action`); agent-moved cursor repaints (`{:geex_cursor}`); targets the active view; multi-view + journal deferred | Accepted |
 | [0031](0031-undo-redo-history-operations.md) | Undo/redo — history operations (not edits, not view-actions): replay-from-base reusing `replay/2`; redo stack cleared by a new edit; cursor view-local from the returned command; flicker-free overlays via a byte-footprint diff (`Footprint.between/2`) + a monotonic `seq`; `Alt+Z`/`Alt+Shift+Z`, select-all → `Alt+B` | Accepted |
+| [0032](0032-listener-first-agent-integration.md) | Listener-first agent integration — agents edit with native tools, reconcile records, a captAInHook payload attests by content hash (`:external` → `{:agent, …}` via a `Buffer.attest/2` history op); MCP server + presets frozen; pharos client off the critical path; v0.5 redefined around the ledger | Accepted |
 
 ## Adding one
 

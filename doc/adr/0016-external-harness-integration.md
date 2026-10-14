@@ -84,3 +84,8 @@ denied). This is why the enforced rung requires the *connect* transport
 [ADR-0009](0009-three-tier-extension-model.md),
 [mcp-ai-integration.md](../mcp-ai-integration.md) §9 / §14,
 [evidence/rung2-sandbox-smoke/](../evidence/rung2-sandbox-smoke/).
+
+
+## Amendment — 2026-10-14 ([ADR-0032](0032-listener-first-agent-integration.md))
+
+The ladder's recommended path changes. Agents now edit with their native tools; Rung 0 (reconcile) is the **primary** path, and a captAInHook payload attests who made each write. Rung 1 presets are **frozen**: kept, tested, still usable, but no new presets will be added and they are no longer the recommendation. Rung 2 (OS sandbox) is unchanged and still documented, not shipped.

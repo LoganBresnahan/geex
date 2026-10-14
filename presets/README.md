@@ -1,5 +1,10 @@
 # geex — per-harness presets (ADR-0016, Rung 1)
 
+> **Frozen (2026-10-14, [ADR-0032](../doc/adr/0032-listener-first-agent-integration.md)).**
+> geex no longer asks harnesses to edit through it. Agents edit with their native tools, the
+> reconcile watcher records every change, and a captAInHook payload attests who made it. These
+> presets still work and stay tested, but no new ones will be added.
+
 A **preset** is the checked-in artifact of ADR-0012's *cooperative* regime, made concrete
 by [ADR-0016](../doc/adr/0016-external-harness-integration.md): per supported harness, a
 small config that (a) **denies the harness's built-in file writers** and (b) **points its

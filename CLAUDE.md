@@ -40,7 +40,7 @@ One Mix app, `:geex`, under `lib/geex/`:
   the view-local cursor), `Geex.Reconcile` (file-watch → `:external` commands).
 - **Projections** — `Geex.MCP.*` (Protocol is pure; HTTP is the loopback
   Bandit/Plug transport; tool categories: edits, `Operations`, `ViewActions`,
-  `Grid`), and the TUI: `Geex.Loop` (+ `loop/`), `Screen`/`Cell`/`Renderer`,
+  `Grid`) — **frozen by ADR-0032**: keep it green, add no tools; and the TUI: `Geex.Loop` (+ `loop/`), `Screen`/`Cell`/`Renderer`,
   `TerminalIO` (`:prim_tty`, no NIF), `Input.Parser`, `Minibuffer`.
 - **Capabilities** — `Geex.Highlight.*` (reactor + tree-sitter-on-wasm via the
   sibling path dep `../tree_sitter_wasm`), `Geex.Theme`, `priv/grammars`,
@@ -67,10 +67,14 @@ One Mix app, `:geex`, under `lib/geex/`:
    (and logical lines); display width (`Geex.Width`) is a *render* concern only
    — width can mis-render, never mis-address. Display→grapheme casts are pure.
    (ADR-0027.)
-6. **World, not brain.** geex owns buffers / the shared path / undo / replay /
+6. **Agents edit natively; geex records, captAInHook attributes** (ADR-0032).
+   Reconcile is the primary agent path. Attribution comes only from an
+   attestation that matches the exact content hash; with no match the command
+   stays `:external`. Never infer an actor from timing.
+7. **World, not brain.** geex owns buffers / the shared path / undo / replay /
    provenance; agent orchestration, planning, context and cost are
    bring-your-own. Apply this test before proposing any feature. (ADR-0007.)
-7. **Loopback only.** The MCP listener binds `127.0.0.1`; `Origin` is matched by
+8. **Loopback only.** The MCP listener binds `127.0.0.1`; `Origin` is matched by
    parsed host, never a prefix. `quit` stays human-only — no agent tool may
    stop the VM.
 

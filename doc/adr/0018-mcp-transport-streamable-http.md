@@ -72,3 +72,8 @@ the current (non-deprecated) remote transport.
 [ADR-0016](0016-external-harness-integration.md), [ADR-0011](0011-direction-b-balance-beam.md),
 [mcp-ai-integration.md](../mcp-ai-integration.md) §3 / §4 / §12 / §15b,
 [testing.md](../testing.md).
+
+
+## Amendment — 2026-10-14 ([ADR-0032](0032-listener-first-agent-integration.md))
+
+The MCP server is **frozen**: it keeps working and stays tested (`mix geex.serve`), but gets no new tools or categories. The Bandit listener itself lives on: it also hosts the loopback `POST /attest` intake, and that listener now starts in TUI mode as well.

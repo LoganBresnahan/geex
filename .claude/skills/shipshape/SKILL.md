@@ -141,7 +141,7 @@ grep -rn 'Doc\.\(replace\|insert\|delete\)' lib --include=*.ex
 `meta.actor` honestly — `:human` from the loop, `{:llm, _}` from the MCP door,
 `:external` from reconcile. Never fabricate `{:llm, _}` for an off-path write.
 
-**Loopback only** (invariant 7):
+**Loopback only** (invariant 8):
 
 ```bash
 grep -rnE 'ip: |0\.0\.0\.0|:any' lib/geex/application.ex lib/geex/mcp/

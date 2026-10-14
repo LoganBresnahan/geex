@@ -126,9 +126,14 @@ curl -s -m 5 -o /dev/null -w '%{http_code}\n' -X POST "$U" -H 'origin: http://lo
 curl -s -m 5 -o /dev/null -w '%{http_code}\n' "$U"                                                                                         # 405 (GET)
 ```
 
-## Handle 3 — a real harness honoring the preset (open item)
+## Handle 3 — a real harness honoring the preset (frozen by ADR-0032)
 
-The roadmap's still-pending proof: **Claude Code itself**, honoring
+Presets are frozen: this is no longer on the roadmap. Kept for whoever un-freezes
+the door. The ledger-track equivalent (an agent editing natively, with the
+captAInHook payload attesting each write) gets its own handle when the attestation
+intake lands.
+
+The original pending proof: **Claude Code itself**, honoring
 `presets/claude-code/` (`.mcp.json` → geex + `permissions.deny` on the
 structured writers), routes an edit through geex. curl (Handle 2) proves the
 wire, not that the harness obeys the preset — don't conflate them.

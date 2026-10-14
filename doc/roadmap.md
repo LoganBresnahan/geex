@@ -14,8 +14,11 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 **Current (2026-10-14):** 650 tests + 9 doctests green, `--warnings-as-errors` clean. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
-minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped —
-the live frontier is the command-surface track at the end of this file. The reconcile watcher is
+minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
+**Direction changed the same day ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
+the MCP door is frozen; v0.5 is now the **ledger track** (reconcile as the primary agent path,
+attested by captAInHook). The frontier is that track's item 1; the command-surface track at the
+end of this file continues alongside it, since editor comfort is the other half of the point. The reconcile watcher is
 now shown live against a real `inotify` backend. (Test counts quoted further down are as of their
 own dates.)
 
@@ -109,12 +112,42 @@ Ships:
 
 Exit criteria: every command auto-exports as an MCP tool schema with no hand-sync.
 
-## v0.5 — Direction A: the LLM drives geex (the headline)
+## v0.5 — The ledger: agents edit natively, geex records, captAInHook attributes
 
-**Goal:** an external harness edits real buffers through the same path a human does,
-by **attaching to the running geex** — dogfood == production.
+**Redefined 2026-10-14 by [adr/0032](adr/0032-listener-first-agent-integration.md).** The
+original v0.5 headline (the agent edits *through* geex over MCP, steered there by a preset) is
+**frozen**: it works and stays tested, but it's no longer the plan. **Goal now:** whatever an
+agent writes with its own native tools lands in geex's one undo history as reviewable,
+undoable hunks, attributed to the harness, session and tool call by a captAInHook payload.
 
-Ships:
+The ledger track, in order (each builds on the one before):
+
+1. **Line-level reconcile diffs.** Replace the whole-buffer `replace` with a myers line diff →
+   one minimal `replace` per hunk, dispatched as one atomic group, so undoing an agent's
+   change undoes *that hunk*, not the file. (Pairs with ADR-0020's diff work; pure, so
+   table-testable.)
+2. **Conflict UX.** A disk change on a **dirty** buffer: today it's last-writer-wins. Decide
+   and build the merge/prompt (non-overlapping hunks merge; overlapping ones ask), plus
+   deletion handling and burst coalescing.
+3. **Attestation intake.** `meta` gains the reconciled post-state hash; `Buffer.attest/2` (a
+   history operation, ADR-0031-style) upgrades a matching `:external` command to
+   `{:agent, %{harness, session, …}}`; `POST /attest` on the loopback listener, now started
+   in TUI mode too; a `0600` discovery file (URL + token) under `$XDG_RUNTIME_DIR/geex/`.
+4. **The captAInHook payload.** A geex-owned `post-tool-use` exec handler script (e.g.
+   `integrations/captainhook/geex-attest.sh`): read the file path from the envelope, hash the
+   file, send the attestation to every live geex. The user registers it in
+   `~/.captainHook/handlers.json`; captAInHook itself stays unaware of geex.
+5. **Surfacing in the TUI.** Show who wrote what: a gutter mark for agent-authored hunks, the
+   author on the status line, and undo of a specific agent hunk without touching your own
+   edits.
+
+Exit criteria: with captAInHook installed and the payload registered, an agent session
+(Claude Code first) edits a file open in geex with its **native** tools; each change appears
+live as a hunk, attributed to that session; a shell write appears as `:external`; any of
+them can be undone individually; replay still reproduces the state.
+
+### What v0.5 shipped before the redefinition (Direction A — now frozen)
+
 - **`Geex.MCP.{Protocol,Dispatch,…}`** — the transport-agnostic protocol core first
   (`handle_line/1`, `tools/list` from the field-spec, `tools/call → Dispatch.run/1`,
   provenance), the pharos-ported pure-`handle_line` discipline
@@ -145,9 +178,11 @@ Ships:
   other first-class presets (Codex, Gemini, Continue, Roo, OpenCode).
 - **MCP-client connection to an external pharos** for LSP — **disk-truth only**; pharos
   is *not bundled* ([adr/0008](adr/0008-pharos-not-bundled.md),
-  [adr/0010](adr/0010-disk-truth-lsp-v05.md)). Not started — the remaining v0.5 ship.
+  [adr/0010](adr/0010-disk-truth-lsp-v05.md)). Not started — **deferred off the critical
+  path by [adr/0032](adr/0032-listener-first-agent-integration.md)** (pharos serves agents;
+  LSP in the human editor is a later nice-to-have).
 
-Exit criteria: a real harness (claude-code first) connects to the running geex over
+Original exit criteria (Direction A, frozen): a real harness (claude-code first) connects to the running geex over
 loopback HTTP and edits buffers; every edit is a provenance-tagged `%Command{}` in the
 live shared undo history; out-of-band writes are reconciled as `:external`; sessions
 replay. **Status:** the *connect + edit + provenance + save* clauses are proven live (an

@@ -64,11 +64,13 @@ subsystem has been moving, and the ADR number is the doc to pull on demand.
 1. **"The command surface & shell (in flight — the minibuffer track)"** — the
    numbered list. This is the live frontier; each item says *built* /
    *remaining*.
-2. **"## v0.5 — Direction A"** — the milestone's remaining ship
-   (historically: the MCP-client → external pharos LSP, ADR-0008/0010).
+2. **"## v0.5 — The ledger"** — the numbered ledger track (ADR-0032:
+   reconcile as the primary agent path, attested by captAInHook). The old
+   Direction A material under it is frozen; don't report it as the frontier.
 
-The **frontier** = the first "Remaining:" clause in the command-surface list
-whose work isn't evidenced by a commit, else v0.5's unshipped item. Note any
+There are two live tracks. The **frontier** = the first ledger-track item not
+evidenced by a commit; name the first open command-surface "Remaining:" item
+alongside it. Note any
 **Deferred:** lists in the last few commit bodies — they're the carry-ins
 waiting on the next task.
 

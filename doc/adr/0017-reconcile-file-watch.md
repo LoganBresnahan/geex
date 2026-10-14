@@ -135,3 +135,8 @@ correlation if a concrete need (debugging / audit) appears.
 [ADR-0003](0003-one-shared-path.md), [ADR-0014](0014-editor-state-and-dispatch-ownership.md),
 [ADR-0005](0005-provenance-on-every-command.md),
 [mcp-ai-integration.md](../mcp-ai-integration.md) §7 / §9.
+
+
+## Amendment — 2026-10-14 ([ADR-0032](0032-listener-first-agent-integration.md))
+
+Reconcile is now the **primary agent path**, not only the floor. The open question above (attribution beyond `:external`) is **answered yes, by attestation, not inference**: a captAInHook `post-tool-use` payload sends `(path, sha256, harness, session, …)` and `Buffer.attest/2` upgrades the matching command's actor from `:external` to `{:agent, …}` on an exact post-state hash match. On no match it stays `:external`; never a guess. The deferred work (line-level diffs, conflict UX) moves onto the v0.5 critical path.
