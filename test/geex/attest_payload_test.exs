@@ -116,6 +116,24 @@ defmodule Geex.AttestPayloadTest do
       end
     end
 
+    # ADR-0034 §8. The fixtures above report `userModified: false`, and their message has no
+    # `user_modified` (the exact maps above); set to true, it is sent.
+    test "userModified: true (you edited the proposal) adds user_modified", ctx do
+      listen(ctx, "/tap")
+      path = target(ctx, "file", "after\n")
+
+      line =
+        envelope("edit.jsonl")
+        |> retarget(path)
+        |> JSON.decode!()
+        |> put_in(["event", "payload", "tool_response", "userModified"], true)
+        |> JSON.encode!()
+
+      assert %{status: 0, stdout: "", stderr: ""} = run(ctx, line)
+      assert_receive {:tapped, "/tap", _, body}, 2_000
+      assert %{"user_modified" => true, "tool_use" => _} = JSON.decode!(body)
+    end
+
     for fixture <- ~w(write-create.jsonl read-text.jsonl read-notebook.jsonl bash.jsonl) do
       test "#{fixture}: sends nothing", ctx do
         listen(ctx, "/tap")

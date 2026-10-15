@@ -1,8 +1,8 @@
 # ADR-0034: Panes, the file tree, the edits pane, and holding open buffers
 
-- **Status:** Accepted 2026-10-15 (open decisions A, F–K taken as recommended). Build steps 1 (the
-  hold), 2 (more than one buffer), 3 (the edits pane, with the layout and `Alt+O`) and 4 (the
-  file tree) built 2026-10-15; step 5 not yet.
+- **Status:** Accepted 2026-10-15 (open decisions A, F–K taken as recommended). **Built**
+  2026-10-15: the hold (1), more than one buffer (2), the edits pane with the layout and `Alt+O`
+  (3), the file tree (4), "edited by you" (5).
   Rewritten the same day after the maintainer's redirect: the first draft's follow pane is dropped.
 - **Date:** 2026-10-15
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell; it deferred tabs and
@@ -287,6 +287,26 @@ the hold.
 - **Also fixed:** `Geex.Attest.Discovery` traps exits, so its start-up sweep's `kill -0` ports
   each sent it an `EXIT` with no matching clause, logged as an error whenever stale discovery
   files existed. That predates ADR-0034; it surfaced in this step's dogfood log.
+
+### Built: step 5, "edited by you" (2026-10-15)
+
+- The payload adds `"user_modified": true` when Claude Code's `tool_response.userModified` is
+  true, and nothing otherwise, so every other message is byte-identical to before. The intake
+  takes `user_modified` as an optional boolean (anything else is refused).
+- `Geex.Attest.who/1` builds the agent's actor for the buffer, the edits list and the spool's
+  chain: `user_modified: true` is added only when set, so an unedited write's actor is exactly
+  as before. A chain is marked if you edited any of its writes. The ledger codec keeps the key,
+  so a reopen keeps it.
+- The status line reads `✎ claude-code/7ccbf3d1 · turn b60e… · edited by you`, and the edits row
+  reads `claude-code/7ccbf3d1, edited by you`.
+- **Tree, from the coordinator's live test of step 4:** Left on a file (or a closed directory)
+  goes up to the directory it is in, so a long open directory is two keys from closed. Its
+  report of an unhighlighted first row turned out to be a `tmux capture-pane -e` artifact: it
+  omits a background equal to the end of the line above, which there was the editor's
+  current-line tint. With the editor's cursor elsewhere, the row's highlight is emitted.
+- **Not live with a real prompt:** this session's Claude Code runs without permission prompts,
+  so `userModified: true` was posted by hand. The field path is the one the coordinator found
+  in real `toolUseResult` records (always `false` in the captured fixtures).
 
 ## Consequences
 

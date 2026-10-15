@@ -8,13 +8,17 @@
 #
 # The message (geex's Geex.Attest, v1), POSTed to each geex's loopback /attest:
 #
-#   {"v":1, "path", "before", "sha256", "harness", "session", "turn"?, "tool_use"?}
+#   {"v":1, "path", "before", "sha256", "harness", "session", "turn"?, "tool_use"?,
+#    "user_modified"?}
 #
 #   before  sha256 of the file before the call, as the harness reports it
 #           (claude-code: tool_response.originalFile, or original_file for NotebookEdit).
 #           Claude Code reports a CRLF file's text with each "\r\n" as "\n"; geex
 #           matches that form too, so it is sent as given.
 #   sha256  sha256 of the file on disk now.
+#   user_modified  true when you edited the agent's proposed change in the permission prompt
+#           before accepting it (claude-code: tool_response.userModified); geex says "edited
+#           by you" (ADR-0034). Left out otherwise, so the message is unchanged for the rest.
 #
 # geex relabels a change only when BOTH hashes match it, so a wrong, late or duplicate
 # message costs nothing: the change stays :external.
@@ -96,6 +100,7 @@ picked=$(printf '%s\n' "$envelope" | jq -r '
          then {turn: $p.prompt_id} else {} end)
       + (if ($p.tool_use_id | type) == "string" and $p.tool_use_id != ""
          then {tool_use: $p.tool_use_id} else {} end)
+      + (if $r.userModified == true then {user_modified: true} else {} end)
       | tojson))
 ' 2>/dev/null) || {
   echo "geex-attest: envelope did not parse; nothing sent" >&2

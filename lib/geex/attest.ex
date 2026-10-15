@@ -9,12 +9,14 @@ defmodule Geex.Attest do
       {"v": 1, "path": "/abs/file",
        "before": "<sha256>", "sha256": "<sha256>",
        "harness": "claude-code", "session": "…",
-       "turn": "…", "tool_use": "…"}
+       "turn": "…", "tool_use": "…", "user_modified": true}
 
   `before` and `sha256` are **exactly 64 lowercase hex characters** (what `sha256sum`
   prints). `before` is the file's contents before the call; it is absent only for a file the
-  call created, which can't match. `turn` and `tool_use` are optional. Anything else is
-  rejected rather than accepted as a hash that could never match.
+  call created, which can't match. `turn` and `tool_use` are optional. `user_modified` is
+  optional too: `true` when you edited the agent's proposed change in the permission prompt
+  before accepting it (Claude Code's `userModified`, ADR-0034 §8); geex then says "edited by
+  you". Anything else is rejected rather than accepted as a hash that could never match.
 
   `parse/1` is pure; `submit/1` routes a parsed attestation to the buffer open on `path`
   (`Geex.Buffer.attest/2`). A path geex doesn't have open is not geex's to record.
@@ -31,7 +33,8 @@ defmodule Geex.Attest do
           harness: String.t(),
           session: String.t(),
           turn: String.t() | nil,
-          tool_use: String.t() | nil
+          tool_use: String.t() | nil,
+          user_modified: boolean()
         }
 
   @hex ~r/\A[0-9a-f]{64}\z/
@@ -56,7 +59,8 @@ defmodule Geex.Attest do
          {:ok, harness} <- required_string(msg, "harness"),
          {:ok, session} <- required_string(msg, "session"),
          {:ok, turn} <- optional_string(msg, "turn"),
-         {:ok, tool_use} <- optional_string(msg, "tool_use") do
+         {:ok, tool_use} <- optional_string(msg, "tool_use"),
+         {:ok, user_modified} <- optional_boolean(msg, "user_modified") do
       {:ok,
        %{
          path: path,
@@ -65,13 +69,30 @@ defmodule Geex.Attest do
          harness: harness,
          session: session,
          turn: turn,
-         tool_use: tool_use
+         tool_use: tool_use,
+         user_modified: user_modified
        }}
     end
   end
 
   def parse(%{"v" => v}), do: {:error, "unsupported version #{inspect(v)}"}
   def parse(_), do: {:error, "expected a JSON object with \"v\": 1"}
+
+  @doc """
+  Who an attestation (or a spooled one) names, for an `{:agent, who}` actor: its harness,
+  session, turn and tool call, and `user_modified: true` when you edited the change in the
+  permission prompt (left out otherwise, so older records compare equal).
+
+      iex> Geex.Attest.who(%{harness: "h", session: "s", turn: nil, tool_use: "u", user_modified: true})
+      %{harness: "h", session: "s", turn: nil, tool_use: "u", user_modified: true}
+      iex> Geex.Attest.who(%{harness: "h", session: "s", turn: nil, tool_use: "u", user_modified: false})
+      %{harness: "h", session: "s", turn: nil, tool_use: "u"}
+  """
+  @spec who(map()) :: map()
+  def who(attestation) do
+    who = Map.take(attestation, [:harness, :session, :turn, :tool_use])
+    if attestation[:user_modified] == true, do: Map.put(who, :user_modified, true), else: who
+  end
 
   @doc """
   Hand a parsed attestation to the buffer open on its path. Returns the buffer's answer
@@ -114,6 +135,14 @@ defmodule Geex.Attest do
       nil -> {:ok, nil}
       value when is_binary(value) and value != "" -> {:ok, value}
       _ -> {:error, "#{key} must be a non-empty string when present"}
+    end
+  end
+
+  defp optional_boolean(msg, key) do
+    case msg[key] do
+      nil -> {:ok, false}
+      value when is_boolean(value) -> {:ok, value}
+      _ -> {:error, "#{key} must be true or false when present"}
     end
   end
 

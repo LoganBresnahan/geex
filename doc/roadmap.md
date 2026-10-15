@@ -12,12 +12,12 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-15):** 877 tests + 28 doctests green, `--warnings-as-errors` clean. Since the
+**Current (2026-10-15):** 883 tests + 29 doctests green, `--warnings-as-errors` clean. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
 the MCP door is frozen; v0.5 is now the **ledger track** (reconcile as the primary agent path,
-attested by captAInHook). Items 1–6 are built (item 5's display; item 6 the durable ledger, ADR-0033); the frontier is item 7, panes, the file tree, the edits pane and holding open buffers (ADR-0034); the command-surface track at the
+attested by captAInHook). Items 1–7 are built (item 5's display; item 6 the durable ledger, ADR-0033; item 7 panes, the file tree, the edits pane and holding open buffers, ADR-0034). Next is the maintainer's UI-testing review of the parked decisions (command-surface items 7–8); the command-surface track at the
 end of this file continues alongside it, since editor comfort is the other half of the point. The reconcile watcher is
 now shown live against a real `inotify` backend. (Test counts quoted further down are as of their
 own dates.)
@@ -190,7 +190,7 @@ The ledger track, in order (each builds on the one before):
    buffer (`open`, `buffers`, `close`, a cursor and scroll per buffer) — **built 2026-10-15**;
    (3) `Geex.Layout`, panes and `Alt+O` (moved here from step 2: their first consumer) with the
    edits pane — **built 2026-10-15**; (4) the file tree — **built 2026-10-15**; (5)
-   `user_modified` ("edited by you"). The follow pane in the first draft was dropped.
+   `user_modified` ("edited by you") — **built 2026-10-15**. All of ADR-0034 is built. The follow pane in the first draft was dropped.
 
 Exit criteria: with captAInHook installed and the payload registered, an agent session
 (Claude Code first) edits a file open in geex with its **native** tools; each change appears

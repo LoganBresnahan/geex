@@ -749,7 +749,7 @@ defmodule Geex.Loop do
   defp enter_pane(:editor, state), do: %{state | focus: :editor}
 
   # Keys while the tree has focus: move, Enter opens a file or opens/closes a directory,
-  # Right/Left open/close one, Esc goes back. As in the edits pane, the minibuffer, the palette
+  # Right opens one, Left closes one (or, on a file, goes up to its directory), Esc goes back. As in the edits pane, the minibuffer, the palette
   # and quitting work; other keys do nothing.
   defp apply_tree_key(event, %{tree: tree} = state) do
     count = length(tree.rows)
@@ -773,8 +773,14 @@ defmodule Geex.Loop do
       {:key, :right} when is_map(row) and row.dir? ->
         schedule_repaint(set_open(state, row.path, true))
 
-      {:key, :left} when is_map(row) and row.dir? ->
+      {:key, :left} when is_map(row) and row.dir? and row.open? ->
         schedule_repaint(set_open(state, row.path, false))
+
+      # On a file or a closed directory, Left goes up to the directory it is in.
+      {:key, :left} when is_map(row) ->
+        parent = Path.dirname(row.path)
+        i = Enum.find_index(tree.rows, &(&1.path == parent))
+        schedule_repaint(if i, do: put_in(state.tree.sel, i), else: state)
 
       e when e in [{:key, :esc}] ->
         schedule_repaint(%{state | focus: :editor})
@@ -1007,7 +1013,12 @@ defmodule Geex.Loop do
   def author_label(blame, line) do
     case Enum.at(blame, line) do
       {{:agent, %{harness: harness, session: session} = who}, _group} ->
-        "✎ " <> harness <> "/" <> String.slice(session, 0, 8) <> turn_label(who[:turn])
+        "✎ " <>
+          harness <>
+          "/" <>
+          String.slice(session, 0, 8) <>
+          turn_label(who[:turn]) <>
+          edited_by_you(who)
 
       {{:llm, model}, _group} ->
         "✎ llm/" <> to_string(model)
@@ -1019,6 +1030,10 @@ defmodule Geex.Loop do
 
   defp turn_label(turn) when is_binary(turn), do: " · turn " <> String.slice(turn, 0, 4) <> "…"
   defp turn_label(_turn), do: ""
+
+  # You edited the agent's change in the permission prompt before accepting it (ADR-0034 §8).
+  defp edited_by_you(%{user_modified: true}), do: " · edited by you"
+  defp edited_by_you(_who), do: ""
 
   @doc """
   Mark the gutter's left margin column with `▌`, in the theme's accent (`cursor`) colour, on

@@ -567,9 +567,7 @@ defmodule Geex.Buffer do
 
   defp matches?(_attestation, _stamp), do: false
 
-  defp agent_actor(attestation) do
-    {:agent, Map.take(attestation, [:harness, :session, :turn, :tool_use])}
-  end
+  defp agent_actor(attestation), do: {:agent, Geex.Attest.who(attestation)}
 
   # A reconcile group about to be recorded (a fast-forward, ADR-0034) is credited from the held
   # attestations and the file's spool by the chain rule (ADR-0033 F): one write, or a chain all

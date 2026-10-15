@@ -21,7 +21,8 @@ defmodule Geex.Ledger.Spool do
   credited. A write whose `before` and `sha256` are equal changes nothing and is skipped.
 
   The whole gap is credited to that session; the actor carries the last write's turn and tool
-  call, and the chain's tool calls are listed. Anything else (a missing link, two sessions)
+  call, and the chain's tool calls are listed. If you edited any of those writes in the
+  permission prompt, the actor says so (`user_modified: true`, ADR-0034 §8). Anything else (a missing link, two sessions)
   explains nothing, and the gap stays `:external`. A chain through a CRLF file breaks after its
   first link (the disk keeps `"\\r\\n"`, the next `before` doesn't) and stays `:external` too.
 
@@ -37,7 +38,8 @@ defmodule Geex.Ledger.Spool do
           harness: String.t(),
           session: String.t(),
           turn: String.t() | nil,
-          tool_use: String.t() | nil
+          tool_use: String.t() | nil,
+          user_modified: boolean()
         }
 
   @doc "The spool file for a ledger file."
@@ -121,7 +123,8 @@ defmodule Geex.Ledger.Spool do
   defp credit(nil), do: :none
 
   defp credit([last | _] = links) do
-    who = Map.take(last, [:harness, :session, :turn, :tool_use])
+    edited? = Enum.any?(links, &(Map.get(&1, :user_modified) == true))
+    who = Geex.Attest.who(Map.put(last, :user_modified, edited?))
     {:ok, {:agent, who}, links |> Enum.reverse() |> Enum.map(& &1.tool_use)}
   end
 
@@ -139,7 +142,8 @@ defmodule Geex.Ledger.Spool do
           harness: harness,
           session: session,
           turn: string_or_nil(m["turn"]),
-          tool_use: string_or_nil(m["tool_use"])
+          tool_use: string_or_nil(m["tool_use"]),
+          user_modified: m["user_modified"] == true
         }
       ]
     else

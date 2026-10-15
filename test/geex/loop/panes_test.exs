@@ -56,9 +56,17 @@ defmodule Geex.Loop.PanesTest do
     assert key(state, {:alt, ?o}).focus == :editor
   end
 
-  test "in the tree, Enter opens a directory", %{dir: _dir} do
+  test "in the tree, Enter opens a directory; Left on a file goes up to it, then closes it",
+       %{dir: _dir} do
     state = key(Loop.new_state(120, 30), {:alt, ?o}) |> key({:alt, ?o})
     state = key(state, {:key, :enter})
     assert Enum.map(state.tree.rows, & &1.path) == ["lib", "lib/a.ex"]
+
+    state = key(state, {:key, :down})
+    assert state.tree.sel == 1
+    state = key(state, {:key, :left})
+    assert state.tree.sel == 0
+    state = key(state, {:key, :left})
+    assert Enum.map(state.tree.rows, & &1.path) == ["lib"]
   end
 end

@@ -1870,3 +1870,39 @@ editor → edits → tree → editor; Enter opens a directory. **877 tests + 28 
 
 **Not tested:** the tree's drawing and keys beyond the run above (Right/Left, a list longer than the
 pane); a repository with 10,000+ files (the cap is unit-reasoned, not measured); the walk's cap.
+
+### 2026-10-15 — "Edited by you", build step 5 (ADR-0034 §8)
+
+When you edit an agent's proposed change in Claude Code's permission prompt before accepting it, its
+`tool_response.userModified` is `true`. The payload now sends `"user_modified": true` then (nothing
+otherwise: every other message is byte-identical). The intake reads it as an optional boolean.
+`Geex.Attest.who/1` builds the agent actor for the buffer, the edits list and the spool's chain, adding
+`user_modified: true` only when set; the ledger codec keeps the key. The status line and the edits pane
+say "edited by you". This is the last step: all of ADR-0034 is built.
+
+**Live-verified** (geex TUI in a tmux pty, 100×24, scratch `XDG_STATE_HOME`): a `printf` changed line
+2 of the open file, then a hand-made attestation with `"user_modified": true` was POSTed to every
+running geex (this one answered `held`, the coordinator's `not_open`). The edits pane listed `hold.txt
+claude-code/d25a8b6d, edited by you`; after `Alt+L` the line had its `▌` and the status line read `✎
+claude-code/d25a8b6d · turn turn… · edited by you`. The tree beside it was a walk of the scratch
+directory (not a repository). Before that, the edited payload script passed `sh -n` and the full
+payload suite (the message unchanged when the flag is false), and the coordinator was told before the
+live script changed.
+
+**Automated:** `edited_by_you_test` (5): the intake's `user_modified` (true, false, absent, refused
+otherwise); the actor keeps it through a held fast-forward, and an unedited write's actor has no such key;
+a chain is marked if any write was edited; a reopen keeps it (the ledger); the status-line label and the
+edits-pane row. `attest_payload_test` +1 (a real envelope with `userModified: true` sends
+`user_modified`); `Geex.Attest.who/1` doctest. **883 tests + 29 doctests**, green twice,
+`--warnings-as-errors` clean.
+
+Also from the coordinator's live test of `ea6ec63` (the tree: all checks passed, including Right/Left,
+a list longer than the pane, files added while unfocused, ignored and deleted files hidden, 59/60/120
+columns, and the `Alt+M` / `Alt+P` fix): Left on a file now goes up to its directory (`panes_test`).
+Its "first row never highlighted" report was checked here: with the editor's cursor on line 1, `tmux
+capture-pane -e` showed the tree's row 0 with no background code, because it equals the end of the line
+above (the editor's current-line tint) and tmux omits it; with the cursor on line 3 the row's
+`48;2;49;35;33` is emitted. Not a bug. **883 tests + 29 doctests** after it.
+
+**Not tested:** a real `userModified: true` from Claude Code's permission prompt (this session runs
+without prompts; the captured fixtures all say `false`).

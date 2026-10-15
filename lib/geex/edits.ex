@@ -72,7 +72,7 @@ defmodule Geex.Edits do
   @impl true
   def handle_cast({:attested, a, at}, state) do
     path = Path.expand(a.path)
-    who = {:agent, Map.take(a, [:harness, :session, :turn, :tool_use])}
+    who = {:agent, Geex.Attest.who(a)}
 
     rows =
       case find(state.rows, path, a.sha256) do

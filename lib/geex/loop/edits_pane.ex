@@ -64,7 +64,7 @@ defmodule Geex.Loop.EditsPane do
   def lines(entries, root, w, n, sel, focused?) do
     names = Enum.map(entries, &relative(&1.path, root))
     name_w = names |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end) |> min(div(w, 2))
-    who_w = entries |> Enum.map(&String.length(&1.who)) |> Enum.max(fn -> 0 end) |> min(24)
+    who_w = entries |> Enum.map(&String.length(&1.who)) |> Enum.max(fn -> 0 end) |> min(36)
     start = sel |> Kernel.-(n - 1) |> max(0) |> min(max(length(entries) - n, 0))
 
     entries
@@ -101,8 +101,12 @@ defmodule Geex.Loop.EditsPane do
   defp who(:you), do: "you"
   defp who(:outside), do: "outside"
 
-  defp who({:agent, %{harness: harness, session: session}}),
-    do: harness <> "/" <> String.slice(session, 0, 8)
+  defp who({:agent, %{harness: harness, session: session} = who}),
+    do:
+      harness <>
+        "/" <>
+        String.slice(session, 0, 8) <>
+        if(who[:user_modified], do: ", edited by you", else: "")
 
   # Pad, or cut with an ellipsis, to exactly `w` graphemes.
   defp fit(text, w) do
