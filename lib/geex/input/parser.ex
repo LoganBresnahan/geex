@@ -59,6 +59,31 @@ defmodule Geex.Input.Parser do
   @spec parse(binary()) :: {[event()], binary()}
   def parse(bytes) when is_binary(bytes), do: do_parse(bytes, [])
 
+  @doc """
+  Give up waiting on a `leftover` that nothing followed. A terminal sends a whole control
+  sequence in one write, so bytes still incomplete after a short pause were typed by a person:
+  the ESC is the Esc key, and what follows it is ordinary input. The caller (`Geex.TerminalIO`)
+  calls this when no bytes arrive for a few tens of milliseconds.
+
+      iex> Geex.Input.Parser.flush("\\e")
+      [{:key, :esc}]
+
+      iex> Geex.Input.Parser.flush("\\e[")
+      [{:key, :esc}, {:char, "["}]
+  """
+  @spec flush(binary()) :: [event()]
+  def flush(<<>>), do: []
+  def flush(<<"\e", rest::binary>>), do: [{:key, :esc} | flush(rest)]
+
+  def flush(bytes) do
+    case parse(bytes) do
+      {events, <<>>} -> events
+      {events, leftover} when byte_size(leftover) < byte_size(bytes) -> events ++ flush(leftover)
+      # an incomplete UTF-8 tail: nothing to make of it
+      {events, _stuck} -> events
+    end
+  end
+
   defp do_parse(<<>>, acc), do: {Enum.reverse(acc), <<>>}
 
   # CSI: ESC [ params* intermediates* final, read whole. A known one becomes a key; an unknown

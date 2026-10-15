@@ -1634,3 +1634,25 @@ Delete mid-line, at a line's end, at the buffer's end). **807 tests + 20 doctest
 **Not handled yet (dropped, by choice):** Page Up/Down, modified arrows (Ctrl/Shift), F-keys, Insert. Home,
 End and Delete do nothing in the minibuffer (it ignores keys it doesn't know). Alt + a non-letter
 (`ESC 1`) still emits ESC and types the character, as before.
+
+### 2026-10-15 — Input: a leftover Esc is delivered after 40 ms (fixes a regression in `ebeca5a`)
+
+**Regression** (found by the coordinator session the same hour): a bare Esc stays leftover until the next
+chunk. With whole-CSI parsing, Esc then `[` then `a`, typed as separate keystrokes, built `ESC [ a`, a
+complete CSI that was dropped, losing all three. Before `ebeca5a` they arrived as Esc, `[`, `a`. Reproduced
+by parsing the three chunks in sequence.
+
+**Fix:** `Geex.TerminalIO` starts a 40 ms timer whenever a read leaves leftover bytes. Any new bytes make it
+stale. If nothing followed, the bytes were typed by a person, not sent as one sequence (a terminal writes a
+whole sequence at once), so `Geex.Input.Parser.flush/1` delivers them: each ESC as the Esc key, the rest as
+ordinary input. This also ends the old lag where a bare Esc waited for your next key.
+
+**Live-verified** (TUI in a tmux pty, keys 200 ms apart): Esc, `[`, `a` typed `[a`; Esc alone closed the
+open minibuffer with no further key; End still moved to the line's end.
+
+**Automated:** `parser_test` +3 and 2 doctests (`flush/1`: bare Esc, `ESC [`, an incomplete CSI, two Escs,
+and Esc / `[` / `a` as separate chunks). **810 tests + 22 doctests**, green twice, `--warnings-as-errors`
+clean.
+
+**Not tested:** the timer under a slow or remote terminal (an SSH link that splits a sequence across more
+than 40 ms would now type its tail; raising `@esc_timeout_ms` is the knob).

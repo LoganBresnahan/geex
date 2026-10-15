@@ -172,4 +172,29 @@ defmodule Geex.Input.ParserTest do
       assert {[{:alt, ?O}], ""} = Parser.parse("\eO")
     end
   end
+
+  # Esc, then "[", then "a", typed as separate keystrokes: the leftover Esc joined the "[" and
+  # the "a" closed a CSI that was dropped, losing all three. TerminalIO now flushes a leftover
+  # that nothing followed within 40 ms.
+  describe "flush/1: a leftover nothing followed was typed" do
+    test "a bare Esc is the Esc key; what follows it is ordinary input" do
+      assert Parser.flush("\e") == [{:key, :esc}]
+      assert Parser.flush("\e[") == [{:key, :esc}, {:char, "["}]
+
+      assert Parser.flush("\e[1;5") ==
+               Enum.concat([[{:key, :esc}], Enum.map(~w([ 1 ; 5), &{:char, &1})])
+    end
+
+    test "every Esc counts" do
+      assert Parser.flush("\e\e") == [{:key, :esc}, {:key, :esc}]
+    end
+
+    test "Esc, [ and a as separate keystrokes all arrive" do
+      {[], left} = Parser.parse("\e")
+      events = Parser.flush(left)
+      {more, ""} = Parser.parse("[")
+      {last, ""} = Parser.parse("a")
+      assert events ++ more ++ last == [{:key, :esc}, {:char, "["}, {:char, "a"}]
+    end
+  end
 end

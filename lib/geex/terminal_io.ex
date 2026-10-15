@@ -88,6 +88,8 @@ defmodule Geex.TerminalIO do
       tty: tty,
       reader_ref: reader_ref,
       esc_buf: <<>>,
+      # The pending flush of `esc_buf` (a ref), stale once more bytes arrive.
+      esc_flush: nil,
       subscribers: MapSet.new(),
       monitors: %{}
     }
@@ -145,8 +147,17 @@ defmodule Geex.TerminalIO do
     {events, leftover} = Parser.parse(state.esc_buf <> bytes)
     Enum.each(events, fn ev -> publish({:geex_io, ev}, state) end)
     :prim_tty.read(state.tty, 1024)
-    {:noreply, %{state | esc_buf: leftover}}
+    {:noreply, %{state | esc_buf: leftover, esc_flush: schedule_flush(leftover)}}
   end
+
+  # Nothing followed the leftover within @esc_timeout_ms: it was typed, not sent as one
+  # sequence (a bare Esc, or Esc then `[`). Deliver it (`Parser.flush/1`).
+  def handle_info({:flush_esc, ref}, %{esc_flush: ref, esc_buf: buf} = state) do
+    Enum.each(Parser.flush(buf), fn ev -> publish({:geex_io, ev}, state) end)
+    {:noreply, %{state | esc_buf: <<>>, esc_flush: nil}}
+  end
+
+  def handle_info({:flush_esc, _stale}, state), do: {:noreply, state}
 
   def handle_info({ref, :eof}, %{reader_ref: ref} = state) do
     publish({:geex_io, :eof}, state)
@@ -192,5 +203,17 @@ defmodule Geex.TerminalIO do
 
   defp publish(message, state) do
     Enum.each(state.subscribers, fn pid -> send(pid, message) end)
+  end
+
+  # A terminal writes a whole control sequence at once, so a leftover that sits this long was
+  # typed by a person. 25–50 ms is the usual range in terminal editors.
+  @esc_timeout_ms 40
+
+  defp schedule_flush(<<>>), do: nil
+
+  defp schedule_flush(_leftover) do
+    ref = make_ref()
+    Process.send_after(self(), {:flush_esc, ref}, @esc_timeout_ms)
+    ref
   end
 end
