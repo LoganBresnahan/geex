@@ -153,6 +153,9 @@ session's `Co-Authored-By` trailer.
 - attestation discovery file (ADR-0032): `$XDG_RUNTIME_DIR/geex/<os_pid>.json`
   (`<tmp>/geex-<user>/` without it), `0600`, removed on clean exit; app gate
   `:start_attest` (off under test)
+- attestation payload (ADR-0032 step d): `integrations/captainhook/geex-attest.sh`, which the
+  user registers in `~/.captainHook/handlers.json` (never edit that file without asking);
+  tested against `test/fixtures/claude-code/` (verbatim captAInHook captures)
 - TUI log: `<tmp>/geex.log` (`System.tmp_dir!/0`)
 - sibling path dep: `~/tree_sitter_wasm` (Rustler NIF; must exist to compile)
 - harness presets: `presets/<harness>/` — copy into a *target* project, never

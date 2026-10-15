@@ -12,12 +12,12 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-14):** 650 tests + 9 doctests green, `--warnings-as-errors` clean. Since the
+**Current (2026-10-15):** 730 tests + 14 doctests green, `--warnings-as-errors` clean. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
-**Direction changed the same day ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
+**Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
 the MCP door is frozen; v0.5 is now the **ledger track** (reconcile as the primary agent path,
-attested by captAInHook). The frontier is that track's item 1; the command-surface track at the
+attested by captAInHook). Items 1–4 are built; the frontier is item 5 (surfacing in the TUI); the command-surface track at the
 end of this file continues alongside it, since editor comfort is the other half of the point. The reconcile watcher is
 now shown live against a real `inotify` backend. (Test counts quoted further down are as of their
 own dates.)
@@ -153,15 +153,16 @@ The ledger track, in order (each builds on the one before):
    now started in TUI mode too; hashes must be 64 lowercase hex, and anything else is rejected
    with a 400. A `0600` discovery file (URL + token + pid) under `$XDG_RUNTIME_DIR/geex/`,
    removed on clean exit.
-4. **The captAInHook payload.** A geex-owned `post-tool-use` exec handler script (e.g.
-   `integrations/captainhook/geex-attest.sh`), registered by the user in
-   `~/.captainHook/handlers.json`; captAInHook itself stays unaware of geex. It attests only
-   **writer tools** on a per-harness allowlist (unknown means send nothing), parses with `jq`,
-   and sends `before` = sha256 of `tool_response.originalFile` / `original_file`, `sha256` =
-   sha256 of the file on disk, plus `tool_use_id` and `prompt_id` (as the turn). It POSTs
-   *before* answering, skipping discovery entries whose pid is gone, with a short connect
-   timeout. Fixtures: captAInHook `3ddb467`, copied into `test/fixtures/` with that source
-   note.
+4. **The captAInHook payload** — **built 2026-10-15** (ADR-0032 step-d amendment):
+   `integrations/captainhook/geex-attest.sh`, a fail-open `post-tool-use` oneshot handler the
+   user registers in `~/.captainHook/handlers.json`; captAInHook itself stays unaware of geex.
+   It attests only `Write` / `Edit` / `NotebookEdit` from `claude-code` (anything else sends
+   nothing), parses with `jq`, sends `before` = sha256 of `originalFile` / `original_file` and
+   `sha256` = sha256 of the disk, plus `prompt_id` (turn) and `tool_use_id`, and POSTs to every
+   live discovery entry in parallel before exiting. A **CRLF** file matches because reconcile
+   also stamps `before_sha256_lf` (the baseline with `\r\n` as `\n`, how Claude Code reports
+   it). Tested against captAInHook's real envelopes (`test/fixtures/claude-code/`, from
+   `3ddb467`).
 5. **Surfacing in the TUI.** Show who wrote what: a gutter mark for agent-authored hunks, the
    author on the status line, and undo of a specific agent hunk without touching your own
    edits.

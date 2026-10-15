@@ -215,7 +215,9 @@ defmodule Geex.Buffer do
 
   It upgrades the buffer's **newest reconcile group**, every command of it, once, from
   `:external` to `{:agent, %{harness, session, turn, tool_use}}`, only when **both**
-  `before` and `sha256` equal the group's `before_sha256` and `sha256`. Otherwise it waits in
+  `before` and `sha256` equal the group's `before_sha256` and `sha256`. `before` may instead
+  equal `before_sha256_lf`, the baseline with each `\\r\\n` turned into `\\n`: Claude Code reports a
+  CRLF file's prior text that way. `sha256` is always exact. Otherwise it waits in
   a bounded pending table and is consumed if a matching group is recorded soon after (the
   usual order: the hook beats the settled file read). Replay is unaffected: `meta` never
   feeds a command's `run/2`.
@@ -519,8 +521,14 @@ defmodule Geex.Buffer do
     Enum.find_value(history, fn command -> command.meta.reconcile end)
   end
 
-  defp matches?(attestation, stamp),
-    do: attestation.before == stamp.before_sha256 and attestation.sha256 == stamp.sha256
+  # `after` must equal the disk bytes exactly; `before` may also equal the baseline with
+  # each "\r\n" turned into "\n" (`before_sha256_lf`, nil for a baseline without one), the form
+  # Claude Code reports a CRLF file's prior text in.
+  defp matches?(%{before: before, sha256: sha256}, stamp) when is_binary(before) do
+    sha256 == stamp.sha256 and before in [stamp.before_sha256, stamp.before_sha256_lf]
+  end
+
+  defp matches?(_attestation, _stamp), do: false
 
   # Only once: every command of the group is still the anonymous `:external`.
   defp unattested?(history, group) do

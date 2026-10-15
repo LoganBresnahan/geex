@@ -366,3 +366,57 @@ Implementation choices made building the intake, within the decisions above:
 - **Statuses:** `attested` / `pending` / `ignored` / `not_open` (200); `400` invalid, with the
   reason; `401` token; `403` any `Origin` header (the payload is never a browser). The token is
   compared in constant time.
+
+## Amendment — 2026-10-15: step (d) as built — the payload, and line endings
+
+1. **A CRLF file's `before` matches too (supersedes the earlier "Exactness caveat" for line
+   endings).** Claude Code reports a file's prior text (`originalFile`) with each `\r\n` turned
+   into `\n`, in one left-to-right pass: a lone `\r` stays, and `\r\r\n` becomes `\r\n`. The
+   coordinator verified this live on 2.1.299 against five files (CRLF with a stray `\r`, mixed,
+   LF with a stray `\r`, a CRLF `Write`, `\r\r\n`). An Edit to a CRLF file therefore never matched
+   the exact baseline hash. Decided (maintainer): **geex** accounts for it, not the payload.
+   - When the baseline holds `\r\n`, reconcile also stamps `before_sha256_lf`, the hash of
+     `String.replace(baseline, "\r\n", "\n")` (else `nil`). An attestation's `before` may equal
+     either before hash. **`sha256` (after) is always exact.**
+   - geex holds the real pre-write bytes, so this covers `Edit` *and* `Write` (which rewrites a
+     CRLF file as LF, leaving the payload nothing to rebuild from) and mixed endings. Rejected:
+     rebuilding CRLF in the payload (Edit only, guesses which lines had `\r`), a `PreToolUse`
+     disk hash joined by `tool_use_id` (exact, but a second handler plus cleanup), and leaving
+     CRLF `:external`.
+   - **Residual, pinned by a test:** another writer converts *only* CRLF to LF, then an agent
+     edits, inside one quiet period. The coalesced group's baseline converts to the agent's
+     `before`, so the agent is also credited with the conversion. A change to any other byte
+     keeps the group `:external`.
+   - Also from the live check: BOM, non-ASCII UTF-8 and a missing final newline round-trip
+     exactly. Edit/Write refuse invalid UTF-8, so such writes come through Bash and stay
+     `:external`. Claude Code's `Edit` rewrites a mixed-ending file to one ending, so hunks can
+     land on lines the agent didn't target; they are credited to the agent, correctly, since
+     its tool wrote them.
+
+2. **`NotebookEdit` reports success as `error: ""`**, not `null` (fixture-verified). Only a
+   non-empty `error` sends nothing. This corrects the earlier "non-null `error`".
+
+3. **The payload, `integrations/captainhook/geex-attest.sh`** (POSIX `sh`; jq, curl, and
+   `sha256sum` or macOS `shasum -a 256`):
+   - Acts only on a `PostToolUse` envelope from `claude-code` for `Write` / `Edit` /
+     `NotebookEdit` (`MultiEdit` allowed if a version still has it) with an absolute path and a
+     string prior text. A created file sends **nothing**: a message without `before` could only
+     be ignored.
+   - Discovery: `$XDG_RUNTIME_DIR/geex`, else `/run/user/<uid>/geex`, plus
+     `${TMPDIR:-/tmp}/geex-$USER` (`GEEX_ATTEST_DIR` overrides, for tests). It skips a file or
+     directory not owned by the user, a `url` not starting `http://127.0.0.1:`, a non-hex token,
+     and a dead pid.
+   - The token reaches curl as a header on fd 3, never on argv (`ps` shows argv to every local
+     user). POSTs run in parallel, each capped at 1 s (0.3 s to connect), and the script waits
+     for them before exiting 0 with empty stdout (a Noop). Every failure is fail-open, with a
+     note on stderr (captAInHook's trail).
+   - Measured against a live `mix geex.serve`: ~3 ms for a non-writer call, ~15 ms for a small
+     Edit, ~250 ms for a 2.7 MB file (an 8 MB envelope).
+   - **Registration** (the user's step, in `~/.captainHook/handlers.json`): `events
+     ["post-tool-use"]`, `mode "oneshot"`, `failMode "open"`, `budgetMs 1500`, `passEnv
+     ["XDG_RUNTIME_DIR"]` (captAInHook strips a handler's environment to an allowlist).
+   - Tested against captAInHook's real envelopes, copied verbatim to
+     `test/fixtures/claude-code/` (captAInHook `3ddb467`).
+   - **macOS:** the payload runs there (shasum fallback; the tmp-dir discovery matches
+     `System.tmp_dir!/0`'s `TMPDIR`). geex itself has never run on macOS: its watcher's FSEvents
+     backend (`file_system`) is untested here.

@@ -14,11 +14,13 @@ defmodule Geex.Command.Meta do
     * `origin`      — `%{turn_id, seq}` linking a *sequence* of commands to one
                       agent turn (§13 composite provenance); `nil` for ad-hoc input
     * `reconcile`   — for a reconciled (`:external`) command:
-                      `%{group, before_sha256, sha256}`. Every hunk of one out-of-band
-                      write shares the `group` id, the sha256 of the baseline disk
-                      bytes the write replaced, and the sha256 of the disk bytes
-                      reconcile read (64 lowercase hex). An attestation must match
-                      both hashes (ADR-0032). `nil` otherwise
+                      `%{group, before_sha256, before_sha256_lf, sha256}`. Every
+                      hunk of one out-of-band write shares the `group` id, the sha256
+                      of the baseline disk bytes the write replaced, and the sha256 of
+                      the disk bytes reconcile read (64 lowercase hex). When the
+                      baseline holds a `\\r\\n`, `before_sha256_lf` is its hash with
+                      each `\\r\\n` turned into `\\n` (else `nil`). An attestation must match the
+                      after hash and either before hash (ADR-0032). `nil` otherwise
 
   `at` is stamped at creation and **preserved** when a recorded command is
   replayed — replay re-runs the same values, it does not re-stamp them. That is
@@ -37,7 +39,13 @@ defmodule Geex.Command.Meta do
   @type origin :: nil | %{turn_id: String.t(), seq: non_neg_integer()}
 
   @type reconcile ::
-          nil | %{group: pos_integer(), before_sha256: String.t(), sha256: String.t()}
+          nil
+          | %{
+              group: pos_integer(),
+              before_sha256: String.t(),
+              before_sha256_lf: String.t() | nil,
+              sha256: String.t()
+            }
 
   @type t :: %__MODULE__{
           actor: actor(),

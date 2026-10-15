@@ -176,14 +176,17 @@ defmodule Geex.Reconcile do
   # One `replace` per changed hunk (bottom-up, so each is valid after the ones before
   # it), all sharing one reconcile group: an id, the sha256 of the disk bytes just read,
   # and the sha256 of the baseline disk bytes this write replaced (`synced`). An
-  # attestation must match both hashes (ADR-0032 amendments). If the line diff can't
-  # reproduce the disk text exactly, fall back to one whole-text replace.
+  # attestation must match both hashes (ADR-0032 amendments). A baseline holding "\r\n"
+  # also gets the hash of itself with each "\r\n" turned into "\n": Claude Code reports a
+  # CRLF file's prior text that way, so its `before` can only match that. If the line diff
+  # can't reproduce the disk text exactly, fall back to one whole-text replace.
   defp external_commands(buffer_text, target, baseline, disk_text) do
     meta =
       Meta.new(:external,
         reconcile: %{
           group: System.unique_integer([:positive, :monotonic]),
           before_sha256: sha256(baseline),
+          before_sha256_lf: lf_sha256(baseline),
           sha256: sha256(disk_text)
         }
       )
@@ -215,6 +218,12 @@ defmodule Geex.Reconcile do
 
   # Lowercase hex, 64 chars — the attestation contract's format (what `sha256sum` prints).
   defp sha256(bytes), do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)
+
+  # One left-to-right pass of "\r\n" -> "\n", as Claude Code does it (a lone "\r" stays;
+  # "\r\r\n" becomes "\r\n"). Verified live on 2.1.299.
+  defp lf_sha256(bytes) do
+    if String.contains?(bytes, "\r\n"), do: bytes |> String.replace("\r\n", "\n") |> sha256()
+  end
 
   defp whole_text_span(buffer_text, disk_text) do
     lines = String.split(buffer_text, "\n")

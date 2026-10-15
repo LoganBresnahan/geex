@@ -156,6 +156,72 @@ defmodule Geex.AttestTest do
     end
   end
 
+  # Claude Code hands the hook a file's prior text with each "\r\n" turned into "\n" (one
+  # left-to-right pass; a lone "\r" stays), so the payload's `before` is that text's hash.
+  # `sha256` is the payload's hash of the disk. The rows come from the coordinator's live check
+  # on Claude Code 2.1.299: the pre-write bytes and `originalFile` as it reported them (written
+  # out, not computed); the after bytes follow the line endings it saw each tool leave.
+  @crlf_cases [
+    {"stray: CRLF with a lone \\r (Edit keeps CRLF)", "alpha\r\nmid\rline\r\ngamma\r\n",
+     "alpha\nmid\rline\ngamma\n", "alpha\r\nmid\rline\r\nGAMMA\r\n"},
+    {"mixed (Edit rewrites all-LF)", "alpha\nbeta\r\ngamma\nend\r\n", "alpha\nbeta\ngamma\nend\n",
+     "alpha\nbeta\ngamma\nEND\n"},
+    {"lfstray: LF with a lone \\r (exact match)", "alpha\nmid\rline\ngamma\n",
+     "alpha\nmid\rline\ngamma\n", "alpha\nmid\rline\nGAMMA\n"},
+    {"crlfw: Write rewrites a CRLF file as LF", "alpha\r\nbeta\r\ngamma\r\n",
+     "alpha\nbeta\ngamma\n", "alpha\nbeta\nGAMMA\n"},
+    {"doublecr: \\r\\r\\n reports as \\r\\n", "alpha\r\r\nbeta\n", "alpha\r\nbeta\n",
+     "alpha\r\nBETA\n"}
+  ]
+
+  describe "Buffer.attest/2 — line endings as Claude Code reports them" do
+    for {name, baseline, reported, disk} <- @crlf_cases do
+      test name do
+        buf = start_supervised!({Buffer, text: unquote(baseline)})
+        {:reconciled, _} = Reconcile.reconcile(buf, unquote(disk))
+        assert Buffer.attest(buf, attestation(unquote(reported), unquote(disk))) == :attested
+        assert Enum.all?(actors(buf), &match?({:agent, _}, &1))
+      end
+    end
+
+    test "the early (pending) path matches the same way" do
+      buf = start_supervised!({Buffer, text: "a\r\nb\r\n"})
+      assert Buffer.attest(buf, attestation("a\nb\n", "a\r\nB\r\n")) == :pending
+      {:reconciled, snap} = Reconcile.reconcile(buf, "a\r\nB\r\n")
+      assert [%{meta: %{actor: {:agent, _}}}] = snap.history
+    end
+
+    test "the exact before still matches; the after hash is never loosened" do
+      buf = start_supervised!({Buffer, text: "a\r\nb\r\n"})
+      {:reconciled, _} = Reconcile.reconcile(buf, "a\r\nB\r\n")
+      # the after given without its \r: no match
+      assert Buffer.attest(buf, attestation("a\nb\n", "a\nB\n")) == :pending
+      assert actors(buf) == [:external]
+      assert Buffer.attest(buf, attestation("a\r\nb\r\n", "a\r\nB\r\n")) == :attested
+    end
+
+    test "a baseline with no \\r\\n gets no second hash" do
+      buf = start_supervised!({Buffer, text: "a\rb\n"})
+      {:reconciled, snap} = Reconcile.reconcile(buf, "c\n")
+      assert [%{meta: %{reconcile: %{before_sha256_lf: nil}}}] = snap.history
+    end
+
+    # The stated residual (ADR-0032 CRLF amendment): another writer ONLY converts CRLF to LF,
+    # then the agent edits, inside one quiet period. One group H0 -> H2; the agent's before
+    # (H1 = H0 converted) matches the second hash, so the agent is credited with the
+    # line-ending change too. A change to any other byte keeps the group :external.
+    test "residual: a CRLF->LF conversion coalesced with an agent edit is credited to it" do
+      buf = start_supervised!({Buffer, text: "a\r\nb\r\n"})
+      {:reconciled, _} = Reconcile.reconcile(buf, "a\nB\n")
+      assert Buffer.attest(buf, attestation("a\nb\n", "a\nB\n")) == :attested
+
+      other = start_supervised!({Buffer, text: "a\r\nb\r\n"}, id: :other)
+      {:reconciled, _} = Reconcile.reconcile(other, "x\nB\n")
+      assert Buffer.attest(other, attestation("x\nb\n", "x\nB\n")) == :pending
+      assert actors(other) == [:external]
+    end
+  end
+
   describe "submit/1" do
     test "a path with no open buffer is :not_open" do
       assert Attest.submit(attestation("a", "b", %{path: "/nope/#{System.unique_integer()}"})) ==

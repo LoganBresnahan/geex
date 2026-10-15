@@ -1373,3 +1373,44 @@ router; discovery file modes, contents and cleanup). **705 tests + 14 doctests**
 **Not tested:** the payload itself (step d) and real captAInHook envelopes; whether Claude Code's
 `originalFile` matches the disk bytes for every file (the step-d dogfood check); two geex instances with
 the same file open.
+
+### 2026-10-15 — Ledger step (d): the captAInHook payload, and CRLF (ADR-0032)
+
+`integrations/captainhook/geex-attest.sh`, a fail-open oneshot `post-tool-use` handler: for a `claude-code`
+`PostToolUse` of `Write` / `Edit` / `NotebookEdit` it POSTs `{v, path, before, sha256, harness, session,
+turn, tool_use}` (`before` = sha256 of `originalFile` / `original_file`, `sha256` = sha256 of the disk) to
+every live geex discovery entry, in parallel, then exits 0 with empty stdout. Everything else sends nothing.
+geex side: reconcile also stamps `before_sha256_lf` (the baseline with each `\r\n` as `\n`) when the baseline
+holds `\r\n`, and `Buffer.attest/2` accepts either before hash; `sha256` stays exact. The rule came from the
+coordinator's live check on Claude Code 2.1.299 (one left-to-right `\r\n` → `\n`; a lone `\r` stays).
+Fixtures: captAInHook `3ddb467`, copied verbatim to `test/fixtures/claude-code/`.
+
+**Live-verified** with the handler registered in `~/.captainHook/handlers.json` (backup
+`handlers.json.bak-20261015-090908`; hot reload logged `added 1, kept 7`). Two geex TUIs in a tmux pty, one
+on an LF file and one on a CRLF file, so every POST went to two instances. This session's native tools:
+- LF `Edit` → `geex attest: … attributed to claude-code session d25a8b6d…`. The reconcile landed first, so
+  this was the late path.
+- CRLF `Edit` → CRLF kept on disk (`od -c`); the attestation arrived first (`pending`), then `geex
+  reconcile: … (attested: claude-code session d25a8b6d…)`.
+- `Write` over the CRLF file → rewritten as LF on disk, and attested the same way.
+- `sed -i` via Bash → reconciled with no attestation (stays `:external`).
+- Quitting both TUIs removed both discovery files.
+- captAInHook trail: 20 runs of the handler across this machine's sessions, avg 15 ms, min 4 ms, max 92 ms
+  (the first Edit; geex's first `/attest` request), no non-zero exit, no stderr rows.
+- Measured beforehand against `mix geex.serve` (stripped env, n=20/20/10): non-writer ~3 ms, small Edit
+  ~15 ms, a 2.7 MB file (8 MB envelope) ~250 ms.
+
+**Automated:** `attest_test` (the coordinator's five line-ending rows, with `originalFile` written out
+literally; the pending path; the after hash is never loosened; no `\r\n`, no second hash; the residual: a
+CRLF→LF conversion coalesced with an agent edit is credited to it). `attest_payload_test`, 16 tests: the
+three writer fixtures give the exact message and bearer token; Write-create, Read (text, notebook), Bash, a
+`PreToolUse` line, another harness and a NotebookEdit with an `error` send nothing; garbage in → exit 0 plus
+a stderr note; no geex → exit 0; discovery: two live instances both receive, while a dead pid, a `localhost`
+url and a non-hex token are skipped and a refused POST is reported; the macOS `shasum -a 256` fallback with
+no `sha256sum` on PATH; end to end through the real `POST /attest`, an Edit credited with the fixture's
+session / prompt / tool-use ids, and a CRLF Write. **730 tests + 14 doctests**, green twice,
+`--warnings-as-errors` clean.
+
+**Not tested:** `NotebookEdit` and `MultiEdit` live (NotebookEdit is fixture-tested only); geex on macOS
+(its `file_system` FSEvents backend has never run here); a hung but alive geex (the 1 s cap is curl's); two
+geex instances with the same file open; harnesses other than Claude Code (they send nothing by design).
