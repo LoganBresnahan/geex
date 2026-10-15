@@ -17,7 +17,7 @@ narrative below: the interactive TUI loop, highlighting, selection + clipboard, 
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
 the MCP door is frozen; v0.5 is now the **ledger track** (reconcile as the primary agent path,
-attested by captAInHook). Items 1–4 are built and item 5's display is built; the frontier is per-agent undo; the command-surface track at the
+attested by captAInHook). Items 1–4 and item 5's display are built; the frontier is item 6, the durable ledger (ADR-0033); the command-surface track at the
 end of this file continues alongside it, since editor comfort is the other half of the point. The reconcile watcher is
 now shown live against a real `inotify` backend. (Test counts quoted further down are as of their
 own dates.)
@@ -168,8 +168,17 @@ The ledger track, in order (each builds on the one before):
    status line for the line under the cursor, both derived from `Geex.Blame` (a per-line
    `git blame` over the one history: shifts with edits, cleared by undo, relabelled on a late
    attestation). Shell and other unattested writes stay unmarked. **Still open:** undo of a
-   specific agent hunk without touching your own later edits. It needs its own design, since
-   the ADR-0031 history is linear.
+   specific agent hunk without touching your own later edits, now designed as a forward
+   revert in ADR-0033 (item 6).
+6. **The durable ledger** ([adr/0033](adr/0033-durable-ledger.md), accepted 2026-10-15): an
+   append-only JSONL history log per file in `~/.local/state/geex/ledger/`, so quitting or a
+   crash loses nothing. Reopening restores history, blame and unsaved edits when the disk
+   matches the replayed synced hash, and otherwise records an `:external` gap. Build order:
+   (1) extract the pure `Geex.History` (no behavior change); (2) the ledger codec, write path and
+   restore; (2b) the hash-only spool that credits agent edits made while a file isn't open
+   (single writes and same-session runs); (3) per-agent revert (`Alt+R`, `revert` /
+   `revert-call`; refused when your later edits overlap); (4) `mix geex.ledger compact` /
+   `forget` / `list`.
 
 Exit criteria: with captAInHook installed and the payload registered, an agent session
 (Claude Code first) edits a file open in geex with its **native** tools; each change appears
