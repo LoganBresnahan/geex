@@ -215,4 +215,25 @@ defmodule Geex.Loop.KeymapTest do
       assert :ignore = Keymap.resolve({:alt, ?j}, {0, 0}, "abc")
     end
   end
+
+  describe "Home, End, Delete" do
+    test "Home and End go to the line's start and end" do
+      assert {:move, {1, 0}} = Keymap.resolve({:key, :home}, {1, 2}, "ab\ncdef")
+      assert {:move, {1, 4}} = Keymap.resolve({:key, :end}, {1, 2}, "ab\ncdef")
+    end
+
+    test "Delete removes the grapheme under the cursor and stays put" do
+      assert {:edit, %Delete{line: 0, col: 1, count: 1}, {0, 1}} =
+               Keymap.resolve({:key, :delete}, {0, 1}, "abc")
+    end
+
+    test "Delete at a line's end joins the next line" do
+      assert {:edit, %Replace{start_line: 0, start_col: 2, end_line: 1, end_col: 0, text: ""},
+              {0, 2}} = Keymap.resolve({:key, :delete}, {0, 2}, "ab\ncd")
+    end
+
+    test "Delete at the very end of the buffer is ignored" do
+      assert :ignore = Keymap.resolve({:key, :delete}, {1, 2}, "ab\ncd")
+    end
+  end
 end

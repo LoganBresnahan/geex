@@ -1605,3 +1605,32 @@ reopen (`credited to claude-code/7ccbf3d1 (1 edit)`, mark, turn on the status li
 was recorded as an outside change, both lines unmarked, and the leftover spool entry dropped. A lock was
 never left behind by a clean `Ctrl-X` (checked after each clean quit). Its scratch ledgers were removed
 afterwards.
+
+### 2026-10-15 — Input: special keys no longer type escape-sequence junk into the buffer
+
+**Bug** (found by the coordinator session while checking step 3): `Geex.Input.Parser` recognised only the
+four arrow CSIs. Any other escape sequence fell to "ESC + unknown byte": the ESC became `{:key, :esc}` and
+the rest was inserted as text. Pressing End in tmux typed `[4~` into the file; Delete typed `[3~`, Page
+Up/Down `[5~`/`[6~`, Ctrl+Right `[1;5C`, and F1 (`ESC O P`) fired Alt+O and typed `P`. Confirmed by
+parsing each sequence before the fix.
+
+**Fix:** a control sequence is read as one unit: a CSI (`ESC [`, parameter bytes `0x30–0x3F`, intermediates
+`0x20–0x2F`, final `0x40–0x7E`) or an SS3 (`ESC O` + one byte). Arrows, Home (`ESC [ H`, `1~`, `7~`, `ESC O
+H`), End (`ESC [ F`, `4~`, `8~`, `ESC O F`) and Delete (`3~`) map to keys; every other sequence is dropped.
+An incomplete one stays leftover (at most 32 bytes); a byte outside the CSI ranges means it wasn't a
+sequence, and the rest is re-read. The keymap gained Home / End (line start / end, as Alt+R / Alt+F) and
+Delete (the grapheme under the cursor; at a line's end, join the next line).
+
+**Live-verified** (TUI in a tmux pty, keys sent by name): End → `1:12`, Home → `1:1`, Delete removed the
+`h`; then Page Up, Page Down, Ctrl+Right, Shift+Up, F1, F5 and Insert changed nothing; End then Delete
+joined line 2 onto line 1.
+
+**Automated:** `parser_test` +7 (the three forms of Home/End and Delete, SS3 arrows; ten unsupported
+sequences dropped; text around a dropped sequence; an incomplete sequence across chunks; unbounded garbage
+dropped; `ESC [` + a control byte re-read; a lone `ESC O` is Alt+Shift+O). `keymap_test` +4 (Home/End;
+Delete mid-line, at a line's end, at the buffer's end). **807 tests + 20 doctests**, green twice,
+`--warnings-as-errors` clean.
+
+**Not handled yet (dropped, by choice):** Page Up/Down, modified arrows (Ctrl/Shift), F-keys, Insert. Home,
+End and Delete do nothing in the minibuffer (it ignores keys it doesn't know). Alt + a non-letter
+(`ESC 1`) still emits ESC and types the character, as before.

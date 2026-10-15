@@ -110,4 +110,66 @@ defmodule Geex.Input.ParserTest do
       assert {[{:char, "😀"}], ""} = Parser.parse("😀")
     end
   end
+
+  # Every special key a terminal sends is read as one unit: mapped, or dropped. None of it may
+  # reach the buffer as text (pressing End in tmux once typed "[4~" into the file).
+  describe "whole control sequences" do
+    test "Home, End and Delete, in the xterm, VT220 and SS3 forms" do
+      for {bytes, key} <- [
+            {"\e[H", :home},
+            {"\e[1~", :home},
+            {"\e[7~", :home},
+            {"\eOH", :home},
+            {"\e[F", :end},
+            {"\e[4~", :end},
+            {"\e[8~", :end},
+            {"\eOF", :end},
+            {"\e[3~", :delete},
+            {"\eOA", :up},
+            {"\eOD", :left}
+          ] do
+        assert Parser.parse(bytes) == {[{:key, key}], ""}, inspect(bytes)
+      end
+    end
+
+    test "unsupported keys are dropped, never typed" do
+      for bytes <- [
+            "\e[5~",
+            "\e[6~",
+            "\e[2~",
+            "\e[1;5C",
+            "\e[1;2A",
+            "\e[3;5~",
+            "\eOP",
+            "\e[15~",
+            "\e[<0;12;5M",
+            "\e[200~"
+          ] do
+        assert Parser.parse(bytes) == {[], ""}, inspect(bytes)
+      end
+    end
+
+    test "text around a dropped sequence survives" do
+      assert Parser.parse("a\e[5~b\e[4~c") ==
+               {[{:char, "a"}, {:char, "b"}, {:key, :end}, {:char, "c"}], ""}
+    end
+
+    test "an incomplete sequence waits for the rest, across chunks" do
+      assert {[], "\e[1;5"} = Parser.parse("\e[1;5")
+      assert {[], ""} = Parser.parse("\e[1;5" <> "C")
+      assert {[{:key, :delete}], ""} = Parser.parse("\e[3" <> "~")
+    end
+
+    test "garbage that never finishes isn't held forever" do
+      assert {[], ""} = Parser.parse("\e[" <> String.duplicate("1", 40))
+    end
+
+    test "ESC [ followed by a control byte wasn't a sequence: the rest is re-read" do
+      assert {[{:key, :enter}], ""} = Parser.parse("\e[\r")
+    end
+
+    test "a lone ESC O at the end of a chunk is Alt+Shift+O" do
+      assert {[{:alt, ?O}], ""} = Parser.parse("\eO")
+    end
+  end
 end

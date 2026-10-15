@@ -72,6 +72,20 @@ defmodule Geex.Loop.Keymap do
 
   def resolve({:key, :backspace}, {0, 0}, _text), do: :ignore
 
+  # Delete → the grapheme under the cursor; at a line's end it joins the next line (the
+  # mirror of Backspace at column 0). The cursor stays put.
+  def resolve({:key, :delete}, {line, col} = cursor, text) do
+    cond do
+      col < line_len(text, line) -> {:edit, delete(line, col), cursor}
+      line < last_line(text) -> {:edit, join(line + 1, col), cursor}
+      true -> :ignore
+    end
+  end
+
+  # Home / End → the start or end of the line (the same as Alt+R / Alt+F).
+  def resolve({:key, :home}, cursor, _text), do: {:move, line_start(cursor)}
+  def resolve({:key, :end}, cursor, text), do: {:move, line_end(cursor, text)}
+
   # Arrows → move the cursor, clamped to the text, wrapping at line ends.
   def resolve({:key, :left}, cursor, text), do: {:move, left(cursor, text)}
   def resolve({:key, :right}, cursor, text), do: {:move, right(cursor, text)}
