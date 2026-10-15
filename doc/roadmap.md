@@ -402,6 +402,18 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      cursor's line, so on a line you've since edited it says "nothing to revert" even when other
      lines of that call are still the agent's. Fine as designed; the alternative is to also look
      at the call's other lines, or offer a picker of recent agent calls.
+   - **Credit for two or more agent writes in a row to a CRLF file** (confirmed live by the
+     coordinator session, 2026-10-15; already listed as a limitation in ADR-0033 F). A single
+     write is credited. A chain isn't: the payload's `before` hashes Claude Code's text with
+     `\r\n` turned into `\n`, but its `sha256` hashes the CRLF bytes on disk, so write 2's `before`
+     never equals write 1's `sha256`. The chain stays `:external` (a missed credit, never a wrong
+     one), whether held (ADR-0034) or reopened. Two fixes:
+     - the payload sends an optional `sha256_lf` (the after bytes folded the same one-pass way;
+       `sed 's/\r$//'` gets a lone `\r` wrong) and chains link on either hash. This covers held
+       and reopened files and stays within message `v: 1`;
+     - geex records both hashes of each disk text the watcher reads while a buffer is held. This
+       needs no payload change but covers held buffers only.
+     Small; it matters only for CRLF files.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09); the shelf is currently clear.
