@@ -1449,3 +1449,30 @@ follows the scroll). **744 tests + 18 doctests**, green twice, `--warnings-as-er
 the handler is a one-line repaint); blame cost on a very large file or a long history (one O(lines)
 prefix/suffix pass per command, plus undo's existing replay); grid mode with marks (the ruler shifts rows,
 and the mark is painted before that shift, as the text is).
+
+### 2026-10-15 — Durable ledger build step 1: the pure `Geex.History` (ADR-0033)
+
+`Geex.Buffer`'s history transitions moved into a pure value, `Geex.History` (base, editor, commands
+newest-first, redo, blame, synced, dirty, seq): `dispatch/2`, `group/3`, `undo/1`, `redo/1`,
+`attest/3`, `sync/1`, plus the group queries `newest_group/1` and `unattested?/2`. The buffer keeps
+only the process concerns: path, subscribers and notifications, the pending-attestation table, file
+I/O. Its state is `%{path, history: %History{}, subscribers, pending, pending_ttl_ms}`. The snapshot
+and every public `Geex.Buffer` function are unchanged. buffer.ex went from 664 to 524 lines. No
+behavior change intended. This is the seam the ledger will replay through (ADR-0033 §3).
+
+**Live smoke** (TUI in a tmux pty): typing `hi `, three `Alt+Z` (back to clean, `[+]` cleared), one
+`Alt+Shift+Z`. Then this session's native `Edit` of line 2 while line 1 held an unsaved edit: the merge
+kept the unsaved `h`, the buffer stayed dirty, line 2 was credited (`attested: claude-code session
+d25a8b6d…`), and the `▌` mark and `✎ claude-code/d25a8b6d · turn e2dc…` showed. Quitting removed the
+discovery file.
+
+**Automated:** `history_test` (1 doctest + 9): dispatch clears redo, dirties and bumps `seq`; a failing
+command changes nothing; a group is all-or-nothing; a baseline re-syncs and recomputes dirty; an empty
+group keeps redo; undo onto the synced text is clean and redo re-dirties; nothing to undo or redo;
+sync; attest relabels only its group's commands and blame. **The ledger's rule, pinned:** after 300
+seeded random dispatch/undo/redo steps with mixed actors, replaying the recorded commands over `base`
+rebuilds the same editor and the same blame. The whole existing suite passes unchanged. **753 tests +
+19 doctests**, green twice, `--warnings-as-errors` clean.
+
+**Not tested:** none of the ledger itself exists yet (build step 2). Group ids are still
+`System.unique_integer/1` until step 2 makes them durable.

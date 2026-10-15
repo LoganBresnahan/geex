@@ -35,8 +35,9 @@ One Mix app, `:geex`, under `lib/geex/`:
   field-spec), `Geex.Commands.*` (each a pure `run(cmd, %EditorState{})`),
   `Geex.Dispatch` (pure `apply_command/2` + deterministic `replay/2`; public
   `run/1` = resolve active buffer → gather → apply → scatter → record).
-- **World** — `Geex.Buffer` (GenServer: owns `EditorState` + the ONE undo
-  history; `Buffer.Doc` is the text), `Geex.Session` (active-buffer pointer +
+- **World** — `Geex.Buffer` (GenServer: owns the ONE undo history as a pure
+  `Geex.History` value, every transition going through it (ADR-0033); `Geex.Blame`
+  derives who last wrote each line; `Buffer.Doc` is the text), `Geex.Session` (active-buffer pointer +
   the view-local cursor), `Geex.Reconcile` (file-watch → `:external` commands).
 - **Projections** — `Geex.MCP.*` (Protocol is pure; HTTP is the loopback
   Bandit/Plug transport; tool categories: edits, `Operations`, `ViewActions`,
@@ -54,7 +55,7 @@ One Mix app, `:geex`, under `lib/geex/`:
 2. **Provenance on every command.** Every recorded command carries `meta.actor`
    (`:human` / `{:llm, _}` / `:external`). (ADR-0005.)
 3. **The pure core stays pure and replay stays deterministic.** `apply_command/2`,
-   `replay/2`, the `run/2` bodies, `Coord`, `Fuzzy`, `Selection`, `Width` are
+   `replay/2`, the `run/2` bodies, `History`, `Blame`, `Coord`, `Fuzzy`, `Selection`, `Width` are
    `value -> value`. A recorded command list replays to the same state — the
    §15c golden-pair cassette (`test/geex/cassette_test.exs`) pins it; never
    regenerate the golden from the replay under test.

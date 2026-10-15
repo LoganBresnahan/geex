@@ -49,7 +49,7 @@ defmodule Geex.Buffer do
 
   use GenServer, restart: :temporary
 
-  alias Geex.{Blame, EditorState}
+  alias Geex.{EditorState, History}
   alias Geex.Edit.Footprint
 
   @doc """
@@ -240,38 +240,15 @@ defmodule Geex.Buffer do
 
     case load_text(opts, path) do
       {:ok, text} ->
-        editor = EditorState.new(text)
-
         state = %{
           path: path,
-          editor: editor,
-          # The loaded baseline `EditorState` — undo replays `base + remaining history` to
-          # reconstruct the document after dropping the newest command (the §15c replay
-          # backbone, ADR-0014). Never changes; load is the only thing that sets it.
-          base: editor,
-          # newest-first internally (O(1) prepend); exposed oldest-first via snapshot.
-          history: [],
-          # Who last wrote each line (`Geex.Blame`), kept in step with `history`: advanced by
-          # every applied command, rebuilt on undo, relabelled by an attestation.
-          blame: Blame.new(EditorState.lines(editor)),
-          # Undone commands, newest-first — the redo future. A new edit clears it (the
-          # redone branch is discarded once you edit past the undo point). ADR-0031.
-          redo: [],
-          # A **monotonic** change clock — incremented on every dispatch/undo/redo. Distinct
-          # from `version` (= `length(history)`, which goes *backwards* on undo): the reactor
-          # orders optimistic overlays by `seq`, so its "newer = higher" assumption survives an
-          # undo and the overlay byte-shifts (no re-highlight flash) instead of resetting. ADR-0031.
-          seq: 0,
+          # The document, the one undo history and what is kept in step with it (blame, the
+          # synced baseline, dirty, the change clock): a pure value whose transitions the
+          # durable ledger replays (`Geex.History`, ADR-0033).
+          history: History.new(text),
           # Change-stream subscribers (ADR-0022): %{monitor_ref => pid}. Empty by
           # default — the buffer notifies no one unless something subscribes.
           subscribers: %{},
-          dirty: false,
-          # The disk content the buffer is **in sync with** — its baseline. Reconcile
-          # (ADR-0017) compares disk against *this*, not the live (possibly dirty) text, so an
-          # event whose disk still equals the baseline is no external change (no spurious revert
-          # of unsaved edits), and the baseline travels with a rename's re-key. Set to the
-          # loaded content here; updated by `save/1` (to the written bytes) and `mark_synced/1`.
-          synced: text,
           # Attestations (ADR-0032) that arrived before the reconcile group they describe:
           # `[{attestation, received_at_ms}]`, newest first. Consumed when a matching group is
           # recorded; size and age are bounded, which only garbage-collects (a match is exact).
@@ -302,23 +279,12 @@ defmodule Geex.Buffer do
 
   @impl true
   def handle_call({:dispatch, command}, _from, state) do
-    case Geex.Dispatch.apply_command(command, state.editor) do
-      {:ok, editor} ->
-        # Compute the edit's byte footprint against the *pre-edit* doc, before we
-        # swap in the new editor — it lets a byte-oriented overlay (highlighting)
-        # shift optimistically across the edit (ADR-0022).
-        footprint = Footprint.of(EditorState.doc(state.editor), command)
-        # A fresh edit invalidates the redo future (you can't redo past a new divergence).
-        new_state = %{
-          state
-          | editor: editor,
-            history: [command | state.history],
-            blame: advance(state.blame, state.editor, editor, command),
-            redo: [],
-            dirty: true,
-            seq: state.seq + 1
-        }
-
+    case History.dispatch(state.history, command) do
+      {:ok, history} ->
+        # The edit's byte footprint against the *pre-edit* doc lets a byte-oriented overlay
+        # (highlighting) shift optimistically across the edit (ADR-0022).
+        footprint = Footprint.of(EditorState.doc(state.history.editor), command)
+        new_state = %{state | history: history}
         notify_change(new_state, footprint)
         {:reply, {:ok, build_snapshot(new_state)}, new_state}
 
@@ -329,68 +295,30 @@ defmodule Geex.Buffer do
 
   def handle_call({:dispatch_group, commands, opts}, _from, state) do
     case Keyword.fetch(opts, :expect_seq) do
-      {:ok, seq} when seq != state.seq -> {:reply, {:error, :stale}, state}
+      {:ok, seq} when seq != state.history.seq -> {:reply, {:error, :stale}, state}
       _ -> apply_group(commands, opts, state)
     end
   end
 
-  def handle_call(:undo, _from, %{history: []} = state),
-    do: {:reply, {:error, :nothing_to_undo}, state}
-
-  def handle_call(:undo, _from, %{history: [command | rest]} = state) do
-    # Reconstruct the pre-`command` document by replaying base + the remaining (older)
-    # commands. These all applied successfully once, so replay cannot fail here; guard it
-    # anyway so a (theoretically impossible) failure leaves state and history untouched.
-    # Blame.replay folds `Dispatch.apply_command/2` exactly as `Dispatch.replay/2` does, and
-    # rebuilds the per-line blame alongside, so the undone command's lines lose its mark.
-    case Blame.replay(state.base, Enum.reverse(rest)) do
-      {:ok, editor, blame} ->
-        new_state = revert(state, editor, blame, rest, [command | state.redo])
-        notify_change(new_state, revert_footprint(state.editor, editor))
-        {:reply, {:ok, build_snapshot(new_state), command}, new_state}
-
-      {:error, _reason} ->
-        {:reply, {:error, :nothing_to_undo}, state}
-    end
-  end
-
-  def handle_call(:redo, _from, %{redo: []} = state),
-    do: {:reply, {:error, :nothing_to_redo}, state}
-
-  def handle_call(:redo, _from, %{redo: [command | rest_redo]} = state) do
-    # Re-apply the undone command to the current editor (which, after the matching undo,
-    # equals the state it was first applied to — so this succeeds), moving it back onto history.
-    case Geex.Dispatch.apply_command(command, state.editor) do
-      {:ok, editor} ->
-        blame = advance(state.blame, state.editor, editor, command)
-        new_state = revert(state, editor, blame, [command | state.history], rest_redo)
-        notify_change(new_state, revert_footprint(state.editor, editor))
-        {:reply, {:ok, build_snapshot(new_state), command}, new_state}
-
-      {:error, _reason} = error ->
-        {:reply, error, state}
-    end
-  end
+  def handle_call(:undo, _from, state), do: revert(state, History.undo(state.history))
+  def handle_call(:redo, _from, state), do: revert(state, History.redo(state.history))
 
   def handle_call({:attest, %{before: nil}}, _from, state), do: {:reply, :ignored, state}
 
   def handle_call({:attest, attestation}, _from, state) do
     state = prune_pending(state)
 
-    case newest_group(state.history) do
+    case History.newest_group(state.history) do
       %{group: group} = stamp when not is_nil(group) ->
         cond do
           not matches?(attestation, stamp) ->
             {:reply, :pending, park(state, attestation)}
 
-          unattested?(state.history, group) ->
-            new_state = %{
-              state
-              | history: upgrade(state.history, group, attestation),
-                blame: Blame.relabel(state.blame, group, agent_actor(attestation))
-            }
+          History.unattested?(state.history, group) ->
+            actor = agent_actor(attestation)
+            new_state = %{state | history: History.attest(state.history, group, actor)}
 
-            notify_attested(new_state, group, agent_actor(attestation))
+            notify_attested(new_state, group, actor)
             {:reply, :attested, new_state}
 
           # Already attested: a repeat says nothing new, and parking it could let it match a
@@ -406,18 +334,18 @@ defmodule Geex.Buffer do
 
   def handle_call({:subscribe, pid}, _from, state) do
     ref = Process.monitor(pid)
-    {:reply, {:ok, length(state.history)}, put_in(state.subscribers[ref], pid)}
+    {:reply, {:ok, length(state.history.commands)}, put_in(state.subscribers[ref], pid)}
   end
 
   def handle_call(:snapshot, _from, state), do: {:reply, build_snapshot(state), state}
 
-  def handle_call(:get_text, _from, state), do: {:reply, EditorState.text(state.editor), state}
+  def handle_call(:get_text, _from, state), do: {:reply, History.text(state.history), state}
 
   def handle_call(:history, _from, state),
-    do: {:reply, Enum.reverse(state.history), state}
+    do: {:reply, History.commands_oldest_first(state.history), state}
 
   def handle_call(:mark_synced, _from, state) do
-    state = %{state | dirty: false, synced: EditorState.text(state.editor)}
+    state = %{state | history: History.sync(state.history)}
     {:reply, build_snapshot(state), state}
   end
 
@@ -442,11 +370,9 @@ defmodule Geex.Buffer do
   def handle_call(:save, _from, %{path: nil} = state), do: {:reply, {:error, :no_path}, state}
 
   def handle_call(:save, _from, state) do
-    text = EditorState.text(state.editor)
-
-    case File.write(state.path, text) do
+    case File.write(state.path, History.text(state.history)) do
       # disk now equals the written text — that is the new in-sync baseline.
-      :ok -> {:reply, {:ok, state.path}, %{state | dirty: false, synced: text}}
+      :ok -> {:reply, {:ok, state.path}, %{state | history: History.sync(state.history)}}
       {:error, _reason} = error -> {:reply, error, state}
     end
   end
@@ -486,39 +412,12 @@ defmodule Geex.Buffer do
   defp apply_group(commands, opts, state) do
     {commands, state} = consume_pending(commands, prune_pending(state))
 
-    applied =
-      Enum.reduce_while(commands, {:ok, state.editor, state.blame}, fn command,
-                                                                       {:ok, editor, blame} ->
-        case Geex.Dispatch.apply_command(command, editor) do
-          {:ok, next} -> {:cont, {:ok, next, advance(blame, editor, next, command)}}
-          {:error, _reason} = error -> {:halt, error}
-        end
-      end)
-
-    case applied do
-      {:ok, editor, blame} ->
+    case History.group(state.history, commands, Keyword.get(opts, :baseline)) do
+      {:ok, history} ->
         # One notification for the group: the byte footprint is the diff of the whole
         # transition (the same exact splice undo/redo uses), not a per-command footprint.
-        footprint =
-          Footprint.between(EditorState.text(state.editor), EditorState.text(editor))
-
-        {synced, dirty} =
-          case Keyword.fetch(opts, :baseline) do
-            {:ok, baseline} -> {baseline, EditorState.text(editor) != baseline}
-            :error -> {state.synced, true}
-          end
-
-        new_state = %{
-          state
-          | editor: editor,
-            blame: blame,
-            history: Enum.reverse(commands) ++ state.history,
-            redo: if(commands == [], do: state.redo, else: []),
-            synced: synced,
-            dirty: dirty,
-            seq: state.seq + 1
-        }
-
+        footprint = Footprint.between(History.text(state.history), History.text(history))
+        new_state = %{state | history: history}
         notify_change(new_state, footprint)
         if notice = opts[:notice], do: notify_notice(new_state, notice)
         {:reply, {:ok, build_snapshot(new_state)}, new_state}
@@ -530,11 +429,6 @@ defmodule Geex.Buffer do
 
   # --- attestation (ADR-0032) ---
 
-  # The stamp of the newest reconcile group in `history` (newest-first), or nil.
-  defp newest_group(history) do
-    Enum.find_value(history, fn command -> command.meta.reconcile end)
-  end
-
   # `after` must equal the disk bytes exactly; `before` may also equal the baseline with
   # each "\r\n" turned into "\n" (`before_sha256_lf`, nil for a baseline without one), the form
   # Claude Code reports a CRLF file's prior text in.
@@ -543,26 +437,6 @@ defmodule Geex.Buffer do
   end
 
   defp matches?(_attestation, _stamp), do: false
-
-  # Only once: every command of the group is still the anonymous `:external`.
-  defp unattested?(history, group) do
-    history
-    |> Enum.filter(&in_group?(&1, group))
-    |> Enum.all?(&(&1.meta.actor == :external))
-  end
-
-  defp upgrade(history, group, attestation) do
-    actor = agent_actor(attestation)
-
-    Enum.map(history, fn command ->
-      if in_group?(command, group), do: put_actor(command, actor), else: command
-    end)
-  end
-
-  defp in_group?(command, group),
-    do: match?(%{reconcile: %{group: ^group}}, command.meta)
-
-  defp put_actor(command, actor), do: %{command | meta: %{command.meta | actor: actor}}
 
   defp agent_actor(attestation) do
     {:agent, Map.take(attestation, [:harness, :session, :turn, :tool_use])}
@@ -574,7 +448,7 @@ defmodule Geex.Buffer do
     case Enum.split_with(state.pending, fn {att, _at} -> matches?(att, stamp) end) do
       {[{att, _at} | _], rest} ->
         actor = agent_actor(att)
-        {Enum.map(commands, &put_actor(&1, actor)), %{state | pending: rest}}
+        {Enum.map(commands, &History.put_actor(&1, actor)), %{state | pending: rest}}
 
       {[], _} ->
         {commands, state}
@@ -606,59 +480,45 @@ defmodule Geex.Buffer do
   end
 
   defp notify_change(state, footprint) do
-    msg = {:geex_buffer_change, self(), state.seq, footprint}
+    msg = {:geex_buffer_change, self(), state.history.seq, footprint}
     for {_ref, pid} <- state.subscribers, do: send(pid, msg)
     :ok
   end
 
-  # The byte footprint of an undo/redo, computed by diffing the pre- and post-transition text
-  # (ADR-0031). A single undo/redo reverts exactly one contiguous command, so the minimal splice
-  # is exact — the overlay shifts like a forward edit rather than resetting (no re-highlight flash).
-  defp revert_footprint(before_editor, after_editor),
-    do: Footprint.between(EditorState.text(before_editor), EditorState.text(after_editor))
+  # An undo/redo result: swap in the new history and emit its byte footprint, the diff of the
+  # pre- and post-transition text (ADR-0031). One undo/redo reverts exactly one contiguous
+  # command, so the minimal splice is exact and the overlay shifts like a forward edit rather
+  # than resetting (no re-highlight flash). Returns the affected command so the view can place
+  # the cursor.
+  defp revert(state, {:ok, history, command}) do
+    new_state = %{state | history: history}
 
-  # Apply an undo/redo transition: swap in the reconstructed `editor`, set `history` and the
-  # `redo` stack, bump the monotonic `seq` (an undo/redo *is* a forward step on the change clock,
-  # even though it lowers `version`), and recompute `dirty` against the `synced` disk baseline —
-  # so undoing back to the saved content clears the dirty flag (a forward `dispatch/2` is
-  # unconditionally dirty; an undo/redo can land *on* the baseline, which is genuinely clean).
-  defp revert(state, editor, blame, history, redo) do
-    %{
-      state
-      | editor: editor,
-        blame: blame,
-        history: history,
-        redo: redo,
-        dirty: EditorState.text(editor) != state.synced,
-        seq: state.seq + 1
-    }
+    notify_change(
+      new_state,
+      Footprint.between(History.text(state.history), History.text(history))
+    )
+
+    {:reply, {:ok, build_snapshot(new_state), command}, new_state}
   end
 
-  defp build_snapshot(state) do
-    history = Enum.reverse(state.history)
+  defp revert(state, {:error, _reason} = error), do: {:reply, error, state}
+
+  defp build_snapshot(%{history: h} = state) do
+    commands = History.commands_oldest_first(h)
 
     %{
       path: state.path,
-      text: EditorState.text(state.editor),
-      lines: EditorState.lines(state.editor),
-      version: length(history),
+      text: History.text(h),
+      lines: EditorState.lines(h.editor),
+      version: length(commands),
       # The monotonic change clock (ADR-0031): the reactor reads this (not `version`) so its
       # overlay ordering survives an undo, which lowers `version` but advances `seq`.
-      seq: state.seq,
-      dirty: state.dirty,
-      synced: state.synced,
-      history: history,
+      seq: h.seq,
+      dirty: h.dirty,
+      synced: h.synced,
+      history: commands,
       # One writer per line (`Geex.Blame`): who last wrote it, for the gutter and status line.
-      blame: state.blame
+      blame: h.blame
     }
   end
-
-  defp advance(blame, before, after_editor, command),
-    do:
-      Blame.step(
-        blame,
-        EditorState.lines(before),
-        EditorState.lines(after_editor),
-        Blame.writer(command)
-      )
 end

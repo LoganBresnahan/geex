@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-15):** 744 tests + 18 doctests green, `--warnings-as-errors` clean. Since the
+**Current (2026-10-15):** 753 tests + 19 doctests green, `--warnings-as-errors` clean. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -174,7 +174,7 @@ The ledger track, in order (each builds on the one before):
    append-only JSONL history log per file in `~/.local/state/geex/ledger/`, so quitting or a
    crash loses nothing. Reopening restores history, blame and unsaved edits when the disk
    matches the replayed synced hash, and otherwise records an `:external` gap. Build order:
-   (1) extract the pure `Geex.History` (no behavior change); (2) the ledger codec, write path and
+   (1) extract the pure `Geex.History` (no behavior change) — **built 2026-10-15**; (2) the ledger codec, write path and
    restore; (2b) the hash-only spool that credits agent edits made while a file isn't open
    (single writes and same-session runs); (3) per-agent revert (`Alt+R`, `revert` /
    `revert-call`; refused when your later edits overlap); (4) `mix geex.ledger compact` /
