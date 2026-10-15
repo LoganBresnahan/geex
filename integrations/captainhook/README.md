@@ -30,6 +30,14 @@ path of your checkout. The daemon hot-reloads the file.
   attribution, never a tool call.
 - It needs `jq`, `curl`, and `sha256sum` (or `shasum` on macOS).
 
+## When geex isn't running
+
+If no geex has the file open, and geex keeps a history log for the file, the script saves the
+attestation (hashes and ids, no file content) next to that log in
+`~/.local/state/geex/ledger/`. When geex next opens the file and finds it changed, it credits
+the change to the agent if the saved edits explain it exactly, from one session. If you set
+`XDG_STATE_HOME`, add it to `passEnv` too.
+
 ## Cost
 
 Every tool call runs it. Measured against a live geex: ~3 ms for a call that isn't a write,

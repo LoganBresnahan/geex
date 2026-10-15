@@ -40,7 +40,8 @@ defmodule Geex.AttestPayloadTest do
 
     bandit =
       start_supervised!(
-        {Bandit, plug: {Tap, self()}, scheme: :http, ip: {127, 0, 0, 1}, port: 0, startup_log: false}
+        {Bandit,
+         plug: {Tap, self()}, scheme: :http, ip: {127, 0, 0, 1}, port: 0, startup_log: false}
       )
 
     {:ok, {_ip, port}} = ThousandIsland.listener_info(bandit)
@@ -171,7 +172,8 @@ defmodule Geex.AttestPayloadTest do
       for {name, url, tok, pid} <- [
             {"second", ctx.base <> "/second", token, live},
             {"stale", ctx.base <> "/stale", token, String.trim(dead)},
-            {"named", String.replace(ctx.base, "127.0.0.1", "localhost") <> "/named", token, live},
+            {"named", String.replace(ctx.base, "127.0.0.1", "localhost") <> "/named", token,
+             live},
             {"badtoken", ctx.base <> "/badtoken", "not-hex", live},
             {"closed", "http://127.0.0.1:1/attest", token, live}
           ] do
@@ -195,7 +197,7 @@ defmodule Geex.AttestPayloadTest do
       bin = Path.join(ctx.dir, "bin")
       File.mkdir_p!(bin)
 
-      for tool <- ~w(cat jq curl),
+      for tool <- ~w(cat jq curl mktemp rm wc tail mv),
           do: File.ln_s!(System.find_executable(tool), Path.join(bin, tool))
 
       # a stand-in that insists on the macOS arguments
@@ -208,6 +210,94 @@ defmodule Geex.AttestPayloadTest do
       assert %{status: 0, stdout: "", stderr: ""} = run(ctx, line, [{"PATH", bin}])
       assert_receive {:tapped, "/tap", _, body}, 2_000
       assert JSON.decode!(body)["sha256"] == hex("mac\n")
+    end
+  end
+
+  describe "the spool (ADR-0033 F): attestations no geex took" do
+    defp state_env(ctx), do: [{"XDG_STATE_HOME", Path.join(ctx.dir, "state")}]
+    defp ledger_dir(ctx), do: Path.join([ctx.dir, "state", "geex", "ledger"])
+
+    defp with_ledger(ctx, path) do
+      File.mkdir_p!(ledger_dir(ctx))
+      File.write!(Geex.Ledger.file(ledger_dir(ctx), path), "{}\n")
+    end
+
+    defp spooled(ctx, path) do
+      spool = Geex.Ledger.Spool.file(Geex.Ledger.file(ledger_dir(ctx), path))
+
+      case File.read(spool) do
+        {:ok, bytes} -> bytes |> String.split("\n", trim: true) |> Enum.map(&JSON.decode!/1)
+        {:error, _} -> []
+      end
+    end
+
+    test "no geex running, and geex keeps a ledger for the file: spooled, 0600", ctx do
+      path = target(ctx, "f", "after\n")
+      with_ledger(ctx, path)
+      line = envelope("edit.jsonl") |> retarget(path)
+
+      assert %{status: 0, stdout: "", stderr: ""} = run(ctx, line, state_env(ctx))
+      assert [entry] = spooled(ctx, path)
+      assert %{"path" => ^path, "harness" => "claude-code", "at" => _} = entry
+      assert entry["sha256"] == hex("after\n")
+
+      spool = Geex.Ledger.Spool.file(Geex.Ledger.file(ledger_dir(ctx), path))
+      assert File.stat!(spool).mode |> Bitwise.band(0o777) == 0o600
+    end
+
+    test "no ledger for the file: nothing spooled", ctx do
+      path = target(ctx, "f", "after\n")
+      assert %{status: 0} = run(ctx, envelope("edit.jsonl") |> retarget(path), state_env(ctx))
+      assert spooled(ctx, path) == []
+      refute File.exists?(ledger_dir(ctx))
+    end
+
+    test "a geex that took it (pending) means no spool; not_open everywhere means spool", ctx do
+      listen(ctx, "/tap")
+      path = target(ctx, "f", "after\n")
+      with_ledger(ctx, path)
+      line = envelope("edit.jsonl") |> retarget(path)
+
+      assert %{status: 0} = run(ctx, line, state_env(ctx))
+      assert_receive {:tapped, "/tap", _, _}, 2_000
+      assert spooled(ctx, path) == []
+
+      stop_supervised!(Discovery)
+      listen(ctx, "/attest")
+      assert %{status: 0} = run(ctx, line, state_env(ctx))
+      assert [_entry] = spooled(ctx, path)
+    end
+
+    test "end to end: the payload spools while the file is closed; reopening credits it", ctx do
+      path = target(ctx, "e2e.txt", "one\ntwo\n")
+      {:ok, buf} = Geex.Buffer.start_link(path: path, ledger_dir: ledger_dir(ctx))
+      Process.unlink(buf)
+      {:ok, cmd} = Geex.Commands.Insert.parse(%{line: 0, col: 0, text: "0"})
+      {:ok, _} = Buffer.dispatch(buf, Geex.Command.put_meta(cmd, Geex.Command.Meta.human()))
+      {:ok, _} = Buffer.save(buf)
+      GenServer.stop(buf, :shutdown)
+
+      # an agent edits the closed file
+      File.write!(path, "0one\nTWO\n")
+
+      assert %{status: 0, stderr: ""} =
+               run(ctx, agent_write("edit.jsonl", path, "0one\ntwo\n"), state_env(ctx))
+
+      {:ok, buf} = Geex.Buffer.start_link(path: path, ledger_dir: ledger_dir(ctx))
+      Process.unlink(buf)
+      payload = JSON.decode!(envelope("edit.jsonl"))["event"]["payload"]
+      gap = List.last(Buffer.history(buf))
+
+      assert gap.meta.actor ==
+               {:agent,
+                %{
+                  harness: "claude-code",
+                  session: payload["session_id"],
+                  turn: payload["prompt_id"],
+                  tool_use: payload["tool_use_id"]
+                }}
+
+      GenServer.stop(buf, :shutdown)
     end
   end
 
@@ -248,6 +338,7 @@ defmodule Geex.AttestPayloadTest do
       payload = JSON.decode!(envelope("edit.jsonl"))["event"]["payload"]
 
       assert [%{meta: %{actor: {:agent, who}}}] = snap.history
+
       assert who == %{
                harness: "claude-code",
                session: payload["session_id"],
@@ -263,8 +354,11 @@ defmodule Geex.AttestPayloadTest do
       {:reconciled, _} = Reconcile.reconcile(buf, "one\nTWO\n")
 
       # Claude Code reports the CRLF file's prior text with "\r\n" as "\n"
-      assert %{status: 0, stderr: ""} = run(ctx, agent_write("write-update.jsonl", path, "one\ntwo\n"))
-      assert [{:agent, %{harness: "claude-code"}}] = Enum.map(Buffer.history(buf), & &1.meta.actor)
+      assert %{status: 0, stderr: ""} =
+               run(ctx, agent_write("write-update.jsonl", path, "one\ntwo\n"))
+
+      assert [{:agent, %{harness: "claude-code"}}] =
+               Enum.map(Buffer.history(buf), & &1.meta.actor)
     end
   end
 end

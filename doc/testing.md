@@ -1524,3 +1524,38 @@ its `jq`-read entries checked at each step):
 **Not tested:** fsync timing (the timer path ran live, not under test); a power loss; a disk-full write
 error (the code turns the ledger off with a notice); very long ledgers (replay is synchronous in the
 buffer's init); two geex *processes* racing for one lock (tested within one VM); macOS.
+
+### 2026-10-15 — Durable ledger build step 2b: the spool, plus two crash cleanups (ADR-0033 F)
+
+`geex-attest.sh` now notices whether any geex took the attestation. When none did (no geex running, or
+every answer `not_open`) and geex keeps a ledger for the file, it appends the attestation plus an `at` time
+to `<ledger dir>/<key>.spool.jsonl` (`0600`, last 256 lines). On reopen, `Geex.Ledger.Spool.chain/3` credits
+a gap when one entry, or an exactly linked same-session chain, takes the replayed synced hash to the disk
+hash. The spool is then discarded. Also: a ledger left without a `close` (a crash) is verified with one
+on reopen, and `Geex.Attest.Discovery` sweeps discovery files of dead pids on start.
+
+**Live-verified** with the real registered hook and the real `~/.local/state/geex/ledger/` (scratch file;
+its ledger removed afterwards):
+- geex opened the file, `0` + `Ctrl-O`, quit: ledger `b29afff362fca901.jsonl`, the same key the payload
+  computes with `sha256sum`.
+- **geex closed** (no instance running). This session's native `Edit` of line 2: the payload wrote one
+  spool line (session `d25a8b6d`, its `tool_use`, `at`). Reopen: line 2 marked, `✎ claude-code/d25a8b6d ·
+  turn 4764…`, the spool gone; the ledger's `gap` entry carried the agent actor and `chain: [toolu_…]`.
+- **A chain.** Quit, then two native `Edit`s (lines 3, then 1): two spool lines. Reopen, before any key:
+  `the file changed while geex was closed; credited to claude-code/d25a8b6d (2 edits)`, lines 1–3 all
+  marked.
+
+**Automated:** `ledger_test` +5: reopening after a crash writes a verifying `close`; one spooled write is
+credited (actor with turn and tool_use, `chain`, spool removed, the credit survives another reopen); a
+same-session chain with an unrelated entry in between is credited with the last write's ids; a
+two-session chain and a missing link stay `:external`; a CRLF file's single write matches through the
+`\r\n`-as-`\n` before. `Spool.chain/3` doctest. `attest_payload_test` +4: spooled (`0600`) when no geex
+runs and a ledger exists; nothing without a ledger; no spool when a geex answered `pending`, a spool when
+the only geex answered `not_open`; **end to end:** the real payload spools while the file is closed and a
+real buffer reopening it credits the gap with the fixture's session/prompt/tool-use ids. `attest_test` +1:
+a dead pid's discovery file is swept on start, a live one kept. **782 tests + 20 doctests**, green twice,
+`--warnings-as-errors` clean.
+
+**Not tested:** the 256-line cap (one `tail`), two hooks appending to one spool at once, a CRLF chain
+(stays `:external` by design), `XDG_STATE_HOME` set in geex but not passed to the hook (they would look
+in different places), and NotebookEdit through the spool.

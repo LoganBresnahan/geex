@@ -159,7 +159,8 @@ session's `Co-Authored-By` trailer.
   tested against `test/fixtures/claude-code/` (verbatim captAInHook captures)
 - durable ledger (ADR-0033): `$XDG_STATE_HOME/geex/ledger/<key>.jsonl` (default
   `~/.local/state/geex/ledger/`; `<key>` = 16 hex of the sha256 of the absolute path),
-  `0600` in `0700`, plus `<key>.lock` while a buffer has it open; app gates `ledger` (off under
+  `0600` in `0700`, plus `<key>.lock` while a buffer has it open and `<key>.spool.jsonl` (the
+  payload's attestations for the file while no geex had it open); app gates `ledger` (off under
   test; tests pass `:ledger_dir`) and `ledger_dir`. Dogfood with `XDG_STATE_HOME` pointed at a
   scratch dir to keep the real one clean
 - TUI log: `<tmp>/geex.log` (`System.tmp_dir!/0`)

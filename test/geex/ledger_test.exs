@@ -3,11 +3,12 @@ defmodule Geex.LedgerTest do
   use ExUnit.Case, async: true
   # The damage tests log warnings on purpose.
   @moduletag :capture_log
+  doctest Geex.Ledger.Spool
 
   alias Geex.{Buffer, Command, Ledger, Reconcile}
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Edit, Insert, Replace}
-  alias Geex.Ledger.{Codec, Restore}
+  alias Geex.Ledger.{Codec, Restore, Spool}
 
   @agent {:agent, %{harness: "claude-code", session: "s1", turn: "t1", tool_use: "u1"}}
 
@@ -59,8 +60,7 @@ defmodule Geex.LedgerTest do
   defp actors(buf), do: Enum.map(Buffer.history(buf), & &1.meta.actor)
 
   defp ledger_lines(ctx, path \\ nil),
-    do:
-      Ledger.file(ctx.ledger, path || ctx.doc) |> File.read!() |> String.split("\n", trim: true)
+    do: Ledger.file(ctx.ledger, path || ctx.doc) |> File.read!() |> String.split("\n", trim: true)
 
   describe "the line format" do
     test "every entry round-trips, with every actor, a stamp, an origin and non-UTF-8 bytes" do
@@ -259,7 +259,8 @@ defmodule Geex.LedgerTest do
       buf = open(ctx)
       assert Buffer.snapshot(buf).text == "1a\n"
       assert [_aside] = Path.wildcard(file <> ".corrupt-*")
-      assert length(ledger_lines(ctx)) == 2
+      # the usable prefix, then the reopen's verification of it
+      assert Enum.map(ledger_lines(ctx), &JSON.decode!(&1)["t"]) == ["open", "cmd", "close"]
       close(buf)
     end
 
@@ -344,6 +345,119 @@ defmodule Geex.LedgerTest do
       buf = open(ctx, moved)
       assert actors(buf) == [:human, :human]
       assert Buffer.snapshot(buf).text == "yxa\n"
+      close(buf)
+    end
+  end
+
+  describe "reopening after a crash" do
+    test "the restored state is verified at once with a close entry", ctx do
+      File.write!(ctx.doc, "a\n")
+      buf = open(ctx)
+      type(buf, 0, 0, "x")
+      crash(buf)
+      refute List.last(ledger_lines(ctx)) =~ ~s|"t":"close"|
+
+      buf = open(ctx)
+      assert List.last(ledger_lines(ctx)) =~ ~s|"t":"close"|
+      close(buf)
+    end
+  end
+
+  describe "the spool: credit for edits made while the file wasn't open (ADR-0033 F)" do
+    defp spool(ctx, entries) do
+      lines =
+        Enum.map(entries, fn {before, after_text, session, tool_use} ->
+          JSON.encode!(%{
+            "v" => 1,
+            "path" => ctx.doc,
+            "before" => hex(before),
+            "sha256" => hex(after_text),
+            "harness" => "claude-code",
+            "session" => session,
+            "turn" => "t-" <> tool_use,
+            "tool_use" => tool_use,
+            "at" => "2026-10-15T12:00:00Z"
+          }) <> "\n"
+        end)
+
+      File.write!(Spool.file(Ledger.file(ctx.ledger, ctx.doc)), lines)
+    end
+
+    defp saved_and_closed(ctx, text) do
+      File.write!(ctx.doc, text)
+      buf = open(ctx)
+      type(buf, 0, 0, "0")
+      {:ok, _} = Buffer.save(buf)
+      close(buf)
+      "0" <> text
+    end
+
+    test "one spooled write that explains the change is credited", ctx do
+      base = saved_and_closed(ctx, "a\nb\n")
+      File.write!(ctx.doc, "0a\nB\n")
+      spool(ctx, [{base, "0a\nB\n", "s1", "u1"}])
+
+      buf = open(ctx)
+      {:ok, _} = Buffer.subscribe(buf, self())
+      assert_receive {:geex_buffer_notice, ^buf, notice}
+      assert notice =~ "credited to claude-code/s1 (1 edit)"
+
+      [_typed, gap] = Buffer.history(buf)
+
+      assert gap.meta.actor ==
+               {:agent, %{harness: "claude-code", session: "s1", turn: "t-u1", tool_use: "u1"}}
+
+      assert gap.meta.reconcile.chain == ["u1"]
+      refute File.exists?(Spool.file(Ledger.file(ctx.ledger, ctx.doc)))
+      close(buf)
+
+      # the credit is in the ledger: a reopen keeps it
+      buf = open(ctx)
+      assert {:agent, %{session: "s1"}} = List.last(Buffer.history(buf)).meta.actor
+      close(buf)
+    end
+
+    test "a same-session chain is credited to that session, last write's ids", ctx do
+      base = saved_and_closed(ctx, "a\n")
+      File.write!(ctx.doc, "0a\nb\nc\n")
+
+      spool(ctx, [
+        {base, "0a\nb\n", "s1", "u1"},
+        {"unrelated", "noise", "s1", "u9"},
+        {"0a\nb\n", "0a\nb\nc\n", "s1", "u2"}
+      ])
+
+      buf = open(ctx)
+      gap = List.last(Buffer.history(buf))
+      assert {:agent, %{session: "s1", tool_use: "u2", turn: "t-u2"}} = gap.meta.actor
+      assert gap.meta.reconcile.chain == ["u1", "u2"]
+      close(buf)
+    end
+
+    test "a chain across two sessions, or with a missing link, stays :external", ctx do
+      base = saved_and_closed(ctx, "a\n")
+      File.write!(ctx.doc, "0a\nb\nc\n")
+      spool(ctx, [{base, "0a\nb\n", "s1", "u1"}, {"0a\nb\n", "0a\nb\nc\n", "s2", "u2"}])
+
+      buf = open(ctx)
+      assert List.last(Buffer.history(buf)).meta.actor == :external
+      refute File.exists?(Spool.file(Ledger.file(ctx.ledger, ctx.doc)))
+      close(buf)
+
+      File.write!(ctx.doc, "0a\nb\nc\nd\n")
+      spool(ctx, [{"0a\nb\nc\nZZZ\n", "0a\nb\nc\nd\n", "s1", "u3"}])
+      buf = open(ctx)
+      assert List.last(Buffer.history(buf)).meta.actor == :external
+      close(buf)
+    end
+
+    test "a CRLF file's single write matches through the \\r\\n-as-\\n before", ctx do
+      base = saved_and_closed(ctx, "a\r\nb\r\n")
+      File.write!(ctx.doc, "0a\r\nB\r\n")
+      spool(ctx, [{String.replace(base, "\r\n", "\n"), "0a\r\nB\r\n", "s1", "u1"}])
+
+      buf = open(ctx)
+      assert {:agent, %{session: "s1"}} = List.last(Buffer.history(buf)).meta.actor
       close(buf)
     end
   end

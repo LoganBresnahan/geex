@@ -40,7 +40,8 @@ defmodule Geex.Ledger.Codec do
     "group" => :group,
     "before_sha256" => :before_sha256,
     "before_sha256_lf" => :before_sha256_lf,
-    "sha256" => :sha256
+    "sha256" => :sha256,
+    "chain" => :chain
   }
 
   @type baseline :: :none | :result | String.t()

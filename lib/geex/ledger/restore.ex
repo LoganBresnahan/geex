@@ -12,8 +12,8 @@ defmodule Geex.Ledger.Restore do
     * a hash that doesn't match stops at the **last verified point** (the previous `sync` or
       `close`, or the `open` entry), since everything after it is suspect.
 
-  The caller gets the history and path at the stopping point and the byte offset to cut the
-  file back to.
+  The caller gets the history and path at the stopping point, the byte offset to cut the file
+  back to, and `clean`: whether the last entry it applied was a `close` (false after a crash).
   """
 
   alias Geex.History
@@ -24,7 +24,8 @@ defmodule Geex.Ledger.Restore do
           path: String.t(),
           entries: non_neg_integer(),
           valid_bytes: non_neg_integer(),
-          stopped: nil | String.t()
+          stopped: nil | String.t(),
+          clean: boolean()
         }
 
   @doc """
@@ -35,7 +36,14 @@ defmodule Geex.Ledger.Restore do
   def restore([{first, first_end} | rest]) do
     case Codec.decode(first) do
       {:ok, {:open, %{path: path, base: base}}} ->
-        start = %{history: History.new(base), path: path, entries: 1, valid_bytes: first_end}
+        start = %{
+          history: History.new(base),
+          path: path,
+          entries: 1,
+          valid_bytes: first_end,
+          clean: false
+        }
+
         {:ok, fold(rest, start, start)}
 
       {:ok, _other} ->
@@ -53,7 +61,14 @@ defmodule Geex.Ledger.Restore do
   defp fold([{line, line_end} | rest], acc, verified) do
     with {:ok, entry} <- Codec.decode(line),
          {:ok, history, path, check} <- step(entry, acc.history, acc.path) do
-      acc = %{acc | history: history, path: path, entries: acc.entries + 1, valid_bytes: line_end}
+      acc = %{
+        acc
+        | history: history,
+          path: path,
+          entries: acc.entries + 1,
+          valid_bytes: line_end,
+          clean: match?({:close, _}, entry)
+      }
 
       case check do
         :unchecked -> fold(rest, acc, verified)

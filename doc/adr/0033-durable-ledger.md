@@ -268,3 +268,31 @@ Choices made building it, within the decisions above:
   discovery file. Cleaning up another instance's stale discovery file is not done.
 - Not built yet: `checkpoint` (compaction, build step 4) — a ledger containing one stops replay
   there like any unknown entry.
+
+## Amendment — 2026-10-15: build step 2b as built (the spool), and two crash cleanups
+
+- **One spool per file, next to its ledger** (`<key>.spool.jsonl`), not one global
+  `spool.jsonl`. The payload spools only for a file geex keeps a ledger for (a file geex never
+  changed can't have a gap to credit), which bounds the spool to files you edit in geex; reopen
+  reads exactly one file. The payload computes `<key>` the same way geex does (16 hex of the
+  path's sha256) and keeps the last 256 lines.
+- **When the payload spools:** when no running geex took the attestation, meaning every
+  answer was `not_open` or no geex was running. An `attested` / `pending` / `ignored` answer means
+  a geex had the file open. The spool directory follows `${XDG_STATE_HOME:-$HOME/.local/state}`;
+  `XDG_STATE_HOME` isn't in captAInHook's default allowlist, so whoever sets it must add it to
+  `passEnv`.
+- **Matching** (`Geex.Ledger.Spool.chain/3`, pure): walk the entries in time order from the
+  replayed synced hash (or its `\r\n`-as-`\n` form), following exact `sha256 → before` links from
+  one harness and session; the longest chain that ends at the disk hash wins. The credited gap's
+  actor carries the last write's `turn` and `tool_use`; its stamp lists the chain's tool calls as
+  `chain`. A chain through a CRLF file breaks after its first link (the disk keeps `\r\n`, the next
+  `before` doesn't) and stays `:external`.
+- **The spool is discarded when the file is next opened** (by the lock holder), whether or not
+  it explained anything. Entries it didn't explain describe states the file has moved past, so
+  no TTL is needed.
+- **After a crash the restored state is verified at once** (the coordinator's live-check note):
+  a ledger whose last entry isn't `close` gets a `close` entry, with the restored text and synced
+  hashes, as soon as it is reopened, instead of at the next clean close.
+- **Stale discovery files are swept:** on start, `Geex.Attest.Discovery` removes files in its
+  `0700` directory whose pid is gone (a `kill -9` leaves one), so a reused pid never receives a
+  stale token.

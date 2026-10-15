@@ -266,6 +266,22 @@ defmodule Geex.AttestTest do
       assert Integer.to_string(pid) == System.pid()
     end
 
+    test "on start, files left by geex processes that are gone are swept", %{dir: dir} do
+      stop_supervised!(Discovery)
+      {dead, 0} = System.cmd("sh", ["-c", "echo $$"])
+      port = Port.open({:spawn, "sleep 30"}, [])
+      {:os_pid, live} = Port.info(port, :os_pid)
+      on_exit(fn -> System.cmd("kill", [Integer.to_string(live)]) end)
+
+      for {name, pid} <- [{"dead", String.to_integer(String.trim(dead))}, {"live", live}],
+          do:
+            File.write!(Path.join(dir, name <> ".json"), JSON.encode!(%{"v" => 1, "pid" => pid}))
+
+      start_supervised!({Discovery, url: "http://127.0.0.1:1/attest", dir: dir})
+      refute File.exists?(Path.join(dir, "dead.json"))
+      assert File.exists?(Path.join(dir, "live.json"))
+    end
+
     test "the discovery file is removed on a clean stop", %{dir: dir} do
       stop_supervised!(Discovery)
       assert Path.wildcard(Path.join(dir, "*.json")) == []

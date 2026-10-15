@@ -50,6 +50,7 @@ defmodule Geex.Buffer do
   use GenServer, restart: :temporary
 
   alias Geex.{EditorState, History, Ledger, Reconcile}
+  alias Geex.Ledger.{Restore, Spool}
   alias Geex.Edit.{Footprint, Merge}
 
   require Logger
@@ -242,7 +243,7 @@ defmodule Geex.Buffer do
 
     case load_text(opts, path) do
       {:ok, text} ->
-        {history, ledger, notice, gap} = open_history(opts, path, text)
+        {history, ledger, notice, opening} = open_history(opts, path, text)
 
         state = %{
           path: path,
@@ -269,8 +270,10 @@ defmodule Geex.Buffer do
           pending_ttl_ms: Keyword.get(opts, :pending_ttl_ms, @pending_ttl_ms)
         }
 
-        # Recording the gap is part of opening, not a first change: keep its notice.
-        {:ok, if(gap, do: %{record(state, gap) | opened_notice: notice}, else: state)}
+        # What opening itself records (a verification after a crash, a gap) is not a first
+        # change: keep the notice.
+        state = Enum.reduce(opening, state, &record(&2, &1))
+        {:ok, %{state | opened_notice: notice}}
 
       # A genuinely unreadable existing file (`:eacces`, a TOCTOU `:enoent`/`:eisdir`)
       # fails the start cleanly — non-bang `File.read/1` keeps the I/O error out of a
@@ -555,7 +558,7 @@ defmodule Geex.Buffer do
   defp open_history(opts, path, disk_text) do
     case ledger_dir(opts, path) do
       nil ->
-        {History.new(disk_text), nil, nil, nil}
+        {History.new(disk_text), nil, nil, []}
 
       dir ->
         # Trap exits so a shutdown runs terminate/2 and the ledger closes cleanly.
@@ -571,27 +574,44 @@ defmodule Geex.Buffer do
               {ledger, "another geex is recording this file's history; edits here aren't logged"}
           end
 
+        file = Ledger.file(dir, path)
+        spool = Spool.read(file)
+        # Whatever the spool didn't explain describes a state the file has moved past.
+        if ledger.locked, do: Spool.discard(file)
+
         case Ledger.load(ledger) do
           :none ->
-            {History.new(disk_text), ledger, held, nil}
+            {History.new(disk_text), ledger, held, []}
 
           {:ok, restored} ->
-            {history, notice, gap} = rejoin(restored, disk_text)
+            {history, notice, gap} = rejoin(restored, disk_text, spool)
             Logger.info("geex ledger: restored #{path} (#{restored.entries} entries)")
-            {history, ledger, held || notice, gap}
+            {history, ledger, held || notice, verification(restored) ++ List.wrap(gap)}
         end
     end
   end
 
+  # The last session crashed (no `close`): verify the restored state now, rather than at the
+  # next clean close.
+  defp verification(%{clean: true}), do: []
+
+  defp verification(%{history: h}) do
+    [
+      {:close,
+       %{text_sha256: Restore.sha256(History.text(h)), synced_sha256: Restore.sha256(h.synced)}}
+    ]
+  end
+
   # Disk matches the replayed synced text: restore as is (unsaved edits come back, dirty).
-  # Otherwise the file changed while geex was closed: record the difference as one `:external`
-  # gap group, merged by the step (b) rule (disk wins overlaps).
-  defp rejoin(%{history: h}, disk_text) when h.synced == disk_text do
+  # Otherwise the file changed while geex was closed: record the difference as one gap group,
+  # merged by the step (b) rule (disk wins overlaps). It is `:external` unless the spool shows
+  # one session's edits taking the file exactly from its last known content to the disk.
+  defp rejoin(%{history: h}, disk_text, _spool) when h.synced == disk_text do
     notice = if h.dirty, do: "restored unsaved changes from your last session"
     {h, notice, nil}
   end
 
-  defp rejoin(%{history: h}, disk_text) do
+  defp rejoin(%{history: h}, disk_text, spool) do
     text = History.text(h)
 
     {target, conflicts} =
@@ -599,10 +619,22 @@ defmodule Geex.Buffer do
 
     commands = Reconcile.external_commands(text, target, h.synced, disk_text)
 
+    {commands, credited} =
+      case Spool.chain(spool, h.synced, disk_text) do
+        {:ok, {:agent, who} = actor, tool_uses} ->
+          {Enum.map(commands, &credit(&1, actor, tool_uses)),
+           "; credited to #{who.harness}/#{String.slice(who.session, 0, 8)} " <>
+             "(#{length(tool_uses)} edit#{if length(tool_uses) == 1, do: "", else: "s"})"}
+
+        :none ->
+          {commands, "; recorded as an outside change"}
+      end
+
     case History.group(h, commands, disk_text) do
       {:ok, rejoined} ->
         notice =
-          "the file changed while geex was closed; recorded as an outside change" <>
+          "the file changed while geex was closed" <>
+            credited <>
             if(conflicts > 0, do: " (#{conflicts} unsaved hunk(s) took disk)", else: "")
 
         {rejoined, notice, group_entry(:gap, rejoined, length(commands), disk_text)}
@@ -614,6 +646,13 @@ defmodule Geex.Buffer do
 
         {History.new(disk_text), nil, nil}
     end
+  end
+
+  defp credit(%{meta: meta} = command, actor, tool_uses) do
+    %{
+      command
+      | meta: %{meta | actor: actor, reconcile: Map.put(meta.reconcile, :chain, tool_uses)}
+    }
   end
 
   defp ledger_dir(opts, path) do

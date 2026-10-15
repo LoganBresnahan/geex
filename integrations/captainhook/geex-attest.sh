@@ -39,6 +39,16 @@
 # http://127.0.0.1:, or a pid that is gone is skipped. GEEX_ATTEST_DIR overrides <dir>
 # (tests).
 #
+# THE SPOOL (ADR-0033 decision F): when no running geex took the attestation (none is running,
+# or every one answered not_open) and geex keeps a ledger for the file, the message is appended,
+# with an `at` time, to that file's spool next to its ledger:
+#   ${XDG_STATE_HOME:-$HOME/.local/state}/geex/ledger/<key>.spool.jsonl   (0600, last 256 lines)
+# where <key> is the first 16 hex of the sha256 of the path, as geex names the ledger. Hashes and
+# ids only, never content. When geex next opens the file and finds it changed, it credits the
+# change only if spooled entries link its last known content to the disk exactly, all from one
+# session; otherwise the change stays :external. XDG_STATE_HOME must match geex's; it isn't in
+# captAInHook's default allowlist, so add it to passEnv if you set it.
+#
 # Needs jq (an envelope carries whole file contents with JSON escapes; only a JSON parser
 # reads it faithfully), curl, and sha256sum or (macOS) shasum. Without them it sends
 # nothing and says so on stderr (captAInHook's trail).
@@ -110,9 +120,10 @@ after=${after%% *}
 msg=$(jq -cn --argjson d "$draft" --arg b "$before" --arg s "$after" \
   '$d + {before: $b, sha256: $s}') || exit 0
 
-# The token goes in on fd 3, never on curl's argv: ps shows argv to every local user.
+# The token goes in on fd 3, never on curl's argv: ps shows argv to every local user. The
+# answer's body lands in $3, so the caller can see whether any geex took the message.
 post() {
-  printf '%s' "$msg" | curl -sS -o /dev/null -w '%{http_code}' --noproxy '*' \
+  printf '%s' "$msg" | curl -sS -o "${3:-/dev/null}" -w '%{http_code}' --noproxy '*' \
     --connect-timeout 0.3 -m 1 -H 'Content-Type: application/json' -H @/dev/fd/3 \
     --data-binary @- "$1" 3<<EOF
 Authorization: Bearer $2
@@ -120,8 +131,22 @@ EOF
 }
 
 send() {
-  code=$(post "$1" "$2")
+  code=$(post "$1" "$2" "$3")
   [ "$code" = 200 ] || echo "geex-attest: $1 answered ${code:-nothing} for $path" >&2
+}
+
+# No geex took it: keep it for the next time geex opens this file, if geex keeps its history.
+spool() {
+  ledger=${XDG_STATE_HOME:-$HOME/.local/state}/geex/ledger
+  key=$(printf '%s' "$path" | hash256)
+  key=$(printf '%.16s' "$key")
+  [ -f "$ledger/$key.jsonl" ] && [ -O "$ledger/$key.jsonl" ] || return 0
+  file="$ledger/$key.spool.jsonl"
+  line=$(printf '%s' "$msg" | jq -c '. + {at: (now | todate)}') || return 0
+  (umask 077 && printf '%s\n' "$line" >>"$file") || return 0
+  if [ "$(wc -l <"$file")" -gt 256 ]; then
+    tail -n 256 "$file" >"$file.tmp" && mv "$file.tmp" "$file"
+  fi
 }
 
 if [ -n "${GEEX_ATTEST_DIR:-}" ]; then
@@ -131,6 +156,9 @@ elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
 else
   set -- "/run/user/$(id -u)/geex" "${TMPDIR:-/tmp}/geex-${USER:-user}"
 fi
+
+answers=$(mktemp -d 2>/dev/null) || answers=""
+n=0
 
 for dir in "$@"; do
   [ -d "$dir" ] && [ -O "$dir" ] || continue
@@ -148,9 +176,25 @@ EOF
     kill -0 "$pid" 2>/dev/null || continue
 
     # In parallel, so a hung instance costs at most one timeout however many are running.
-    send "$url" "$token" &
+    n=$((n + 1))
+    send "$url" "$token" "${answers:+$answers/$n}" &
   done
 done
 
 wait
+
+# Any geex that has the file open answers attested / pending / ignored; only not_open (or no
+# geex at all) leaves it unrecorded. Without a scratch dir there is no telling: don't spool.
+if [ -n "$answers" ]; then
+  taken=no
+  for answer in "$answers"/*; do
+    [ -f "$answer" ] || continue
+    case $(jq -r '.status // empty' "$answer" 2>/dev/null) in
+      attested | pending | ignored) taken=yes ;;
+    esac
+  done
+  rm -rf "$answers"
+  [ "$taken" = yes ] || spool
+fi
+
 exit 0

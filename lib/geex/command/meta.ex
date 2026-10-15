@@ -41,6 +41,8 @@ defmodule Geex.Command.Meta do
   @type reconcile ::
           nil
           | %{
+              # a reopen gap credited from the spool: the chain's tool calls (ADR-0033 F)
+              optional(:chain) => [String.t() | nil],
               group: pos_integer() | nil,
               before_sha256: String.t(),
               before_sha256_lf: String.t() | nil,
