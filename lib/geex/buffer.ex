@@ -49,8 +49,10 @@ defmodule Geex.Buffer do
 
   use GenServer, restart: :temporary
 
-  alias Geex.{EditorState, History}
-  alias Geex.Edit.Footprint
+  alias Geex.{EditorState, History, Ledger, Reconcile}
+  alias Geex.Edit.{Footprint, Merge}
+
+  require Logger
 
   @doc """
   Start a buffer. Options: `:path` (file path; its contents are loaded if the file
@@ -240,12 +242,23 @@ defmodule Geex.Buffer do
 
     case load_text(opts, path) do
       {:ok, text} ->
+        {history, ledger, notice, gap} = open_history(opts, path, text)
+
         state = %{
           path: path,
           # The document, the one undo history and what is kept in step with it (blame, the
           # synced baseline, dirty, the change clock): a pure value whose transitions the
           # durable ledger replays (`Geex.History`, ADR-0033).
-          history: History.new(text),
+          history: history,
+          # The durable ledger (ADR-0033): every transition is appended to it. `nil` for a
+          # buffer that isn't logged (no path, explicit `:text`, or the ledger is off).
+          ledger: ledger,
+          # The pending fsync timer: at most one a second while entries are unsynced.
+          ledger_timer: nil,
+          # A message about how the buffer was opened (unsaved edits restored, a change made
+          # while geex was closed, another geex holding the ledger). Every subscriber gets it
+          # until the first change.
+          opened_notice: notice,
           # Change-stream subscribers (ADR-0022): %{monitor_ref => pid}. Empty by
           # default — the buffer notifies no one unless something subscribes.
           subscribers: %{},
@@ -256,7 +269,8 @@ defmodule Geex.Buffer do
           pending_ttl_ms: Keyword.get(opts, :pending_ttl_ms, @pending_ttl_ms)
         }
 
-        {:ok, state}
+        # Recording the gap is part of opening, not a first change: keep its notice.
+        {:ok, if(gap, do: %{record(state, gap) | opened_notice: notice}, else: state)}
 
       # A genuinely unreadable existing file (`:eacces`, a TOCTOU `:enoent`/`:eisdir`)
       # fails the start cleanly — non-bang `File.read/1` keeps the I/O error out of a
@@ -284,7 +298,7 @@ defmodule Geex.Buffer do
         # The edit's byte footprint against the *pre-edit* doc lets a byte-oriented overlay
         # (highlighting) shift optimistically across the edit (ADR-0022).
         footprint = Footprint.of(EditorState.doc(state.history.editor), command)
-        new_state = %{state | history: history}
+        new_state = record(%{state | history: history}, {:cmd, command})
         notify_change(new_state, footprint)
         {:reply, {:ok, build_snapshot(new_state)}, new_state}
 
@@ -300,8 +314,8 @@ defmodule Geex.Buffer do
     end
   end
 
-  def handle_call(:undo, _from, state), do: revert(state, History.undo(state.history))
-  def handle_call(:redo, _from, state), do: revert(state, History.redo(state.history))
+  def handle_call(:undo, _from, state), do: revert(state, :undo, History.undo(state.history))
+  def handle_call(:redo, _from, state), do: revert(state, :redo, History.redo(state.history))
 
   def handle_call({:attest, %{before: nil}}, _from, state), do: {:reply, :ignored, state}
 
@@ -316,7 +330,12 @@ defmodule Geex.Buffer do
 
           History.unattested?(state.history, group) ->
             actor = agent_actor(attestation)
-            new_state = %{state | history: History.attest(state.history, group, actor)}
+
+            new_state =
+              record(
+                %{state | history: History.attest(state.history, group, actor)},
+                {:attest, group, actor}
+              )
 
             notify_attested(new_state, group, actor)
             {:reply, :attested, new_state}
@@ -334,6 +353,7 @@ defmodule Geex.Buffer do
 
   def handle_call({:subscribe, pid}, _from, state) do
     ref = Process.monitor(pid)
+    if state.opened_notice, do: send(pid, {:geex_buffer_notice, self(), state.opened_notice})
     {:reply, {:ok, length(state.history.commands)}, put_in(state.subscribers[ref], pid)}
   end
 
@@ -345,7 +365,7 @@ defmodule Geex.Buffer do
     do: {:reply, History.commands_oldest_first(state.history), state}
 
   def handle_call(:mark_synced, _from, state) do
-    state = %{state | history: History.sync(state.history)}
+    state = %{state | history: History.sync(state.history)} |> record_sync()
     {:reply, build_snapshot(state), state}
   end
 
@@ -355,7 +375,8 @@ defmodule Geex.Buffer do
     case Registry.register(Geex.Registry, new_path, nil) do
       {:ok, _owner} ->
         if is_binary(state.path), do: Registry.unregister(Geex.Registry, state.path)
-        {:reply, :ok, %{state | path: new_path}}
+        ledger = state.ledger && Ledger.rename(state.ledger, new_path, state.history)
+        {:reply, :ok, %{state | path: new_path, ledger: ledger}}
 
       {:error, {:already_registered, _pid}} ->
         {:reply, {:error, :destination_registered}, state}
@@ -372,8 +393,13 @@ defmodule Geex.Buffer do
   def handle_call(:save, _from, state) do
     case File.write(state.path, History.text(state.history)) do
       # disk now equals the written text — that is the new in-sync baseline.
-      :ok -> {:reply, {:ok, state.path}, %{state | history: History.sync(state.history)}}
-      {:error, _reason} = error -> {:reply, error, state}
+      :ok ->
+        state = %{state | history: History.sync(state.history)} |> record_sync()
+        # A save is a natural durability point: don't wait for the timer.
+        {:reply, {:ok, state.path}, %{state | ledger: state.ledger && Ledger.sync(state.ledger)}}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
     end
   end
 
@@ -390,6 +416,23 @@ defmodule Geex.Buffer do
       when is_map_key(subscribers, ref) do
     {:noreply, %{state | subscribers: Map.delete(subscribers, ref)}}
   end
+
+  def handle_info(:ledger_fsync, state),
+    do: {:noreply, %{state | ledger: Ledger.sync(state.ledger), ledger_timer: nil}}
+
+  # The buffer traps exits when it keeps a ledger (so a shutdown runs terminate/2 and writes
+  # the close entry). An exit from anything else it is linked to is not its concern.
+  def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
+
+  # A clean close (a supervisor shutdown, `close_file`, quitting): the ledger's `close` entry,
+  # an fsync, and the lock released.
+  @impl true
+  def terminate(_reason, %{ledger: %Ledger{} = ledger} = state) do
+    Ledger.close(ledger, state.history)
+    :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
 
   # Remove every subscription held by `pid` and demonitor it — the explicit
   # counterpart to a subscriber's `:DOWN` cleanup (used on `unsubscribe/2`).
@@ -417,7 +460,8 @@ defmodule Geex.Buffer do
         # One notification for the group: the byte footprint is the diff of the whole
         # transition (the same exact splice undo/redo uses), not a per-command footprint.
         footprint = Footprint.between(History.text(state.history), History.text(history))
-        new_state = %{state | history: history}
+        entry = group_entry(:group, history, length(commands), Keyword.get(opts, :baseline))
+        new_state = record(%{state | history: history}, entry)
         notify_change(new_state, footprint)
         if notice = opts[:notice], do: notify_notice(new_state, notice)
         {:reply, {:ok, build_snapshot(new_state)}, new_state}
@@ -490,8 +534,8 @@ defmodule Geex.Buffer do
   # command, so the minimal splice is exact and the overlay shifts like a forward edit rather
   # than resetting (no re-highlight flash). Returns the affected command so the view can place
   # the cursor.
-  defp revert(state, {:ok, history, command}) do
-    new_state = %{state | history: history}
+  defp revert(state, entry, {:ok, history, command}) do
+    new_state = record(%{state | history: history}, entry)
 
     notify_change(
       new_state,
@@ -501,7 +545,129 @@ defmodule Geex.Buffer do
     {:reply, {:ok, build_snapshot(new_state), command}, new_state}
   end
 
-  defp revert(state, {:error, _reason} = error), do: {:reply, error, state}
+  defp revert(state, _entry, {:error, _reason} = error), do: {:reply, error, state}
+
+  # --- the durable ledger (ADR-0033) ---
+
+  # The history to start from, the ledger, a message for the human, and a gap entry to record.
+  # A path-backed buffer loaded from disk restores its ledger; the disk is then checked
+  # against the replayed synced text (the same content-hash join as attestation).
+  defp open_history(opts, path, disk_text) do
+    case ledger_dir(opts, path) do
+      nil ->
+        {History.new(disk_text), nil, nil, nil}
+
+      dir ->
+        # Trap exits so a shutdown runs terminate/2 and the ledger closes cleanly.
+        Process.flag(:trap_exit, true)
+
+        {ledger, held} =
+          case Ledger.claim(Ledger.new(dir, path)) do
+            {:ok, ledger} ->
+              {ledger, nil}
+
+            {:error, reason, ledger} ->
+              Logger.warning("geex ledger: not recording #{path}: #{inspect(reason)}")
+              {ledger, "another geex is recording this file's history; edits here aren't logged"}
+          end
+
+        case Ledger.load(ledger) do
+          :none ->
+            {History.new(disk_text), ledger, held, nil}
+
+          {:ok, restored} ->
+            {history, notice, gap} = rejoin(restored, disk_text)
+            Logger.info("geex ledger: restored #{path} (#{restored.entries} entries)")
+            {history, ledger, held || notice, gap}
+        end
+    end
+  end
+
+  # Disk matches the replayed synced text: restore as is (unsaved edits come back, dirty).
+  # Otherwise the file changed while geex was closed: record the difference as one `:external`
+  # gap group, merged by the step (b) rule (disk wins overlaps).
+  defp rejoin(%{history: h}, disk_text) when h.synced == disk_text do
+    notice = if h.dirty, do: "restored unsaved changes from your last session"
+    {h, notice, nil}
+  end
+
+  defp rejoin(%{history: h}, disk_text) do
+    text = History.text(h)
+
+    {target, conflicts} =
+      if text == h.synced, do: {disk_text, 0}, else: Merge.merge(h.synced, text, disk_text)
+
+    commands = Reconcile.external_commands(text, target, h.synced, disk_text)
+
+    case History.group(h, commands, disk_text) do
+      {:ok, rejoined} ->
+        notice =
+          "the file changed while geex was closed; recorded as an outside change" <>
+            if(conflicts > 0, do: " (#{conflicts} unsaved hunk(s) took disk)", else: "")
+
+        {rejoined, notice, group_entry(:gap, rejoined, length(commands), disk_text)}
+
+      {:error, reason} ->
+        Logger.warning(
+          "geex ledger: could not rejoin the disk (#{inspect(reason)}); starting fresh"
+        )
+
+        {History.new(disk_text), nil, nil}
+    end
+  end
+
+  defp ledger_dir(opts, path) do
+    cond do
+      not is_binary(path) or Keyword.has_key?(opts, :text) ->
+        nil
+
+      dir = Keyword.get(opts, :ledger_dir) ->
+        dir
+
+      Application.get_env(:geex, :ledger, false) ->
+        Application.get_env(:geex, :ledger_dir) || Ledger.default_dir()
+
+      true ->
+        nil
+    end
+  end
+
+  # A group's ledger entry: the `count` commands just recorded (as stamped, with their group
+  # id) and how `synced` moved: not at all, to the resulting text, or to a different disk text.
+  defp group_entry(kind, history, count, baseline) do
+    commands = history.commands |> Enum.take(count) |> Enum.reverse()
+
+    mode =
+      cond do
+        is_nil(baseline) -> :none
+        baseline == History.text(history) -> :result
+        true -> baseline
+      end
+
+    {kind, commands, mode}
+  end
+
+  defp record_sync(state),
+    do: record(state, {:sync, Ledger.Restore.sha256(state.history.synced)})
+
+  # Append one transition, then make sure an fsync follows within a second. The first change
+  # retires the opened notice; a ledger that just turned off says so once.
+  defp record(%{ledger: nil} = state, _entry), do: %{state | opened_notice: nil}
+
+  defp record(state, entry) do
+    was_off = Ledger.off?(state.ledger)
+    ledger = Ledger.append(state.ledger, entry, state.history)
+
+    if Ledger.off?(ledger) and not was_off,
+      do: notify_notice(state, "the history ledger stopped recording (see the log)")
+
+    timer =
+      if ledger.unsynced and is_nil(state.ledger_timer),
+        do: Process.send_after(self(), :ledger_fsync, 1_000),
+        else: state.ledger_timer
+
+    %{state | ledger: ledger, ledger_timer: timer, opened_notice: nil}
+  end
 
   defp build_snapshot(%{history: h} = state) do
     commands = History.commands_oldest_first(h)

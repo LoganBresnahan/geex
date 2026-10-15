@@ -20,4 +20,7 @@ config :geex,
   start_attest: config_env() != :test,
   start_terminal: config_env() != :test,
   start_reconcile: config_env() != :test,
-  start_highlight: config_env() != :test
+  start_highlight: config_env() != :test,
+  # The durable ledger (ADR-0033): each path-backed buffer's history is appended to
+  # ~/.local/state/geex/ledger/ (`ledger_dir` overrides). Tests opt in per buffer.
+  ledger: config_env() != :test

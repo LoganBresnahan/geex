@@ -41,7 +41,7 @@ defmodule Geex.Command.Meta do
   @type reconcile ::
           nil
           | %{
-              group: pos_integer(),
+              group: pos_integer() | nil,
               before_sha256: String.t(),
               before_sha256_lf: String.t() | nil,
               sha256: String.t()

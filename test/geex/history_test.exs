@@ -86,19 +86,26 @@ defmodule Geex.HistoryTest do
   end
 
   describe "attest/3 and the group queries" do
-    test "relabels only that group's commands and lines" do
+    test "group ids come from the history, and attest relabels only its group" do
       h = History.new("a\nb\n")
-      {:ok, h} = History.group(h, [replace(0, "A", :external, 7)], nil)
-      {:ok, h} = History.group(h, [replace(1, "B", :external, 8)], nil)
-      assert History.newest_group(h).group == 8
+      # whatever id a command arrives with, the history numbers its reconcile groups
+      {:ok, h} = History.group(h, [replace(0, "A", :external, 99)], nil)
+      {:ok, h} = History.group(h, [replace(1, "B", :external, 99)], nil)
+      assert History.newest_group(h).group == 2
+      assert h.next_group == 3
 
       agent = {:agent, %{harness: "claude-code", session: "s"}}
-      h = History.attest(h, 7, agent)
+      h = History.attest(h, 1, agent)
 
       assert Enum.map(History.commands_oldest_first(h), & &1.meta.actor) == [agent, :external]
-      assert [{^agent, 7}, {:external, 8}, nil] = h.blame
-      refute History.unattested?(h, 7)
-      assert History.unattested?(h, 8)
+      assert [{^agent, 1}, {:external, 2}, nil] = h.blame
+      refute History.unattested?(h, 1)
+      assert History.unattested?(h, 2)
+    end
+
+    test "a group with no reconcile stamp leaves the counter alone" do
+      {:ok, h} = History.group(History.new("a"), [insert(0, 0, "x")], nil)
+      assert h.next_group == 1
     end
   end
 

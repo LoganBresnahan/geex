@@ -24,13 +24,25 @@ defmodule Geex.History do
     * `seq` — a **monotonic** change clock, bumped by every transition that can change the
       text. Unlike the command count it never goes backwards on undo, so the highlight
       reactor orders its overlays by it (ADR-0031).
+    * `next_group` — the id the next reconcile group gets. `group/3` stamps it, so ids come
+      from the history itself and survive a restart through the ledger (ADR-0033 §2).
   """
 
   alias Geex.{Blame, Dispatch, EditorState}
   alias Geex.Command.Meta
 
   @enforce_keys [:base, :editor, :synced, :blame]
-  defstruct [:base, :editor, :synced, :blame, commands: [], redo: [], dirty: false, seq: 0]
+  defstruct [
+    :base,
+    :editor,
+    :synced,
+    :blame,
+    commands: [],
+    redo: [],
+    dirty: false,
+    seq: 0,
+    next_group: 1
+  ]
 
   @type t :: %__MODULE__{
           base: EditorState.t(),
@@ -40,7 +52,8 @@ defmodule Geex.History do
           commands: [struct()],
           redo: [struct()],
           dirty: boolean(),
-          seq: non_neg_integer()
+          seq: non_neg_integer(),
+          next_group: pos_integer()
         }
 
   @doc """
@@ -99,9 +112,14 @@ defmodule Geex.History do
   keeps your unsaved edits stays dirty, and `commands` may be empty (disk changed to what the
   buffer already holds). Without one, the history is simply marked dirty. An empty group
   keeps the redo future; a non-empty one clears it.
+
+  Commands that carry a reconcile stamp get this history's `next_group` as their group id,
+  whatever id they arrived with, so ids are durable and never collide across restarts.
   """
   @spec group(t(), [struct()], String.t() | nil) :: {:ok, t()} | {:error, term()}
   def group(%__MODULE__{} = h, commands, baseline) when is_list(commands) do
+    {commands, next_group} = stamp_group(commands, h.next_group)
+
     applied =
       Enum.reduce_while(commands, {:ok, h.editor, h.blame}, fn command, {:ok, editor, blame} ->
         case Dispatch.apply_command(command, editor) do
@@ -126,7 +144,8 @@ defmodule Geex.History do
            redo: if(commands == [], do: h.redo, else: []),
            synced: synced,
            dirty: dirty,
-           seq: h.seq + 1
+           seq: h.seq + 1,
+           next_group: next_group
        }}
     end
   end
@@ -198,6 +217,25 @@ defmodule Geex.History do
   @doc "`command` with its actor replaced."
   @spec put_actor(struct(), Meta.actor()) :: struct()
   def put_actor(command, actor), do: %{command | meta: %{command.meta | actor: actor}}
+
+  # Give a reconcile group's commands this history's next id; a group without a reconcile
+  # stamp (a revert, a plain batch) leaves the counter alone.
+  defp stamp_group(commands, id) do
+    if Enum.any?(commands, &match?(%{meta: %Meta{reconcile: %{}}}, &1)) do
+      stamped =
+        Enum.map(commands, fn
+          %{meta: %Meta{reconcile: %{} = stamp} = meta} = command ->
+            %{command | meta: %{meta | reconcile: %{stamp | group: id}}}
+
+          command ->
+            command
+        end)
+
+      {stamped, id + 1}
+    else
+      {commands, id}
+    end
+  end
 
   defp in_group?(command, group),
     do: match?(%{reconcile: %{group: ^group}}, command.meta)

@@ -95,7 +95,7 @@ elixir --erl "-noshell -noinput +Bd" -S mix run --no-start -e 'Geex.run("path")'
 ```
 
 Feature gates live in `config/config.exs` (`start_terminal` / `start_reconcile`
-/ `start_highlight` are all **off under `mix test`** — tests start what they
+/ `start_highlight` / `ledger` are all **off under `mix test`** — tests start what they
 need explicitly) and `config/runtime.exs` (`GEEX_SERVE=1` flips the HTTP
 listener on and the terminal off; `GEEX_MCP_PORT`, `GEEX_MCP_PORT_FILE`).
 
@@ -157,6 +157,11 @@ session's `Co-Authored-By` trailer.
 - attestation payload (ADR-0032 step d): `integrations/captainhook/geex-attest.sh`, which the
   user registers in `~/.captainHook/handlers.json` (never edit that file without asking);
   tested against `test/fixtures/claude-code/` (verbatim captAInHook captures)
+- durable ledger (ADR-0033): `$XDG_STATE_HOME/geex/ledger/<key>.jsonl` (default
+  `~/.local/state/geex/ledger/`; `<key>` = 16 hex of the sha256 of the absolute path),
+  `0600` in `0700`, plus `<key>.lock` while a buffer has it open; app gates `ledger` (off under
+  test; tests pass `:ledger_dir`) and `ledger_dir`. Dogfood with `XDG_STATE_HOME` pointed at a
+  scratch dir to keep the real one clean
 - TUI log: `<tmp>/geex.log` (`System.tmp_dir!/0`)
 - sibling path dep: `~/tree_sitter_wasm` (Rustler NIF; must exist to compile)
 - harness presets: `presets/<harness>/` — copy into a *target* project, never

@@ -236,3 +236,35 @@ captAInHook is untouched.
 `doc/notes.md` § "Persistence & durable state"; `lib/geex/buffer.ex` (the transitions to
 extract); `lib/geex/blame.ex` (derived blame); `lib/geex/edit/merge.ex` (the merge the revert
 reuses); `test/geex/cassette_test.exs` (commands rebuilt through `parse/1`).
+
+## Amendment — 2026-10-15: build step 2 as built (the ledger, write path and restore)
+
+Choices made building it, within the decisions above:
+
+- **Modules.** `Geex.Ledger.Codec` (pure: entries to JSON lines and back, commands rebuilt
+  through `parse/1`, non-UTF-8 strings as `{"$b64": …}`); `Geex.Ledger.Restore` (pure: folds
+  lines through `Geex.History`, verifies `sync`/`close` hashes, reports where it stopped and the
+  byte offset to cut back to); `Geex.Ledger` (the file, the lock, append, fsync, load and
+  repair). `Geex.Buffer` records one entry per transition.
+- **The lock is claimed when the buffer opens,** not on its first write. Loading may repair the
+  file (cut a torn line, set a corrupt one aside), and doing that while another geex is
+  mid-write would damage its ledger. Without the lock, a buffer reads the ledger but never
+  modifies it, and doesn't record. The ledger *file* is still created lazily: a buffer that
+  never changes writes nothing (its lock is released when it closes).
+- **Durable group ids:** `Geex.History.group/3` numbers reconcile groups from `next_group`;
+  reconcile now passes `group: nil`.
+- **A group whose baseline equals its result** is logged as `"baseline": "result"` and
+  replayed as the group then `History.sync/1`, which reaches the same value.
+- **The opened notice** ("restored unsaved changes…", "the file changed while geex was
+  closed…", "another geex is recording…") goes to every subscriber until the first change, so
+  the TUI gets it whether or not the highlighter subscribed first.
+- **A gap** is built by the same `Reconcile.external_commands/4` reconcile uses (now public),
+  merged with `Geex.Edit.Merge` when the restored buffer was dirty, and logged as a `gap` entry.
+- **Config:** `config :geex, ledger:` (on; off under `mix test`, where tests pass `:ledger_dir`)
+  and `ledger_dir:` (default `$XDG_STATE_HOME/geex/ledger`). A path-backed buffer loaded from
+  disk is logged; scratch buffers and explicit `:text` buffers are not.
+- **After a hard crash** the lock file and the attestation discovery file are left behind.
+  Both name a dead process, so the next geex takes the lock over and the payload skips the
+  discovery file. Cleaning up another instance's stale discovery file is not done.
+- Not built yet: `checkpoint` (compaction, build step 4) — a ledger containing one stops replay
+  there like any unknown entry.

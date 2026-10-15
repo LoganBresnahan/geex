@@ -173,18 +173,26 @@ defmodule Geex.Reconcile do
   # full disk content. Coarse but always state-equivalent — the lossy diff→command step
   # ADR-0017 flags, isolated here so a finer line-level diff (the ADR-0020 myers work)
   # can replace it without touching the watcher or the echo-suppression.
-  # One `replace` per changed hunk (bottom-up, so each is valid after the ones before
-  # it), all sharing one reconcile group: an id, the sha256 of the disk bytes just read,
-  # and the sha256 of the baseline disk bytes this write replaced (`synced`). An
-  # attestation must match both hashes (ADR-0032 amendments). A baseline holding "\r\n"
-  # also gets the hash of itself with each "\r\n" turned into "\n": Claude Code reports a
-  # CRLF file's prior text that way, so its `before` can only match that. If the line diff
-  # can't reproduce the disk text exactly, fall back to one whole-text replace.
-  defp external_commands(buffer_text, target, baseline, disk_text) do
+  @doc """
+  The commands that record an out-of-band disk change: one `:external` `replace` per changed
+  hunk taking `buffer_text` to `target` (bottom-up, so each stays valid after the ones before
+  it), all stamped with one reconcile group (ADR-0032): the sha256 of `baseline` (the synced disk
+  bytes the write replaced), of `disk_text` (the bytes read), and, when the baseline holds
+  `"\\r\\n"`, of the baseline with each `"\\r\\n"` as `"\\n"` (how Claude Code reports a CRLF
+  file). The group id itself is assigned by the buffer's history as the group is recorded.
+  If the line diff can't reproduce `target` exactly, one whole-text replace is used. Pure.
+
+  Used by `reconcile/2`, and by a buffer reopening a file that changed while geex was closed
+  (ADR-0033).
+  """
+  @spec external_commands(String.t(), String.t(), String.t(), String.t()) :: [struct()]
+  def external_commands(buffer_text, target, baseline, disk_text) do
     meta =
       Meta.new(:external,
         reconcile: %{
-          group: System.unique_integer([:positive, :monotonic]),
+          # Assigned by the buffer's history as the group is recorded (`Geex.History.group/3`),
+          # so ids are durable across restarts (ADR-0033).
+          group: nil,
           before_sha256: sha256(baseline),
           before_sha256_lf: lf_sha256(baseline),
           sha256: sha256(disk_text)

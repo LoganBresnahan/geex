@@ -1476,3 +1476,51 @@ rebuilds the same editor and the same blame. The whole existing suite passes unc
 
 **Not tested:** none of the ledger itself exists yet (build step 2). Group ids are still
 `System.unique_integer/1` until step 2 makes them durable.
+
+### 2026-10-15 — Durable ledger build step 2: the ledger, write path and restore (ADR-0033)
+
+Every path-backed buffer appends one JSON line per history transition to
+`$XDG_STATE_HOME/geex/ledger/<key>.jsonl` (`Geex.Ledger.Codec` / `Restore` / `Ledger`), and replays it on
+open. The disk is then checked against the replayed synced text: a match restores everything (unsaved
+edits come back dirty); a difference becomes one `:external` gap group. Group ids now come from
+`Geex.History.next_group`. Config gate `ledger` (off under test).
+
+**Live-verified** (geex TUI in a tmux pty, `XDG_STATE_HOME` pointed at a scratch dir; the ledger file and
+its `jq`-read entries checked at each step):
+- **Session 1.** The first keystroke created the ledger (`0600` file, `0700` dir) and its lock. Then this
+  session's native `Edit` of line 3 (credited, marked), `Ctrl-O`, and an unsaved `y`. Entries: `open, cmd,
+  group, attest, sync, cmd`; quitting added `close` and removed the lock.
+- **Session 2.** The status line read `restored unsaved changes from your last session`, the buffer was
+  dirty with the `y`, line 3 kept its `▌` and `✎ claude-code/d25a8b6d · turn 74cd…`. `Alt+Z` removed the
+  `y` (clean again: equal to the saved file); a second `Alt+Z` undid session 1's agent hunk. Two
+  `Alt+Shift+Z`, then quit, leaving the `y` unsaved.
+- **Changed while closed.** `sed` rewrote line 2 (`beta`, where the unsaved `y` was) with geex closed.
+  Relaunch: `the file changed while geex was closed; recorded as an outside change (1 unsaved hunk(s)
+  took disk)`. Line 2 showed the disk text with no author; a `gap` entry was appended; `Alt+Z` brought
+  back the unsaved `byeta`.
+- **Hard crash.** Typed `CRASH-`, then `kill -9` on the BEAM. The ledger held every keystroke (last entry
+  the `-`), no `close`; the lock file and the discovery file were left behind. Relaunch: `restored unsaved
+  changes…`, `CRASH-xalpha` back, the stale lock taken over by the new pid and released on quit. (I
+  removed the dead instance's leftover discovery file by hand.)
+
+**Automated:** `ledger_test`, 18 tests:
+- every entry type round-trips, with every actor kind, a reconcile stamp, an origin and non-UTF-8 bytes;
+- other versions, unknown types and garbage are rejected;
+- **reopen:** a clean close restores history, blame and undo across sessions; unsaved edits survive a
+  crash with a notice; **a crash right after an agent reconcile into a clean buffer finds no gap** (the
+  coordinator's case); a closed-file change becomes an `:external` gap (and a second reopen adds
+  nothing); a closed-file change merges with unsaved edits; **CRLF + BOM + no final newline rejoins
+  with no gap**; group ids continue across a reopen;
+- **damage:** a torn last line is dropped and cut off; a corrupt middle line stops replay there, with
+  the original kept aside; a tampered `sync` hash stops at the last verified point;
+- **file and lock:** nothing is written for a buffer that never changes; `0600`/`0700`; a second buffer
+  on the same file doesn't record and says so; a stale lock is taken over; a rename moves the ledger;
+- **ADR-0033 §3, pinned:** after 150 seeded random edits, undos, redos, outside writes, credits and saves
+  through the real buffer, restoring the ledger gives exactly the live `History` value.
+
+`history_test` gained the group-id tests. **772 tests + 19 doctests**, green twice,
+`--warnings-as-errors` clean.
+
+**Not tested:** fsync timing (the timer path ran live, not under test); a power loss; a disk-full write
+error (the code turns the ledger off with a notice); very long ledgers (replay is synchronous in the
+buffer's init); two geex *processes* racing for one lock (tested within one VM); macOS.
