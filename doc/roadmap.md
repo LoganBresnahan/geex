@@ -17,7 +17,7 @@ narrative below: the interactive TUI loop, highlighting, selection + clipboard, 
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
 the MCP door is frozen; v0.5 is now the **ledger track** (reconcile as the primary agent path,
-attested by captAInHook). Items 1–4 and item 5's display are built; the frontier is item 6, the durable ledger (ADR-0033); the command-surface track at the
+attested by captAInHook). Items 1–6 are built (item 5's display; item 6 the durable ledger, ADR-0033); the frontier is item 7, panes, the file tree, the edits pane and holding open buffers (ADR-0034); the command-surface track at the
 end of this file continues alongside it, since editor comfort is the other half of the point. The reconcile watcher is
 now shown live against a real `inotify` backend. (Test counts quoted further down are as of their
 own dates.)
@@ -178,10 +178,22 @@ The ledger track, in order (each builds on the one before):
    (single writes and same-session runs); (3) per-agent revert (`Alt+U` / `revert`,
    `revert-call`; refused when your later edits overlap) — **built 2026-10-15**; (4) `mix geex.ledger compact` /
    `forget` / `list` — **built 2026-10-15**. All of ADR-0033 is built.
+7. **Panes, the file tree, the edits pane, and holding open buffers**
+   ([adr/0034](adr/0034-panes-tree-edits-hold.md), accepted 2026-10-15). An open buffer no
+   longer changes when its file does. It is marked "behind disk" and fast-forwards on demand
+   (`Alt+L`, `fast-forward`, or Enter on its "disk is newer" row). Agent writes it holds are
+   credited at the fast-forward by the spool's chain rule. A dirty buffer, and a save of a buffer
+   that is behind, merge with `git merge-file`: conflicts become markers in the buffer, and a
+   conflicting merge doesn't write. Panes are a tree (git's file list, rooted at the path's git
+   top level) · editor · edits pane (file · who · when). Build order: (1) the hold,
+   fast-forward, the git merge and save-while-behind; (2) panes and buffers (`Alt+O`, `open`,
+   `buffers`, `close`); (3) the edits pane; (4) the file tree; (5) `user_modified` ("edited by
+   you"). The follow pane in the first draft was dropped.
 
 Exit criteria: with captAInHook installed and the payload registered, an agent session
 (Claude Code first) edits a file open in geex with its **native** tools; each change appears
-live as a hunk, attributed to that session; a shell write appears as `:external`; any of
+live in the edits pane and lands as a hunk attributed to that session when you fast-forward
+(ADR-0034); a shell write appears as `:external`; any of
 them can be undone individually; replay still reproduces the state.
 
 ### What v0.5 shipped before the redefinition (Direction A — now frozen)

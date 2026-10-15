@@ -1,6 +1,6 @@
 # ADR-0033: The durable ledger — an append-only history log per file, and per-agent revert
 
-- **Status:** Accepted 2026-10-15 (decisions A–F as recommended; not yet built)
+- **Status:** Accepted 2026-10-15 (decisions A–F as recommended); built 2026-10-15 (`7e6d483` … `15ff6d3`)
 - **Date:** 2026-10-15
 - **Relates to:** [ADR-0005](0005-provenance-on-every-command.md) (provenance on every command),
   [ADR-0014](0014-editor-state-and-dispatch-ownership.md) (the buffer owns the one history; it
