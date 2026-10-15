@@ -374,6 +374,41 @@ defmodule Geex.LedgerTest do
     end
   end
 
+  describe "Spool.chain/3, the rule itself" do
+    defp e(before, after_text, session, tool_use),
+      do: %{
+        before: hex(before),
+        sha256: hex(after_text),
+        harness: "claude-code",
+        session: session,
+        turn: nil,
+        tool_use: tool_use
+      }
+
+    test "a chain restarts from the last known content; mixed sessions never link" do
+      round_trip = [e("a", "b", "x", "u1"), e("b", "a", "x", "u2")]
+
+      assert {:ok, {:agent, %{session: "y"}}, ["u3"]} =
+               Spool.chain(round_trip ++ [e("a", "c", "y", "u3")], "a", "c")
+
+      # the round trip and a continuation by the same session is one longer chain
+      assert {:ok, {:agent, %{session: "x"}}, ["u1", "u2", "u4"]} =
+               Spool.chain(round_trip ++ [e("a", "c", "x", "u4")], "a", "c")
+
+      assert Spool.chain([e("a", "b", "x", "u1"), e("b", "c", "y", "u2")], "a", "c") == :none
+    end
+
+    test "time order matters; a no-op write is skipped; duplicates link once" do
+      assert Spool.chain([e("b", "c", "x", "u2"), e("a", "b", "x", "u1")], "a", "c") == :none
+
+      assert {:ok, _, ["u1"]} =
+               Spool.chain([e("a", "a", "x", "u0"), e("a", "b", "x", "u1")], "a", "b")
+
+      twice = [e("a", "b", "x", "u1"), e("b", "c", "x", "u2")]
+      assert {:ok, _, ["u1", "u2"]} = Spool.chain(twice ++ twice, "a", "c")
+    end
+  end
+
   describe "the spool: credit for edits made while the file wasn't open (ADR-0033 F)" do
     defp spool(ctx, entries) do
       lines =
@@ -442,6 +477,23 @@ defmodule Geex.LedgerTest do
       gap = List.last(Buffer.history(buf))
       assert {:agent, %{session: "s1", tool_use: "u2", turn: "t-u2"}} = gap.meta.actor
       assert gap.meta.reconcile.chain == ["u1", "u2"]
+      close(buf)
+    end
+
+    test "one session's round trip doesn't stop another session's write being credited", ctx do
+      base = saved_and_closed(ctx, "a\n")
+      File.write!(ctx.doc, "0a\nY\n")
+
+      spool(ctx, [
+        {base, "0a\nX\n", "s1", "u1"},
+        {"0a\nX\n", base, "s1", "u2"},
+        {base, "0a\nY\n", "s2", "u3"}
+      ])
+
+      buf = open(ctx)
+      gap = List.last(Buffer.history(buf))
+      assert {:agent, %{session: "s2", tool_use: "u3"}} = gap.meta.actor
+      assert gap.meta.reconcile.chain == ["u3"]
       close(buf)
     end
 

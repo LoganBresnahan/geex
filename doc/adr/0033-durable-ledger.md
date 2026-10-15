@@ -287,6 +287,13 @@ Choices made building it, within the decisions above:
   actor carries the last write's `turn` and `tool_use`; its stamp lists the chain's tool calls as
   `chain`. A chain through a CRLF file breaks after its first link (the disk keeps `\r\n`, the next
   `before` doesn't) and stays `:external`.
+  - *Amended 2026-10-15 (after ADR-0034's live test):* a chain can start at **any** entry whose
+    `before` is the last known content, not only at the first one that links. Before this, one
+    session changing a line and changing it back left the walk at that session, so another
+    session's next write wasn't credited: a missed credit, never a wrong one. The search now keeps
+    the longest chain ending at each (content, session) in time order, so the work is bounded by
+    the number of entries. A write whose `before` equals its `sha256` changes nothing and is
+    skipped.
 - **The spool is discarded when the file is next opened** (by the lock holder), whether or not
   it explained anything. Entries it didn't explain describe states the file has moved past, so
   no TTL is needed.

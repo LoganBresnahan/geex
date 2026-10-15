@@ -162,6 +162,22 @@ defmodule Geex.HoldTest do
       assert List.last(actors(buf)) == :external
     end
 
+    # Found live by the coordinator: a round trip left in the held list (the mark cleared by
+    # itself, so no fast-forward cleared it) must not block the next session's credit.
+    test "one session's round trip, then another session's write: the write is credited", ctx do
+      File.write!(ctx.doc, "a\n")
+      buf = open(ctx)
+      :held = Buffer.attest(buf, attestation("a\n", "b\n", "s1", "u1"))
+      agent_edits(ctx, buf, "b\n")
+      :held = Buffer.attest(buf, attestation("b\n", "a\n", "s1", "u2"))
+      assert agent_edits(ctx, buf, "a\n") == :in_sync
+      :held = Buffer.attest(buf, attestation("a\n", "c\n", "s2", "u3"))
+      agent_edits(ctx, buf, "c\n")
+
+      {:fast_forwarded, _, 0} = Reconcile.fast_forward(buf)
+      assert [{:agent, %{session: "s2", tool_use: "u3"}}] = actors(buf)
+    end
+
     test "a write both held and spooled links once", ctx do
       File.write!(ctx.doc, "a\n")
       buf = open(ctx, ledger_dir: ctx.ledger)

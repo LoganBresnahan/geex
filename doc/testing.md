@@ -1735,3 +1735,26 @@ behind) plus the no-git fallback (`:git_executable` set to a missing binary: dis
 as is, not behind, as before); two geex instances holding the same file; the frozen MCP `save_file` on a
 buffer that is behind (returns the `:behind` error; only reasoned from `Buffer.save/1`); very large files
 (each save now reads the file once to compare).
+
+### 2026-10-15 — Fix: a round trip no longer blocks the next session's credit (ADR-0033 F amendment)
+
+Found by the coordinator session's live test of `b764891` (7 of 7 checks passed). After session X wrote a
+line and wrote it back while the buffer was held, session Y's next write fast-forwarded as `:external`. Root
+cause: `Spool.chain/3` walked one chain; X's round trip linked first and left the walk at X, so Y's entry
+(whose `before` was the last known content) failed the same-session test and nothing restarted. The same
+failure existed on reopen (ADR-0033). The chain search now keeps the longest chain ending at each
+(content, session) and starts one at any entry whose `before` is the last known content. A no-op write
+(`before == sha256`) is skipped.
+
+**Live-verified** (geex TUI in a tmux pty, scratch `XDG_STATE_HOME`): this session's native `Edit` changed
+line 2 and changed it back (two `held`), then a `printf` changed line 3 and a hand-made attestation for it
+from session `ffffffff-…` was POSTed to the intake (`{"status":"held"}`). `Alt+L` said `caught up with the
+disk (claude-code/ffffffff)`, `▌` on line 3. Before the fix the coordinator saw `:external` here.
+
+**Automated:** `hold_test` +1 (the held round trip, then another session's write), `ledger_test` +3 (the
+same on reopen; `Spool.chain/3` directly: a restart, the round trip continued by the same session as one
+longer chain, mixed sessions never linking, time order, a skipped no-op, duplicates linking once). The new
+tests fail on the old walk (4 failures). **848 tests + 23 doctests**, green twice, `--warnings-as-errors`
+clean.
+
+**Not tested:** a very long spool of interleaved sessions (bounded by entries, not measured).

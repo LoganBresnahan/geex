@@ -16,6 +16,10 @@ defmodule Geex.Ledger.Spool do
     * **a chain:** entries that link exactly, last known → `e1.sha256 = e2.before` → … → disk,
       **all from one harness and session**.
 
+  A chain can start at any entry whose `before` is the last known content, so one session
+  changing a line and changing it back doesn't stop another session's later write from being
+  credited. A write whose `before` and `sha256` are equal changes nothing and is skipped.
+
   The whole gap is credited to that session; the actor carries the last write's turn and tool
   call, and the chain's tool calls are listed. Anything else (a missing link, two sessions)
   explains nothing, and the gap stays `:external`. A chain through a CRLF file breaks after its
@@ -65,7 +69,8 @@ defmodule Geex.Ledger.Spool do
   The session that explains the change from `synced` to `disk`, if the spool shows one:
   `{:ok, actor, tool_uses}`, or `:none`. Pure.
 
-  Entries are walked in time order; when several complete chains exist, the longest wins.
+  Entries are walked in time order; when several complete chains exist, the longest wins (the
+  first found, among equals).
 
       iex> e = %{before: Geex.Ledger.Restore.sha256("a"), sha256: Geex.Ledger.Restore.sha256("b"),
       ...>       harness: "claude-code", session: "s1", turn: "t1", tool_use: "u1"}
@@ -82,26 +87,36 @@ defmodule Geex.Ledger.Spool do
         do: [Restore.sha256(synced), Restore.sha256(String.replace(synced, "\r\n", "\n"))],
         else: [Restore.sha256(synced)]
 
-    walk(entries, starts, Restore.sha256(disk), [], nil)
+    disk = Restore.sha256(disk)
+
+    entries
+    |> Enum.reject(&(&1.before == &1.sha256))
+    |> Enum.reduce({%{}, nil}, &link(&1, &2, starts, disk))
+    |> elem(1)
+    |> credit()
   end
 
-  # `links` is newest first. `best` is the longest complete chain seen so far.
-  defp walk([], _cur, _disk, _links, best), do: credit(best)
+  # The longest chain (links newest first) ending at each {content hash, harness, session}, built
+  # in time order, so a chain only ever extends with later entries; and the longest complete one.
+  # Keeping only the longest per end bounds the work by the number of entries.
+  defp link(e, {chains, best}, starts, disk) do
+    who = {e.harness, e.session}
+    from = Map.get(chains, {e.before, who}, if(e.before in starts, do: []))
 
-  defp walk([e | rest], cur, disk, links, best) do
-    if e.before in cur and same_session?(links, e) do
-      links = [e | links]
-      best = if e.sha256 == disk, do: links, else: best
-      walk(rest, [e.sha256], disk, links, best)
-    else
-      walk(rest, cur, disk, links, best)
+    case from && [e | from] do
+      nil ->
+        {chains, best}
+
+      links ->
+        chains = Map.update(chains, {e.sha256, who}, links, &longer(&1, links))
+        best = if e.sha256 == disk, do: longer(best, links), else: best
+        {chains, best}
     end
   end
 
-  defp same_session?([], _e), do: true
-
-  defp same_session?([first | _], e),
-    do: first.harness == e.harness and first.session == e.session
+  # The existing one unless the new one is longer.
+  defp longer(nil, links), do: links
+  defp longer(kept, links), do: if(length(links) > length(kept), do: links, else: kept)
 
   defp credit(nil), do: :none
 
