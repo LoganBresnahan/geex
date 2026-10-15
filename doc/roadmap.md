@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-15):** 782 tests + 20 doctests green, `--warnings-as-errors` clean. Since the
+**Current (2026-10-15):** 796 tests + 20 doctests green, `--warnings-as-errors` clean. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -167,17 +167,16 @@ The ledger track, in order (each builds on the one before):
    gutter mark on each line an agent last wrote, and `✎ <harness>/<session8> · turn …` on the
    status line for the line under the cursor, both derived from `Geex.Blame` (a per-line
    `git blame` over the one history: shifts with edits, cleared by undo, relabelled on a late
-   attestation). Shell and other unattested writes stay unmarked. **Still open:** undo of a
-   specific agent hunk without touching your own later edits, now designed as a forward
-   revert in ADR-0033 (item 6).
+   attestation). Shell and other unattested writes stay unmarked. Undo of a specific agent hunk
+   without touching your own later edits shipped as the forward revert of item 6, step 3.
 6. **The durable ledger** ([adr/0033](adr/0033-durable-ledger.md), accepted 2026-10-15): an
    append-only JSONL history log per file in `~/.local/state/geex/ledger/`, so quitting or a
    crash loses nothing. Reopening restores history, blame and unsaved edits when the disk
    matches the replayed synced hash, and otherwise records an `:external` gap. Build order:
    (1) extract the pure `Geex.History` (no behavior change) — **built 2026-10-15**; (2) the ledger codec, write path and
    restore — **built 2026-10-15**; (2b) the hash-only spool that credits agent edits made while a file isn't open — **built 2026-10-15**
-   (single writes and same-session runs); (3) per-agent revert (`Alt+R`, `revert` /
-   `revert-call`; refused when your later edits overlap); (4) `mix geex.ledger compact` /
+   (single writes and same-session runs); (3) per-agent revert (`Alt+U` / `revert`,
+   `revert-call`; refused when your later edits overlap) — **built 2026-10-15**; (4) `mix geex.ledger compact` /
    `forget` / `list`.
 
 Exit criteria: with captAInHook installed and the payload registered, an agent session

@@ -43,6 +43,17 @@ defmodule Geex.Command.Catalog do
     %Entry{name: "undo", description: "Undo the last edit.", invoke: {:action, :undo}},
     %Entry{name: "redo", description: "Redo the last undone edit.", invoke: {:action, :redo}},
     %Entry{
+      name: "revert",
+      description:
+        "Take back the agent's (or outside) change under the cursor, keeping later edits (Alt+U).",
+      invoke: {:action, :revert_hunk}
+    },
+    %Entry{
+      name: "revert-call",
+      description: "Take back the whole tool call that changed this line, keeping later edits.",
+      invoke: {:action, :revert_call}
+    },
+    %Entry{
       name: "highlight",
       description: "Start a selection at the cursor (extend it with motion).",
       invoke: {:action, :select_start}

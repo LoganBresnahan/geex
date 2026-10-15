@@ -34,16 +34,30 @@ defmodule Geex.Edit.Merge do
   """
   @spec merge(String.t(), String.t(), String.t()) :: {String.t(), non_neg_integer()}
   def merge(base, ours, theirs) when is_binary(base) and is_binary(ours) and is_binary(theirs) do
+    %{merged: merged, conflicts: conflicts} = plan(base, ours, theirs)
+    {merged, length(conflicts)}
+  end
+
+  @doc """
+  The same merge as data: the merged text, your hunks (`ours`, in `base` line coordinates) in
+  the order `LineDiff.hunks/2` gives them, and which of them were replaced because they overlap
+  one of theirs (an identical change on both sides isn't counted). A per-agent revert
+  (`Geex.Revert`) refuses when there are any, and names their lines.
+  """
+  @spec plan(String.t(), String.t(), String.t()) :: %{
+          merged: String.t(),
+          ours: [LineDiff.hunk()],
+          conflicts: [LineDiff.hunk()]
+        }
+  def plan(base, ours, theirs) when is_binary(base) and is_binary(ours) and is_binary(theirs) do
     ours_hunks = LineDiff.hunks(base, ours)
     theirs_hunks = LineDiff.hunks(base, theirs)
 
     {kept, replaced} =
       Enum.split_with(ours_hunks, fn o -> not Enum.any?(theirs_hunks, &overlap?(o, &1)) end)
 
-    conflicts = Enum.count(replaced, &(&1 not in theirs_hunks))
     merged = base |> String.split("\n") |> apply_hunks(kept ++ theirs_hunks) |> Enum.join("\n")
-
-    {merged, conflicts}
+    %{merged: merged, ours: ours_hunks, conflicts: Enum.reject(replaced, &(&1 in theirs_hunks))}
   end
 
   # Removed ranges are [line, line + removed); a pure insert (removed 0) sits at `line`.
@@ -56,10 +70,13 @@ defmodule Geex.Edit.Merge do
     end
   end
 
-  # Apply non-overlapping hunks (all in base coordinates) bottom-up, so each splice leaves
-  # the lines above it where the hunks below expect them. At one line, a replacement goes
-  # before an insert, which then lands ahead of the replaced block.
-  defp apply_hunks(lines, hunks) do
+  @doc """
+  Apply non-overlapping hunks (all in the coordinates of `lines`) bottom-up, so each splice
+  leaves the lines above it where the hunks below expect them. At one line, a replacement goes
+  before an insert, which then lands ahead of the replaced block.
+  """
+  @spec apply_hunks([String.t()], [LineDiff.hunk()]) :: [String.t()]
+  def apply_hunks(lines, hunks) do
     hunks
     |> Enum.sort_by(&{&1.line, &1.removed}, :desc)
     |> Enum.reduce(lines, fn %{line: at, removed: n, added: added}, acc ->

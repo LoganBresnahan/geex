@@ -12,6 +12,8 @@ defmodule Geex.Loop.Verbs do
       `line` view action; the bare number is sugar). 1-based; `0` = the last line.
     * `copy` / `cut` / `paste` — the clipboard verbs (= `Alt+C`/`X`/`V`, ADR-0015).
     * `undo` / `redo` — the history operations (= `Alt+Z`/`Alt+Shift+Z`, ADR-0031).
+    * `revert` / `revert-call` — take back the agent's (or outside) change under the cursor,
+      one hunk (= `Alt+U`) or its whole tool call, keeping later edits (ADR-0033 §7).
     * `highlight` / `select` — start a selection at the cursor (= `Alt+H`, ADR-0029);
       `highlight all` / `select all` — select the whole buffer (= `Alt+B`).
     * `save` — write the active buffer to disk (= `Ctrl-O`; an operation, ADR-0019).
@@ -93,6 +95,8 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("paste"), do: {:action, :paste}
   defp do_parse("undo"), do: {:action, :undo}
   defp do_parse("redo"), do: {:action, :redo}
+  defp do_parse("revert"), do: {:action, :revert_hunk}
+  defp do_parse("revert-call"), do: {:action, :revert_call}
   defp do_parse("highlight"), do: {:action, :select_start}
   defp do_parse("select"), do: {:action, :select_start}
   defp do_parse("highlight all"), do: {:action, :select_all}

@@ -296,3 +296,27 @@ Choices made building it, within the decisions above:
 - **Stale discovery files are swept:** on start, `Geex.Attest.Discovery` removes files in its
   `0700` directory whose pid is gone (a `kill -9` leaves one), so a reused pid never receives a
   stale token.
+
+## Amendment — 2026-10-15: build step 3 as built (per-agent revert)
+
+- **`Geex.Revert.plan/3` (pure)** finds the reconcile group that last wrote the cursor's line
+  (its blame entry), replays to just before and after that group, and three-way merges base
+  `after`, ours the current text, theirs `after` with the chosen hunks undone. It uses
+  `Geex.Edit.Merge.plan/3`, which now returns the merge as data (the overlapping hunks, not just
+  a count) and exposes `apply_hunks/2`. Any change, agent or outside (`:external`, a gap), can be
+  reverted: the blame names it.
+- **`:hunk`** maps the cursor's line back through the later changes to the change's own
+  coordinates and picks the hunk there; **`:call`** takes back all of the group's hunks.
+- **Overlap refuses, naming the lines** in the current text, 1-based. Edits on lines next to the
+  change don't block it; two adjacent edits of yours read as one changed range, so the notice may
+  name a range one line wider than the agent's line.
+- **Recorded** as a plain group of `:human` `replace` commands with `meta.reverts = %{group,
+  scope}` (a new `Geex.Command.Meta` field, round-tripped by the ledger), applied inside the
+  buffer (`Buffer.revert/3`) so nothing can land between planning and applying. The reverted
+  lines are yours in the blame; undo takes the revert back like any edit.
+- **Surface:** the typed verbs `revert` / `revert-call`, also in the command palette, with a
+  status-line notice for each outcome ("reverted claude-code/7ccbf3d1's change (1 hunk)", "can't
+  revert: line 4 changed after claude-code/7ccbf3d1's edit", "nothing to revert: …").
+- **The key is `Alt+U`, not decision E's `Alt+R`:** `Alt+R` is already the line-start motion of the
+  `Q W E R` / `A S D F` cluster, so the maintainer chose `Alt+U` (revert the hunk under the cursor).
+  `revert-call` has no key; it is typed or picked from the palette.

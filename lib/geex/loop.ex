@@ -892,6 +892,12 @@ defmodule Geex.Loop do
       :undo ->
         schedule_repaint(do_undo(state))
 
+      :revert_hunk ->
+        schedule_repaint(do_revert(state, cursor, :hunk))
+
+      :revert_call ->
+        schedule_repaint(do_revert(state, cursor, :call))
+
       :redo ->
         schedule_repaint(do_redo(state))
 
@@ -1074,6 +1080,45 @@ defmodule Geex.Loop do
     line = line |> max(0) |> min(length(lines) - 1)
     col = col |> max(0) |> min(String.length(Enum.at(lines, line, "")))
     {line, col}
+  end
+
+  # Take back the change under the cursor (ADR-0033 §7). The buffer's change notification
+  # repaints; what the loop adds is telling you what happened, or why nothing did.
+  defp do_revert(state, {line, _col}, scope) do
+    notice =
+      case on_active_buffer(&Buffer.revert(&1, line, scope)) do
+        {:ok, _snapshot, %{actor: actor, hunks: n}} ->
+          "reverted #{who(actor)}'s change (#{n} hunk#{if n == 1, do: "", else: "s"})"
+
+        {:error, {:overlap, actor, ranges}} ->
+          "can't revert: #{line_list(ranges)} changed after #{who(actor)}'s edit"
+
+        {:error, :not_a_change} ->
+          "nothing to revert: no agent or outside change last wrote this line"
+
+        {:error, :already_reverted} ->
+          "that change already reads as it did before"
+
+        {:error, _reason} ->
+          "couldn't find that change in the history"
+      end
+
+    %{state | notice: notice, selection: nil}
+  end
+
+  defp who({:agent, %{harness: harness, session: session}}),
+    do: harness <> "/" <> String.slice(session, 0, 8)
+
+  defp who({:llm, model}), do: "llm/" <> to_string(model)
+  defp who(_external), do: "an outside writer"
+
+  defp line_list(ranges) do
+    ranges
+    |> Enum.map(fn
+      {n, n} -> "line #{n}"
+      {a, b} -> "lines #{a}–#{b}"
+    end)
+    |> Enum.join(", ")
   end
 
   defp safe_undo, do: on_active_buffer(&Buffer.undo/1)

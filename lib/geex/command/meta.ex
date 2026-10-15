@@ -21,13 +21,16 @@ defmodule Geex.Command.Meta do
                       baseline holds a `\\r\\n`, `before_sha256_lf` is its hash with
                       each `\\r\\n` turned into `\\n` (else `nil`). An attestation must match the
                       after hash and either before hash (ADR-0032). `nil` otherwise
+    * `reverts`     — for a per-agent revert: `%{group, scope}`, the reconcile group it took
+                      back and whether it was one hunk or the whole tool call (`:hunk` |
+                      `:call`, ADR-0033 §7). `nil` otherwise
 
   `at` is stamped at creation and **preserved** when a recorded command is
   replayed — replay re-runs the same values, it does not re-stamp them. That is
   what makes replay deterministic (§15c).
   """
 
-  defstruct actor: :human, at: nil, prompt_hash: nil, origin: nil, reconcile: nil
+  defstruct actor: :human, at: nil, prompt_hash: nil, origin: nil, reconcile: nil, reverts: nil
 
   @type actor ::
           :human
@@ -54,7 +57,8 @@ defmodule Geex.Command.Meta do
           at: DateTime.t() | nil,
           prompt_hash: String.t() | nil,
           origin: origin(),
-          reconcile: reconcile()
+          reconcile: reconcile(),
+          reverts: nil | %{group: pos_integer(), scope: :hunk | :call}
         }
 
   @doc """
@@ -71,7 +75,8 @@ defmodule Geex.Command.Meta do
       at: Keyword.get(opts, :at) || DateTime.utc_now(),
       prompt_hash: Keyword.get(opts, :prompt_hash),
       origin: Keyword.get(opts, :origin),
-      reconcile: Keyword.get(opts, :reconcile)
+      reconcile: Keyword.get(opts, :reconcile),
+      reverts: Keyword.get(opts, :reverts)
     }
   end
 

@@ -124,7 +124,10 @@ defmodule Geex.Ledger.Codec do
       "prompt_hash" => meta.prompt_hash,
       "origin" => meta.origin && %{"turn_id" => meta.origin.turn_id, "seq" => meta.origin.seq},
       "reconcile" =>
-        meta.reconcile && Map.new(meta.reconcile, fn {k, v} -> {Atom.to_string(k), v} end)
+        meta.reconcile && Map.new(meta.reconcile, fn {k, v} -> {Atom.to_string(k), v} end),
+      "reverts" =>
+        meta.reverts &&
+          %{"group" => meta.reverts.group, "scope" => Atom.to_string(meta.reverts.scope)}
     }
   end
 
@@ -206,14 +209,16 @@ defmodule Geex.Ledger.Codec do
     with {:ok, actor} <- actor(actor),
          {:ok, at} <- datetime(m["at"]),
          {:ok, origin} <- origin(m["origin"]),
-         {:ok, stamp} <- stamp(m["reconcile"]) do
+         {:ok, stamp} <- stamp(m["reconcile"]),
+         {:ok, reverts} <- reverts(m["reverts"]) do
       {:ok,
        %Meta{
          actor: actor,
          at: at,
          prompt_hash: m["prompt_hash"],
          origin: origin,
-         reconcile: stamp
+         reconcile: stamp,
+         reverts: reverts
        }}
     end
   end
@@ -248,6 +253,14 @@ defmodule Geex.Ledger.Codec do
 
   defp stamp(map) when is_map(map),
     do: {:ok, for({k, v} <- map, key = @stamp_keys[k], into: %{}, do: {key, v})}
+
+  defp reverts(nil), do: {:ok, nil}
+
+  defp reverts(%{"group" => group, "scope" => scope})
+       when is_integer(group) and scope in ["hunk", "call"],
+       do: {:ok, %{group: group, scope: String.to_existing_atom(scope)}}
+
+  defp reverts(_), do: {:error, "malformed reverts"}
 
   defp baseline(nil), do: {:ok, :none}
   defp baseline("result"), do: {:ok, :result}

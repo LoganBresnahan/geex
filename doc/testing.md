@@ -1559,3 +1559,49 @@ a dead pid's discovery file is swept on start, a live one kept. **782 tests + 20
 **Not tested:** the 256-line cap (one `tail`), two hooks appending to one spool at once, a CRLF chain
 (stays `:external` by design), `XDG_STATE_HOME` set in geex but not passed to the hook (they would look
 in different places), and NotebookEdit through the spool.
+
+### 2026-10-15 — Durable ledger build step 3: per-agent revert (ADR-0033 §7)
+
+`Geex.Revert.plan/3` (pure) takes back the change that last wrote the cursor's line, one hunk (`revert`) or
+its whole tool call (`revert-call`), by three-way merging its undo into the current text over the replayed
+after-state (`Merge.plan/3`). It is refused, with the lines named, when a later change overlaps. Applied by
+`Buffer.revert/3` as a group of `:human` replaces carrying `meta.reverts` (ledger round-trip). Typed verbs
+and palette entries; status-line notices; `Alt+U` reverts the hunk under the cursor (the maintainer's pick;
+`Alt+R` is the line-start motion).
+
+**Live-verified** (geex TUI in a tmux pty, isolated `XDG_STATE_HOME`). One native `Edit` from this session
+changed lines 2 and 4 in one tool call (two hunks, both marked); then `my-` typed on line 1.
+- `Alt+M` `revert` on line 4: line 4 back to `four` and unmarked, line 2 still the agent's, `my-one` kept;
+  notice `reverted claude-code/d25a8b6d's change (1 hunk)`.
+- `Alt+Z` undid the revert (line 4 the agent's again); `x` typed on line 4; `revert-call` from line 2:
+  refused, `can't revert: line 4 changed …`, nothing changed. (Its wording was then fixed from "… wrote
+  them" to "… changed after claude-code/d25a8b6d's edit".)
+- `revert` on line 2 (its hunk alone): reverted.
+- The ledger's two revert groups carry `"actor":"human","reverts":{"group":1,"scope":"hunk"}`.
+- After binding the key: `Alt+U` on a fresh agent line reverted it (`reverted claude-code/d25a8b6d's change
+  (1 hunk)`), and `Alt+Z` brought the agent's line and its mark back.
+
+**Automated:** `revert_test`, 13 tests: revert-call takes back both hunks and keeps your later edit
+(commands `:human` with `reverts`, no agent mark left); one hunk only; your edit on the agent's line refuses
+the call and names it (exactly `{4, 4}`; two adjacent edits read as `{1, 2}`) while the other hunk alone
+still goes; lines shifted by a later insert map to the right hunk; a later agent change on an adjacent line
+doesn't block; loaded and human lines are `:not_a_change`; a deletion comes back with revert-call; an
+`:external` change reverts too; the verbs parse; through the buffer, undo restores the agent's change and
+mark, a refused revert changes nothing, and the revert's provenance survives the ledger (restore == live).
+Plus a keymap test (`Alt+U` → revert; `Alt+R` still line start). **796 tests + 20 doctests**, green twice,
+`--warnings-as-errors` clean.
+
+**Not tested:** reverting a group that was partly undone; reverting across a ledger gap; MCP `{:llm, _}`
+edits (not reconcile groups, so not revertible); `:already_reverted` (defensive, hard to reach from a
+marked line).
+
+### 2026-10-15 — Independent live check of step 2b (the coordinator session)
+
+The captAInHook coordinator (session `7ccbf3d1`) checked `05cecdd` from its own session in the real
+`~/.local/state`, with `XDG_STATE_HOME` unset. A single native `Edit` to a closed file was credited on
+reopen (`credited to claude-code/7ccbf3d1 (1 edit)`, mark, turn on the status line, spool consumed). Three
+`Edit`s sent in parallel in one assistant message spooled in a correctly linked order and were credited as
+`(3 edits)`, all three lines marked. An agent `Edit` followed by a shell `>>` append broke the chain: the gap
+was recorded as an outside change, both lines unmarked, and the leftover spool entry dropped. A lock was
+never left behind by a clean `Ctrl-X` (checked after each clean quit). Its scratch ledgers were removed
+afterwards.

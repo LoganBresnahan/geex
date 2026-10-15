@@ -49,7 +49,7 @@ defmodule Geex.Buffer do
 
   use GenServer, restart: :temporary
 
-  alias Geex.{EditorState, History, Ledger, Reconcile}
+  alias Geex.{EditorState, History, Ledger, Reconcile, Revert}
   alias Geex.Ledger.{Restore, Spool}
   alias Geex.Edit.{Footprint, Merge}
 
@@ -232,6 +232,19 @@ defmodule Geex.Buffer do
   def attest(server, attestation) when is_map(attestation),
     do: GenServer.call(server, {:attest, attestation})
 
+  @doc """
+  Take back the change that last wrote `line` (0-based): one agent's (or outside) change,
+  without touching anything written after it ([ADR-0033](`e:doc/adr/0033-durable-ledger.md`)
+  §7). `scope` is `:hunk` (the hunk under the line) or `:call` (the whole tool call). Planned
+  and applied in one call (`Geex.Revert.plan/3`), recorded as a new group of `:human` commands
+  with `meta.reverts`, so it is an ordinary, undoable edit. Returns `{:ok, snapshot, info}` or
+  `{:error, reason}` (see `Geex.Revert`), changing nothing on error.
+  """
+  @spec revert(GenServer.server(), non_neg_integer(), Revert.scope()) ::
+          {:ok, map(), Revert.info()} | {:error, Revert.reason()}
+  def revert(server, line, scope) when scope in [:hunk, :call],
+    do: GenServer.call(server, {:revert, line, scope})
+
   # Pending attestations live this long and this many per buffer (ADR-0032). A match is
   # exact, so these only garbage-collect: an attestation whose write never reconciles.
   @pending_ttl_ms 10_000
@@ -317,8 +330,21 @@ defmodule Geex.Buffer do
     end
   end
 
-  def handle_call(:undo, _from, state), do: revert(state, :undo, History.undo(state.history))
-  def handle_call(:redo, _from, state), do: revert(state, :redo, History.redo(state.history))
+  def handle_call(:undo, _from, state), do: history_op(state, :undo, History.undo(state.history))
+  def handle_call(:redo, _from, state), do: history_op(state, :redo, History.redo(state.history))
+
+  def handle_call({:revert, line, scope}, _from, state) do
+    with {:ok, commands, info} <- Revert.plan(state.history, line, scope),
+         {:ok, history} <- History.group(state.history, commands, nil) do
+      footprint = Footprint.between(History.text(state.history), History.text(history))
+      entry = group_entry(:group, history, length(commands), nil)
+      new_state = record(%{state | history: history}, entry)
+      notify_change(new_state, footprint)
+      {:reply, {:ok, build_snapshot(new_state), info}, new_state}
+    else
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
 
   def handle_call({:attest, %{before: nil}}, _from, state), do: {:reply, :ignored, state}
 
@@ -537,7 +563,7 @@ defmodule Geex.Buffer do
   # command, so the minimal splice is exact and the overlay shifts like a forward edit rather
   # than resetting (no re-highlight flash). Returns the affected command so the view can place
   # the cursor.
-  defp revert(state, entry, {:ok, history, command}) do
+  defp history_op(state, entry, {:ok, history, command}) do
     new_state = record(%{state | history: history}, entry)
 
     notify_change(
@@ -548,7 +574,7 @@ defmodule Geex.Buffer do
     {:reply, {:ok, build_snapshot(new_state), command}, new_state}
   end
 
-  defp revert(state, _entry, {:error, _reason} = error), do: {:reply, error, state}
+  defp history_op(state, _entry, {:error, _reason} = error), do: {:reply, error, state}
 
   # --- the durable ledger (ADR-0033) ---
 
