@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-15):** 848 tests + 23 doctests green, `--warnings-as-errors` clean. Since the
+**Current (2026-10-15):** 855 tests + 23 doctests green, `--warnings-as-errors` clean. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -186,9 +186,10 @@ The ledger track, in order (each builds on the one before):
    that is behind, merge with `git merge-file`: conflicts become markers in the buffer, and a
    conflicting merge doesn't write. Panes are a tree (git's file list, rooted at the path's git
    top level) · editor · edits pane (file · who · when). Build order: (1) the hold,
-   fast-forward, the git merge and save-while-behind — **built 2026-10-15**; (2) panes and buffers (`Alt+O`, `open`,
-   `buffers`, `close`); (3) the edits pane; (4) the file tree; (5) `user_modified` ("edited by
-   you"). The follow pane in the first draft was dropped.
+   fast-forward, the git merge and save-while-behind — **built 2026-10-15**; (2) more than one
+   buffer (`open`, `buffers`, `close`, a cursor and scroll per buffer) — **built 2026-10-15**;
+   (3) `Geex.Layout`, panes and `Alt+O` (moved here from step 2: their first consumer) with the
+   edits pane; (4) the file tree; (5) `user_modified` ("edited by you"). The follow pane in the first draft was dropped.
 
 Exit criteria: with captAInHook installed and the payload registered, an agent session
 (Claude Code first) edits a file open in geex with its **native** tools; each change appears
@@ -410,7 +411,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      one), whether held (ADR-0034) or reopened. Two fixes:
      - the payload sends an optional `sha256_lf` (the after bytes folded the same one-pass way;
        `sed 's/\r$//'` gets a lone `\r` wrong) and chains link on either hash. This covers held
-       and reopened files and stays within message `v: 1`;
+       and reopened files and stays within message `v: 1`. `perl -0777 -pe 's/\r\n/\n/g'` is
+       a byte-exact fold on Linux and macOS (the coordinator checked): `sed -z` is GNU-only and
+       `jq` mangles non-UTF-8 bytes;
      - geex records both hashes of each disk text the watcher reads while a buffer is held. This
        needs no payload change but covers held buffers only.
      Small; it matters only for CRLF files.

@@ -33,8 +33,11 @@ defmodule Geex do
   Quit with **Ctrl-X** (Ctrl-Q is XON flow-control, Ctrl-C is SIGINT — both flaky as
   quit keys). Logs go to `<tmpdir>/geex.log`. With no path, geex boots to an empty
   screen. The live dogfood: watch geex recolour its own source as you type.
+
+  `path` may also be a **list** of paths, all opened, the first one shown (`buffers` switches,
+  ADR-0034), or a **directory**, which opens an empty scratch buffer.
   """
-  @spec run(String.t() | nil) :: no_return()
+  @spec run(String.t() | [String.t()] | nil) :: no_return()
   def run(path \\ nil) do
     redirect_logs_to_file()
     {:ok, _} = Application.ensure_all_started(:geex)
@@ -42,12 +45,19 @@ defmodule Geex do
     Process.sleep(:infinity)
   end
 
-  defp open(path) when is_binary(path), do: Geex.Session.open_file(path)
+  defp open([]), do: open(nil)
+
+  # Open the last first, so the first is shown and the recent list reads in argument order.
+  defp open([_ | _] = paths), do: paths |> Enum.reverse() |> Enum.each(&open/1)
+
+  defp open(path) when is_binary(path) do
+    if File.dir?(path), do: open(nil), else: Geex.Session.open_file(path)
+  end
 
   # No file given: start a pathless scratch buffer and make it active, so the editor
   # is usable (typing needs an active buffer — with none, the loop ignores keys).
   defp open(nil) do
-    {:ok, buf} = Geex.Buffer.start_link(text: "")
+    {:ok, buf} = Geex.BufferSupervisor.start_scratch()
     Geex.Session.set_active_buffer(buf)
   end
 

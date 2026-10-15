@@ -23,7 +23,7 @@ defmodule Geex.Minibuffer do
 
   defstruct mode: :inactive, input: "", cursor: 0, sel: 0
 
-  @type mode :: :inactive | :command | :grid | :palette
+  @type mode :: :inactive | :command | :grid | :palette | :buffers
   @type t :: %__MODULE__{
           mode: mode(),
           input: String.t(),
@@ -62,6 +62,7 @@ defmodule Geex.Minibuffer do
   def prompt(%__MODULE__{mode: :command}), do: "geex:"
   def prompt(%__MODULE__{mode: :grid}), do: "grid:"
   def prompt(%__MODULE__{mode: :palette}), do: "palette:"
+  def prompt(%__MODULE__{mode: :buffers}), do: "buffer:"
   def prompt(%__MODULE__{}), do: ""
 
   @doc """

@@ -1,7 +1,7 @@
 # ADR-0034: Panes, the file tree, the edits pane, and holding open buffers
 
-- **Status:** Accepted 2026-10-15 (open decisions A, F–K taken as recommended). Build step 1 (the
-  hold) built 2026-10-15; steps 2–5 not yet.
+- **Status:** Accepted 2026-10-15 (open decisions A, F–K taken as recommended). Build steps 1 (the
+  hold) and 2 (more than one buffer) built 2026-10-15; steps 3–5 not yet.
   Rewritten the same day after the maintainer's redirect: the first draft's follow pane is dropped.
 - **Date:** 2026-10-15
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell; it deferred tabs and
@@ -225,6 +225,25 @@ the hold.
     group is credited;
   - a buffer opened and never edited has no ledger entries, so a crash while holding reopens it fresh,
     as ADR-0033 does for any file it never recorded (the payload doesn't spool for it either).
+
+### Built: step 2, more than one buffer (2026-10-15)
+
+- **Re-sequenced:** step 2 shipped the buffers only. `Geex.Layout`, the panes and `Alt+O` move to
+  step 3 with the edits pane: with one pane on screen they would have nothing to switch to (the
+  named-consumer rule).
+- `open PATH` (verb and palette): a relative path is resolved from the **current file's
+  directory**, since the working directory is geex's own checkout. A directory is refused with a
+  notice. The path keeps its case (the verb parser lowercases everything else).
+- `buffers`: the palette's popup over the open buffers, most recent first, with the **previous**
+  one highlighted, so `buffers` + Enter goes back. It is fuzzy-filtered by name and path.
+- `close`: refuses a buffer with unsaved edits, then shows the previous buffer, or a new empty
+  scratch buffer when none is left (`Geex.Session.close_active/0`). The frozen MCP `close_file`
+  is unchanged.
+- **Each buffer keeps its own cursor** (`Geex.Session`) **and scroll** (`Geex.Loop`) across
+  switches. `Geex.run/1` takes a list of paths (the first shown) or a directory (a scratch
+  buffer). The scratch buffer is now supervised (`BufferSupervisor.start_scratch/0`).
+- **Found while dogfooding:** a typed verb's submit closed the minibuffer *after* running the
+  action, so `buffers` opened its picker and closed it at once. Submits now close first.
 
 ## Consequences
 

@@ -11,6 +11,11 @@ defmodule Geex.Session do
                       subsystem with its own ring history (ADR-0015).
     * `:minibuffer` — `%{mode, input, cursor}` for command-line entry.
     * `:layout`     — placeholder; meaningful in v0.3 when panes split.
+    * `:recent`     — the buffers that have been active, most recent first (ADR-0034:
+                      the `buffers` picker, and where `close_active/0` goes next). Each is
+                      monitored, and dropped when it ends.
+    * `:cursors`    — each inactive buffer's last cursor, restored when it is switched back
+                      to (a buffer seen for the first time starts at the top).
 
   Dispatch lives in `Geex.Dispatch`. The per-buffer `Geex.Buffer` process owns the
   `EditorState` and the one undo history and applies commands via `Geex.Dispatch.run/1`;
@@ -125,6 +130,24 @@ defmodule Geex.Session do
   def close_file(path \\ nil) when is_binary(path) or is_nil(path),
     do: GenServer.call(__MODULE__, {:close_file, path})
 
+  @doc """
+  The open buffers that have been active, most recent first (the active one leads):
+  `[%{pid, path, dirty}]`, `path` `nil` for a scratch buffer (ADR-0034). A buffer that
+  died is left out.
+  """
+  @spec buffers() :: [%{pid: pid(), path: String.t() | nil, dirty: boolean()}]
+  def buffers, do: GenServer.call(__MODULE__, :buffers)
+
+  @doc """
+  Close the active buffer and switch to the one before it, or to a new empty scratch buffer
+  when none is left (ADR-0034). Refuses a buffer with unsaved edits (`{:error, :dirty}`):
+  save them, or undo them, first. Returns `{:ok, label}` (the closed buffer's path, or
+  `"[scratch]"`), `{:error, :dirty}`, or `{:error, :no_active_buffer}`. Not
+  `close_file/1`: that one (the MCP tool's) discards and leaves no buffer active.
+  """
+  @spec close_active() :: {:ok, String.t()} | {:error, :dirty | :no_active_buffer}
+  def close_active, do: GenServer.call(__MODULE__, :close_active)
+
   @doc "The active buffer pid, or `:error` if none is active."
   @spec active_buffer() :: {:ok, pid()} | :error
   def active_buffer, do: GenServer.call(__MODULE__, :active_buffer)
@@ -163,7 +186,9 @@ defmodule Geex.Session do
       clipboard: %{},
       minibuffer: %{mode: :inactive, input: "", cursor: 0},
       layout: nil,
-      subscribers: %{}
+      subscribers: %{},
+      recent: [],
+      cursors: %{}
     }
 
     {:ok, state}
@@ -288,6 +313,38 @@ defmodule Geex.Session do
     end
   end
 
+  def handle_call(:buffers, _from, state) do
+    listed =
+      for pid <- state.recent, snap = safe_status(pid), do: Map.put(snap, :pid, pid)
+
+    {:reply, listed, state}
+  end
+
+  def handle_call(:close_active, _from, state) do
+    case state.view.buffer_pid do
+      nil ->
+        {:reply, {:error, :no_active_buffer}, state}
+
+      pid ->
+        case safe_status(pid) do
+          %{dirty: true} ->
+            {:reply, {:error, :dirty}, state}
+
+          status ->
+            label = (status && status.path) || "[scratch]"
+            state = drop_buffer(pid, state)
+
+            next =
+              case Enum.find(state.recent, &(&1 != pid and safe_status(&1))) do
+                nil -> start_scratch()
+                other -> other
+              end
+
+            {:reply, {:ok, label}, put_active(state, next)}
+        end
+    end
+  end
+
   def handle_call(:active_buffer, _from, state) do
     reply = if pid = state.view.buffer_pid, do: {:ok, pid}, else: :error
     {:reply, reply, state}
@@ -327,6 +384,13 @@ defmodule Geex.Session do
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{subscribers: subs} = state)
       when is_map_key(subs, ref) do
     {:noreply, %{state | subscribers: Map.delete(subs, ref)}}
+  end
+
+  # A buffer in the recent list ended: forget it (and its cursor). The active pointer is left
+  # as it is, as before (see `open_file/1`).
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+    {:noreply,
+     %{state | recent: List.delete(state.recent, pid), cursors: Map.delete(state.cursors, pid)}}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
@@ -404,19 +468,56 @@ defmodule Geex.Session do
   # async cleanup), terminate it, and clear the active pointer if it pointed here.
   defp drop_buffer(pid, state) do
     evict(pid)
+
+    state = %{
+      state
+      | recent: List.delete(state.recent, pid),
+        cursors: Map.delete(state.cursors, pid)
+    }
+
     if state.view.buffer_pid == pid, do: put_active(state, nil), else: state
   end
 
-  # Update the active-buffer pointer and notify subscribers when it actually changes.
+  # Update the active-buffer pointer and notify subscribers when it actually changes. The
+  # buffer being left keeps its cursor; the one switched to gets its own back (ADR-0034).
   defp put_active(state, pid) do
     if state.view.buffer_pid == pid do
       state
     else
-      state = put_in(state.view.buffer_pid, pid)
+      state = remember_cursor(state)
+      {cursor, cursors} = Map.pop(state.cursors, pid, {0, 0})
+      state = %{state | cursors: cursors, recent: to_front(state.recent, pid)}
+      state = %{state | view: %{state.view | buffer_pid: pid, cursor: cursor}}
       msg = {:geex_active_buffer, pid}
       Enum.each(Map.values(state.subscribers), &send(&1, msg))
       state
     end
+  end
+
+  defp remember_cursor(%{view: %{buffer_pid: old, cursor: cursor}} = state) when is_pid(old),
+    do: put_in(state.cursors[old], cursor)
+
+  defp remember_cursor(state), do: state
+
+  defp to_front(recent, nil), do: recent
+
+  defp to_front(recent, pid) do
+    unless pid in recent, do: Process.monitor(pid)
+    [pid | List.delete(recent, pid)]
+  end
+
+  # A new empty scratch buffer, supervised like any other (so its crash isn't ours).
+  defp start_scratch do
+    {:ok, pid} = BufferSupervisor.start_scratch()
+    pid
+  end
+
+  # The path and dirty flag, or `nil` for a buffer that died.
+  defp safe_status(pid) do
+    snapshot = Buffer.snapshot(pid)
+    %{path: snapshot.path, dirty: snapshot.dirty}
+  catch
+    :exit, _ -> nil
   end
 
   # Unregister-then-terminate, tolerant of two edge cases a *serialized* Session must not

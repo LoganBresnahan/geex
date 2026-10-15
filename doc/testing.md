@@ -1758,3 +1758,34 @@ tests fail on the old walk (4 failures). **848 tests + 23 doctests**, green twic
 clean.
 
 **Not tested:** a very long spool of interleaved sessions (bounded by entries, not measured).
+
+### 2026-10-15 — More than one buffer, build step 2 (ADR-0034)
+
+`open PATH`, a `buffers` picker and `close`, as typed verbs and palette entries. `Geex.Session` keeps the
+buffers that have been active (most recent first, monitored) and each one's cursor; `Geex.Loop` keeps each
+one's scroll. `close` (`Session.close_active/0`) refuses unsaved edits and falls back to the previous buffer,
+or a new scratch buffer. `Geex.run/1` takes a list of paths or a directory. `Geex.Layout`, panes and `Alt+O`
+moved to step 3 (the edits pane is their first consumer).
+
+**Live-verified** (geex TUI in a tmux pty, scratch `XDG_STATE_HOME`, `Geex.run([a.txt, b.txt])`): `a.txt`
+shown first. The first try showed a bug: `buffers` typed in the minibuffer opened the picker and the
+submit's close shut it, so the following Enter typed a newline into `a.txt`. Fixed (close, then act); then
+`buffers` listed `a.txt [+]` and `b.txt` with paths, and Enter went to `b.txt`. Back to `a.txt` via the
+picker: the cursor was at `3:12` where it had been left. `open sub/c.txt` (relative to `a.txt`'s directory)
+opened a new empty buffer; `close` with typing in it said `not closed: unsaved changes (save them, or undo
+them, first)`; after `Ctrl-O`, `close` said `closed c.txt`, showed `a.txt` at `3:12`, and `sub/c.txt` held
+the text on disk. `open sub` said `sub is a directory`. The palette filtered by `buf` listed `buffers`
+first, and Enter on it opened the picker (the palette's action path had the same close-after-act order,
+also fixed); `c.txt` was no longer listed. Incidentally, quitting with the stray newline unsaved and
+relaunching brought it back as `restored unsaved changes from your last session` (ADR-0033), as designed.
+
+**Automated:** `buffers_test` (7): the recent list follows switches; a cursor per buffer; `close_active/0`
+refuses a dirty buffer, then goes back to the previous one; closing the last leaves a scratch buffer; a
+buffer that ends drops out of the list; `open PATH` keeps its case (`buffers`, `close`, `line 3` still
+parse); the palette entries. `reconcile_test`'s quiet-period test widened from 40 to 150 ms after one
+loaded full-suite run fired the timer before the "nothing read yet" check (a pre-existing race).
+**855 tests + 23 doctests**, green twice, `--warnings-as-errors` clean.
+
+**Not tested:** the loop's picker and the submit order (no automated test drives the loop process; only
+the dogfood above); per-buffer scroll (live only, no tall file); `Geex.run/1` with a directory (reasoned:
+it opens a scratch buffer); many open buffers (the picker shows 8 rows and scrolls, as the palette does).

@@ -37,8 +37,8 @@ One Mix app, `:geex`, under `lib/geex/`:
   `run/1` = resolve active buffer → gather → apply → scatter → record).
 - **World** — `Geex.Buffer` (GenServer: owns the ONE undo history as a pure
   `Geex.History` value, every transition going through it (ADR-0033); `Geex.Blame`
-  derives who last wrote each line; `Buffer.Doc` is the text), `Geex.Session` (active-buffer pointer +
-  the view-local cursor), `Geex.Reconcile` (file-watch marks an open buffer *behind*; a fast-forward or
+  derives who last wrote each line; `Buffer.Doc` is the text), `Geex.Session` (active-buffer pointer, the
+  recent buffers, and each buffer's view-local cursor), `Geex.Reconcile` (file-watch marks an open buffer *behind*; a fast-forward or
   save records the change as `:external` commands, merging with `git merge-file`, ADR-0034).
 - **Projections** — `Geex.MCP.*` (Protocol is pure; HTTP is the loopback
   Bandit/Plug transport; tool categories: edits, `Operations`, `ViewActions`,

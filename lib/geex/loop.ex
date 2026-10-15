@@ -42,6 +42,7 @@ defmodule Geex.Loop do
     Command,
     Coord,
     Dispatch,
+    Fuzzy,
     Minibuffer,
     Reconcile,
     Renderer,
@@ -236,7 +237,9 @@ defmodule Geex.Loop do
         notice: nil,
         # Ctrl-O was just refused over a leftover conflict block: the next key, if it is
         # Ctrl-O again, saves anyway (ADR-0034 §3).
-        save_armed: false
+        save_armed: false,
+        # Each buffer's last `{scroll, hscroll}`, restored when it is shown again (ADR-0034).
+        scrolls: %{}
       }
       |> attach(active)
 
@@ -357,7 +360,17 @@ defmodule Geex.Loop do
           nil
       end
 
-    %{state | buffer: pid, buffer_ref: ref, reactor: reactor}
+    {{scroll, hscroll}, scrolls} = Map.pop(state.scrolls, pid, {0, 0})
+
+    %{
+      state
+      | buffer: pid,
+        buffer_ref: ref,
+        reactor: reactor,
+        scroll: scroll,
+        hscroll: hscroll,
+        scrolls: scrolls
+    }
   end
 
   defp detach(%{buffer_ref: ref, buffer: buf, reactor: reactor} = state) when is_reference(ref) do
@@ -367,8 +380,22 @@ defmodule Geex.Loop do
     # change/overlay messages) until they die — a leak across buffer switches.
     if is_pid(buf), do: Buffer.unsubscribe(buf, self())
     if is_pid(reactor), do: Reactor.unsubscribe(reactor, self())
-    # A selection is buffer-specific; drop it (and reset the goal) on a buffer switch.
-    %{state | buffer: nil, buffer_ref: nil, reactor: nil, selection: nil, goal: 0}
+    # A selection is buffer-specific; drop it (and reset the goal) on a buffer switch. Where
+    # the buffer was scrolled to comes back with it.
+    scrolls =
+      if is_pid(buf),
+        do: Map.put(state.scrolls, buf, {state.scroll, state.hscroll}),
+        else: state.scrolls
+
+    %{
+      state
+      | buffer: nil,
+        buffer_ref: nil,
+        reactor: nil,
+        selection: nil,
+        goal: 0,
+        scrolls: scrolls
+    }
   end
 
   defp detach(state), do: state
@@ -492,13 +519,15 @@ defmodule Geex.Loop do
   # the top of the block); pressing Alt+S moves the highlight *down on screen* toward the
   # input, Alt+W up — the on-screen direction matches the editor's own up/down. The highlighted
   # row takes the active-line tint (the same the input row wears), so eye + Enter agree.
-  defp draw_palette(screen, %{minibuffer: %Minibuffer{mode: :palette} = mb} = state) do
-    candidates = Catalog.search(Minibuffer.value(mb))
+  defp draw_palette(screen, %{minibuffer: %Minibuffer{mode: mode} = mb} = state)
+       when mode in [:palette, :buffers] do
+    candidates = candidates(mb)
     rows = min(length(candidates), min(@palette_rows, max(state.h - 1, 0)))
+    name_col = name_col(mode, candidates, state.w)
 
     cond do
       candidates == [] ->
-        draw_palette_empty(screen, state)
+        draw_palette_empty(screen, state, if(mode == :buffers, do: "buffers", else: "commands"))
 
       # No vertical room for even one candidate row (a degenerate ≤1-row terminal): draw nothing
       # rather than the empty hint, which would mislead.
@@ -515,19 +544,65 @@ defmodule Geex.Loop do
         |> Enum.slice(start, rows)
         |> Enum.with_index()
         |> Enum.reduce(screen, fn {entry, i}, acc ->
-          draw_palette_row(acc, entry, top + i, start + i == mb.sel, state)
+          draw_palette_row(acc, entry, top + i, start + i == mb.sel, state, name_col)
         end)
     end
   end
 
   defp draw_palette(screen, _state), do: screen
 
+  # What the popup lists: the command catalog, or the open buffers (ADR-0034), filtered by the
+  # input. Draw, Enter and the highlight moves all read it, so they agree on what is where.
+  defp candidates(%Minibuffer{mode: :palette} = mb), do: Catalog.search(Minibuffer.value(mb))
+  defp candidates(%Minibuffer{mode: :buffers} = mb), do: buffer_candidates(Minibuffer.value(mb))
+
+  # One row per open buffer, most recent first: the file name (with ` [+]` when it has unsaved
+  # edits) and where it is. A filter keeps the rows it fuzzy-matches, best first.
+  defp buffer_candidates(query) do
+    rows =
+      for %{pid: pid, path: path, dirty: dirty} <- Session.buffers() do
+        %{
+          name: status_label(path) <> if(dirty, do: " [+]", else: ""),
+          description: if(path, do: home_relative(path), else: ""),
+          invoke: {:buffer, pid}
+        }
+      end
+
+    case String.trim(query) do
+      "" ->
+        rows
+
+      q ->
+        rows
+        |> Enum.map(&{&1, Fuzzy.score(&1.name <> " " <> &1.description, q)})
+        |> Enum.reject(fn {_row, score} -> is_nil(score) end)
+        |> Enum.sort_by(fn {_row, score} -> -score end)
+        |> Enum.map(fn {row, _score} -> row end)
+    end
+  end
+
+  defp home_relative(path) do
+    home = System.user_home!()
+
+    if String.starts_with?(path, home <> "/"),
+      do: "~/" <> Path.relative_to(path, home),
+      else: path
+  end
+
+  # Commands line up at a fixed column; buffer names at the longest one, up to half the width.
+  defp name_col(:palette, _candidates, _w), do: @palette_name_col
+
+  defp name_col(:buffers, candidates, w) do
+    longest = candidates |> Enum.map(&String.length(&1.name)) |> Enum.max(fn -> 0 end)
+    min(longest + 2, max(div(w, 2), 1))
+  end
+
   # One candidate row: `name` padded to a column, then its description, on the theme bg —
   # or the active-line tint when highlighted (the Enter target).
-  defp draw_palette_row(screen, entry, y, selected?, %{w: w, theme: %Theme{palette: pal}}) do
+  defp draw_palette_row(screen, entry, y, selected?, %{w: w, theme: %Theme{palette: pal}}, col) do
     bg = if selected?, do: pal.active_line_bg, else: pal.bg
     name_fg = if selected?, do: pal.fg, else: pal.active_line_number
-    label = String.pad_trailing(entry.name, @palette_name_col)
+    label = String.pad_trailing(entry.name, col)
 
     screen
     |> Screen.fill_rect(0, y, w, 1, %Cell{char: " ", fg: pal.fg, bg: bg})
@@ -537,9 +612,9 @@ defmodule Geex.Loop do
     })
     # Re-tint the description (past the name column) in the dimmer fg so the name stands out.
     |> Screen.draw_text(
-      @palette_name_col,
+      col,
       y,
-      palette_clip(entry.description, w - @palette_name_col),
+      palette_clip(entry.description, w - col),
       %Cell{
         fg: pal.line_number,
         bg: bg
@@ -547,14 +622,14 @@ defmodule Geex.Loop do
     )
   end
 
-  # No command matches the filter: a single dim hint row just above the input.
-  defp draw_palette_empty(screen, %{w: w, h: h, theme: %Theme{palette: pal}}) do
+  # Nothing matches the filter: a single dim hint row just above the input.
+  defp draw_palette_empty(screen, %{w: w, h: h, theme: %Theme{palette: pal}}, what) do
     y = h - 2
 
     if y >= 0 do
       screen
       |> Screen.fill_rect(0, y, w, 1, %Cell{char: " ", fg: pal.line_number, bg: pal.bg})
-      |> Screen.draw_text(0, y, palette_clip("(no commands match)", w), %Cell{
+      |> Screen.draw_text(0, y, palette_clip("(no #{what} match)", w), %Cell{
         fg: pal.line_number,
         bg: pal.bg
       })
@@ -917,6 +992,15 @@ defmodule Geex.Loop do
       :fast_forward ->
         schedule_repaint(do_fast_forward(state))
 
+      :buffers ->
+        # The open buffers in the palette's popup, the previous one highlighted (ADR-0034).
+        mb = Minibuffer.open(:buffers)
+        mb = if length(Session.buffers()) > 1, do: Minibuffer.select(mb, 1), else: mb
+        schedule_repaint(%{state | minibuffer: mb})
+
+      :close ->
+        schedule_repaint(do_close(state))
+
       :quit ->
         System.stop()
         state
@@ -945,6 +1029,46 @@ defmodule Geex.Loop do
       end
 
     schedule_repaint(state)
+  end
+
+  # Show `path`, opening it if needed (`open PATH`, ADR-0034). A relative path is from the
+  # current file's directory (the working directory is geex's own checkout, never yours).
+  defp do_open(path, state) do
+    full = resolve_path(path)
+
+    cond do
+      File.dir?(full) ->
+        %{state | notice: "#{path} is a directory"}
+
+      true ->
+        case Session.open_file(full) do
+          {:ok, _pid} -> state
+          {:error, reason} -> %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
+        end
+    end
+  end
+
+  defp resolve_path("~" <> _ = path), do: Path.expand(path)
+
+  defp resolve_path(path) do
+    base =
+      case safe_session_snapshot() do
+        {:ok, %{path: current}} when is_binary(current) -> Path.dirname(current)
+        _ -> File.cwd!()
+      end
+
+    Path.expand(path, base)
+  end
+
+  defp do_close(state) do
+    notice =
+      case Session.close_active() do
+        {:ok, label} -> "closed " <> Path.basename(label)
+        {:error, :dirty} -> "not closed: unsaved changes (save them, or undo them, first)"
+        {:error, :no_active_buffer} -> nil
+      end
+
+    %{state | notice: notice}
   end
 
   # Take in what the disk holds now (Alt+L / `fast-forward`, ADR-0034 §1). The buffer's change
@@ -1205,10 +1329,11 @@ defmodule Geex.Loop do
   # into the fuzzy filter; the Alt modifier is what separates "move" from "type".
   defp apply_minibuffer_key(event, %{minibuffer: mb} = state) do
     case event do
-      _ when mb.mode == :palette and event in [{:alt, ?w}, {:alt, ?W}, {:key, :up}] ->
+      _ when mb.mode in [:palette, :buffers] and event in [{:alt, ?w}, {:alt, ?W}, {:key, :up}] ->
         move_palette(state, -1)
 
-      _ when mb.mode == :palette and event in [{:alt, ?s}, {:alt, ?S}, {:key, :down}] ->
+      _
+      when mb.mode in [:palette, :buffers] and event in [{:alt, ?s}, {:alt, ?S}, {:key, :down}] ->
         move_palette(state, +1)
 
       {:char, g} ->
@@ -1262,23 +1387,35 @@ defmodule Geex.Loop do
     end
   end
 
-  defp submit_minibuffer(state) do
-    state =
-      case Verbs.parse(Minibuffer.value(state.minibuffer)) do
-        {:line, n} -> jump_to_line(n, state)
-        {:action, action} -> apply_verb(action, state)
-        :cancel -> state
-        :unknown -> state
-      end
+  # The buffer picker: Enter shows the highlighted buffer.
+  defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :buffers} = mb} = state) do
+    case Enum.at(candidates(mb), mb.sel) do
+      %{invoke: {:buffer, pid}} -> Session.set_active_buffer(pid)
+      nil -> :ok
+    end
 
     close_minibuffer(state)
+  end
+
+  # Close first, then act: an action may open the minibuffer again (`buffers` opens its picker).
+  defp submit_minibuffer(state) do
+    input = Minibuffer.value(state.minibuffer)
+    state = close_minibuffer(state)
+
+    case Verbs.parse(input) do
+      {:line, n} -> jump_to_line(n, state)
+      {:open, path} -> do_open(path, state)
+      {:action, action} -> apply_verb(action, state)
+      :cancel -> state
+      :unknown -> state
+    end
   end
 
   # Move the palette highlight by `delta` (Alt+W/S, arrows), **wrapping** at the ends so a long
   # list cycles. Clamp against the *current* candidate count (the filter may have narrowed it);
   # an empty list leaves `sel` untouched.
   defp move_palette(%{minibuffer: mb} = state, delta) do
-    case length(Catalog.search(Minibuffer.value(mb))) do
+    case length(candidates(mb)) do
       0 ->
         state
 
@@ -1295,7 +1432,7 @@ defmodule Geex.Loop do
   # closes. A `{:typed, prefix}` command still needs an argument, so instead of running it we
   # **hand off** to `:command` mode pre-filled with the verb (e.g. `line `) for the user to
   # complete — the palette is a launcher, the typed parser finishes the job.
-  defp dispatch_palette({:action, action}, state), do: close_minibuffer(apply_verb(action, state))
+  defp dispatch_palette({:action, action}, state), do: apply_verb(action, close_minibuffer(state))
 
   defp dispatch_palette({:typed, prefix}, state),
     do: schedule_repaint(%{state | minibuffer: Minibuffer.open(:command, prefix <> " ")})
@@ -1375,6 +1512,9 @@ defmodule Geex.Loop do
   # A typed verb needs the same cursor + text context a keystroke has — fetch it fresh.
   # :quit must work with no buffer open (you can always type `quit`); the rest no-op.
   defp apply_verb(:quit, state), do: apply_action(:quit, {0, 0}, "", state)
+  # Switching and closing buffers need no text either (and work with none active).
+  defp apply_verb(action, state) when action in [:buffers, :close],
+    do: apply_action(action, {0, 0}, "", state)
 
   defp apply_verb(action, state) do
     case safe_session_snapshot() do

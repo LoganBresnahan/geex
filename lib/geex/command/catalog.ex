@@ -54,6 +54,21 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, :revert_call}
     },
     %Entry{
+      name: "open",
+      description: "Open a file (a path from this file's directory), or switch to it.",
+      invoke: {:typed, "open"}
+    },
+    %Entry{
+      name: "buffers",
+      description: "Switch to another open buffer.",
+      invoke: {:action, :buffers}
+    },
+    %Entry{
+      name: "close",
+      description: "Close this buffer (not while it has unsaved changes).",
+      invoke: {:action, :close}
+    },
+    %Entry{
       name: "fast-forward",
       description: "Take in the file's change on disk, merging your unsaved edits (Alt+L).",
       invoke: {:action, :fast_forward}

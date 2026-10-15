@@ -35,6 +35,13 @@ defmodule Geex.BufferSupervisor do
     DynamicSupervisor.start_child(__MODULE__, {Geex.Buffer, path: path, name: via(path)})
   end
 
+  @doc """
+  Start a new empty, pathless **scratch** buffer (not registered: it has no path). What
+  `Geex.run/1` opens with no file, and what `Geex.Session.close_active/0` falls back to.
+  """
+  @spec start_scratch() :: DynamicSupervisor.on_start_child()
+  def start_scratch, do: DynamicSupervisor.start_child(__MODULE__, {Geex.Buffer, text: ""})
+
   @doc "The running buffer for `path`, or `:error` if none is open."
   @spec whereis(String.t()) :: {:ok, pid()} | :error
   def whereis(path) when is_binary(path) do

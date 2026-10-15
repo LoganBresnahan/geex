@@ -18,6 +18,9 @@ defmodule Geex.Loop.Verbs do
       `highlight all` / `select all` — select the whole buffer (= `Alt+B`).
     * `save` — write the active buffer to disk (= `Ctrl-O`; an operation, ADR-0019).
     * `fast-forward` — take in the file's change on disk (= `Alt+L`, ADR-0034).
+    * `open PATH` — show a file, opening it if needed; a relative `PATH` is from the current
+      file's directory, and keeps its case. `buffers` — pick an open buffer. `close` — close
+      this buffer (refused while it has unsaved edits). ADR-0034.
     * `quit` / `exit` — leave the editor (= `Ctrl-X`).
     * `no` — the typed twin of `Alt+N`: clears a live selection (a plain cancel when
       nothing is selected). An empty line just cancels.
@@ -34,6 +37,7 @@ defmodule Geex.Loop.Verbs do
   @type verb ::
           {:line, non_neg_integer()}
           | {:action, atom()}
+          | {:open, String.t()}
           | :cancel
           | :unknown
 
@@ -47,7 +51,17 @@ defmodule Geex.Loop.Verbs do
   @doc "Parse one minibuffer input line into a verb. Pure."
   @spec parse(String.t()) :: verb()
   def parse(input) when is_binary(input) do
-    input |> String.trim() |> String.downcase() |> do_parse()
+    trimmed = String.trim(input)
+
+    # `open PATH` before the rest is lowercased: a path keeps its case.
+    case String.split(trimmed, ~r/\s+/, parts: 2) do
+      [verb, path] -> if String.downcase(verb) == "open", do: {:open, path}, else: :lower
+      _ -> :lower
+    end
+    |> case do
+      :lower -> trimmed |> String.downcase() |> do_parse()
+      open -> open
+    end
   end
 
   @doc """
@@ -104,6 +118,10 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("select all"), do: {:action, :select_all}
   defp do_parse("save"), do: {:action, :save}
   defp do_parse("fast-forward"), do: {:action, :fast_forward}
+  defp do_parse("buffers"), do: {:action, :buffers}
+  defp do_parse("close"), do: {:action, :close}
+  # `open` with no path: nothing to open.
+  defp do_parse("open"), do: :unknown
   defp do_parse("quit"), do: {:action, :quit}
   defp do_parse("exit"), do: {:action, :quit}
 

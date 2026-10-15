@@ -283,7 +283,9 @@ defmodule Geex.ReconcileTest do
   end
 
   describe "write completion: the per-path quiet period (ADR-0032)" do
-    @settle 40
+    # Wide enough that the "still quiet" check below can't lose the race to the timer under a
+    # loaded full-suite run (40 ms once did).
+    @settle 150
 
     setup do
       recon =
