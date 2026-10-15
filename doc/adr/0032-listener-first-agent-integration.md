@@ -420,3 +420,29 @@ Implementation choices made building the intake, within the decisions above:
    - **macOS:** the payload runs there (shasum fallback; the tmp-dir discovery matches
      `System.tmp_dir!/0`'s `TMPDIR`). geex itself has never run on macOS: its watcher's FSEvents
      backend (`file_system`) is untested here.
+
+## Amendment — 2026-10-15: step (e), display only — who wrote this line
+
+Chosen by the maintainer: make attribution visible while editing, with **no undo changes**.
+Undoing one agent's hunk without touching later edits needs its own design, because the
+ADR-0031 history is linear. Built to the approved mockup:
+
+- **A gutter mark.** `▌` in the line-number gutter's left margin column, in the theme's accent
+  (`palette.cursor`; no new palette key), on each line an agent last wrote: an attested write
+  (`{:agent, …}`) or an MCP edit (`{:llm, …}`). `:external` (shell, other editors, unattested)
+  and your own lines stay unmarked.
+- **The author on the status line**, for the line under the cursor, just left of the position:
+  `✎ <harness>/<session, 8 chars> · turn <4 chars>…` (MCP: `✎ llm/<model>`). The
+  `harness/session8` tag is the one captAInHook's agent-shell-history writes into shell history,
+  so one session reads the same in both places.
+- **Derived from the history, never stored as line numbers.** `Geex.Blame` (pure) keeps one
+  writer per line, `{actor, reconcile group}`, the way `git blame` does: a command writes the
+  lines between the common prefix and suffix of the document's lines before and after it. The
+  buffer advances it on every applied command, rebuilds it in the same replay undo already does
+  (`Blame.replay/2` folds `Dispatch.apply_command/2` like `Dispatch.replay/2`), and relabels a
+  group's lines in place when a late attestation lands. So lines shifted by later edits keep
+  their mark, an undone hunk loses it, and redo restores it. The snapshot carries it as `blame`.
+- **Typing on an agent's line makes it yours** (its mark goes; the maintainer chose `git blame`
+  semantics over "marked until the agent's text is gone"). Enter at the end of an agent's line
+  marks only the new line.
+- **A late attestation repaints at once:** the TUI now handles `{:geex_buffer_attested, …}`.

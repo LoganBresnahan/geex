@@ -49,7 +49,7 @@ defmodule Geex.Buffer do
 
   use GenServer, restart: :temporary
 
-  alias Geex.EditorState
+  alias Geex.{Blame, EditorState}
   alias Geex.Edit.Footprint
 
   @doc """
@@ -251,6 +251,9 @@ defmodule Geex.Buffer do
           base: editor,
           # newest-first internally (O(1) prepend); exposed oldest-first via snapshot.
           history: [],
+          # Who last wrote each line (`Geex.Blame`), kept in step with `history`: advanced by
+          # every applied command, rebuilt on undo, relabelled by an attestation.
+          blame: Blame.new(EditorState.lines(editor)),
           # Undone commands, newest-first — the redo future. A new edit clears it (the
           # redone branch is discarded once you edit past the undo point). ADR-0031.
           redo: [],
@@ -310,6 +313,7 @@ defmodule Geex.Buffer do
           state
           | editor: editor,
             history: [command | state.history],
+            blame: advance(state.blame, state.editor, editor, command),
             redo: [],
             dirty: true,
             seq: state.seq + 1
@@ -337,9 +341,11 @@ defmodule Geex.Buffer do
     # Reconstruct the pre-`command` document by replaying base + the remaining (older)
     # commands. These all applied successfully once, so replay cannot fail here; guard it
     # anyway so a (theoretically impossible) failure leaves state and history untouched.
-    case Geex.Dispatch.replay(state.base, Enum.reverse(rest)) do
-      {:ok, editor} ->
-        new_state = revert(state, editor, rest, [command | state.redo])
+    # Blame.replay folds `Dispatch.apply_command/2` exactly as `Dispatch.replay/2` does, and
+    # rebuilds the per-line blame alongside, so the undone command's lines lose its mark.
+    case Blame.replay(state.base, Enum.reverse(rest)) do
+      {:ok, editor, blame} ->
+        new_state = revert(state, editor, blame, rest, [command | state.redo])
         notify_change(new_state, revert_footprint(state.editor, editor))
         {:reply, {:ok, build_snapshot(new_state), command}, new_state}
 
@@ -356,7 +362,8 @@ defmodule Geex.Buffer do
     # equals the state it was first applied to — so this succeeds), moving it back onto history.
     case Geex.Dispatch.apply_command(command, state.editor) do
       {:ok, editor} ->
-        new_state = revert(state, editor, [command | state.history], rest_redo)
+        blame = advance(state.blame, state.editor, editor, command)
+        new_state = revert(state, editor, blame, [command | state.history], rest_redo)
         notify_change(new_state, revert_footprint(state.editor, editor))
         {:reply, {:ok, build_snapshot(new_state), command}, new_state}
 
@@ -377,7 +384,12 @@ defmodule Geex.Buffer do
             {:reply, :pending, park(state, attestation)}
 
           unattested?(state.history, group) ->
-            new_state = %{state | history: upgrade(state.history, group, attestation)}
+            new_state = %{
+              state
+              | history: upgrade(state.history, group, attestation),
+                blame: Blame.relabel(state.blame, group, agent_actor(attestation))
+            }
+
             notify_attested(new_state, group, agent_actor(attestation))
             {:reply, :attested, new_state}
 
@@ -475,15 +487,16 @@ defmodule Geex.Buffer do
     {commands, state} = consume_pending(commands, prune_pending(state))
 
     applied =
-      Enum.reduce_while(commands, {:ok, state.editor}, fn command, {:ok, editor} ->
+      Enum.reduce_while(commands, {:ok, state.editor, state.blame}, fn command,
+                                                                       {:ok, editor, blame} ->
         case Geex.Dispatch.apply_command(command, editor) do
-          {:ok, next} -> {:cont, {:ok, next}}
+          {:ok, next} -> {:cont, {:ok, next, advance(blame, editor, next, command)}}
           {:error, _reason} = error -> {:halt, error}
         end
       end)
 
     case applied do
-      {:ok, editor} ->
+      {:ok, editor, blame} ->
         # One notification for the group: the byte footprint is the diff of the whole
         # transition (the same exact splice undo/redo uses), not a per-command footprint.
         footprint =
@@ -498,6 +511,7 @@ defmodule Geex.Buffer do
         new_state = %{
           state
           | editor: editor,
+            blame: blame,
             history: Enum.reverse(commands) ++ state.history,
             redo: if(commands == [], do: state.redo, else: []),
             synced: synced,
@@ -608,10 +622,11 @@ defmodule Geex.Buffer do
   # even though it lowers `version`), and recompute `dirty` against the `synced` disk baseline —
   # so undoing back to the saved content clears the dirty flag (a forward `dispatch/2` is
   # unconditionally dirty; an undo/redo can land *on* the baseline, which is genuinely clean).
-  defp revert(state, editor, history, redo) do
+  defp revert(state, editor, blame, history, redo) do
     %{
       state
       | editor: editor,
+        blame: blame,
         history: history,
         redo: redo,
         dirty: EditorState.text(editor) != state.synced,
@@ -632,7 +647,18 @@ defmodule Geex.Buffer do
       seq: state.seq,
       dirty: state.dirty,
       synced: state.synced,
-      history: history
+      history: history,
+      # One writer per line (`Geex.Blame`): who last wrote it, for the gutter and status line.
+      blame: state.blame
     }
   end
+
+  defp advance(blame, before, after_editor, command),
+    do:
+      Blame.step(
+        blame,
+        EditorState.lines(before),
+        EditorState.lines(after_editor),
+        Blame.writer(command)
+      )
 end

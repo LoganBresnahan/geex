@@ -226,4 +226,55 @@ defmodule Geex.LoopTest do
       assert Loop.status_text("doc.txt  a long notice", "5:16", 20) =~ "notice 5:16"
     end
   end
+
+  describe "attribution (ADR-0032 step e): the status-line author and the gutter mark" do
+    @agent {:agent,
+            %{
+              harness: "claude-code",
+              session: "7ccbf3d1-9f0e-4a1b-8c2d-000000000000",
+              turn: "d23f4e5a-0000",
+              tool_use: "toolu_1"
+            }}
+
+    test "author_label/2: harness/session8 and the turn, only for agent-written lines" do
+      blame = [nil, {@agent, 3}, {:external, 4}, {:human, nil}, {{:llm, "unknown"}, nil}]
+
+      assert Loop.author_label(blame, 1) == "✎ claude-code/7ccbf3d1 · turn d23f…"
+      assert Loop.author_label(blame, 4) == "✎ llm/unknown"
+      for line <- [0, 2, 3, 99], do: assert(Loop.author_label(blame, line) == nil)
+    end
+
+    test "author_label/2: no turn, no turn segment" do
+      {:agent, who} = @agent
+      blame = [{{:agent, %{who | turn: nil}}, 1}]
+      assert Loop.author_label(blame, 0) == "✎ claude-code/7ccbf3d1"
+    end
+
+    test "agent_marks/5: ▌ in the gutter's margin on agent rows only, bg kept" do
+      theme = Geex.Theme.default()
+      text = "alpha\nBETA-sed\nGAMMA-agent\ndelta"
+      blame = [nil, {:external, 1}, {@agent, 2}, nil]
+      {screen, _cursor, _h} = Loop.frame(text, [], theme, {2, 0}, 30, 4, 0)
+
+      marked = Loop.agent_marks(screen, blame, 0, 4, theme)
+
+      assert Screen.get_cell(marked, 0, 2).char == "▌"
+      assert Screen.get_cell(marked, 0, 2).fg == theme.palette.cursor
+      # the cursor row's tint survives under the mark
+      assert Screen.get_cell(marked, 0, 2).bg == Screen.get_cell(screen, 0, 2).bg
+
+      for row <- [0, 1, 3],
+          do: assert(Screen.get_cell(marked, 0, row) == Screen.get_cell(screen, 0, row))
+    end
+
+    test "agent_marks/5: follows the scroll; rows past the blame are untouched" do
+      theme = Geex.Theme.default()
+      blame = [nil, nil, {@agent, 2}]
+      {screen, _cursor, _h} = Loop.frame("a\nb\nc", [], theme, {2, 0}, 20, 4, 2)
+
+      marked = Loop.agent_marks(screen, blame, 2, 4, theme)
+      assert Screen.get_cell(marked, 0, 0).char == "▌"
+      assert Screen.get_cell(marked, 0, 1) == Screen.get_cell(screen, 0, 1)
+    end
+  end
 end

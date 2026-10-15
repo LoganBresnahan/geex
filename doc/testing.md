@@ -1414,3 +1414,38 @@ session / prompt / tool-use ids, and a CRLF Write. **730 tests + 14 doctests**, 
 **Not tested:** `NotebookEdit` and `MultiEdit` live (NotebookEdit is fixture-tested only); geex on macOS
 (its `file_system` FSEvents backend has never run here); a hung but alive geex (the 1 s cap is curl's); two
 geex instances with the same file open; harnesses other than Claude Code (they send nothing by design).
+
+### 2026-10-15 — Ledger step (e), display only: who wrote this line (ADR-0032)
+
+`Geex.Blame` (pure): one writer per line, `{actor, reconcile group}`, from the history, `git blame` style
+(a command writes the lines between the common prefix and suffix of before/after). `Geex.Buffer` advances
+it per applied command (dispatch, group, redo), rebuilds it in undo's replay (`Blame.replay/2`), relabels a
+group on a late attestation, and returns it in the snapshot as `blame`. The TUI draws `▌` (theme accent) in
+the gutter's left margin on lines an agent last wrote (`{:agent, …}` / `{:llm, …}`), shows `✎
+<harness>/<session8> · turn <4>…` left of the position for the cursor's line, and repaints on
+`{:geex_buffer_attested, …}`.
+
+**Live-verified** (geex TUI in a tmux pty on a scratch `doc.txt`, the step (d) hook registered):
+- This session's native `Edit` of line 3: `▌` appeared on line 3 **with no keypress** (attestation pending,
+  then the group landed attested).
+- `sed -i` via Bash on line 2: no mark; the status line on line 2 shows only the position.
+- Cursor on line 3: `✎ claude-code/d25a8b6d · turn 3466…  3:1`.
+- Typing `x` on line 3 removed its mark (now yours); `Alt+Z` restored it. Two more `Alt+Z` undid the `sed`
+  and the agent hunk, and the mark went. `Alt+Shift+Z` brought it back, then the `sed` line.
+- **Two sessions:** the coordinator session (oof-af, now `oof-41`) changed line 4 with its native `Edit`.
+  Line 4 got its own `▌`; the status line read `✎ claude-code/7ccbf3d1 · turn 441b…` on line 4 and
+  `✎ claude-code/d25a8b6d …` on line 3.
+- Quitting removed the discovery file.
+
+**Automated:** `blame_test` (4 doctests + 10: step for edit / insert / delete / no-op / multi-line;
+`replay/2` ends where `Dispatch.replay/2` does with one entry per line; in a buffer: an attested hunk marks
+its line and a shell write stays `:external`, attested-first lands marked, two sessions keep their own
+labels, typing makes a line yours while Enter at its end doesn't, undo clears and redo restores, your
+edits shift an agent line without unmarking it). `loop_test` (`author_label/2`: agent with/without turn,
+MCP, none for human/external/loaded/out of range; `agent_marks/5`: agent rows only, accent fg, bg kept,
+follows the scroll). **744 tests + 18 doctests**, green twice, `--warnings-as-errors` clean.
+
+**Not tested:** a late attestation's repaint in isolation (live, the attestation arrived first both times;
+the handler is a one-line repaint); blame cost on a very large file or a long history (one O(lines)
+prefix/suffix pass per command, plus undo's existing replay); grid mode with marks (the ruler shifts rows,
+and the mark is painted before that shift, as the text is).

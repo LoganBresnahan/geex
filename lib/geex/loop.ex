@@ -254,6 +254,11 @@ defmodule Geex.Loop do
   def handle_info({:geex_buffer_notice, buffer, text}, %{buffer: buffer} = state),
     do: {:noreply, schedule_repaint(%{state | notice: text})}
 
+  # A late attestation relabelled an agent's lines (ADR-0032): repaint so the gutter mark and
+  # the status-line author show now, not on the next keystroke.
+  def handle_info({:geex_buffer_attested, buffer, _group, _actor}, %{buffer: buffer} = state),
+    do: {:noreply, schedule_repaint(state)}
+
   def handle_info({:geex_highlights, buffer, _v}, %{buffer: buffer} = state),
     do: {:noreply, schedule_repaint(state)}
 
@@ -407,6 +412,7 @@ defmodule Geex.Loop do
 
         screen =
           screen
+          |> agent_marks(snap.blame, scroll, h_text, state.theme)
           |> Screen.resize(state.w, state.h)
           |> maybe_vscrollbar(vbar?, state.w - 1, h_text, scroll, total, state.theme)
           # Shift the text + scroll bar down past the reserved ruler row, then paint the
@@ -560,13 +566,60 @@ defmodule Geex.Loop do
         if(snap.dirty, do: " [+]", else: "") <>
         if(state.notice, do: "  " <> state.notice, else: "")
 
-    Screen.draw_text(
-      screen,
-      0,
-      h - 1,
-      status_text(left, position(snap.cursor), w),
-      status_style(theme)
-    )
+    {line, _col} = snap.cursor
+
+    right =
+      case author_label(snap.blame, line) do
+        nil -> position(snap.cursor)
+        author -> author <> "  " <> position(snap.cursor)
+      end
+
+    Screen.draw_text(screen, 0, h - 1, status_text(left, right, w), status_style(theme))
+  end
+
+  @doc """
+  The status-line author of `line`, from the buffer's blame (`Geex.Blame`): who last wrote
+  it, when that was an agent. An attested write reads `✎ <harness>/<session>`, the session
+  cut to 8 characters (the tag captAInHook writes into shell history), then the turn cut
+  to 4. An MCP edit reads `✎ llm/<model>`. `nil` for your own lines, lines as loaded, and
+  unattested out-of-band writes (ADR-0032).
+  """
+  @spec author_label(Geex.Blame.t(), non_neg_integer()) :: String.t() | nil
+  def author_label(blame, line) do
+    case Enum.at(blame, line) do
+      {{:agent, %{harness: harness, session: session} = who}, _group} ->
+        "✎ " <> harness <> "/" <> String.slice(session, 0, 8) <> turn_label(who[:turn])
+
+      {{:llm, model}, _group} ->
+        "✎ llm/" <> to_string(model)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp turn_label(turn) when is_binary(turn), do: " · turn " <> String.slice(turn, 0, 4) <> "…"
+  defp turn_label(_turn), do: ""
+
+  @doc """
+  Mark the gutter's left margin column with `▌`, in the theme's accent (`cursor`) colour, on
+  each visible row whose line an agent last wrote (an attested write or an MCP edit). The
+  cell's background is kept, so the mark sits on the cursor-line tint too. Derived from the
+  blame on every frame, so an edit, undo or late attestation moves or clears it.
+  """
+  @spec agent_marks(Screen.t(), Geex.Blame.t(), non_neg_integer(), non_neg_integer(), Theme.t()) ::
+          Screen.t()
+  def agent_marks(screen, blame, scroll, h, %Theme{palette: pal}) do
+    blame
+    |> Enum.slice(scroll, h)
+    |> Enum.with_index()
+    |> Enum.reduce(screen, fn
+      {{{kind, _}, _group}, row}, acc when kind in [:agent, :llm] ->
+        Screen.set_cell(acc, 0, row, %{Screen.get_cell(acc, 0, row) | char: "▌", fg: pal.cursor})
+
+      _unmarked, acc ->
+        acc
+    end)
   end
 
   defp draw_empty_status(screen, %{w: w, h: h, theme: theme}) do

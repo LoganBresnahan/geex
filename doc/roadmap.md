@@ -12,12 +12,12 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-15):** 730 tests + 14 doctests green, `--warnings-as-errors` clean. Since the
+**Current (2026-10-15):** 744 tests + 18 doctests green, `--warnings-as-errors` clean. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
 the MCP door is frozen; v0.5 is now the **ledger track** (reconcile as the primary agent path,
-attested by captAInHook). Items 1–4 are built; the frontier is item 5 (surfacing in the TUI); the command-surface track at the
+attested by captAInHook). Items 1–4 are built and item 5's display is built; the frontier is per-agent undo; the command-surface track at the
 end of this file continues alongside it, since editor comfort is the other half of the point. The reconcile watcher is
 now shown live against a real `inotify` backend. (Test counts quoted further down are as of their
 own dates.)
@@ -163,9 +163,13 @@ The ledger track, in order (each builds on the one before):
    also stamps `before_sha256_lf` (the baseline with `\r\n` as `\n`, how Claude Code reports
    it). Tested against captAInHook's real envelopes (`test/fixtures/claude-code/`, from
    `3ddb467`).
-5. **Surfacing in the TUI.** Show who wrote what: a gutter mark for agent-authored hunks, the
-   author on the status line, and undo of a specific agent hunk without touching your own
-   edits.
+5. **Surfacing in the TUI** — **display built 2026-10-15** (ADR-0032 step-e amendment): a `▌`
+   gutter mark on each line an agent last wrote, and `✎ <harness>/<session8> · turn …` on the
+   status line for the line under the cursor, both derived from `Geex.Blame` (a per-line
+   `git blame` over the one history: shifts with edits, cleared by undo, relabelled on a late
+   attestation). Shell and other unattested writes stay unmarked. **Still open:** undo of a
+   specific agent hunk without touching your own later edits. It needs its own design, since
+   the ADR-0031 history is linear.
 
 Exit criteria: with captAInHook installed and the payload registered, an agent session
 (Claude Code first) edits a file open in geex with its **native** tools; each change appears
