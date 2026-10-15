@@ -30,24 +30,21 @@ defmodule Geex.Ledger.Restore do
 
   @doc """
   Fold `lines`, each `{line_without_newline, byte_offset_after_its_newline}`, oldest first.
-  `{:error, reason}` when the first line isn't a usable `open` entry.
+  The first line is an `open` entry, or a compacted ledger's `checkpoint`; `{:error, reason}`
+  when it is neither.
   """
   @spec restore([{String.t(), non_neg_integer()}]) :: {:ok, result()} | {:error, String.t()}
   def restore([{first, first_end} | rest]) do
     case Codec.decode(first) do
       {:ok, {:open, %{path: path, base: base}}} ->
-        start = %{
-          history: History.new(base),
-          path: path,
-          entries: 1,
-          valid_bytes: first_end,
-          clean: false
-        }
+        start(History.new(base), path, first_end, rest)
 
-        {:ok, fold(rest, start, start)}
+      {:ok, {:checkpoint, c}} ->
+        history = History.from_checkpoint(c.text, c.blame, c.synced, c.next_group)
+        start(history, c.path, first_end, rest)
 
       {:ok, _other} ->
-        {:error, "the first entry is not an open entry"}
+        {:error, "the first entry is not an open or checkpoint entry"}
 
       {:error, reason} ->
         {:error, reason}
@@ -55,6 +52,18 @@ defmodule Geex.Ledger.Restore do
   end
 
   def restore([]), do: {:error, "empty ledger"}
+
+  defp start(history, path, first_end, rest) do
+    start = %{
+      history: history,
+      path: path,
+      entries: 1,
+      valid_bytes: first_end,
+      clean: false
+    }
+
+    {:ok, fold(rest, start, start)}
+  end
 
   defp fold([], acc, _verified), do: Map.put(acc, :stopped, nil)
 
@@ -118,6 +127,7 @@ defmodule Geex.Ledger.Restore do
   end
 
   defp step({:open, _}, _h, _path), do: {:error, "a second open entry"}
+  defp step({:checkpoint, _}, _h, _path), do: {:error, "a checkpoint after the first line"}
 
   defp ok({:ok, h}, path), do: {:ok, h, path, :unchecked}
   defp ok({:ok, h, _command}, path), do: {:ok, h, path, :unchecked}

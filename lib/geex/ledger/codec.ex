@@ -15,6 +15,9 @@ defmodule Geex.Ledger.Codec do
     * `{:sync, sha256}` — disk now matches the buffer; the sha256 of the bytes written
     * `{:rename, path}`
     * `{:close, %{text_sha256, synced_sha256}}` — a clean close
+    * `{:checkpoint, %{path, text, blame, synced, next_group, geex}}` — a compacted ledger's
+      first line, in place of `open`: the text with who wrote each line, the disk text it was
+      synced with (`nil` when the same), and the next reconcile group id (ADR-0033 §6)
 
   On disk every line is `{"v": 1, "t": <type>, "at": <ISO-8601>, …}`. Commands are values
   (ADR-0002/0004): `args` are the struct's field-spec fields, and decoding goes through the
@@ -55,6 +58,7 @@ defmodule Geex.Ledger.Codec do
           | {:sync, String.t()}
           | {:rename, String.t()}
           | {:close, map()}
+          | {:checkpoint, map()}
 
   @doc "One ledger line for `entry`, stamped `at`, ending in a newline."
   @spec encode(entry(), DateTime.t()) :: String.t()
@@ -106,6 +110,21 @@ defmodule Geex.Ledger.Codec do
 
   defp fields({:close, %{text_sha256: text, synced_sha256: synced}}),
     do: %{"t" => "close", "text_sha256" => text, "synced_sha256" => synced}
+
+  defp fields({:checkpoint, c}) do
+    %{
+      "t" => "checkpoint",
+      "path" => c.path,
+      "text" => text(c.text),
+      "blame" => Enum.map(c.blame, &writer_json/1),
+      "synced" => if(c.synced == c.text, do: nil, else: text(c.synced)),
+      "next_group" => c.next_group,
+      "geex" => c.geex
+    }
+  end
+
+  defp writer_json(nil), do: nil
+  defp writer_json({actor, group}), do: %{"actor" => actor_json(actor), "group" => group}
 
   defp command_json(%module{} = command) do
     names = Enum.map(module.__fields__(), & &1.name)
@@ -185,7 +204,33 @@ defmodule Geex.Ledger.Codec do
   defp entry("close", %{"text_sha256" => text, "synced_sha256" => synced}),
     do: {:ok, {:close, %{text_sha256: text, synced_sha256: synced}}}
 
+  defp entry("checkpoint", %{"path" => path, "text" => text, "blame" => blame} = c)
+       when is_binary(path) and is_list(blame) and is_integer(:erlang.map_get("next_group", c)) do
+    with {:ok, text} <- untext(text),
+         {:ok, synced} <- if(c["synced"], do: untext(c["synced"]), else: {:ok, text}),
+         {:ok, blame} <- all(blame, &writer/1) do
+      {:ok,
+       {:checkpoint,
+        %{
+          path: path,
+          text: text,
+          blame: blame,
+          synced: synced,
+          next_group: c["next_group"],
+          geex: c["geex"]
+        }}}
+    end
+  end
+
   defp entry(type, _), do: {:error, "unknown or incomplete entry #{inspect(type)}"}
+
+  defp writer(nil), do: {:ok, nil}
+
+  defp writer(%{"actor" => actor, "group" => group}) when is_integer(group) or is_nil(group) do
+    with {:ok, actor} <- actor(actor), do: {:ok, {actor, group}}
+  end
+
+  defp writer(_), do: {:error, "malformed blame entry"}
 
   defp command(%{"name" => name, "args" => args, "meta" => meta}) do
     with {:ok, module} <- module(name),

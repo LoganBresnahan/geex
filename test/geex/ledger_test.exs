@@ -97,7 +97,18 @@ defmodule Geex.LedgerTest do
         {:attest, 3, @agent},
         {:sync, hex("x")},
         {:rename, "/g"},
-        {:close, %{text_sha256: hex("x"), synced_sha256: hex("y")}}
+        {:close, %{text_sha256: hex("x"), synced_sha256: hex("y")}},
+        {:checkpoint,
+         %{
+           path: "/f",
+           text: raw,
+           blame: [nil, {@agent, 3}, {:human, nil}],
+           synced: "disk",
+           next_group: 4,
+           geex: "0.1.0"
+         }},
+        {:checkpoint,
+         %{path: "/f", text: "t", blame: [nil], synced: "t", next_group: 1, geex: "0.1.0"}}
       ]
 
       for entry <- entries do

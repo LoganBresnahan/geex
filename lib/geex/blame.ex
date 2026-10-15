@@ -57,13 +57,16 @@ defmodule Geex.Blame do
 
   @doc """
   Replay `commands` (oldest first) over `base`, the way `Geex.Dispatch.replay/2` does, and
-  build the blame alongside. Returns the resulting editor state and its blame.
+  build the blame alongside, starting from `base_blame` (by default every line unwritten; a
+  compacted ledger's checkpoint carries the blame its base had). Returns the resulting editor
+  state and its blame.
   """
-  @spec replay(EditorState.t(), [struct()]) ::
+  @spec replay(EditorState.t(), [struct()], t() | nil) ::
           {:ok, EditorState.t(), t()} | {:error, {term(), struct()}}
-  def replay(%EditorState{} = base, commands) when is_list(commands) do
-    Enum.reduce_while(commands, {:ok, base, new(EditorState.lines(base))}, fn command,
-                                                                              {:ok, editor, blame} ->
+  def replay(%EditorState{} = base, commands, base_blame \\ nil) when is_list(commands) do
+    start = base_blame || new(EditorState.lines(base))
+
+    Enum.reduce_while(commands, {:ok, base, start}, fn command, {:ok, editor, blame} ->
       case Dispatch.apply_command(command, editor) do
         {:ok, next} ->
           blame = step(blame, EditorState.lines(editor), EditorState.lines(next), writer(command))

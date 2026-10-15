@@ -88,6 +88,7 @@ mix test test/geex/mcp/grid_test.exs
 mix geex.serve                     # headless + loopback MCP on a free port (logged)
 mix geex.serve --port 4000         # pin 4000 to match presets/claude-code/.mcp.json
 mix geex.highlight <file>          # one-shot highlighted dump (engine check)
+mix geex.ledger list               # the durable ledgers (ADR-0033); also forget / compact
 # every non-test boot also listens on loopback POST /attest (ADR-0032); in TUI
 # mode that is the ONLY route — the frozen MCP surface needs mix geex.serve
 # the interactive TUI (needs a real tty — /dogfood drives it through tmux):

@@ -25,7 +25,7 @@ defmodule Geex.Ledger do
   """
 
   alias Geex.{EditorState, History}
-  alias Geex.Ledger.{Codec, Restore}
+  alias Geex.Ledger.{Codec, Compact, Restore, Spool}
 
   require Logger
 
@@ -234,11 +234,13 @@ defmodule Geex.Ledger do
     from = file(ledger.dir, ledger.path)
     to = file(ledger.dir, new_path)
 
+    # Record the rename in the ledger whenever it exists, even if this buffer hasn't written to
+    # it yet (append opens it), so the file keeps naming its path.
     ledger =
-      if ledger.state == :open do
+      if ledger.state == :open or File.exists?(from) do
         ledger = ledger |> append({:rename, new_path}, history) |> sync()
-        :file.close(ledger.fd)
-        %{ledger | fd: nil, state: :closed}
+        if ledger.fd, do: :file.close(ledger.fd)
+        %{ledger | fd: nil, state: if(ledger.state == :off, do: :off, else: :closed)}
       else
         ledger
       end
@@ -251,6 +253,137 @@ defmodule Geex.Ledger do
     end
 
     %{ledger | path: new_path}
+  end
+
+  # --- maintenance: `mix geex.ledger list | forget | compact` (ADR-0033 §6) ---
+
+  @doc """
+  Every ledger in `dir`, by file: the path it records (following renames), how many entries and
+  bytes, when it last changed, whether a running geex has it open (a live lock), how many
+  attestations are spooled for it, and whether its file still exists.
+  """
+  @spec list(Path.t()) :: [map()]
+  def list(dir) do
+    dir
+    |> Path.join("*.jsonl")
+    |> Path.wildcard()
+    |> Enum.reject(&String.ends_with?(&1, ".spool.jsonl"))
+    |> Enum.sort()
+    |> Enum.map(&describe/1)
+  end
+
+  defp describe(file) do
+    bytes = File.read!(file)
+    lines = String.split(bytes, "\n", trim: true)
+
+    path =
+      Enum.reduce(lines, nil, fn line, path ->
+        case Codec.decode(line) do
+          {:ok, {:open, %{path: p}}} -> p
+          {:ok, {:checkpoint, %{path: p}}} -> p
+          {:ok, {:rename, p}} -> p
+          _ -> path
+        end
+      end)
+
+    %{
+      file: file,
+      key: Path.basename(file, ".jsonl"),
+      path: path,
+      entries: length(lines),
+      bytes: byte_size(bytes),
+      modified: File.stat!(file, time: :posix).mtime,
+      open: lock_live?(lock_file(file)),
+      spooled: file |> Spool.read() |> length(),
+      orphan: is_nil(path) or not File.exists?(path)
+    }
+  end
+
+  @doc """
+  Delete a ledger file with its spool, lock and set-aside copies (for a secret that got into a
+  file's history). Refused while a running geex has the file open.
+  """
+  @spec forget(Path.t()) :: {:ok, [Path.t()]} | {:error, term()}
+  def forget(file) do
+    lock = lock_file(file)
+
+    with :ok <- take_lock(lock) do
+      doomed = [file, Spool.file(file) | Path.wildcard(file <> ".corrupt-*")]
+      removed = for f <- doomed, File.rm(f) == :ok, do: f
+      File.rm(lock)
+      {:ok, removed}
+    end
+  end
+
+  @doc """
+  Rewrite a ledger as a checkpoint plus its last `keep` commands (`Geex.Ledger.Compact`). The
+  rewrite is replayed and checked against the original before it replaces the file. Refused
+  while a running geex has the file open. Returns the sizes before and after.
+  """
+  @spec compact(Path.t(), non_neg_integer()) :: {:ok, map()} | {:error, term()}
+  def compact(file, keep) when is_integer(keep) and keep >= 0 do
+    lock = lock_file(file)
+
+    with :ok <- take_lock(lock) do
+      try do
+        rewrite(file, keep)
+      after
+        File.rm(lock)
+      end
+    end
+  end
+
+  defp rewrite(file, keep) do
+    with {:ok, bytes} <- File.read(file),
+         {lines, _complete} = split_lines(bytes),
+         {:ok, restored} <- Restore.restore(lines) do
+      if restored.stopped, do: set_aside(file, :copy)
+      geex = :geex |> Application.spec(:vsn) |> to_string()
+      at = DateTime.utc_now()
+      entries = Compact.entries(restored.history, restored.path, keep, geex)
+      new_bytes = Enum.map_join(entries, &Codec.encode(&1, at))
+      {new_lines, _} = split_lines(new_bytes)
+
+      with {:ok, %{stopped: nil, history: check}} <- Restore.restore(new_lines),
+           :ok <- Compact.check(check, restored.history),
+           :ok <- replace(file, new_bytes) do
+        total = length(History.commands_oldest_first(restored.history))
+
+        {:ok,
+         %{
+           before: byte_size(bytes),
+           after: byte_size(new_bytes),
+           kept: min(keep, total),
+           dropped: max(total - keep, 0),
+           stopped: restored.stopped
+         }}
+      else
+        {:ok, %{stopped: reason}} -> {:error, {:rewrite_does_not_replay, reason}}
+        {:error, reason} -> {:error, {:rewrite_rejected, reason}}
+      end
+    end
+  end
+
+  # Write next to the original, fsync, then rename over it: a crash leaves one or the other.
+  defp replace(file, bytes) do
+    tmp = file <> ".compact"
+
+    with :ok <- File.write(tmp, bytes),
+         :ok <- File.chmod(tmp, 0o600),
+         {:ok, fd} <- :file.open(tmp, [:read, :raw]),
+         :ok <- :file.sync(fd),
+         :ok <- :file.close(fd) do
+      File.rename(tmp, file)
+    end
+  end
+
+  defp lock_file(file), do: String.replace_suffix(file, ".jsonl", ".lock")
+
+  defp lock_live?(lock) do
+    case File.read(lock) do
+      {:ok, held} -> not stale?(held)
+      {:error, _} -> false
+    end
   end
 
   defp open(ledger, history) do

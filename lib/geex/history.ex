@@ -11,6 +11,8 @@ defmodule Geex.History do
 
     * `base` — the loaded `EditorState`. Undo replays `base` plus the remaining commands
       (ADR-0031), the §15c replay backbone.
+    * `base_blame` — who wrote each line of `base`: all unwritten for a loaded file; for a
+      compacted ledger, the blame its checkpoint carries, so undo keeps it (ADR-0033 §6).
     * `editor` — the current `EditorState`.
     * `commands` — the applied commands, **newest first** (O(1) prepend);
       `commands_oldest_first/1` for callers.
@@ -34,6 +36,7 @@ defmodule Geex.History do
   @enforce_keys [:base, :editor, :synced, :blame]
   defstruct [
     :base,
+    :base_blame,
     :editor,
     :synced,
     :blame,
@@ -46,6 +49,7 @@ defmodule Geex.History do
 
   @type t :: %__MODULE__{
           base: EditorState.t(),
+          base_blame: Blame.t(),
           editor: EditorState.t(),
           synced: String.t(),
           blame: Blame.t(),
@@ -66,12 +70,27 @@ defmodule Geex.History do
   @spec new(String.t()) :: t()
   def new(text) when is_binary(text) do
     editor = EditorState.new(text)
+    blame = Blame.new(EditorState.lines(editor))
+    %__MODULE__{base: editor, base_blame: blame, editor: editor, synced: text, blame: blame}
+  end
+
+  @doc """
+  A history that starts from a compacted ledger's checkpoint (ADR-0033 §6): `text` with the
+  blame it had, the disk text it was synced with, and the next reconcile group id. Nothing
+  before it can be undone; who wrote each line is kept.
+  """
+  @spec from_checkpoint(String.t(), Blame.t(), String.t(), pos_integer()) :: t()
+  def from_checkpoint(text, blame, synced, next_group) do
+    editor = EditorState.new(text)
 
     %__MODULE__{
       base: editor,
+      base_blame: blame,
       editor: editor,
-      synced: text,
-      blame: Blame.new(EditorState.lines(editor))
+      synced: synced,
+      dirty: text != synced,
+      blame: blame,
+      next_group: next_group
     }
   end
 
@@ -162,7 +181,7 @@ defmodule Geex.History do
     # These all applied once, so replay can't fail; a (theoretically impossible) failure
     # changes nothing. Blame.replay folds Dispatch.apply_command/2 exactly as
     # Dispatch.replay/2 does, rebuilding the blame alongside.
-    case Blame.replay(h.base, Enum.reverse(rest)) do
+    case Blame.replay(h.base, Enum.reverse(rest), h.base_blame) do
       {:ok, editor, blame} -> {:ok, revert(h, editor, blame, rest, [command | h.redo]), command}
       {:error, _reason} -> {:error, :nothing_to_undo}
     end

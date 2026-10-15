@@ -1656,3 +1656,36 @@ clean.
 
 **Not tested:** the timer under a slow or remote terminal (an SSH link that splits a sequence across more
 than 40 ms would now type its tail; raising `@esc_timeout_ms` is the knob).
+
+### 2026-10-15 — Durable ledger build step 4: `mix geex.ledger list | forget | compact` (ADR-0033 §6)
+
+`Geex.Ledger.Compact` rewrites a ledger as a `checkpoint` plus its last N commands (with a `sync` or
+baseline entry and a `close`), checked by replaying it against the original before it replaces the file.
+`Geex.History` gained `base_blame` / `from_checkpoint/4` so undo after a compaction keeps the checkpoint's
+credits. `Geex.Ledger.list/1`, `forget/1`, `compact/2` and the `mix geex.ledger` task. Fix found by the new
+`list` test: a rename before the buffer's first write in a session now records the rename in the ledger.
+
+**Live-verified** (geex TUI in a tmux pty, `XDG_STATE_HOME` pointed at a scratch dir, the real `mix
+geex.ledger`): typed and saved, then this session's native `Edit` of line 3 (credited), then unsaved
+typing.
+- With geex open: `list` showed the file with `23 entries, 5.7 KB … [open]`; `compact` was refused: `a
+  running geex has this file open (180501 <0.557.0>); close it first`.
+- After quitting: `compact --keep 3` gave `5.9 KB -> 1.6 KB; kept the last 3 command(s), folded 18 into the
+  checkpoint`; `list` then showed 6 entries.
+- Reopen: `restored unsaved changes from your last session`, the text exact, line 3's `▌` and `✎
+  claude-code/d25a8b6d · turn 381b…` intact. Five `Alt+Z` undid only the 3 kept keystrokes (`unsaved ` →
+  `unsav`) and stopped at the checkpoint, the agent line still credited.
+- `forget` without `--yes` only said what it would delete; with `--yes` it removed the ledger; `list` then
+  said `no ledgers`.
+
+**Automated:** `ledger_admin_test`, 8 tests: compaction keeps text, blame, synced text and unsaved edits,
+writes a checkpoint first line, shrinks the file, and undo stops at the checkpoint with the agent's credit
+kept; `--keep 0`, then group ids continue (2 after 1); compacting twice, and recording after a compaction;
+`compact` and `forget` refused while a buffer has the file open; a misplaced checkpoint stops replay;
+`forget` removes the ledger, spool and set-aside copies; `list` follows a rename and shows `open`,
+`spooled 1`, `orphan` (cleared once the file exists); the mix task end to end (list, compact, forget dry
+run and `--yes`). `ledger_test`'s round-trip gained two checkpoint entries. **818 tests + 22 doctests**,
+green twice, `--warnings-as-errors` clean.
+
+**Not tested:** compacting a ledger whose replay had stopped early (a copy is set aside first); very large
+ledgers (compaction replays the whole history once); `--dir` with a key from another directory.

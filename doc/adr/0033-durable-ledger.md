@@ -320,3 +320,26 @@ Choices made building it, within the decisions above:
 - **The key is `Alt+U`, not decision E's `Alt+R`:** `Alt+R` is already the line-start motion of the
   `Q W E R` / `A S D F` cluster, so the maintainer chose `Alt+U` (revert the hunk under the cursor).
   `revert-call` has no key; it is typed or picked from the palette.
+
+## Amendment — 2026-10-15: build step 4 as built (`mix geex.ledger list | forget | compact`)
+
+- **Compaction is a rewrite, not a cut.** Keeping a ledger's last N *lines* can strand an `undo`
+  whose command was cut, and replay would fail. `Geex.Ledger.Compact` instead writes the ledger from
+  the restored history: a `checkpoint` (the text before the last N commands, its blame, the next
+  group id), those N commands as `cmd` entries with their final actors, an entry restoring `synced`
+  (a `sync`, or an empty `group` with the disk text when edits were unsaved), and a `close`. Before
+  it replaces the file, the rewrite is replayed and must match the original's text, blame, synced
+  text, group counter and newest commands; it is written beside the file, fsynced and renamed over.
+  Lost on purpose: undo before the checkpoint, the redo stack, and the folded commands' own records.
+- **The checkpoint is a first-line entry,** in place of `open` (one anywhere else stops replay).
+  `Geex.History` gained `base_blame` (`from_checkpoint/4`), and `Blame.replay/3` starts from it, so
+  undo after a compaction keeps the checkpoint's credits instead of resetting them.
+- **The commands** (`lib/mix/tasks/geex.ledger.ex`): `list` shows each ledger's path (following
+  renames), entries, size, last change, and flags `open` (a live lock), `spooled N`, `orphan` (the
+  file is gone); `forget PATH --yes` deletes a ledger with its spool and set-aside copies (a dry run
+  without `--yes`); `compact PATH [--keep N]` defaults to 1000 kept commands. `PATH` may be a key
+  from `list`. `forget` and `compact` take the ledger's lock, so they are refused while a running
+  geex has the file open. `--dir` overrides the directory.
+- **A fix found by the `list` test:** renaming a buffer that hadn't yet written to its ledger in
+  this session moved the file without recording the rename, so the ledger kept naming the old
+  path. `Ledger.rename/3` now records the rename whenever the ledger file exists.
