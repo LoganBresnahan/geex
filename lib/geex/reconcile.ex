@@ -476,7 +476,10 @@ defmodule Geex.Reconcile do
   defp on_disk_change(path) do
     with {:ok, pid} <- BufferSupervisor.whereis(path),
          {:ok, disk_text} <- File.read(path) do
-      Buffer.disk_changed(pid, disk_text)
+      result = Buffer.disk_changed(pid, disk_text)
+      # A row in the edits pane, joined to its attestation by the hash (ADR-0034 §6).
+      if result == :behind, do: Geex.Edits.disk_changed(path, sha256(disk_text))
+      result
     else
       _ -> :ignored
     end

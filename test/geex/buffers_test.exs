@@ -105,6 +105,18 @@ defmodule Geex.BuffersTest do
     assert recent([a, b]) == [b]
   end
 
+  test "set_start/1: the directory named, or a file's; its git top level as the root", ctx do
+    nested = Path.join(ctx.dir, "sub")
+    File.mkdir_p!(nested)
+    assert %{dir: ^nested, root: ^nested} = Session.set_start(nested)
+    assert Session.start() == %{dir: nested, root: nested}
+
+    # inside this checkout: the root is its top level
+    me = Path.expand("../..", __DIR__)
+    assert %{dir: dir, root: ^me} = Session.set_start(Path.join(me, "lib/geex.ex"))
+    assert dir == Path.join(me, "lib")
+  end
+
   describe "the verbs" do
     test "`open PATH` keeps the path's case; `buffers`, `close`" do
       assert Verbs.parse("open lib/Geex/Foo.ex") == {:open, "lib/Geex/Foo.ex"}
@@ -112,6 +124,7 @@ defmodule Geex.BuffersTest do
       assert Verbs.parse("open") == :unknown
       assert Verbs.parse("buffers") == {:action, :buffers}
       assert Verbs.parse("close") == {:action, :close}
+      assert Verbs.parse("edits") == {:action, :toggle_edits}
       # not swallowed by the `open` rule
       assert Verbs.parse("line 3") == {:line, 3}
     end
@@ -121,6 +134,7 @@ defmodule Geex.BuffersTest do
       assert by_name["open"] == {:typed, "open"}
       assert by_name["buffers"] == {:action, :buffers}
       assert by_name["close"] == {:action, :close}
+      assert by_name["edits"] == {:action, :toggle_edits}
     end
   end
 end

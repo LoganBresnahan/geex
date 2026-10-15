@@ -69,6 +69,11 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, :close}
     },
     %Entry{
+      name: "edits",
+      description: "Show or hide the edits pane: who changed which file, and when (Alt+O).",
+      invoke: {:action, :toggle_edits}
+    },
+    %Entry{
       name: "fast-forward",
       description: "Take in the file's change on disk, merging your unsaved edits (Alt+L).",
       invoke: {:action, :fast_forward}

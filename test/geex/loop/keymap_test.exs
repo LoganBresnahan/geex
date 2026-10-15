@@ -211,8 +211,13 @@ defmodule Geex.Loop.KeymapTest do
     test "the retired ERTYUIOP letters and other unbound Alt letters are ignored" do
       assert :ignore = Keymap.resolve({:alt, ?t}, {0, 0}, "abc")
       assert :ignore = Keymap.resolve({:alt, ?y}, {0, 0}, "abc")
-      assert :ignore = Keymap.resolve({:alt, ?o}, {0, 0}, "abc")
+      assert :ignore = Keymap.resolve({:alt, ?k}, {0, 0}, "abc")
       assert :ignore = Keymap.resolve({:alt, ?j}, {0, 0}, "abc")
+    end
+
+    test "Alt+O moves to the next pane, Alt+L fast-forwards (ADR-0034)" do
+      assert :next_pane = Keymap.resolve({:alt, ?o}, {0, 0}, "abc")
+      assert :fast_forward = Keymap.resolve({:alt, ?l}, {0, 0}, "abc")
     end
   end
 

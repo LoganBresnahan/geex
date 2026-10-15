@@ -43,7 +43,9 @@ One Mix app, `:geex`, under `lib/geex/`:
 - **Projections** — `Geex.MCP.*` (Protocol is pure; HTTP is the loopback
   Bandit/Plug transport; tool categories: edits, `Operations`, `ViewActions`,
   `Grid`) — **frozen by ADR-0032**: keep it green, add no tools; and the TUI: `Geex.Loop` (+ `loop/`), `Screen`/`Cell`/`Renderer`,
-  `TerminalIO` (`:prim_tty`, no NIF), `Input.Parser`, `Minibuffer`.
+  `TerminalIO` (`:prim_tty`, no NIF), `Input.Parser`, `Minibuffer`, `Layout` (pure: where
+  the editor and the edits pane go), and `Geex.Edits` (the in-memory edits list behind the
+  edits pane, ADR-0034).
 - **Capabilities** — `Geex.Highlight.*` (reactor + tree-sitter-on-wasm via the
   sibling path dep `../tree_sitter_wasm`), `Geex.Theme`, `priv/grammars`,
   `priv/themes`.

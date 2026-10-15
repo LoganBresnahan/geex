@@ -41,6 +41,8 @@ defmodule Geex do
   def run(path \\ nil) do
     redirect_logs_to_file()
     {:ok, _} = Application.ensure_all_started(:geex)
+    # Where geex was started, for the edits pane's root and a relative `open` (ADR-0034 §5).
+    with [first | _] <- List.wrap(path), do: Geex.Session.set_start(first)
     open(path)
     Process.sleep(:infinity)
   end

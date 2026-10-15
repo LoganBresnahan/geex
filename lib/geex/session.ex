@@ -16,6 +16,10 @@ defmodule Geex.Session do
                       monitored, and dropped when it ends.
     * `:cursors`    — each inactive buffer's last cursor, restored when it is switched back
                       to (a buffer seen for the first time starts at the top).
+    * `:dir` / `:root` — the directory geex was started in (the one named, or the first
+                      file's) and its git top level, or `dir` itself outside a repository
+                      (ADR-0034 §5). The edits pane lists files under `root`; a relative `open`
+                      from a pathless buffer resolves from `dir`. `nil` until `set_start/1`.
 
   Dispatch lives in `Geex.Dispatch`. The per-buffer `Geex.Buffer` process owns the
   `EditorState` and the one undo history and applies commands via `Geex.Dispatch.run/1`;
@@ -132,10 +136,12 @@ defmodule Geex.Session do
 
   @doc """
   The open buffers that have been active, most recent first (the active one leads):
-  `[%{pid, path, dirty}]`, `path` `nil` for a scratch buffer (ADR-0034). A buffer that
+  `[%{pid, path, dirty, behind}]`, `path` `nil` for a scratch buffer (ADR-0034). A buffer that
   died is left out.
   """
-  @spec buffers() :: [%{pid: pid(), path: String.t() | nil, dirty: boolean()}]
+  @spec buffers() :: [
+          %{pid: pid(), path: String.t() | nil, dirty: boolean(), behind: map() | nil}
+        ]
   def buffers, do: GenServer.call(__MODULE__, :buffers)
 
   @doc """
@@ -147,6 +153,22 @@ defmodule Geex.Session do
   """
   @spec close_active() :: {:ok, String.t()} | {:error, :dirty | :no_active_buffer}
   def close_active, do: GenServer.call(__MODULE__, :close_active)
+
+  @doc """
+  Record where geex was started (ADR-0034 §5): `path` is the directory named, or a file (its
+  directory is used). Sets `dir`, and `root` = `git -C dir rev-parse --show-toplevel`, or `dir`
+  outside a repository. Returns `%{dir, root}`.
+  """
+  @spec set_start(String.t()) :: %{dir: String.t(), root: String.t()}
+  def set_start(path) when is_binary(path) do
+    full = Path.expand(path)
+    dir = if File.dir?(full), do: full, else: Path.dirname(full)
+    GenServer.call(__MODULE__, {:set_start, %{dir: dir, root: git_root(dir) || dir}})
+  end
+
+  @doc "Where geex was started: `%{dir, root}`, each `nil` before `set_start/1`."
+  @spec start() :: %{dir: String.t() | nil, root: String.t() | nil}
+  def start, do: GenServer.call(__MODULE__, :start)
 
   @doc "The active buffer pid, or `:error` if none is active."
   @spec active_buffer() :: {:ok, pid()} | :error
@@ -188,7 +210,9 @@ defmodule Geex.Session do
       layout: nil,
       subscribers: %{},
       recent: [],
-      cursors: %{}
+      cursors: %{},
+      dir: nil,
+      root: nil
     }
 
     {:ok, state}
@@ -312,6 +336,11 @@ defmodule Geex.Session do
         {:reply, {:error, :no_such_buffer}, state}
     end
   end
+
+  def handle_call({:set_start, %{dir: dir, root: root} = start}, _from, state),
+    do: {:reply, start, %{state | dir: dir, root: root}}
+
+  def handle_call(:start, _from, state), do: {:reply, %{dir: state.dir, root: state.root}, state}
 
   def handle_call(:buffers, _from, state) do
     listed =
@@ -512,12 +541,28 @@ defmodule Geex.Session do
     pid
   end
 
-  # The path and dirty flag, or `nil` for a buffer that died.
+  # The path, dirty flag and behind mark, or `nil` for a buffer that died.
   defp safe_status(pid) do
-    snapshot = Buffer.snapshot(pid)
-    %{path: snapshot.path, dirty: snapshot.dirty}
+    Buffer.status(pid)
   catch
     :exit, _ -> nil
+  end
+
+  # The git work tree's top level, or nil (not a repository, or no git). Git's stderr is
+  # dropped: in the TUI the terminal belongs to the renderer.
+  defp git_root(dir) do
+    case System.find_executable("git") do
+      nil ->
+        nil
+
+      git ->
+        script = ~s|exec "$0" -C "$1" rev-parse --show-toplevel 2>/dev/null|
+
+        case System.cmd("sh", ["-c", script, git, dir]) do
+          {out, 0} -> String.trim(out)
+          _ -> nil
+        end
+    end
   end
 
   # Unregister-then-terminate, tolerant of two edge cases a *serialized* Session must not

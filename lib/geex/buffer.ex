@@ -222,6 +222,17 @@ defmodule Geex.Buffer do
   @spec snapshot(GenServer.server()) :: map()
   def snapshot(server), do: GenServer.call(server, :snapshot)
 
+  @doc """
+  The cheap status: `%{path, dirty, behind}`, without the text or history `snapshot/1` builds.
+  For lists drawn on every repaint (the buffer picker, the edits pane, ADR-0034).
+  """
+  @spec status(GenServer.server()) :: %{
+          path: String.t() | nil,
+          dirty: boolean(),
+          behind: map() | nil
+        }
+  def status(server), do: GenServer.call(server, :status)
+
   @doc "Current buffer text."
   @spec get_text(GenServer.server()) :: String.t()
   def get_text(server), do: GenServer.call(server, :get_text)
@@ -417,6 +428,9 @@ defmodule Geex.Buffer do
   end
 
   def handle_call(:snapshot, _from, state), do: {:reply, build_snapshot(state), state}
+
+  def handle_call(:status, _from, state),
+    do: {:reply, %{path: state.path, dirty: state.history.dirty, behind: state.behind}, state}
 
   def handle_call(:get_text, _from, state), do: {:reply, History.text(state.history), state}
 

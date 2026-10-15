@@ -1789,3 +1789,45 @@ loaded full-suite run fired the timer before the "nothing read yet" check (a pre
 **Not tested:** the loop's picker and the submit order (no automated test drives the loop process; only
 the dogfood above); per-buffer scroll (live only, no tall file); `Geex.run/1` with a directory (reasoned:
 it opens a scratch buffer); many open buffers (the picker shows 8 rows and scrolls, as the palette does).
+
+### 2026-10-15 — The edits pane, build step 3 (ADR-0034)
+
+`Geex.Edits`: an in-memory list (500 rows) of agent writes (every attestation the intake gets, open
+file or not), disk changes to open files (when the watcher marks a buffer behind) and your saves. A
+change and its attestation are one row, joined by `{path, sha256}`. `Geex.Layout` puts the pane under
+the editor. "Disk is newer" rows are read from `Geex.Buffer.status/1` at each repaint. `Alt+O` moves in
+and out, the `edits` verb shows or hides it. The root (`Geex.Session.set_start/1`, the git top level of
+the first path given) scopes the pane, and is the base for a relative `open` from a pathless buffer.
+That fixes the coordinator's step-2 finding (`geex DIR` then `open a.txt` opened `~/geex/a.txt`).
+
+**Live-verified** (geex TUI in a tmux pty, 90×24, scratch `XDG_STATE_HOME`; the live hook attesting this
+session's native `Edit` calls):
+- `Geex.run([a.txt, b.txt])`: the pane showed `no edits yet` under the editor.
+- An `Edit` of `b.txt` (open, not shown) and a `printf` over `a.txt` (shown): the pane listed `a.txt
+  disk is newer`, `b.txt disk is newer`, `a.txt outside`, `b.txt claude-code/d25a8b6d`, all `16:05`
+  (local time); the status line said `behind disk (Alt+L)`.
+- `Alt+O` (title switched to `Enter opens · Esc back`), Down, Enter on `b.txt disk is newer`: `b.txt`
+  shown, fast-forwarded, `caught up with the disk (claude-code/d25a8b6d)`, `▌` on line 2, its pinned
+  row gone, focus back in the editor.
+- Enter on the agent's `b.txt` row put the cursor on the line that write changed (`2:1`). Typing and
+  `Ctrl-O` added `b.txt you`. The `edits` verb hid the pane; `Alt+O` then said `no other pane: the
+  edits pane is hidden`.
+- After a restart with `Geex.run(multi/)`: `open a.txt` opened `multi/a.txt`, with no stray
+  `~/geex/a.txt`. An `Edit` of `b.txt` while it wasn't open listed `b.txt claude-code/d25a8b6d`, and an
+  `Edit` of a file outside the root wasn't listed. Enter on the `b.txt` row opened it.
+- One adjustment from the run: the highlight kept its old position when re-entering the pane; `Alt+O`
+  now starts at the newest entry.
+- `/tmp/geex.log` had no warnings; nothing new in the real `~/.local/state/geex/ledger`.
+
+**Automated:** `edits_test` (8 + `Geex.Layout` and `Geex.Loop.EditsPane` doctests): rows newest first
+with a notification; a disk change an attestation explains adds nothing; an outside row becomes the
+agent's, and a repeat adds nothing; another change to the same file is its own row; the bound; the
+pane's entries (pinned first, root-scoped, everything without a root); rows scroll to the selection
+and cut long names; the layout drops the band in a short terminal. `buffers_test` +1
+(`set_start/1`: a named directory, a file's directory, this checkout's top level) and the `edits` verb
+and palette entry; `keymap_test`: `Alt+O` is `:next_pane` now (no longer an ignored letter).
+**865 tests + 27 doctests**, green twice, `--warnings-as-errors` clean.
+
+**Not tested:** the pane's drawing and its keys (no automated test drives the loop process; only the
+run above); the scroll of a list longer than the pane; a resize below 12 rows with the pane focused
+(reasoned: keys and the hardware cursor go back to the editor while the pane is gone).

@@ -117,6 +117,9 @@ defmodule Geex.Loop.Keymap do
   # Fast-forward (ADR-0034 §1): take in the file's change on disk, which an open buffer holds
   # until you ask. Merges with your unsaved edits.
   def resolve({:alt, c}, _cursor, _text) when c in [?l, ?L], do: :fast_forward
+  # Next pane (ADR-0034 §7): the editor and the edits pane. Alt+Shift+O can't arrive: it sends
+  # `ESC O`, an SS3 prefix.
+  def resolve({:alt, c}, _cursor, _text) when c in [?o, ?O], do: :next_pane
   # Selection (ADR-0029): Alt+H starts a selection at the cursor (motion then extends it),
   # Alt+B selects the whole buffer ("highlight all"), Alt+N / Esc clear. The loop owns the
   # live selection.

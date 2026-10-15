@@ -1,7 +1,8 @@
 # ADR-0034: Panes, the file tree, the edits pane, and holding open buffers
 
 - **Status:** Accepted 2026-10-15 (open decisions A, F–K taken as recommended). Build steps 1 (the
-  hold) and 2 (more than one buffer) built 2026-10-15; steps 3–5 not yet.
+  hold), 2 (more than one buffer) and 3 (the edits pane, with the layout and `Alt+O`) built
+  2026-10-15; steps 4–5 not yet.
   Rewritten the same day after the maintainer's redirect: the first draft's follow pane is dropped.
 - **Date:** 2026-10-15
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell; it deferred tabs and
@@ -244,6 +245,25 @@ the hold.
   buffer). The scratch buffer is now supervised (`BufferSupervisor.start_scratch/0`).
 - **Found while dogfooding:** a typed verb's submit closed the minibuffer *after* running the
   action, so `buffers` opened its picker and closed it at once. Submits now close first.
+
+### Built: step 3, the edits pane (2026-10-15)
+
+- `Geex.Edits` (always on, in memory, 500 rows) gets attestations from the intake
+  (`Geex.Attest.submit/1`, open file or not), disk changes from the watcher (when a buffer goes
+  behind) and your saves (`Ctrl-O`). A change and its attestation are one row, joined by
+  `{path, sha256}` in either order.
+- `Geex.Layout` (pure) puts the edits pane in a band under the editor: a title row and up to 8
+  rows. It is shown at start from 20 rows and dropped below 12. The editor renders as if the
+  terminal ended at its own rectangle, so the frame code is unchanged. The "disk is newer" rows
+  come from the buffers' cheap status (`Geex.Buffer.status/1`) at each repaint, not from storage.
+- **The root** (`Geex.Session.set_start/1`, from the first path given to `Geex.run/1`) filters
+  the pane to files under the git top level. It also fixes a step-2 bug the coordinator found:
+  a relative `open` from a pathless buffer resolved against geex's own checkout. It now uses the
+  directory geex was started in. Buffer-picker rows show paths relative to the root.
+- `Alt+O` moves into the pane (highlighting the newest entry) and back. In the pane, arrows or
+  `Alt+W`/`Alt+S` move, Enter acts, and Esc goes back. The minibuffer, the palette and quit still
+  work; other keys do nothing. The `edits` verb shows and hides it.
+- **Not built:** the tree's left column and its 100-column rule (step 4).
 
 ## Consequences
 

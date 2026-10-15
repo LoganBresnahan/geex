@@ -42,7 +42,9 @@ defmodule Geex.Loop do
     Command,
     Coord,
     Dispatch,
+    Edits,
     Fuzzy,
+    Layout,
     Minibuffer,
     Reconcile,
     Renderer,
@@ -59,7 +61,7 @@ defmodule Geex.Loop do
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
-  alias Geex.Loop.{Keymap, Verbs}
+  alias Geex.Loop.{EditsPane, Keymap, Verbs}
   alias Geex.MCP.ViewActions
 
   # Rows of context kept between the cursor and the top/bottom of the viewport
@@ -216,6 +218,7 @@ defmodule Geex.Loop do
   def init(_opts) do
     TerminalIO.subscribe()
     active = Session.subscribe()
+    safe_subscribe_edits()
     {w, h} = safe_window_size()
 
     state =
@@ -239,7 +242,12 @@ defmodule Geex.Loop do
         # Ctrl-O again, saves anyway (ADR-0034 §3).
         save_armed: false,
         # Each buffer's last `{scroll, hscroll}`, restored when it is shown again (ADR-0034).
-        scrolls: %{}
+        scrolls: %{},
+        # The edits pane (ADR-0034 §6): shown at start when the terminal has 20 rows; `edits`
+        # toggles it. `focus` is where keys go (`Alt+O`); `edits_sel` its highlighted entry.
+        edits_shown: h >= 20,
+        focus: :editor,
+        edits_sel: 0
       }
       |> attach(active)
 
@@ -268,6 +276,10 @@ defmodule Geex.Loop do
 
   # The file changed on disk, or caught up (ADR-0034): the status line says "behind disk".
   def handle_info({:geex_buffer_behind, buffer, _behind}, %{buffer: buffer} = state),
+    do: {:noreply, schedule_repaint(state)}
+
+  # The edits list changed: an agent wrote, a file changed on disk, you saved (ADR-0034 §6).
+  def handle_info({:geex_edits, :changed}, %{edits_shown: true} = state),
     do: {:noreply, schedule_repaint(state)}
 
   def handle_info({:geex_highlights, buffer, _v}, %{buffer: buffer} = state),
@@ -309,13 +321,16 @@ defmodule Geex.Loop do
     state = if state.notice, do: schedule_repaint(%{state | notice: nil}), else: state
     state = %{state | save_armed: state.save_armed and event in [{:ctrl, ?o}, {:ctrl, ?O}]}
 
-    if Minibuffer.active?(state.minibuffer) do
-      {:noreply, apply_minibuffer_key(event, state)}
-    else
-      case safe_session_snapshot() do
-        {:ok, %{text: text, cursor: cursor}} -> {:noreply, apply_key(event, cursor, text, state)}
-        _ -> {:noreply, state}
-      end
+    cond do
+      Minibuffer.active?(state.minibuffer) ->
+        {:noreply, apply_minibuffer_key(event, state)}
+
+      # The pane can have gone (hidden by a resize); then the keys are the editor's again.
+      state.focus == :edits and edits_visible?(state) ->
+        {:noreply, apply_edits_key(event, state)}
+
+      true ->
+        {:noreply, apply_editor_key(event, state)}
     end
   end
 
@@ -331,6 +346,15 @@ defmodule Geex.Loop do
   def handle_info(_msg, state), do: {:noreply, state}
 
   ## Internals
+
+  # A key for the editor: resolve it against the current text + cursor (read fresh from
+  # Session).
+  defp apply_editor_key(event, state) do
+    case safe_session_snapshot() do
+      {:ok, %{text: text, cursor: cursor}} -> apply_key(event, cursor, text, state)
+      _ -> state
+    end
+  end
 
   # Post exactly one :repaint for a burst of dirtying events.
   defp schedule_repaint(%{repaint?: true} = state), do: state
@@ -412,7 +436,11 @@ defmodule Geex.Loop do
         # ruler; the text frame is painted at the reduced height and shifted down by `top`.
         grid? = grid_mode?(state)
         top = if grid?, do: 1, else: 0
-        h_text = max(text_height(state.h) - top, 0)
+        # The editor draws above the edits pane (ADR-0034 §4): it renders as if the terminal
+        # ended one row below its own rectangle, where its status line would be.
+        layout = Layout.resolve(state.w, state.h, %{edits: state.edits_shown})
+        est = %{state | h: layout.editor.h + 1}
+        h_text = max(text_height(est.h) - top, 0)
         # Reserve the rightmost column for a vertical scroll bar when the buffer overflows
         # the viewport; the text then renders into a one-column-narrower area.
         total = line_count(text)
@@ -456,12 +484,15 @@ defmodule Geex.Loop do
           |> Screen.translate_y(top)
           |> draw_ruler(grid?, gw, text_w, hscroll, state.theme)
           |> draw_grid_lines(grid?, gw, text_w, h_text, top, hscroll, state.theme)
-          |> draw_hbar(state, gw, text_w, content_w, hscroll)
+          |> draw_hbar(est, gw, text_w, content_w, hscroll)
+          |> draw_edits_pane(layout.edits, state)
 
         target =
-          case cursor_target(state.w, h_text, cx, cy) do
-            {x, y} -> {x, y + top}
-            :hidden -> :hidden
+          case {state.focus == :edits and layout.edits != nil,
+                cursor_target(state.w, h_text, cx, cy)} do
+            {true, _} -> :hidden
+            {_, {x, y}} -> {x, y + top}
+            {_, :hidden} -> :hidden
           end
 
         {screen, cursor} = draw_bottom(screen, state, snap, target)
@@ -551,6 +582,158 @@ defmodule Geex.Loop do
 
   defp draw_palette(screen, _state), do: screen
 
+  # The edits pane (ADR-0034 §6): a title row, then the entries, the highlighted one tinted
+  # while the pane has focus. `nil` when it isn't shown.
+  defp draw_edits_pane(screen, nil, _state), do: screen
+
+  defp draw_edits_pane(
+         screen,
+         %Geex.Rect{y: y, w: w, h: h},
+         %{theme: %Theme{palette: pal}} = state
+       ) do
+    focused? = state.focus == :edits
+    entries = edits_entries()
+    hint = if focused?, do: " Enter opens · Esc back ", else: " Alt+O "
+    title = "── edits " <> String.duplicate("─", max(w - 9 - String.length(hint), 0)) <> hint
+
+    screen =
+      screen
+      |> Screen.fill_rect(0, y, w, h, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
+      |> Screen.draw_text(0, y, palette_clip(title, w), %Cell{fg: pal.line_number, bg: pal.bg})
+
+    if entries == [] do
+      Screen.draw_text(screen, 2, y + 1, palette_clip("no edits yet", w - 2), %Cell{
+        fg: pal.line_number,
+        bg: pal.bg
+      })
+    else
+      sel = min(state.edits_sel, length(entries) - 1)
+
+      entries
+      |> EditsPane.lines(safe_start().root, w, h - 1, sel, focused?)
+      |> Enum.with_index(y + 1)
+      |> Enum.reduce(screen, fn {{text, entry, selected?}, row}, acc ->
+        bg = if selected? and focused?, do: pal.active_line_bg, else: pal.bg
+        fg = if entry.kind == :behind, do: pal.cursor, else: pal.fg
+
+        acc
+        |> Screen.fill_rect(0, row, w, 1, %Cell{char: " ", fg: fg, bg: bg})
+        |> Screen.draw_text(0, row, palette_clip(text, w), %Cell{fg: fg, bg: bg})
+      end)
+    end
+  end
+
+  defp edits_entries do
+    EditsPane.entries(Session.buffers(), safe_edits_rows(), safe_start().root)
+  catch
+    :exit, _ -> []
+  end
+
+  defp edits_visible?(state),
+    do: Layout.resolve(state.w, state.h, %{edits: state.edits_shown}).edits != nil
+
+  # Alt+O: to the edits pane and back (the only other pane until the file tree).
+  defp next_pane(%{focus: :edits} = state), do: %{state | focus: :editor}
+
+  defp next_pane(state) do
+    # Entering the pane starts at the top: the newest entry.
+    if edits_visible?(state),
+      do: %{state | focus: :edits, edits_sel: 0},
+      else: %{state | notice: "no other pane: the edits pane is hidden (`edits` shows it)"}
+  end
+
+  # Keys while the edits pane has focus: move, Enter, back to the editor. The minibuffer, the
+  # palette and quitting work from here too; other keys do nothing (they'd edit a buffer you
+  # aren't looking at).
+  defp apply_edits_key(event, state) do
+    count = length(edits_entries())
+
+    case event do
+      e when e in [{:key, :up}, {:alt, ?w}, {:alt, ?W}] ->
+        schedule_repaint(%{state | edits_sel: max(min(state.edits_sel, count - 1) - 1, 0)})
+
+      e when e in [{:key, :down}, {:alt, ?s}, {:alt, ?S}] ->
+        schedule_repaint(%{state | edits_sel: min(state.edits_sel + 1, max(count - 1, 0))})
+
+      {:key, :enter} ->
+        case Enum.at(edits_entries(), min(state.edits_sel, count - 1)) do
+          nil -> state
+          entry -> schedule_repaint(open_entry(entry, %{state | focus: :editor}))
+        end
+
+      e when e in [{:key, :esc}, {:alt, ?o}, {:alt, ?O}] ->
+        schedule_repaint(%{state | focus: :editor})
+
+      _ ->
+        case Keymap.resolve(event, {0, 0}, "") do
+          action when action in [:minibuffer, :palette, :quit] ->
+            apply_action(action, {0, 0}, "", state)
+
+          _ ->
+            state
+        end
+    end
+  end
+
+  # Enter on an entry: a "disk is newer" row opens the file and fast-forwards it; any other row
+  # opens the file, at the first line that write changed when its group is in the history.
+  defp open_entry(%{kind: :behind, path: path}, state) do
+    case Session.open_file(path) do
+      {:ok, _pid} -> do_fast_forward(state)
+      {:error, reason} -> %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
+    end
+  end
+
+  defp open_entry(%{kind: :edit, path: path, row: row}, state) do
+    case Session.open_file(path) do
+      {:ok, pid} ->
+        if line = row.tool_use && first_line_of(pid, row.tool_use), do: set_cursor({line, 0})
+        state
+
+      {:error, reason} ->
+        %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
+    end
+  end
+
+  # The first line still credited to the group that tool call's write landed in.
+  defp first_line_of(pid, tool_use) do
+    snap = Buffer.snapshot(pid)
+
+    group =
+      Enum.find_value(snap.history, fn %{meta: meta} ->
+        with %{group: group} = stamp <- meta.reconcile,
+             true <-
+               match?({:agent, %{tool_use: ^tool_use}}, meta.actor) or
+                 tool_use in Map.get(stamp, :chain, []) do
+          group
+        else
+          _ -> nil
+        end
+      end)
+
+    group && Enum.find_index(snap.blame, &match?({_actor, ^group}, &1))
+  catch
+    :exit, _ -> nil
+  end
+
+  defp safe_edits_rows do
+    Edits.rows()
+  catch
+    :exit, _ -> []
+  end
+
+  defp safe_subscribe_edits do
+    Edits.subscribe(self())
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp safe_start do
+    Session.start()
+  catch
+    :exit, _ -> %{dir: nil, root: nil}
+  end
+
   # What the popup lists: the command catalog, or the open buffers (ADR-0034), filtered by the
   # input. Draw, Enter and the highlight moves all read it, so they agree on what is where.
   defp candidates(%Minibuffer{mode: :palette} = mb), do: Catalog.search(Minibuffer.value(mb))
@@ -563,7 +746,7 @@ defmodule Geex.Loop do
       for %{pid: pid, path: path, dirty: dirty} <- Session.buffers() do
         %{
           name: status_label(path) <> if(dirty, do: " [+]", else: ""),
-          description: if(path, do: home_relative(path), else: ""),
+          description: if(path, do: EditsPane.relative(path, safe_start().root), else: ""),
           invoke: {:buffer, pid}
         }
       end
@@ -579,14 +762,6 @@ defmodule Geex.Loop do
         |> Enum.sort_by(fn {_row, score} -> -score end)
         |> Enum.map(fn {row, _score} -> row end)
     end
-  end
-
-  defp home_relative(path) do
-    home = System.user_home!()
-
-    if String.starts_with?(path, home <> "/"),
-      do: "~/" <> Path.relative_to(path, home),
-      else: path
   end
 
   # Commands line up at a fixed column; buffer names at the longest one, up to half the width.
@@ -992,6 +1167,18 @@ defmodule Geex.Loop do
       :fast_forward ->
         schedule_repaint(do_fast_forward(state))
 
+      :next_pane ->
+        schedule_repaint(next_pane(state))
+
+      :toggle_edits ->
+        shown = not state.edits_shown
+
+        schedule_repaint(%{
+          state
+          | edits_shown: shown,
+            focus: if(shown, do: state.focus, else: :editor)
+        })
+
       :buffers ->
         # The open buffers in the palette's popup, the previous one highlighted (ADR-0034).
         mb = Minibuffer.open(:buffers)
@@ -1016,6 +1203,10 @@ defmodule Geex.Loop do
   defp do_save(state) do
     state =
       case on_active_buffer(&Reconcile.save(&1, force: state.save_armed)) do
+        {:ok, path} ->
+          Edits.saved(path)
+          %{state | save_armed: false}
+
         {:markers, line} ->
           %{
             state
@@ -1051,10 +1242,12 @@ defmodule Geex.Loop do
   defp resolve_path("~" <> _ = path), do: Path.expand(path)
 
   defp resolve_path(path) do
+    # The current file's directory; for a pathless buffer, where geex was started (never the
+    # working directory, which is geex's own checkout).
     base =
       case safe_session_snapshot() do
         {:ok, %{path: current}} when is_binary(current) -> Path.dirname(current)
-        _ -> File.cwd!()
+        _ -> safe_start().dir || File.cwd!()
       end
 
     Path.expand(path, base)
@@ -1513,7 +1706,7 @@ defmodule Geex.Loop do
   # :quit must work with no buffer open (you can always type `quit`); the rest no-op.
   defp apply_verb(:quit, state), do: apply_action(:quit, {0, 0}, "", state)
   # Switching and closing buffers need no text either (and work with none active).
-  defp apply_verb(action, state) when action in [:buffers, :close],
+  defp apply_verb(action, state) when action in [:buffers, :close, :toggle_edits, :next_pane],
     do: apply_action(action, {0, 0}, "", state)
 
   defp apply_verb(action, state) do

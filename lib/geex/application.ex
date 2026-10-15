@@ -26,7 +26,9 @@ defmodule Geex.Application do
           # Per-buffer highlight reactors (ADR-0022) are started on demand under
           # this supervisor; cheap when empty, always present.
           Geex.Highlight.ReactorSupervisor,
-          Geex.Session
+          Geex.Session,
+          # The edits list behind the edits pane (ADR-0034 §6): in memory, bounded, always on.
+          Geex.Edits
         ] ++
         loop_child() ++
         reconcile_child() ++

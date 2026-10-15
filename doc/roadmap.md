@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-15):** 855 tests + 23 doctests green, `--warnings-as-errors` clean. Since the
+**Current (2026-10-15):** 865 tests + 27 doctests green, `--warnings-as-errors` clean. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -189,7 +189,8 @@ The ledger track, in order (each builds on the one before):
    fast-forward, the git merge and save-while-behind — **built 2026-10-15**; (2) more than one
    buffer (`open`, `buffers`, `close`, a cursor and scroll per buffer) — **built 2026-10-15**;
    (3) `Geex.Layout`, panes and `Alt+O` (moved here from step 2: their first consumer) with the
-   edits pane; (4) the file tree; (5) `user_modified` ("edited by you"). The follow pane in the first draft was dropped.
+   edits pane — **built 2026-10-15**; (4) the file tree; (5) `user_modified` ("edited by
+   you"). The follow pane in the first draft was dropped.
 
 Exit criteria: with captAInHook installed and the payload registered, an agent session
 (Claude Code first) edits a file open in geex with its **native** tools; each change appears

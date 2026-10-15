@@ -80,6 +80,9 @@ defmodule Geex.Attest do
   """
   @spec submit(t()) :: :attested | :held | :ignored | :not_open
   def submit(%{path: path} = attestation) do
+    # Every agent write is a row in the edits pane, open file or not (ADR-0034 §6).
+    Geex.Edits.attested(attestation)
+
     case BufferSupervisor.whereis(Path.expand(path)) do
       {:ok, pid} -> pid |> Buffer.attest(attestation) |> log(attestation)
       _ -> :not_open
