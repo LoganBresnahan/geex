@@ -1831,3 +1831,42 @@ and palette entry; `keymap_test`: `Alt+O` is `:next_pane` now (no longer an igno
 **Not tested:** the pane's drawing and its keys (no automated test drives the loop process; only the
 run above); the scroll of a list longer than the pane; a resize below 12 rows with the pane focused
 (reasoned: keys and the hardware cursor go back to the editor while the pane is gone).
+
+### 2026-10-15 — The file tree, build step 4 (ADR-0034)
+
+`Geex.Tree`: the root's files from `git ls-files --cached --others --exclude-standard` (less those
+deleted from disk), or a walk outside a repository (dot-directories and symlinks skipped), at most
+10,000; `rows/2` turns them and the opened directories into rows. `Geex.Layout` gains the left column
+(a quarter of the width, 20–36 columns, none below 60; shown at start from 100 columns), the editor
+renders at its own width and moves over (`Geex.Screen.translate_x/2`), and `Alt+O` cycles tree ·
+editor · edits. `tree` toggles it. Also fixed: `Geex.Attest.Discovery`'s start-up sweep logged an
+"unexpected message" error for each `kill -0` port's exit when stale discovery files existed
+(pre-existing; surfaced in this run's log). And a step-3 crash found by the coordinator's live test
+of `8e041a6`: `Alt+M` / `Alt+P` with the edits pane focused hit `apply_action/4`, which has no clause
+for the openers (`CaseClauseError`); the loop restarted, losing focus, scrolls and the selection.
+The tree pane had copied the pattern. Both panels now share one helper (`panel_chord/2`) that opens
+them as the editor's keys do.
+
+**Live-verified** (geex TUI in a tmux pty, 120×30, scratch `XDG_STATE_HOME`, `Geex.run("~/geex/mix.exs")`,
+navigation only): the tree listed `.claude/ config/ doc/ integrations/ lib/ presets/ priv/ test/` then
+`.gitignore CLAUDE.md mix.exs mix.lock` (what git tracks), a `│` divider, the editor beside it with its
+scroll bar at the right edge, and the edits pane under the editor only. `Alt+O` twice went editor →
+edits → tree (title showed `Enter`); Down ×4 and Enter opened `lib/` (`▾ lib/` with `geex/`, `mix/`,
+`geex.ex`); Down ×3 and Enter opened `lib/geex.ex` in the editor, focus back there. `tree` hid it (the
+editor took the full width); `Alt+O` ×2 then went editor → edits → editor; `tree` again showed it with
+`lib/` still open. Nothing was typed or saved. The log's one error line was the Discovery one above
+(every geex logs to the same `/tmp/geex.log`; the coordinator's live geex was running alongside).
+
+**Automated:** `tree_test` (6 + a doctest): the walk skips dot-directories; in a real `git init` work
+tree, tracked + untracked, not ignored, not deleted; rows (directories first, an open directory under a
+closed one stays hidden); the layout's column bounds; `Screen.translate_x/2`; the `tree` verb and palette
+entry. `attest_test`'s sweep test now captures the log and refutes "unexpected message" (fails without
+the fix). `loop/panes_test` (6), the first tests that drive the loop's `handle_info/2` (from a state
+built by the new `Geex.Loop.new_state/2`, no terminal): `Alt+M` / `Alt+P` open the minibuffer and the
+palette from the edits pane and from the tree (with the old routing put back, 2 fail with the
+coordinator's `CaseClauseError`); other keys don't reach a buffer, Esc goes back; `Alt+O` cycles
+editor → edits → tree → editor; Enter opens a directory. **877 tests + 28 doctests**, green twice,
+`--warnings-as-errors` clean.
+
+**Not tested:** the tree's drawing and keys beyond the run above (Right/Left, a list longer than the
+pane); a repository with 10,000+ files (the cap is unit-reasoned, not measured); the walk's cap.

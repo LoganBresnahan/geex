@@ -289,9 +289,16 @@ defmodule Geex.AttestTest do
           do:
             File.write!(Path.join(dir, name <> ".json"), JSON.encode!(%{"v" => 1, "pid" => pid}))
 
-      start_supervised!({Discovery, url: "http://127.0.0.1:1/attest", dir: dir})
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          start_supervised!({Discovery, url: "http://127.0.0.1:1/attest", dir: dir})
+          # the sweep's `kill -0` ports have closed; their exits are handled, not logged
+          :sys.get_state(Discovery)
+        end)
+
       refute File.exists?(Path.join(dir, "dead.json"))
       assert File.exists?(Path.join(dir, "live.json"))
+      refute log =~ "unexpected message"
     end
 
     test "the discovery file is removed on a clean stop", %{dir: dir} do

@@ -1,8 +1,8 @@
 # ADR-0034: Panes, the file tree, the edits pane, and holding open buffers
 
 - **Status:** Accepted 2026-10-15 (open decisions A, F–K taken as recommended). Build steps 1 (the
-  hold), 2 (more than one buffer) and 3 (the edits pane, with the layout and `Alt+O`) built
-  2026-10-15; steps 4–5 not yet.
+  hold), 2 (more than one buffer), 3 (the edits pane, with the layout and `Alt+O`) and 4 (the
+  file tree) built 2026-10-15; step 5 not yet.
   Rewritten the same day after the maintainer's redirect: the first draft's follow pane is dropped.
 - **Date:** 2026-10-15
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell; it deferred tabs and
@@ -264,6 +264,29 @@ the hold.
   `Alt+W`/`Alt+S` move, Enter acts, and Esc goes back. The minibuffer, the palette and quit still
   work; other keys do nothing. The `edits` verb shows and hides it.
 - **Not built:** the tree's left column and its 100-column rule (step 4).
+
+### Built: step 4, the file tree (2026-10-15)
+
+- `Geex.Tree.list/1`: `git ls-files --cached --others --exclude-standard` under the root (less
+  files deleted from disk), or a walk that skips dot-directories and symlinks outside a
+  repository; at most 10,000 files. `Geex.Tree.rows/2` (pure): directories first, alphabetical,
+  the open ones expanded. Git-tracked dot-directories (`.claude/`) are listed: it is what git
+  says.
+- `Geex.Layout` gains the left column: a quarter of the width, 20 to 36 columns, none below 60.
+  It is shown at start from 100 columns once the root is known, and `tree` toggles it. The editor
+  renders at its own width and moves right (`Geex.Screen.translate_x/2`). The edits pane sits
+  under the editor, beside the tree.
+- `Alt+O` cycles the panes on screen: tree · editor · edits. In the tree, arrows or `Alt+W`/`Alt+S`
+  move; Enter opens a file (focus goes back to the editor) or opens/closes a directory;
+  Right/Left open/close one; Esc goes back. The files are re-read when the tree is shown or
+  takes focus.
+- **Fixed from step 3** (the coordinator's live test of `8e041a6`): `Alt+M` or `Alt+P` with the
+  edits pane focused crashed `Geex.Loop` (no `apply_action/4` clause for the openers). The
+  supervisor restarted it, so focus, scrolls and the selection were lost and the next keys went
+  to the buffer. Both panels now open them through the editor's own branches.
+- **Also fixed:** `Geex.Attest.Discovery` traps exits, so its start-up sweep's `kill -0` ports
+  each sent it an `EXIT` with no matching clause, logged as an error whenever stale discovery
+  files existed. That predates ADR-0034; it surfaced in this step's dogfood log.
 
 ## Consequences
 

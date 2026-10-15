@@ -45,6 +45,7 @@ defmodule Geex.Loop do
     Edits,
     Fuzzy,
     Layout,
+    Tree,
     Minibuffer,
     Reconcile,
     Renderer,
@@ -220,38 +221,44 @@ defmodule Geex.Loop do
     active = Session.subscribe()
     safe_subscribe_edits()
     {w, h} = safe_window_size()
+    {:ok, schedule_repaint(new_state(w, h) |> attach(active))}
+  end
 
-    state =
-      %{
-        w: w,
-        h: h,
-        scroll: 0,
-        hscroll: 0,
-        goal: 0,
-        selection: nil,
-        theme: Theme.default(),
-        buffer: nil,
-        buffer_ref: nil,
-        reactor: nil,
-        repaint?: false,
-        minibuffer: Minibuffer.new(),
-        # A one-line message from the buffer (`{:geex_buffer_notice, …}`, e.g. a reconcile
-        # conflict, ADR-0032), shown on the status line until the next key.
-        notice: nil,
-        # Ctrl-O was just refused over a leftover conflict block: the next key, if it is
-        # Ctrl-O again, saves anyway (ADR-0034 §3).
-        save_armed: false,
-        # Each buffer's last `{scroll, hscroll}`, restored when it is shown again (ADR-0034).
-        scrolls: %{},
-        # The edits pane (ADR-0034 §6): shown at start when the terminal has 20 rows; `edits`
-        # toggles it. `focus` is where keys go (`Alt+O`); `edits_sel` its highlighted entry.
-        edits_shown: h >= 20,
-        focus: :editor,
-        edits_sel: 0
-      }
-      |> attach(active)
-
-    {:ok, schedule_repaint(state)}
+  @doc false
+  # The loop's state for a `w` × `h` terminal, attached to no buffer. Public so a test can
+  # drive `handle_info/2` without a terminal.
+  def new_state(w, h) do
+    %{
+      w: w,
+      h: h,
+      scroll: 0,
+      hscroll: 0,
+      goal: 0,
+      selection: nil,
+      theme: Theme.default(),
+      buffer: nil,
+      buffer_ref: nil,
+      reactor: nil,
+      repaint?: false,
+      minibuffer: Minibuffer.new(),
+      # A one-line message from the buffer (`{:geex_buffer_notice, …}`, e.g. a reconcile
+      # conflict, ADR-0032), shown on the status line until the next key.
+      notice: nil,
+      # Ctrl-O was just refused over a leftover conflict block: the next key, if it is
+      # Ctrl-O again, saves anyway (ADR-0034 §3).
+      save_armed: false,
+      # Each buffer's last `{scroll, hscroll}`, restored when it is shown again (ADR-0034).
+      scrolls: %{},
+      # The edits pane (ADR-0034 §6): shown at start when the terminal has 20 rows; `edits`
+      # toggles it. `focus` is where keys go (`Alt+O`); `edits_sel` its highlighted entry.
+      edits_shown: h >= 20,
+      focus: :editor,
+      edits_sel: 0,
+      # The file tree (ADR-0034 §5): shown at start from 100 columns (once geex knows its
+      # root); `tree` toggles it. `files` is read when it is first drawn, shown, or focused.
+      tree_shown: w >= 100,
+      tree: %{files: nil, open: MapSet.new(), rows: [], sel: 0}
+    }
   end
 
   # --- events that dirty the frame ---
@@ -325,9 +332,13 @@ defmodule Geex.Loop do
       Minibuffer.active?(state.minibuffer) ->
         {:noreply, apply_minibuffer_key(event, state)}
 
-      # The pane can have gone (hidden by a resize); then the keys are the editor's again.
-      state.focus == :edits and edits_visible?(state) ->
-        {:noreply, apply_edits_key(event, state)}
+      # A pane can have gone (hidden by a resize); then the keys are the editor's again.
+      state.focus != :editor ->
+        case focused(state, layout(state)) do
+          :edits -> {:noreply, apply_edits_key(event, state)}
+          :tree -> {:noreply, apply_tree_key(event, state)}
+          :editor -> {:noreply, apply_editor_key(event, %{state | focus: :editor})}
+        end
 
       true ->
         {:noreply, apply_editor_key(event, state)}
@@ -438,14 +449,15 @@ defmodule Geex.Loop do
         top = if grid?, do: 1, else: 0
         # The editor draws above the edits pane (ADR-0034 §4): it renders as if the terminal
         # ended one row below its own rectangle, where its status line would be.
-        layout = Layout.resolve(state.w, state.h, %{edits: state.edits_shown})
-        est = %{state | h: layout.editor.h + 1}
+        state = ensure_tree(state)
+        layout = layout(state)
+        est = %{state | w: layout.editor.w, h: layout.editor.h + 1}
         h_text = max(text_height(est.h) - top, 0)
         # Reserve the rightmost column for a vertical scroll bar when the buffer overflows
         # the viewport; the text then renders into a one-column-narrower area.
         total = line_count(text)
         vbar? = h_text > 0 and total > h_text
-        tw = state.w - if(vbar?, do: 1, else: 0)
+        tw = est.w - if(vbar?, do: 1, else: 0)
 
         scroll = scroll_for(state.scroll, line, h_text, @scrolloff)
 
@@ -477,22 +489,25 @@ defmodule Geex.Loop do
         screen =
           screen
           |> agent_marks(snap.blame, scroll, h_text, state.theme)
-          |> Screen.resize(state.w, state.h)
-          |> maybe_vscrollbar(vbar?, state.w - 1, h_text, scroll, total, state.theme)
+          |> Screen.resize(est.w, state.h)
+          |> maybe_vscrollbar(vbar?, est.w - 1, h_text, scroll, total, state.theme)
           # Shift the text + scroll bar down past the reserved ruler row, then paint the
           # contextual grid chrome over the now-vacant top row + the text region.
           |> Screen.translate_y(top)
           |> draw_ruler(grid?, gw, text_w, hscroll, state.theme)
           |> draw_grid_lines(grid?, gw, text_w, h_text, top, hscroll, state.theme)
           |> draw_hbar(est, gw, text_w, content_w, hscroll)
+          # Over beside the tree, then the panels (ADR-0034 §4).
+          |> Screen.resize(state.w, state.h)
+          |> Screen.translate_x(layout.editor.x)
+          |> draw_tree(layout.tree, state)
           |> draw_edits_pane(layout.edits, state)
 
+        # The hardware cursor is the editor's; a focused panel shows its selection instead.
         target =
-          case {state.focus == :edits and layout.edits != nil,
-                cursor_target(state.w, h_text, cx, cy)} do
-            {true, _} -> :hidden
-            {_, {x, y}} -> {x, y + top}
-            {_, :hidden} -> :hidden
+          case {focused(state, layout), cursor_target(est.w, h_text, cx, cy)} do
+            {:editor, {x, y}} -> {x + layout.editor.x, y + top}
+            _ -> :hidden
           end
 
         {screen, cursor} = draw_bottom(screen, state, snap, target)
@@ -588,7 +603,7 @@ defmodule Geex.Loop do
 
   defp draw_edits_pane(
          screen,
-         %Geex.Rect{y: y, w: w, h: h},
+         %Geex.Rect{x: x, y: y, w: w, h: h},
          %{theme: %Theme{palette: pal}} = state
        ) do
     focused? = state.focus == :edits
@@ -598,11 +613,11 @@ defmodule Geex.Loop do
 
     screen =
       screen
-      |> Screen.fill_rect(0, y, w, h, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
-      |> Screen.draw_text(0, y, palette_clip(title, w), %Cell{fg: pal.line_number, bg: pal.bg})
+      |> Screen.fill_rect(x, y, w, h, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
+      |> Screen.draw_text(x, y, palette_clip(title, w), %Cell{fg: pal.line_number, bg: pal.bg})
 
     if entries == [] do
-      Screen.draw_text(screen, 2, y + 1, palette_clip("no edits yet", w - 2), %Cell{
+      Screen.draw_text(screen, x + 2, y + 1, palette_clip("no edits yet", w - 2), %Cell{
         fg: pal.line_number,
         bg: pal.bg
       })
@@ -617,9 +632,93 @@ defmodule Geex.Loop do
         fg = if entry.kind == :behind, do: pal.cursor, else: pal.fg
 
         acc
-        |> Screen.fill_rect(0, row, w, 1, %Cell{char: " ", fg: fg, bg: bg})
-        |> Screen.draw_text(0, row, palette_clip(text, w), %Cell{fg: fg, bg: bg})
+        |> Screen.fill_rect(x, row, w, 1, %Cell{char: " ", fg: fg, bg: bg})
+        |> Screen.draw_text(x, row, palette_clip(text, w), %Cell{fg: fg, bg: bg})
       end)
+    end
+  end
+
+  # The file tree (ADR-0034 §5): a title row, then the rows, with a divider on its right edge.
+  defp draw_tree(screen, nil, _state), do: screen
+
+  defp draw_tree(screen, %Geex.Rect{w: w, h: h}, %{theme: %Theme{palette: pal}} = state) do
+    focused? = state.focus == :tree
+    inner = max(w - 1, 0)
+    hint = if focused?, do: " Enter ", else: ""
+    title = "── files " <> String.duplicate("─", max(inner - 9 - String.length(hint), 0)) <> hint
+
+    screen =
+      screen
+      |> Screen.fill_rect(0, 0, w, h, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
+      |> Screen.draw_text(0, 0, palette_clip(title, inner), %Cell{fg: pal.line_number, bg: pal.bg})
+
+    screen =
+      Enum.reduce(0..(h - 1)//1, screen, fn row, acc ->
+        Screen.draw_text(acc, inner, row, "│", %Cell{fg: pal.line_number, bg: pal.bg})
+      end)
+
+    rows = state.tree.rows
+    n = max(h - 1, 0)
+
+    if rows == [] do
+      Screen.draw_text(screen, 1, 1, palette_clip("no files", inner - 1), %Cell{
+        fg: pal.line_number,
+        bg: pal.bg
+      })
+    else
+      sel = min(state.tree.sel, length(rows) - 1)
+      start = sel |> Kernel.-(n - 1) |> max(0) |> min(max(length(rows) - n, 0))
+
+      rows
+      |> Enum.with_index()
+      |> Enum.slice(start, n)
+      |> Enum.with_index(1)
+      |> Enum.reduce(screen, fn {{row, i}, y}, acc ->
+        bg = if i == sel and focused?, do: pal.active_line_bg, else: pal.bg
+        fg = if row.dir?, do: pal.line_number, else: pal.fg
+        mark = if row.dir?, do: if(row.open?, do: "▾ ", else: "▸ "), else: "  "
+
+        text =
+          String.duplicate("  ", row.depth) <> mark <> row.name <> if(row.dir?, do: "/", else: "")
+
+        acc
+        |> Screen.fill_rect(0, y, inner, 1, %Cell{char: " ", fg: fg, bg: bg})
+        |> Screen.draw_text(0, y, palette_clip(text, inner), %Cell{fg: fg, bg: bg})
+      end)
+    end
+  end
+
+  # The layout for this frame: the tree only once geex knows its root.
+  defp layout(state) do
+    Layout.resolve(state.w, state.h, %{
+      edits: state.edits_shown,
+      tree: state.tree_shown and safe_start().root != nil
+    })
+  end
+
+  # Which pane has focus, of those on screen (a pane a resize hid gives it back to the editor).
+  defp focused(state, layout) do
+    case state.focus do
+      :edits when layout.edits != nil -> :edits
+      :tree when layout.tree != nil -> :tree
+      _ -> :editor
+    end
+  end
+
+  # Read the root's files the first time the tree is drawn.
+  defp ensure_tree(%{tree_shown: true, tree: %{files: nil}} = state), do: reload_tree(state)
+  defp ensure_tree(state), do: state
+
+  defp reload_tree(state) do
+    case safe_start().root do
+      nil ->
+        state
+
+      root ->
+        files = Tree.list(root)
+        rows = Tree.rows(files, state.tree.open)
+        sel = min(state.tree.sel, max(length(rows) - 1, 0))
+        %{state | tree: %{state.tree | files: files, rows: rows, sel: sel}}
     end
   end
 
@@ -629,17 +728,80 @@ defmodule Geex.Loop do
     :exit, _ -> []
   end
 
-  defp edits_visible?(state),
-    do: Layout.resolve(state.w, state.h, %{edits: state.edits_shown}).edits != nil
-
-  # Alt+O: to the edits pane and back (the only other pane until the file tree).
-  defp next_pane(%{focus: :edits} = state), do: %{state | focus: :editor}
-
+  # Alt+O: the next pane on screen, in the order tree · editor · edits, wrapping.
   defp next_pane(state) do
-    # Entering the pane starts at the top: the newest entry.
-    if edits_visible?(state),
-      do: %{state | focus: :edits, edits_sel: 0},
-      else: %{state | notice: "no other pane: the edits pane is hidden (`edits` shows it)"}
+    l = layout(state)
+    panes = for {pane, rect} <- [tree: l.tree, editor: true, edits: l.edits], rect, do: pane
+
+    case panes do
+      [:editor] ->
+        %{state | notice: "no other pane: the tree and edits pane are hidden (`tree`, `edits`)"}
+
+      _ ->
+        i = Enum.find_index(panes, &(&1 == focused(state, l)))
+        enter_pane(Enum.at(panes, rem(i + 1, length(panes))), state)
+    end
+  end
+
+  # The edits pane starts at its newest entry; the tree re-reads the files.
+  defp enter_pane(:edits, state), do: %{state | focus: :edits, edits_sel: 0}
+  defp enter_pane(:tree, state), do: %{reload_tree(state) | focus: :tree}
+  defp enter_pane(:editor, state), do: %{state | focus: :editor}
+
+  # Keys while the tree has focus: move, Enter opens a file or opens/closes a directory,
+  # Right/Left open/close one, Esc goes back. As in the edits pane, the minibuffer, the palette
+  # and quitting work; other keys do nothing.
+  defp apply_tree_key(event, %{tree: tree} = state) do
+    count = length(tree.rows)
+    row = Enum.at(tree.rows, min(tree.sel, count - 1))
+
+    case event do
+      e when e in [{:key, :up}, {:alt, ?w}, {:alt, ?W}] ->
+        schedule_repaint(put_in(state.tree.sel, max(min(tree.sel, count - 1) - 1, 0)))
+
+      e when e in [{:key, :down}, {:alt, ?s}, {:alt, ?S}] ->
+        schedule_repaint(put_in(state.tree.sel, min(tree.sel + 1, max(count - 1, 0))))
+
+      {:key, :enter} when is_map(row) and row.dir? ->
+        schedule_repaint(set_open(state, row.path, not row.open?))
+
+      {:key, :enter} when is_map(row) ->
+        schedule_repaint(
+          do_open(Path.join(safe_start().root, row.path), %{state | focus: :editor})
+        )
+
+      {:key, :right} when is_map(row) and row.dir? ->
+        schedule_repaint(set_open(state, row.path, true))
+
+      {:key, :left} when is_map(row) and row.dir? ->
+        schedule_repaint(set_open(state, row.path, false))
+
+      e when e in [{:key, :esc}] ->
+        schedule_repaint(%{state | focus: :editor})
+
+      e when e in [{:alt, ?o}, {:alt, ?O}] ->
+        schedule_repaint(next_pane(state))
+
+      _ ->
+        panel_chord(event, state)
+    end
+  end
+
+  # The chords that work from either panel: the minibuffer, the palette, quitting. They open
+  # through the same branches the editor's keys use (`apply_key/4`); `apply_action/4` has no
+  # clause for the openers.
+  defp panel_chord(event, state) do
+    case Keymap.resolve(event, {0, 0}, "") do
+      :minibuffer -> open_minibuffer(state)
+      :palette -> schedule_repaint(%{state | minibuffer: Minibuffer.open(:palette)})
+      :quit -> apply_action(:quit, {0, 0}, "", state)
+      _ -> state
+    end
+  end
+
+  defp set_open(%{tree: tree} = state, dir, open?) do
+    open = if open?, do: MapSet.put(tree.open, dir), else: MapSet.delete(tree.open, dir)
+    %{state | tree: %{tree | open: open, rows: Tree.rows(tree.files || [], open)}}
   end
 
   # Keys while the edits pane has focus: move, Enter, back to the editor. The minibuffer, the
@@ -661,17 +823,14 @@ defmodule Geex.Loop do
           entry -> schedule_repaint(open_entry(entry, %{state | focus: :editor}))
         end
 
-      e when e in [{:key, :esc}, {:alt, ?o}, {:alt, ?O}] ->
+      {:key, :esc} ->
         schedule_repaint(%{state | focus: :editor})
 
-      _ ->
-        case Keymap.resolve(event, {0, 0}, "") do
-          action when action in [:minibuffer, :palette, :quit] ->
-            apply_action(action, {0, 0}, "", state)
+      e when e in [{:alt, ?o}, {:alt, ?O}] ->
+        schedule_repaint(next_pane(state))
 
-          _ ->
-            state
-        end
+      _ ->
+        panel_chord(event, state)
     end
   end
 
@@ -1169,6 +1328,11 @@ defmodule Geex.Loop do
 
       :next_pane ->
         schedule_repaint(next_pane(state))
+
+      :toggle_tree ->
+        shown = not state.tree_shown
+        state = %{state | tree_shown: shown, focus: if(shown, do: state.focus, else: :editor)}
+        schedule_repaint(if shown, do: reload_tree(state), else: state)
 
       :toggle_edits ->
         shown = not state.edits_shown
@@ -1706,8 +1870,9 @@ defmodule Geex.Loop do
   # :quit must work with no buffer open (you can always type `quit`); the rest no-op.
   defp apply_verb(:quit, state), do: apply_action(:quit, {0, 0}, "", state)
   # Switching and closing buffers need no text either (and work with none active).
-  defp apply_verb(action, state) when action in [:buffers, :close, :toggle_edits, :next_pane],
-    do: apply_action(action, {0, 0}, "", state)
+  defp apply_verb(action, state)
+       when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane],
+       do: apply_action(action, {0, 0}, "", state)
 
   defp apply_verb(action, state) do
     case safe_session_snapshot() do

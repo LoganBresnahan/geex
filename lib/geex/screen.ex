@@ -166,6 +166,20 @@ defmodule Geex.Screen do
     %{s | cells: moved}
   end
 
+  @doc """
+  Shift every cell `dx` columns (positive: right), dropping what falls off either edge. How
+  the editor, painted at the left, moves over beside the file tree (ADR-0034).
+  """
+  @spec translate_x(t(), integer()) :: t()
+  def translate_x(%__MODULE__{} = s, 0), do: s
+
+  def translate_x(%__MODULE__{cells: cells, w: w} = s, dx) do
+    moved =
+      for {{x, y}, cell} <- cells, x + dx >= 0 and x + dx < w, into: %{}, do: {{x + dx, y}, cell}
+
+    %{s | cells: moved}
+  end
+
   @doc "Clear the screen — every cell becomes blank."
   @spec clear(t()) :: t()
   def clear(%__MODULE__{} = s), do: %{s | cells: %{}}

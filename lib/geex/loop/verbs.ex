@@ -18,7 +18,8 @@ defmodule Geex.Loop.Verbs do
       `highlight all` / `select all` — select the whole buffer (= `Alt+B`).
     * `save` — write the active buffer to disk (= `Ctrl-O`; an operation, ADR-0019).
     * `fast-forward` — take in the file's change on disk (= `Alt+L`, ADR-0034).
-    * `edits` — show or hide the edits pane (`Alt+O` moves into it). ADR-0034.
+    * `edits` / `tree` — show or hide the edits pane / the file tree (`Alt+O` moves between
+      the panes). ADR-0034.
     * `open PATH` — show a file, opening it if needed; a relative `PATH` is from the current
       file's directory, and keeps its case. `buffers` — pick an open buffer. `close` — close
       this buffer (refused while it has unsaved edits). ADR-0034.
@@ -122,6 +123,7 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("buffers"), do: {:action, :buffers}
   defp do_parse("close"), do: {:action, :close}
   defp do_parse("edits"), do: {:action, :toggle_edits}
+  defp do_parse("tree"), do: {:action, :toggle_tree}
   # `open` with no path: nothing to open.
   defp do_parse("open"), do: :unknown
   defp do_parse("quit"), do: {:action, :quit}

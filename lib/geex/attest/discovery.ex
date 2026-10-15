@@ -63,6 +63,12 @@ defmodule Geex.Attest.Discovery do
     end
   end
 
+  # The sweep's `kill -0` checks run as ports linked to this process, and it traps exits, so
+  # each one's normal exit arrives here. Nothing to do; without this clause OTP logged an
+  # "unexpected message" error at every start that found stale discovery files.
+  @impl true
+  def handle_info({:EXIT, port, _reason}, state) when is_port(port), do: {:noreply, state}
+
   @impl true
   def terminate(_reason, %{file: file}) do
     :persistent_term.erase(@token_key)

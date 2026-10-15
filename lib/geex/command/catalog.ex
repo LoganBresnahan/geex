@@ -69,6 +69,11 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, :close}
     },
     %Entry{
+      name: "tree",
+      description: "Show or hide the file tree (Alt+O moves into it).",
+      invoke: {:action, :toggle_tree}
+    },
+    %Entry{
       name: "edits",
       description: "Show or hide the edits pane: who changed which file, and when (Alt+O).",
       invoke: {:action, :toggle_edits}
