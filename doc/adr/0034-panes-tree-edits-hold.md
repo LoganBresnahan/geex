@@ -1,6 +1,7 @@
 # ADR-0034: Panes, the file tree, the edits pane, and holding open buffers
 
-- **Status:** Accepted 2026-10-15 (open decisions A, F–K taken as recommended; not yet built).
+- **Status:** Accepted 2026-10-15 (open decisions A, F–K taken as recommended). Build step 1 (the
+  hold) built 2026-10-15; steps 2–5 not yet.
   Rewritten the same day after the maintainer's redirect: the first draft's follow pane is dropped.
 - **Date:** 2026-10-15
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell; it deferred tabs and
@@ -205,6 +206,25 @@ the hold.
 - A diff view, splitting the editor, resizing panes by hand, tabs, the mouse, and rebuilding the edits
   list from ledgers.
 - Per-write groups across sessions while a buffer is held (§1).
+
+### Built: step 1, the hold (2026-10-15)
+
+- `Geex.Buffer.disk_changed/2` marks a buffer behind (`snapshot.behind`, `{:geex_buffer_behind, …}`);
+  the watcher calls it instead of reconciling. `Geex.Reconcile.fast_forward/1` and `save/2` run the
+  reconcile core; `Buffer.save/1` refuses with `{:error, :behind}` when the disk differs from `synced`,
+  read at the write.
+- `Geex.Edit.GitMerge` runs `git merge-file` under `sh` so git's stderr never reaches the terminal, and
+  `unresolved/1` finds a block that is left. The fallback is `Geex.Edit.Merge` (an `:git_executable` app
+  env seam lets a test see it).
+- Held attestations replace the pending table. The credit is `Spool.chain` over the spool's lines, then
+  the held list.
+- **As built, beyond the text above:**
+  - the frozen MCP `save_file` goes through `Buffer.save/1`, so on a buffer that is behind it now
+    returns the `:behind` error instead of overwriting; it does not merge (no MCP change beyond that);
+  - in a conflicting merge, the marker lines carry the group's credit (the `▌` mark), since the whole
+    group is credited;
+  - a buffer opened and never edited has no ledger entries, so a crash while holding reopens it fresh,
+    as ADR-0033 does for any file it never recorded (the payload doesn't spool for it either).
 
 ## Consequences
 

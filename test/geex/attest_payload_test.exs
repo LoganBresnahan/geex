@@ -327,13 +327,14 @@ defmodule Geex.AttestPayloadTest do
       |> JSON.encode!()
     end
 
-    test "an Edit: attested before reconcile (pending), credited when the group lands", ctx do
+    test "an Edit: held by the open buffer, credited when you fast-forward", ctx do
       path = target(ctx, "e2e.txt", "one\ntwo\n")
       buf = open(path)
       File.write!(path, "one\nTWO\n")
 
       assert %{status: 0, stderr: ""} = run(ctx, agent_write("edit.jsonl", path, "one\ntwo\n"))
-      {:reconciled, snap} = Reconcile.reconcile(buf, "one\nTWO\n")
+      assert Buffer.get_text(buf) == "one\ntwo\n"
+      {:fast_forwarded, snap, 0} = Reconcile.fast_forward(buf)
 
       payload = JSON.decode!(envelope("edit.jsonl"))["event"]["payload"]
 
@@ -359,6 +360,40 @@ defmodule Geex.AttestPayloadTest do
 
       assert [{:agent, %{harness: "claude-code"}}] =
                Enum.map(Buffer.history(buf), & &1.meta.actor)
+    end
+
+    # ADR-0034: geex answers `held`, which the payload doesn't count as taken, so it spools the
+    # attestation as well; the credit survives a crash before the fast-forward.
+    test "held: the payload spools it too, so a crash before the fast-forward keeps the credit",
+         ctx do
+      path = target(ctx, "held.txt", "one\ntwo\n")
+      name = {:via, Registry, {Geex.Registry, Path.expand(path)}}
+      {:ok, buf} = Buffer.start_link(path: path, ledger_dir: ledger_dir(ctx), name: name)
+      Process.unlink(buf)
+      # a file with history, so it has a ledger to spool beside
+      {:ok, cmd} = Geex.Commands.Insert.parse(%{line: 0, col: 0, text: "0"})
+      {:ok, _} = Buffer.dispatch(buf, Geex.Command.put_meta(cmd, Geex.Command.Meta.human()))
+      {:ok, _} = Buffer.save(buf)
+
+      File.write!(path, "0one\nTWO\n")
+      Buffer.disk_changed(buf, "0one\nTWO\n")
+
+      assert %{status: 0, stderr: ""} =
+               run(ctx, agent_write("edit.jsonl", path, "0one\ntwo\n"), state_env(ctx))
+
+      assert Buffer.get_text(buf) == "0one\ntwo\n"
+      assert [_entry] = spooled(ctx, path)
+
+      ref = Process.monitor(buf)
+      Process.exit(buf, :kill)
+      assert_receive {:DOWN, ^ref, _, _, _}
+
+      {:ok, buf} = Buffer.start_link(path: path, ledger_dir: ledger_dir(ctx))
+      Process.unlink(buf)
+      session = JSON.decode!(envelope("edit.jsonl"))["event"]["payload"]["session_id"]
+      assert Buffer.get_text(buf) == "0one\nTWO\n"
+      assert {:agent, %{session: ^session}} = List.last(Buffer.history(buf)).meta.actor
+      GenServer.stop(buf, :shutdown)
     end
   end
 end

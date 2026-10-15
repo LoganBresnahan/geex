@@ -1689,3 +1689,49 @@ green twice, `--warnings-as-errors` clean.
 
 **Not tested:** compacting a ledger whose replay had stopped early (a copy is set aside first); very large
 ledgers (compaction replays the whole history once); `--dir` with a key from another directory.
+
+### 2026-10-15 — Holding open buffers, build step 1: fast-forward and save-while-behind (ADR-0034)
+
+An open buffer no longer changes when its file does. The watcher calls `Geex.Buffer.disk_changed/2`, which
+marks the buffer behind (`behind disk (Alt+L)` on the status line) or clears the mark. `Alt+L` /
+`fast-forward` (`Geex.Reconcile.fast_forward/1`) takes the change in. `Ctrl-O` (`Geex.Reconcile.save/2`)
+fast-forwards a buffer that is behind before it writes, and `Buffer.save/1` itself refuses (`:behind`) to
+write over a changed disk. A dirty buffer merges with `git merge-file` (`Geex.Edit.GitMerge`): a conflict is
+git's `<<<<<<< buffer` … `>>>>>>> disk` block in the buffer, and a save with conflicts doesn't write; a
+block left in the buffer refuses `Ctrl-O` until it is pressed twice in a row. Attestations for writes not
+taken in yet are answered `held` (the payload then spools them too) and credited at the fast-forward by the
+spool chain rule; the 10 s pending table is gone.
+
+**Live-verified** (geex TUI in a tmux pty, `XDG_STATE_HOME` pointed at a scratch dir, the live captAInHook
+hook attesting this session's native `Edit` calls):
+- an `Edit` of line 3 while geex had the file open: the buffer kept `three`, the status line said `behind
+  disk (Alt+L)`, the intake logged `held`; `Alt+L` brought in `THREE (agent, held)` with its `▌` mark and
+  `✎ claude-code/d25a8b6d · turn b60e…`;
+- typed `MINE ` on line 1 (unsaved), then an `Edit` of line 5: `[+]  behind disk`; `Ctrl-O` merged and
+  wrote both, line 5 credited;
+- typed ` (mine)` on line 2, then an `Edit` of the same line: `Ctrl-O` put git's block in the buffer with
+  `1 conflict with the disk: resolve the marked block, then save`, and the disk kept the agent's version;
+  the next `Ctrl-O` said `not saved: a conflict block is left at line 2 (Ctrl-O again saves anyway)`; after
+  an arrow key, `Ctrl-O` refused again; two in a row wrote the file with the block;
+- a `printf` over the file (no attestation): `Alt+L` said `caught up with the disk`, again `already up to
+  date with the disk`; `Alt+Z` gave back the previous text, dirty and not behind.
+- `/tmp/geex.log` had no warnings; nothing was written to the real `~/.local/state/geex/ledger`.
+
+**Automated:** `hold_test` (17): behind/in-sync and its notification; fast-forward of a clean buffer as one
+undoable group; up to date, and a stale mark cleared; a dirty buffer's clean merge and its conflict block
+with the notice; credit for a held write, a same-session chain (`chain: ["u1","u2"]`) and a mixed-session
+one (`:external`); a write both held and spooled links once; a spool line landing after the fast-forward
+can't link later; a crash while holding credits the write on reopen; a late attestation still upgrades;
+`Buffer.save/1` refuses an unreported disk change; save-while-behind clean, merged, conflicting, the marker
+refusal and `force`, and a resolved block; `Alt+L` / the verb / the palette entry. `git_merge_test` (6 + a
+doctest): clean, a labelled conflict counted, a missing final newline, CRLF blocks, a binary file's error,
+no temp files left. `attest_payload_test` +1: the real payload against a held buffer spools the
+attestation, and a crash before the fast-forward keeps the credit. `reconcile_test`, `attest_test`,
+`blame_test`, `session_test` updated (`held` for `pending`, git blocks for disk-wins, the watcher marks
+behind) plus the no-git fallback (`:git_executable` set to a missing binary: disk wins, one undo away).
+**844 tests + 23 doctests**, green twice, `--warnings-as-errors` clean.
+
+**Not tested:** the no-git fallback live (only through the app-env seam); a file deleted while open (left
+as is, not behind, as before); two geex instances holding the same file; the frozen MCP `save_file` on a
+buffer that is behind (returns the `:behind` error; only reasoned from `Buffer.save/1`); very large files
+(each save now reads the file once to compare).

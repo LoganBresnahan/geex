@@ -85,9 +85,9 @@ defmodule Geex.AttestTest do
       assert Buffer.attest(buf, attestation("1\n2\n3\n", "ONE\n2\nTHREE\n")) == :ignored
     end
 
-    test "early (the primary path): the attestation waits, and the group lands attested" do
+    test "early (the primary path): the attestation is held, and the group lands attested" do
       buf = start_supervised!({Buffer, text: "a\n"})
-      assert Buffer.attest(buf, attestation("a\n", "b\n")) == :pending
+      assert Buffer.attest(buf, attestation("a\n", "b\n")) == :held
 
       {:reconciled, snap} = Reconcile.reconcile(buf, "b\n")
       assert [%{meta: %{actor: {:agent, %{session: "s1"}}}}] = snap.history
@@ -96,18 +96,18 @@ defmodule Geex.AttestTest do
     test "coalesced writes (sed H0->H1, agent H1->H2, one group H0->H2) stay :external" do
       buf = start_supervised!({Buffer, text: "h0\n"})
       # the agent's attestation describes only its own step
-      assert Buffer.attest(buf, attestation("h1\n", "h2\n")) == :pending
+      assert Buffer.attest(buf, attestation("h1\n", "h2\n")) == :held
       {:reconciled, _} = Reconcile.reconcile(buf, "h2\n")
       assert actors(buf) == [:external]
       # and a late attempt doesn't match either
-      assert Buffer.attest(buf, attestation("h1\n", "h2\n")) == :pending
+      assert Buffer.attest(buf, attestation("h1\n", "h2\n")) == :held
       assert actors(buf) == [:external]
     end
 
     test "an identical-bytes write (before == after) never matches" do
       buf = start_supervised!({Buffer, text: "x\n"})
       {:reconciled, _} = Reconcile.reconcile(buf, "y\n")
-      assert Buffer.attest(buf, attestation("y\n", "y\n")) == :pending
+      assert Buffer.attest(buf, attestation("y\n", "y\n")) == :held
       assert actors(buf) == [:external]
     end
 
@@ -115,7 +115,7 @@ defmodule Geex.AttestTest do
       buf = start_supervised!({Buffer, text: "a\n"})
       {:reconciled, _} = Reconcile.reconcile(buf, "b\n")
       {:reconciled, _} = Reconcile.reconcile(buf, "c\n")
-      assert Buffer.attest(buf, attestation("a\n", "b\n")) == :pending
+      assert Buffer.attest(buf, attestation("a\n", "b\n")) == :held
       assert actors(buf) == [:external, :external]
     end
 
@@ -136,12 +136,24 @@ defmodule Geex.AttestTest do
       assert actors(buf) == [:external]
     end
 
-    test "a pending attestation expires (garbage collection only)" do
-      buf = start_supervised!({Buffer, text: "a\n", pending_ttl_ms: 20})
-      assert Buffer.attest(buf, attestation("a\n", "b\n")) == :pending
-      Process.sleep(40)
+    test "held attestations are bounded: the oldest beyond 256 is dropped" do
+      buf = start_supervised!({Buffer, text: "a\n"})
+      assert Buffer.attest(buf, attestation("a\n", "b\n")) == :held
+
+      for i <- 1..256,
+          do: :held = Buffer.attest(buf, attestation("x#{i}\n", "y#{i}\n"))
+
       {:reconciled, _} = Reconcile.reconcile(buf, "b\n")
       assert actors(buf) == [:external]
+    end
+
+    test "a fast-forward that used the held attestations clears them" do
+      buf = start_supervised!({Buffer, text: "a\n"})
+      :held = Buffer.attest(buf, attestation("a\n", "b\n"))
+      {:reconciled, _} = Reconcile.reconcile(buf, "b\n")
+      assert :sys.get_state(buf).held == []
+      # a repeat now finds its group already attested
+      assert Buffer.attest(buf, attestation("a\n", "b\n")) == :ignored
     end
 
     test "replay is unaffected by an upgrade (meta never feeds run/2)" do
@@ -184,9 +196,9 @@ defmodule Geex.AttestTest do
       end
     end
 
-    test "the early (pending) path matches the same way" do
+    test "the early (held) path matches the same way" do
       buf = start_supervised!({Buffer, text: "a\r\nb\r\n"})
-      assert Buffer.attest(buf, attestation("a\nb\n", "a\r\nB\r\n")) == :pending
+      assert Buffer.attest(buf, attestation("a\nb\n", "a\r\nB\r\n")) == :held
       {:reconciled, snap} = Reconcile.reconcile(buf, "a\r\nB\r\n")
       assert [%{meta: %{actor: {:agent, _}}}] = snap.history
     end
@@ -195,7 +207,7 @@ defmodule Geex.AttestTest do
       buf = start_supervised!({Buffer, text: "a\r\nb\r\n"})
       {:reconciled, _} = Reconcile.reconcile(buf, "a\r\nB\r\n")
       # the after given without its \r: no match
-      assert Buffer.attest(buf, attestation("a\nb\n", "a\nB\n")) == :pending
+      assert Buffer.attest(buf, attestation("a\nb\n", "a\nB\n")) == :held
       assert actors(buf) == [:external]
       assert Buffer.attest(buf, attestation("a\r\nb\r\n", "a\r\nB\r\n")) == :attested
     end
@@ -217,7 +229,7 @@ defmodule Geex.AttestTest do
 
       other = start_supervised!({Buffer, text: "a\r\nb\r\n"}, id: :other)
       {:reconciled, _} = Reconcile.reconcile(other, "x\nB\n")
-      assert Buffer.attest(other, attestation("x\nb\n", "x\nB\n")) == :pending
+      assert Buffer.attest(other, attestation("x\nb\n", "x\nB\n")) == :held
       assert actors(other) == [:external]
     end
   end

@@ -17,6 +17,7 @@ defmodule Geex.Loop.Verbs do
     * `highlight` / `select` — start a selection at the cursor (= `Alt+H`, ADR-0029);
       `highlight all` / `select all` — select the whole buffer (= `Alt+B`).
     * `save` — write the active buffer to disk (= `Ctrl-O`; an operation, ADR-0019).
+    * `fast-forward` — take in the file's change on disk (= `Alt+L`, ADR-0034).
     * `quit` / `exit` — leave the editor (= `Ctrl-X`).
     * `no` — the typed twin of `Alt+N`: clears a live selection (a plain cancel when
       nothing is selected). An empty line just cancels.
@@ -102,6 +103,7 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("highlight all"), do: {:action, :select_all}
   defp do_parse("select all"), do: {:action, :select_all}
   defp do_parse("save"), do: {:action, :save}
+  defp do_parse("fast-forward"), do: {:action, :fast_forward}
   defp do_parse("quit"), do: {:action, :quit}
   defp do_parse("exit"), do: {:action, :quit}
 

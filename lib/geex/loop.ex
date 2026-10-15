@@ -43,6 +43,7 @@ defmodule Geex.Loop do
     Coord,
     Dispatch,
     Minibuffer,
+    Reconcile,
     Renderer,
     Screen,
     Selection,
@@ -232,7 +233,10 @@ defmodule Geex.Loop do
         minibuffer: Minibuffer.new(),
         # A one-line message from the buffer (`{:geex_buffer_notice, …}`, e.g. a reconcile
         # conflict, ADR-0032), shown on the status line until the next key.
-        notice: nil
+        notice: nil,
+        # Ctrl-O was just refused over a leftover conflict block: the next key, if it is
+        # Ctrl-O again, saves anyway (ADR-0034 §3).
+        save_armed: false
       }
       |> attach(active)
 
@@ -257,6 +261,10 @@ defmodule Geex.Loop do
   # A late attestation relabelled an agent's lines (ADR-0032): repaint so the gutter mark and
   # the status-line author show now, not on the next keystroke.
   def handle_info({:geex_buffer_attested, buffer, _group, _actor}, %{buffer: buffer} = state),
+    do: {:noreply, schedule_repaint(state)}
+
+  # The file changed on disk, or caught up (ADR-0034): the status line says "behind disk".
+  def handle_info({:geex_buffer_behind, buffer, _behind}, %{buffer: buffer} = state),
     do: {:noreply, schedule_repaint(state)}
 
   def handle_info({:geex_highlights, buffer, _v}, %{buffer: buffer} = state),
@@ -294,8 +302,9 @@ defmodule Geex.Loop do
   # the current text + cursor (read fresh from Session) and apply via the one shared path
   # (edits) or a view-local cursor move.
   def handle_info({:geex_io, event}, state) do
-    # Any key dismisses a notice (it has been seen).
+    # Any key dismisses a notice (it has been seen), and any key but Ctrl-O disarms a refused save.
     state = if state.notice, do: schedule_repaint(%{state | notice: nil}), else: state
+    state = %{state | save_armed: state.save_armed and event in [{:ctrl, ?o}, {:ctrl, ?O}]}
 
     if Minibuffer.active?(state.minibuffer) do
       {:noreply, apply_minibuffer_key(event, state)}
@@ -564,6 +573,7 @@ defmodule Geex.Loop do
     left =
       status_label(snap.path) <>
         if(snap.dirty, do: " [+]", else: "") <>
+        if(snap[:behind], do: "  behind disk (Alt+L)", else: "") <>
         if(state.notice, do: "  " <> state.notice, else: "")
 
     {line, _col} = snap.cursor
@@ -904,6 +914,9 @@ defmodule Geex.Loop do
       :save ->
         do_save(state)
 
+      :fast_forward ->
+        schedule_repaint(do_fast_forward(state))
+
       :quit ->
         System.stop()
         state
@@ -912,13 +925,50 @@ defmodule Geex.Loop do
 
   # Save the active buffer (Ctrl-O / the `save` verb) — an operation, not an edit
   # (ADR-0019): no command, no history. Visible feedback is the status line's dirty
-  # marker clearing; `Buffer.save/1` emits no change event, so repaint explicitly. A
-  # failure (`{:error, :no_path}` on a scratch buffer, a posix error) leaves the marker
-  # set — a real echo/message area is a deferred minibuffer slice.
+  # marker clearing; `Buffer.save/1` emits no change event, so repaint explicitly. A buffer
+  # that is behind merges first (ADR-0034 §3); a merge with conflicts doesn't write, and the
+  # buffer's own notice says so. A failure (`{:error, :no_path}` on a scratch buffer, a posix
+  # error) leaves the marker set — a real echo/message area is a deferred minibuffer slice.
   defp do_save(state) do
-    _ = on_active_buffer(&Buffer.save/1)
+    state =
+      case on_active_buffer(&Reconcile.save(&1, force: state.save_armed)) do
+        {:markers, line} ->
+          %{
+            state
+            | notice:
+                "not saved: a conflict block is left at line #{line + 1} (Ctrl-O again saves anyway)",
+              save_armed: true
+          }
+
+        _saved_or_reported ->
+          %{state | save_armed: false}
+      end
+
     schedule_repaint(state)
   end
+
+  # Take in what the disk holds now (Alt+L / `fast-forward`, ADR-0034 §1). The buffer's change
+  # notification repaints; a merge with conflicts sends its own notice.
+  defp do_fast_forward(state) do
+    notice =
+      case on_active_buffer(&Reconcile.fast_forward/1) do
+        {:fast_forwarded, snapshot, 0} -> "caught up with the disk" <> credited(snapshot)
+        {:fast_forwarded, _snapshot, _conflicts} -> nil
+        :up_to_date -> "already up to date with the disk"
+        {:error, _reason} -> "couldn't read the file from disk"
+      end
+
+    %{state | notice: notice || state.notice, selection: nil}
+  end
+
+  defp credited(%{history: [_ | _] = history}) do
+    case List.last(history).meta.actor do
+      {:agent, _} = actor -> " (" <> who(actor) <> ")"
+      _ -> ""
+    end
+  end
+
+  defp credited(_snapshot), do: ""
 
   # A vertical move keeps the goal column (re-derive the landing column from it, so the
   # horizontal position is preserved across a run of up/down and sticks to line ends);

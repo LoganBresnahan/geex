@@ -39,6 +39,13 @@ defmodule Geex.Buffer do
   compares disk against, so unsaved edits diverging from an *unchanged* file are never
   mistaken for an external change.
 
+  **Holding** ([ADR-0034](`e:doc/adr/0034-panes-tree-edits-hold.md`)). A change on disk doesn't
+  change the buffer. The watcher reports it (`disk_changed/2`) and the buffer is marked
+  **behind** until a fast-forward (`Geex.Reconcile.fast_forward/1`) takes it in. Agent writes
+  it hasn't taken in yet are **held**, and the fast-forward credits them by the spool's chain
+  rule. `save/1` refuses to write over a disk that changed (`{:error, :behind}`);
+  `Geex.Reconcile.save/2` merges first.
+
   **Crash policy.** A buffer is a `:temporary` child (`Geex.BufferSupervisor`): if it
   crashes it stays down. It is deliberately *not* restarted — a restart would reload
   the file from disk with a fresh empty history, silently discarding unsaved in-memory
@@ -72,8 +79,10 @@ defmodule Geex.Buffer do
 
   @doc """
   Write the buffer's current text to its `:path` and clear `dirty`. Returns
-  `{:ok, path}`, `{:error, :no_path}` (buffer has no backing file), or
-  `{:error, posix}`. Not an edit — `save/1` does not touch the undo history.
+  `{:ok, path}`, `{:error, :no_path}` (buffer has no backing file), `{:error, :behind}` (the
+  file on disk is no longer the `synced` text, so writing would discard someone else's change:
+  fast-forward first, ADR-0034), or `{:error, posix}`. Not an edit — `save/1` does not touch
+  the undo history.
   """
   @spec save(GenServer.server()) :: {:ok, String.t()} | {:error, term()}
   def save(server), do: GenServer.call(server, :save)
@@ -88,6 +97,16 @@ defmodule Geex.Buffer do
   """
   @spec mark_synced(GenServer.server()) :: map()
   def mark_synced(server), do: GenServer.call(server, :mark_synced)
+
+  @doc """
+  The watcher read `disk_text` from this buffer's file (ADR-0034 §1). The buffer doesn't change:
+  it is marked **behind** when the disk differs from its `synced` text, and the mark clears when
+  they match again. Subscribers get `{:geex_buffer_behind, buffer, behind}` when the mark
+  changes, where `behind` is `nil` or `%{sha256, at}`. Returns `:behind` or `:in_sync`.
+  """
+  @spec disk_changed(GenServer.server(), String.t()) :: :behind | :in_sync
+  def disk_changed(server, disk_text) when is_binary(disk_text),
+    do: GenServer.call(server, {:disk_changed, disk_text})
 
   @doc """
   Re-key this buffer to `new_path` (the buffer side of `Geex.Session.rename_file/2`).
@@ -220,15 +239,18 @@ defmodule Geex.Buffer do
   `:external` to `{:agent, %{harness, session, turn, tool_use}}`, only when **both**
   `before` and `sha256` equal the group's `before_sha256` and `sha256`. `before` may instead
   equal `before_sha256_lf`, the baseline with each `\\r\\n` turned into `\\n`: Claude Code reports a
-  CRLF file's prior text that way. `sha256` is always exact. Otherwise it waits in
-  a bounded pending table and is consumed if a matching group is recorded soon after (the
-  usual order: the hook beats the settled file read). Replay is unaffected: `meta` never
+  CRLF file's prior text that way. `sha256` is always exact. Replay is unaffected: `meta` never
   feeds a command's `run/2`.
 
-  Returns `:attested`, `:pending`, or `:ignored` (no `before`, so a created file can't match;
+  Otherwise the write hasn't been taken in yet (the buffer holds, ADR-0034), so the attestation
+  is **held** (at most 256 per buffer) and the next fast-forward credits it by the spool's
+  chain rule. The payload doesn't count `:held` as taken, so it also spools the attestation,
+  and a crash before the fast-forward still credits the write on reopen.
+
+  Returns `:attested`, `:held`, or `:ignored` (no `before`, so a created file can't match;
   or the matching group is already attested).
   """
-  @spec attest(GenServer.server(), map()) :: :attested | :pending | :ignored
+  @spec attest(GenServer.server(), map()) :: :attested | :held | :ignored
   def attest(server, attestation) when is_map(attestation),
     do: GenServer.call(server, {:attest, attestation})
 
@@ -245,10 +267,8 @@ defmodule Geex.Buffer do
   def revert(server, line, scope) when scope in [:hunk, :call],
     do: GenServer.call(server, {:revert, line, scope})
 
-  # Pending attestations live this long and this many per buffer (ADR-0032). A match is
-  # exact, so these only garbage-collect: an attestation whose write never reconciles.
-  @pending_ttl_ms 10_000
-  @pending_max 64
+  # Held attestations per buffer (ADR-0034), as many as the payload keeps in a spool.
+  @held_max 256
 
   @impl true
   def init(opts) do
@@ -276,11 +296,11 @@ defmodule Geex.Buffer do
           # Change-stream subscribers (ADR-0022): %{monitor_ref => pid}. Empty by
           # default — the buffer notifies no one unless something subscribes.
           subscribers: %{},
-          # Attestations (ADR-0032) that arrived before the reconcile group they describe:
-          # `[{attestation, received_at_ms}]`, newest first. Consumed when a matching group is
-          # recorded; size and age are bounded, which only garbage-collects (a match is exact).
-          pending: [],
-          pending_ttl_ms: Keyword.get(opts, :pending_ttl_ms, @pending_ttl_ms)
+          # Attestations (ADR-0032) for writes not taken in yet, newest first (ADR-0034). The
+          # next fast-forward credits its group from them by the chain rule, then clears them.
+          held: [],
+          # `nil`, or `%{sha256, at}`: the disk differs from `synced` (ADR-0034 §1).
+          behind: nil
         }
 
         # What opening itself records (a verification after a crash, a gap) is not a first
@@ -349,13 +369,11 @@ defmodule Geex.Buffer do
   def handle_call({:attest, %{before: nil}}, _from, state), do: {:reply, :ignored, state}
 
   def handle_call({:attest, attestation}, _from, state) do
-    state = prune_pending(state)
-
     case History.newest_group(state.history) do
       %{group: group} = stamp when not is_nil(group) ->
         cond do
           not matches?(attestation, stamp) ->
-            {:reply, :pending, park(state, attestation)}
+            {:reply, :held, hold(state, attestation)}
 
           History.unattested?(state.history, group) ->
             actor = agent_actor(attestation)
@@ -376,8 +394,20 @@ defmodule Geex.Buffer do
         end
 
       _no_group ->
-        {:reply, :pending, park(state, attestation)}
+        {:reply, :held, hold(state, attestation)}
     end
+  end
+
+  def handle_call({:disk_changed, disk_text}, _from, state) do
+    behind =
+      cond do
+        disk_text == state.history.synced -> nil
+        state.behind && state.behind.sha256 == Restore.sha256(disk_text) -> state.behind
+        true -> %{sha256: Restore.sha256(disk_text), at: DateTime.utc_now()}
+      end
+
+    state = set_behind(state, behind)
+    {:reply, if(behind, do: :behind, else: :in_sync), state}
   end
 
   def handle_call({:subscribe, pid}, _from, state) do
@@ -420,15 +450,24 @@ defmodule Geex.Buffer do
   def handle_call(:save, _from, %{path: nil} = state), do: {:reply, {:error, :no_path}, state}
 
   def handle_call(:save, _from, state) do
-    case File.write(state.path, History.text(state.history)) do
+    with :ok <- not_behind(state),
+         :ok <- File.write(state.path, History.text(state.history)) do
       # disk now equals the written text — that is the new in-sync baseline.
-      :ok ->
-        state = %{state | history: History.sync(state.history)} |> record_sync()
-        # A save is a natural durability point: don't wait for the timer.
-        {:reply, {:ok, state.path}, %{state | ledger: state.ledger && Ledger.sync(state.ledger)}}
+      state = %{state | history: History.sync(state.history)} |> record_sync()
+      state = set_behind(state, nil)
+      # A save is a natural durability point: don't wait for the timer.
+      {:reply, {:ok, state.path}, %{state | ledger: state.ledger && Ledger.sync(state.ledger)}}
+    else
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
 
-      {:error, _reason} = error ->
-        {:reply, error, state}
+  # The file is still what the buffer last synced (or gone, or unreadable: nothing to lose).
+  # Read at the write, so a change the watcher hasn't reported yet is caught too (ADR-0034 §3).
+  defp not_behind(state) do
+    case File.read(state.path) do
+      {:ok, disk} when disk != state.history.synced -> {:error, :behind}
+      _ -> :ok
     end
   end
 
@@ -482,10 +521,13 @@ defmodule Geex.Buffer do
   # added}`, or `:unknown`) so a byte-oriented overlay can shift optimistically across the
   # edit. A plain `send` — the buffer never blocks on a reactor.
   defp apply_group(commands, opts, state) do
-    {commands, state} = consume_pending(commands, prune_pending(state))
+    baseline = Keyword.get(opts, :baseline)
+    {commands, credited?} = credit_held(commands, baseline, state)
 
-    case History.group(state.history, commands, Keyword.get(opts, :baseline)) do
+    case History.group(state.history, commands, baseline) do
       {:ok, history} ->
+        state = if credited?, do: drop_held(state), else: state
+        state = if baseline, do: caught_up(state, baseline), else: state
         # One notification for the group: the byte footprint is the diff of the whole
         # transition (the same exact splice undo/redo uses), not a per-command footprint.
         footprint = Footprint.between(History.text(state.history), History.text(history))
@@ -515,29 +557,50 @@ defmodule Geex.Buffer do
     {:agent, Map.take(attestation, [:harness, :session, :turn, :tool_use])}
   end
 
-  # A group about to be recorded consumes a pending attestation that matches it exactly;
-  # its commands are then recorded already attested.
-  defp consume_pending([%{meta: %{reconcile: %{} = stamp}} | _] = commands, state) do
-    case Enum.split_with(state.pending, fn {att, _at} -> matches?(att, stamp) end) do
-      {[{att, _at} | _], rest} ->
-        actor = agent_actor(att)
-        {Enum.map(commands, &History.put_actor(&1, actor)), %{state | pending: rest}}
+  # A reconcile group about to be recorded (a fast-forward, ADR-0034) is credited from the held
+  # attestations and the file's spool by the chain rule (ADR-0033 F): one write, or a chain all
+  # from one session, taking `synced` exactly to the disk. Its commands are then recorded
+  # already attested. The spool's lines come first: the payload appends each one after this
+  # buffer answered `held`, so both lists are in time order and a write in both links once.
+  defp credit_held([%{meta: %{reconcile: %{}}} | _] = commands, disk_text, state)
+       when is_binary(disk_text) do
+    entries = spool_entries(state) ++ Enum.reverse(state.held)
 
-      {[], _} ->
-        {commands, state}
+    case Spool.chain(entries, state.history.synced, disk_text) do
+      {:ok, actor, tool_uses} -> {Enum.map(commands, &credit(&1, actor, tool_uses)), true}
+      :none -> {commands, false}
     end
   end
 
-  defp consume_pending(commands, state), do: {commands, state}
+  defp credit_held(commands, _disk_text, _state), do: {commands, false}
 
-  defp park(state, attestation) do
-    entry = {attestation, System.monotonic_time(:millisecond)}
-    %{state | pending: Enum.take([entry | state.pending], @pending_max)}
+  defp hold(state, attestation),
+    do: %{state | held: Enum.take([attestation | state.held], @held_max)}
+
+  # Once a fast-forward has used them, the held attestations and the spool describe states the
+  # file has moved past (the rule a reopen follows).
+  defp drop_held(state) do
+    if state.ledger, do: Spool.discard(Ledger.file(state.ledger.dir, state.ledger.path))
+    %{state | held: []}
   end
 
-  defp prune_pending(state) do
-    cutoff = System.monotonic_time(:millisecond) - state.pending_ttl_ms
-    %{state | pending: Enum.filter(state.pending, fn {_att, at} -> at >= cutoff end)}
+  defp spool_entries(%{ledger: %Ledger{dir: dir, path: path}}),
+    do: Spool.read(Ledger.file(dir, path))
+
+  defp spool_entries(_state), do: []
+
+  # The buffer took in `disk_text`: no longer behind, unless the disk has moved on again since.
+  defp caught_up(%{behind: %{sha256: sha}} = state, disk_text) do
+    if sha == Restore.sha256(disk_text), do: set_behind(state, nil), else: state
+  end
+
+  defp caught_up(state, _disk_text), do: state
+
+  defp set_behind(%{behind: same} = state, same), do: state
+
+  defp set_behind(state, behind) do
+    for {_ref, pid} <- state.subscribers, do: send(pid, {:geex_buffer_behind, self(), behind})
+    %{state | behind: behind}
   end
 
   defp notify_attested(state, group, actor) do
@@ -747,6 +810,8 @@ defmodule Geex.Buffer do
       seq: h.seq,
       dirty: h.dirty,
       synced: h.synced,
+      # `nil`, or `%{sha256, at}`: the file on disk has changed since `synced` (ADR-0034).
+      behind: state.behind,
       history: commands,
       # One writer per line (`Geex.Blame`): who last wrote it, for the gutter and status line.
       blame: h.blame

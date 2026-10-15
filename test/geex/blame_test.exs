@@ -76,9 +76,9 @@ defmodule Geex.BlameTest do
       assert [nil, agent("s1"), nil, :external, nil] == actors(buf)
     end
 
-    test "attested first (pending): the group lands already marked" do
+    test "attested first (held): the group lands already marked" do
       buf = start_supervised!({Buffer, text: "a\nb\n"})
-      :pending = attest(buf, "a\nb\n", "A\nb\n")
+      :held = attest(buf, "a\nb\n", "A\nb\n")
       {:reconciled, snap} = Reconcile.reconcile(buf, "A\nb\n")
       assert [{agent_actor, _group}, nil, nil] = snap.blame
       assert agent_actor == agent("s1")

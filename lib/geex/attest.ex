@@ -75,9 +75,10 @@ defmodule Geex.Attest do
 
   @doc """
   Hand a parsed attestation to the buffer open on its path. Returns the buffer's answer
-  (`:attested` / `:pending` / `:ignored`) or `:not_open`.
+  (`:attested` / `:held` / `:ignored`) or `:not_open`. The payload spools `held` and `not_open`
+  (ADR-0034): neither has been recorded yet.
   """
-  @spec submit(t()) :: :attested | :pending | :ignored | :not_open
+  @spec submit(t()) :: :attested | :held | :ignored | :not_open
   def submit(%{path: path} = attestation) do
     case BufferSupervisor.whereis(Path.expand(path)) do
       {:ok, pid} -> pid |> Buffer.attest(attestation) |> log(attestation)

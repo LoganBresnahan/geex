@@ -382,7 +382,7 @@ defmodule Geex.SessionTest do
       assert Enum.all?(Buffer.history(pid), &(&1.meta.actor != :external))
     end
 
-    test "a genuine external write after a dirty rename is still adopted (not over-suppressed)" do
+    test "a genuine external write after a dirty rename is still caught (not over-suppressed)" do
       start_supervised!(Geex.Reconcile)
       from = tmp_path()
       to = tmp_path()
@@ -394,13 +394,15 @@ defmodule Geex.SessionTest do
       assert Buffer.get_text(pid) == "EDIT-orig\n"
 
       # a REAL external writer changes `to` to content that diverges from the buffer's baseline:
-      # reconcile must adopt it as :external (the "never miss a genuine external change" half).
+      # the buffer must be marked behind (the "never miss a genuine external change" half). It
+      # holds its text until a fast-forward (ADR-0034).
       File.write!(ft, "external-edit\n")
       send(Geex.Reconcile, {:file_event, self(), {ft, [:modified]}})
       :sys.get_state(Geex.Reconcile)
 
-      assert Buffer.get_text(pid) == "external-edit\n"
-      assert Enum.any?(Buffer.history(pid), &(&1.meta.actor == :external))
+      assert Buffer.get_text(pid) == "EDIT-orig\n"
+      assert %{sha256: sha} = Buffer.snapshot(pid).behind
+      assert sha == Base.encode16(:crypto.hash(:sha256, "external-edit\n"), case: :lower)
     end
 
     test "an event for the unchanged backing file is ignored even after further edits (edits preserved)" do

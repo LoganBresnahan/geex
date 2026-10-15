@@ -1,6 +1,8 @@
 # ADR-0032: Listener-first agent integration — agents edit natively, geex records, captAInHook attributes; MCP frozen
 
-- **Status:** Accepted (amended 2026-10-14: attestation safety + write completion)
+- **Status:** Accepted (amended 2026-10-14: attestation safety + write completion). For open
+  buffers, step b's disk-wins merge and the pending table are superseded by
+  [ADR-0034](0034-panes-tree-edits-hold.md) (buffers hold; `git merge-file`; held attestations)
 - **Date:** 2026-10-14
 - **Amends:** [ADR-0016](0016-external-harness-integration.md) (the ladder's recommended
   path), [ADR-0017](0017-reconcile-file-watch.md) (reconcile becomes the primary agent path;

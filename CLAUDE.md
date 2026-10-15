@@ -38,7 +38,8 @@ One Mix app, `:geex`, under `lib/geex/`:
 - **World** — `Geex.Buffer` (GenServer: owns the ONE undo history as a pure
   `Geex.History` value, every transition going through it (ADR-0033); `Geex.Blame`
   derives who last wrote each line; `Buffer.Doc` is the text), `Geex.Session` (active-buffer pointer +
-  the view-local cursor), `Geex.Reconcile` (file-watch → `:external` commands).
+  the view-local cursor), `Geex.Reconcile` (file-watch marks an open buffer *behind*; a fast-forward or
+  save records the change as `:external` commands, merging with `git merge-file`, ADR-0034).
 - **Projections** — `Geex.MCP.*` (Protocol is pure; HTTP is the loopback
   Bandit/Plug transport; tool categories: edits, `Operations`, `ViewActions`,
   `Grid`) — **frozen by ADR-0032**: keep it green, add no tools; and the TUI: `Geex.Loop` (+ `loop/`), `Screen`/`Cell`/`Renderer`,
@@ -102,7 +103,8 @@ listener on and the terminal off; `GEEX_MCP_PORT`, `GEEX_MCP_PORT_FILE`).
 
 The reconcile watcher shells out to `inotifywait` (`inotify-tools`, installed
 here). Without it the watcher degrades to a logged no-op — geex still runs,
-but out-of-band writes aren't auto-reconciled. Tests never depend on it: they
+but out-of-band writes aren't noticed. Merging a buffer that is behind shells out to
+`git merge-file`; without git it falls back to geex's own merge (ADR-0034). Tests never depend on it: they
 inject a stub via `Geex.Reconcile`'s `:start_watcher` option.
 
 ## Conventions when you touch code

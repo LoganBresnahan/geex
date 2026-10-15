@@ -114,6 +114,9 @@ defmodule Geex.Loop.Keymap do
   # Revert the agent's (or outside) change under the cursor, one hunk, keeping later edits
   # (ADR-0033 §7). `revert-call` (the whole tool call) is typed or picked from the palette.
   def resolve({:alt, c}, _cursor, _text) when c in [?u, ?U], do: :revert_hunk
+  # Fast-forward (ADR-0034 §1): take in the file's change on disk, which an open buffer holds
+  # until you ask. Merges with your unsaved edits.
+  def resolve({:alt, c}, _cursor, _text) when c in [?l, ?L], do: :fast_forward
   # Selection (ADR-0029): Alt+H starts a selection at the cursor (motion then extends it),
   # Alt+B selects the whole buffer ("highlight all"), Alt+N / Esc clear. The loop owns the
   # live selection.

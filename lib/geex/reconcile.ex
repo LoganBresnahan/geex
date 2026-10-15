@@ -12,6 +12,15 @@ defmodule Geex.Reconcile do
   best-effort / ungateable harnesses. It works with *any* writer — a harness, a
   human in another terminal, `git checkout`.
 
+  ## Open buffers hold ([ADR-0034](../../doc/adr/0034-panes-tree-edits-hold.md))
+
+  The watcher no longer reconciles. It tells the buffer what the disk now holds
+  (`Geex.Buffer.disk_changed/2`), and the buffer is marked **behind** without changing. The
+  change is taken in only when you ask: `fast_forward/1` (`Alt+L`), or `save/2`, which
+  fast-forwards a buffer that is behind before it writes. Both run the core below. A dirty
+  buffer is merged with `git merge-file` (`Geex.Edit.GitMerge`): a conflict leaves git's
+  marked block in the buffer, and a save with conflicts doesn't write.
+
   ## Two layers (like `Geex.MCP.Protocol`)
 
     * **The core — `reconcile/2`** (no watcher, directly testable): given a buffer
@@ -72,7 +81,7 @@ defmodule Geex.Reconcile do
   alias Geex.Command.Meta
   alias Geex.Commands.Replace
   alias Geex.{Buffer, BufferSupervisor, Command}
-  alias Geex.Edit.{LineDiff, Merge}
+  alias Geex.Edit.{GitMerge, LineDiff, Merge}
 
   @default_settle_ms 50
   @stale_retries 3
@@ -105,11 +114,13 @@ defmodule Geex.Reconcile do
     * **differ** → a genuine external change, recorded as one `:external` group of hunk
       `replace`s (ADR-0032), returning `{:reconciled, snapshot}`:
       * a **clean** buffer adopts `disk_text`;
-      * a **dirty** buffer is three-way merged (`Geex.Edit.Merge`: base = `synced`, ours =
-        the buffer, theirs = disk). The disk change always lands; your unsaved hunks that
-        don't overlap it are kept (the buffer stays dirty); an overlapping one takes the
-        disk version, stays one undo away, and the human gets a notice
-        (`{:geex_buffer_notice, …}`) saying how many were replaced;
+      * a **dirty** buffer is three-way merged with `git merge-file` (`Geex.Edit.GitMerge`:
+        base = `synced`, ours = the buffer, theirs = disk, ADR-0034 §2). The disk change
+        lands and your unsaved hunks are kept (the buffer stays dirty). Where they overlap,
+        git's `<<<<<<< buffer` … `>>>>>>> disk` block goes into the buffer, and the human
+        gets a notice (`{:geex_buffer_notice, …}`) saying how many. Without git, geex's own
+        merge (`Geex.Edit.Merge`): an overlapping hunk of yours takes the disk version, one
+        undo away;
     * a dispatch failure → `{:error, reason}`.
 
   The hunks are computed from a snapshot and applied with `expect_seq`, so an edit landing
@@ -122,38 +133,115 @@ defmodule Geex.Reconcile do
   """
   @spec reconcile(pid(), String.t()) ::
           :ignored | {:reconciled, map()} | {:error, term()}
-  def reconcile(pid, disk_text) when is_pid(pid) and is_binary(disk_text),
-    do: reconcile(pid, disk_text, @stale_retries)
+  def reconcile(pid, disk_text) when is_pid(pid) and is_binary(disk_text) do
+    case run(pid, disk_text, @stale_retries) do
+      {:reconciled, snapshot, _conflicts} -> {:reconciled, snapshot}
+      other -> other
+    end
+  end
 
-  defp reconcile(pid, disk_text, retries) do
+  @doc """
+  Take in what the disk holds now (ADR-0034 §1): `Alt+L`, the `fast-forward` verb. Reads the
+  buffer's file and runs the reconcile core once, `synced` → disk, so a clean buffer takes the
+  disk text and a dirty one is merged. Agent writes the buffer held are credited by the chain
+  rule as the group is recorded.
+
+  Returns `{:fast_forwarded, snapshot, conflicts}` (`conflicts` > 0: the merge left that many
+  conflicts, see `reconcile/2`), `:up_to_date` (the disk is what the buffer last synced, or the
+  file is gone), or `{:error, reason}`.
+  """
+  @spec fast_forward(pid()) ::
+          {:fast_forwarded, map(), non_neg_integer()} | :up_to_date | {:error, term()}
+  def fast_forward(pid) when is_pid(pid) do
+    with %{path: path} when is_binary(path) <- Buffer.snapshot(pid),
+         {:ok, disk_text} <- File.read(path),
+         {:reconciled, snapshot, conflicts} <- run(pid, disk_text, @stale_retries) do
+      {:fast_forwarded, snapshot, conflicts}
+    else
+      :ignored -> up_to_date(pid)
+      %{path: nil} -> :up_to_date
+      {:error, :enoent} -> :up_to_date
+      {:error, _reason} = error -> error
+    end
+  catch
+    :exit, reason -> {:error, {:buffer_down, reason}}
+  end
+
+  # The disk matches `synced` again; tell the buffer, which clears a stale mark.
+  defp up_to_date(pid) do
+    with %{path: path} when is_binary(path) <- Buffer.snapshot(pid),
+         {:ok, disk_text} <- File.read(path),
+         do: Buffer.disk_changed(pid, disk_text)
+
+    :up_to_date
+  end
+
+  @doc """
+  Save the way `Ctrl-O` does (ADR-0034 §3). A buffer that is behind is fast-forwarded first;
+  if that merge left conflicts, nothing is written and the markers are in the buffer to
+  resolve. A buffer still holding a conflict block (`Geex.Edit.GitMerge.unresolved/1`) isn't
+  written either, unless `force: true` (the second `Ctrl-O` in a row): a file can legitimately
+  contain those lines.
+
+  Returns `{:ok, path}`, `{:conflicts, n}`, `{:markers, line}` (0-based), or `{:error, reason}`
+  (`Geex.Buffer.save/1`'s).
+  """
+  @spec save(pid(), keyword()) ::
+          {:ok, String.t()}
+          | {:conflicts, pos_integer()}
+          | {:markers, non_neg_integer()}
+          | {:error, term()}
+  def save(pid, opts \\ []) when is_pid(pid), do: save(pid, opts, @stale_retries)
+
+  defp save(pid, opts, retries) do
+    case fast_forward(pid) do
+      {:fast_forwarded, _snapshot, conflicts} when conflicts > 0 -> {:conflicts, conflicts}
+      {:error, _reason} = error -> error
+      _caught_up -> write(pid, opts, retries)
+    end
+  end
+
+  defp write(pid, opts, retries) do
+    marker = if opts[:force], do: nil, else: GitMerge.unresolved(Buffer.get_text(pid))
+
+    case marker && {:markers, marker} do
+      nil ->
+        case Buffer.save(pid) do
+          # The disk changed again between the fast-forward and the write.
+          {:error, :behind} when retries > 0 -> save(pid, opts, retries - 1)
+          result -> result
+        end
+
+      refusal ->
+        refusal
+    end
+  end
+
+  defp run(pid, disk_text, retries) do
     snapshot = Buffer.snapshot(pid)
 
     if snapshot.synced == disk_text do
       :ignored
     else
-      {target, conflicts} =
-        if snapshot.text == snapshot.synced,
-          do: {disk_text, 0},
-          else: Merge.merge(snapshot.synced, snapshot.text, disk_text)
-
+      {target, conflicts, notice} = merge(snapshot, disk_text)
       commands = external_commands(snapshot.text, target, snapshot.synced, disk_text)
 
       opts =
         [baseline: disk_text, expect_seq: snapshot.seq] ++
-          if conflicts > 0, do: [notice: conflict_notice(conflicts)], else: []
+          if notice, do: [notice: notice], else: []
 
       case Buffer.dispatch_group(pid, commands, opts) do
         {:ok, new_snapshot} ->
           Logger.info(
             "geex reconcile: external change to #{snapshot.path || "buffer"}" <>
               attributed(new_snapshot, commands) <>
-              if(conflicts > 0, do: " (#{conflicts} unsaved hunk(s) took disk)", else: "")
+              if(conflicts > 0, do: " (#{conflicts} conflict(s))", else: "")
           )
 
-          {:reconciled, new_snapshot}
+          {:reconciled, new_snapshot, conflicts}
 
         {:error, :stale} when retries > 0 ->
-          reconcile(pid, disk_text, retries - 1)
+          run(pid, disk_text, retries - 1)
 
         {:error, reason} = error ->
           Logger.warning("geex reconcile: failed to apply external change: #{inspect(reason)}")
@@ -213,15 +301,47 @@ defmodule Geex.Reconcile do
 
   defp attributed(snapshot, _commands) do
     case List.last(snapshot.history).meta.actor do
-      {:agent, %{harness: harness, session: session}} -> " (attested: #{harness} session #{session})"
-      _ -> ""
+      {:agent, %{harness: harness, session: session}} ->
+        " (attested: #{harness} session #{session})"
+
+      _ ->
+        ""
     end
   end
 
-  defp conflict_notice(1),
-    do: "disk changed: 1 of your unsaved hunks took the disk version (Alt+Z restores yours)"
+  # A clean buffer takes the disk. A dirty one is merged by git; without git (or on a git error)
+  # by geex's own merge, where an overlapping hunk of yours takes the disk version.
+  defp merge(%{text: text, synced: synced}, disk_text) when text == synced,
+    do: {disk_text, 0, nil}
+
+  defp merge(snapshot, disk_text) do
+    case GitMerge.merge(snapshot.synced, snapshot.text, disk_text) do
+      {:ok, merged, 0} ->
+        {merged, 0, nil}
+
+      {:ok, merged, n} ->
+        {merged, n, conflict_notice(n)}
+
+      {:error, reason} ->
+        Logger.warning(
+          "geex reconcile: git merge-file unavailable (#{inspect(reason)}); " <>
+            "using geex's own merge, where the disk wins overlaps"
+        )
+
+        {merged, n} = Merge.merge(snapshot.synced, snapshot.text, disk_text)
+        {merged, n, if(n > 0, do: took_disk_notice(n))}
+    end
+  end
+
+  defp conflict_notice(1), do: "1 conflict with the disk: resolve the marked block, then save"
 
   defp conflict_notice(n),
+    do: "#{n} conflicts with the disk: resolve the marked blocks, then save"
+
+  defp took_disk_notice(1),
+    do: "disk changed: 1 of your unsaved hunks took the disk version (Alt+Z restores yours)"
+
+  defp took_disk_notice(n),
     do: "disk changed: #{n} of your unsaved hunks took the disk version (Alt+Z restores yours)"
 
   # Lowercase hex, 64 chars — the attestation contract's format (what `sha256sum` prints).
@@ -348,19 +468,21 @@ defmodule Geex.Reconcile do
     end
   end
 
-  # Read the changed file and reconcile its buffer — but only if that path is an open buffer
-  # (the Registry is the source of truth). A transient read error or a deletion (`:enoent`) is
-  # skipped rather than reconciled to empty. `reconcile/2` itself decides external-vs-echo by
-  # comparing disk against the buffer's `synced` baseline, so the watcher needs no per-event
-  # bookkeeping — an unchanged file (geex's own save/rename, or a spurious event) compares
-  # equal and is ignored without reverting any unsaved edits.
+  # Read the changed file and tell its buffer — but only if that path is an open buffer (the
+  # Registry is the source of truth). The buffer holds (ADR-0034): it compares the disk with its
+  # `synced` baseline and marks itself behind, or clears the mark, without changing. A transient
+  # read error or a deletion (`:enoent`) is skipped. geex's own save/rename (or a spurious
+  # event) compares equal, so the watcher needs no per-event bookkeeping.
   defp on_disk_change(path) do
     with {:ok, pid} <- BufferSupervisor.whereis(path),
          {:ok, disk_text} <- File.read(path) do
-      reconcile(pid, disk_text)
+      Buffer.disk_changed(pid, disk_text)
     else
       _ -> :ignored
     end
+  catch
+    # The buffer can close between lookup and call.
+    :exit, _ -> :ignored
   end
 
   defp start_watcher(dir, state) do

@@ -10,7 +10,7 @@ defmodule Geex.Attest.HTTP do
   `0600` discovery file (`Geex.Attest.Discovery`). A request with an `Origin` header is
   refused: the payload is a local process, never a browser page.
 
-  Status codes: `200` with `{"status": "attested" | "pending" | "ignored" | "not_open"}`;
+  Status codes: `200` with `{"status": "attested" | "held" | "ignored" | "not_open"}`;
   `400` malformed JSON or an invalid message (the reason in the body); `401` missing or
   wrong token; `403` an `Origin` header; `413` body too large.
   """

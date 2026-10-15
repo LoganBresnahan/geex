@@ -40,7 +40,8 @@
 # (tests).
 #
 # THE SPOOL (ADR-0033 decision F): when no running geex took the attestation (none is running,
-# or every one answered not_open) and geex keeps a ledger for the file, the message is appended,
+# or every one answered not_open or held: a geex holding the open file hasn't recorded the write
+# yet, ADR-0034) and geex keeps a ledger for the file, the message is appended,
 # with an `at` time, to that file's spool next to its ledger:
 #   ${XDG_STATE_HOME:-$HOME/.local/state}/geex/ledger/<key>.spool.jsonl   (0600, last 256 lines)
 # where <key> is the first 16 hex of the sha256 of the path, as geex names the ledger. Hashes and
@@ -183,8 +184,9 @@ done
 
 wait
 
-# Any geex that has the file open answers attested / pending / ignored; only not_open (or no
-# geex at all) leaves it unrecorded. Without a scratch dir there is no telling: don't spool.
+# A geex that recorded the write answers attested or ignored (pending: a geex from before
+# ADR-0034). held (the open buffer hasn't taken the write in yet), not_open, or no geex at all
+# leave it unrecorded, so it is spooled. Without a scratch dir there is no telling: don't spool.
 if [ -n "$answers" ]; then
   taken=no
   for answer in "$answers"/*; do

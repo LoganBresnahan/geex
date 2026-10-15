@@ -29,6 +29,8 @@ defmodule Geex.ReconcileTest do
     pid
   end
 
+  defp hex(text), do: :crypto.hash(:sha256, text) |> Base.encode16(case: :lower)
+
   # Make `buf` dirty: dispatch one human edit so its text diverges from its `synced` baseline.
   defp dirty_edit(buf, text) do
     {:ok, cmd} = Insert.parse(%{line: 0, col: 0, text: text})
@@ -69,16 +71,20 @@ defmodule Geex.ReconcileTest do
       assert Enum.all?(Buffer.history(buf), &(&1.meta.actor != :external))
     end
 
-    test "a dirty buffer adopts a genuine external change (disk diverges from baseline)" do
+    test "a dirty buffer merges a genuine external change (disk diverges from baseline)" do
       buf = start_supervised!({Buffer, text: "base\n"})
       dirty_edit(buf, "EDIT-")
 
       assert {:reconciled, snap} = Reconcile.reconcile(buf, "external\n")
-      assert snap.text == "external\n"
-      # the human edit is kept in history; the external change is appended and adopted
-      assert length(snap.history) == 2
+      # both changed the one line: git's conflict block, your side first (ADR-0034 §2)
+      assert snap.text ==
+               "<<<<<<< buffer\nEDIT-base\n=======\nexternal\n>>>>>>> disk\n"
+
+      # the human edit is kept in history; the external change is appended
+      assert hd(snap.history).meta.actor == :human
       assert List.last(snap.history).meta.actor == :external
-      assert snap.dirty == false
+      assert snap.synced == "external\n"
+      assert snap.dirty
     end
 
     test "save/1 moves the baseline: the save echo is ignored, a later external change is caught" do
@@ -177,7 +183,7 @@ defmodule Geex.ReconcileTest do
       dirty_edit(buf, "EDIT-")
 
       assert {:reconciled, snap} = Reconcile.reconcile(buf, "external\n")
-      [_human, ext] = snap.history
+      ext = List.last(snap.history)
       hex = &Base.encode16(:crypto.hash(:sha256, &1), case: :lower)
       assert ext.meta.reconcile.before_sha256 == hex.("base\n")
     end
@@ -201,7 +207,7 @@ defmodule Geex.ReconcileTest do
     end
   end
 
-  describe "a disk change on a dirty buffer: merge, disk wins overlaps (ADR-0032 step b)" do
+  describe "a disk change on a dirty buffer: git merge-file (ADR-0034 §2)" do
     test "a disjoint disk change merges in; your unsaved edit is kept and still unsaved" do
       buf = start_supervised!({Buffer, text: "1\n2\n3\n"})
       dirty_edit(buf, "MY-")
@@ -214,7 +220,31 @@ defmodule Geex.ReconcileTest do
       refute_receive {:geex_buffer_notice, ^buf, _}, 100
     end
 
-    test "an overlapping hunk takes disk, the human is told, and undo restores theirs" do
+    test "an overlapping hunk becomes git's conflict block, the human is told, undo takes it back" do
+      buf = start_supervised!({Buffer, text: "keep\nedit me\n"})
+      {:ok, cmd} = Insert.parse(%{line: 1, col: 0, text: "MINE "})
+      {:ok, _} = Buffer.dispatch(buf, Command.put_meta(cmd, Meta.human()))
+      {:ok, _v} = Buffer.subscribe(buf, self())
+
+      assert {:reconciled, snap} = Reconcile.reconcile(buf, "keep\nDISK\n")
+
+      assert snap.text ==
+               "keep\n<<<<<<< buffer\nMINE edit me\n=======\nDISK\n>>>>>>> disk\n"
+
+      assert snap.dirty
+      assert_receive {:geex_buffer_notice, ^buf, notice}, 500
+      assert notice =~ "1 conflict with the disk"
+
+      externals = Enum.count(snap.history, &(&1.meta.actor == :external))
+      for _ <- 1..externals, do: {:ok, _, _} = Buffer.undo(buf)
+
+      assert Buffer.get_text(buf) == "keep\nMINE edit me\n"
+    end
+
+    test "without git, geex's own merge: the disk wins an overlap, one undo away" do
+      Application.put_env(:geex, :git_executable, "geex-test-no-such-git")
+      on_exit(fn -> Application.delete_env(:geex, :git_executable) end)
+
       buf = start_supervised!({Buffer, text: "keep\nedit me\n"})
       {:ok, cmd} = Insert.parse(%{line: 1, col: 0, text: "MINE "})
       {:ok, _} = Buffer.dispatch(buf, Command.put_meta(cmd, Meta.human()))
@@ -264,7 +294,7 @@ defmodule Geex.ReconcileTest do
       %{recon: recon}
     end
 
-    test "nothing is read until the path is quiet; a burst reconciles once, to the final bytes",
+    test "nothing is read until the path is quiet; a burst is read once, to the final bytes",
          %{recon: recon} do
       path = tmp_path()
       File.write!(path, "v1\n")
@@ -277,15 +307,20 @@ defmodule Geex.ReconcileTest do
       :sys.get_state(recon)
 
       # still inside the quiet period: the half-written state was never read
-      assert Buffer.get_text(buf) == "v1\n"
+      assert Buffer.snapshot(buf).behind == nil
 
       Process.sleep(@settle * 3)
       :sys.get_state(recon)
 
-      assert Buffer.get_text(buf) == "v2 done\n"
-      groups = buf |> Buffer.history() |> Enum.map(& &1.meta.reconcile.group) |> Enum.uniq()
-      assert length(groups) == 1
+      # the buffer holds (ADR-0034); it was told about the final bytes only
+      assert Buffer.get_text(buf) == "v1\n"
+      assert Buffer.snapshot(buf).behind.sha256 == hex("v2 done\n")
       assert :sys.get_state(recon).settling == %{}
+
+      assert {:fast_forwarded, snap, 0} = Reconcile.fast_forward(buf)
+      assert snap.text == "v2 done\n"
+      groups = snap.history |> Enum.map(& &1.meta.reconcile.group) |> Enum.uniq()
+      assert length(groups) == 1
     end
   end
 
@@ -302,20 +337,28 @@ defmodule Geex.ReconcileTest do
     # handle_info's synchronous Buffer.dispatch completed).
     defp sync(pid), do: :sys.get_state(pid)
 
-    test "a file_event for an open buffer whose disk changed reconciles it", %{recon: recon} do
+    test "a file_event for an open buffer whose disk changed marks it behind; it holds",
+         %{recon: recon} do
       path = tmp_path()
       File.write!(path, "v1\n")
       buf = open_registered(path)
-      assert Buffer.get_text(buf) == "v1\n"
+      {:ok, _v} = Buffer.subscribe(buf, self())
 
       # external write, then the watcher event geex would have received
       File.write!(path, "v2 external\n")
       send(recon, {:file_event, self(), {path, [:modified, :closed]}})
       sync(recon)
 
-      assert Buffer.get_text(buf) == "v2 external\n"
-      assert [recorded] = Buffer.history(buf)
-      assert recorded.meta.actor == :external
+      assert Buffer.get_text(buf) == "v1\n"
+      assert Buffer.history(buf) == []
+      assert_receive {:geex_buffer_behind, ^buf, %{sha256: sha}}, 500
+      assert sha == hex("v2 external\n")
+
+      # the disk going back clears the mark
+      File.write!(path, "v1\n")
+      send(recon, {:file_event, self(), {path, [:modified]}})
+      sync(recon)
+      assert_receive {:geex_buffer_behind, ^buf, nil}, 500
     end
 
     test "a file_event whose disk equals the buffer is ignored (geex's own save echo)",
@@ -328,6 +371,7 @@ defmodule Geex.ReconcileTest do
       sync(recon)
 
       assert Buffer.history(buf) == []
+      assert Buffer.snapshot(buf).behind == nil
     end
 
     test "a file_event for a path with no open buffer is a harmless no-op", %{recon: recon} do
@@ -447,7 +491,8 @@ defmodule Geex.ReconcileTest do
       recon =
         start_supervised!(
           {Reconcile,
-           name: :"recon_#{System.unique_integer([:positive])}", start_watcher: fn _dir -> :ignore end}
+           name: :"recon_#{System.unique_integer([:positive])}",
+           start_watcher: fn _dir -> :ignore end}
         )
 
       path = tmp_path()

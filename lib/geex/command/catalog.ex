@@ -54,6 +54,11 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, :revert_call}
     },
     %Entry{
+      name: "fast-forward",
+      description: "Take in the file's change on disk, merging your unsaved edits (Alt+L).",
+      invoke: {:action, :fast_forward}
+    },
+    %Entry{
       name: "highlight",
       description: "Start a selection at the cursor (extend it with motion).",
       invoke: {:action, :select_start}

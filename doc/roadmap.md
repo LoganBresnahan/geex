@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-15):** 818 tests + 22 doctests green, `--warnings-as-errors` clean. Since the
+**Current (2026-10-15):** 844 tests + 23 doctests green, `--warnings-as-errors` clean. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -186,7 +186,7 @@ The ledger track, in order (each builds on the one before):
    that is behind, merge with `git merge-file`: conflicts become markers in the buffer, and a
    conflicting merge doesn't write. Panes are a tree (git's file list, rooted at the path's git
    top level) · editor · edits pane (file · who · when). Build order: (1) the hold,
-   fast-forward, the git merge and save-while-behind; (2) panes and buffers (`Alt+O`, `open`,
+   fast-forward, the git merge and save-while-behind — **built 2026-10-15**; (2) panes and buffers (`Alt+O`, `open`,
    `buffers`, `close`); (3) the edits pane; (4) the file tree; (5) `user_modified` ("edited by
    you"). The follow pane in the first draft was dropped.
 
