@@ -354,6 +354,42 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    `Ctrl-O` ([adr/0026](adr/0026-terminal-input-model.md)) *and* as a typed verb, the clipboard
    + selection + undo/redo verb twins. Remaining: typed twins for the other operation tools
    (`open`/`new`/`close`) — they want the file-path completion of the finder (item 4).
+7. **Special keys awaiting a decision** — *to review during UI testing* (noted 2026-10-15). The
+   input parser now reads every terminal control sequence whole (`ebeca5a`, `23a886d`;
+   [adr/0026](adr/0026-terminal-input-model.md) is the input model): arrows, Home, End and Delete
+   work, and every other special key is **dropped** (never typed as text). Each of these needs a
+   decision about what it should do, then a small build:
+   - **Home / End / Delete inside the minibuffer.** The minibuffer has its own key handling (only
+     Left, Right, Backspace today). Likely just "same as in the buffer"; small.
+   - **Page Up / Page Down.** Move the cursor one screen. The parser side is one line; the screen
+     height lives in the loop, not the pure keymap, so the loop handles it. Small.
+   - **Ctrl+Left / Ctrl+Right.** Likely word motion, which exists as `Alt+Q` / `Alt+E`. The parser
+     needs to decode the modifier (`ESC [ 1 ; 5 C`). Small.
+   - **Shift+arrows.** The common convention is "extend the selection" (selection exists,
+     `Alt+H`). Decide whether to adopt it. Small to medium.
+   - **Alt + a digit or symbol** (`Alt+1` sends `ESC 1`). Still emits Esc and types the `1`. Read
+     it as an Alt chord, or drop it. Tiny.
+   - **F-keys, Insert.** Nothing to bind them to yet (no overwrite mode). Leave them dropped until
+     something wants one.
+   - **The Esc timeout** (40 ms, `Geex.TerminalIO`). Watch for slow remote (SSH) links that split a
+     key's bytes past it; the symptom would be a key's tail typed as text.
+8. **Attribution ideas awaiting a decision** — *to review during UI testing* (noted 2026-10-15;
+   design in [adr/0032](adr/0032-listener-first-agent-integration.md) and
+   [adr/0033](adr/0033-durable-ledger.md)). Floated while building the ledger; none is decided:
+   - **A mark colour per agent session.** Today every agent's `▌` is the same accent colour, so
+     telling two sessions apart takes moving the cursor to read the status line. A colour picked
+     from the session id (the glyph unchanged) would show it at a glance. Small.
+   - **Labelling shell writes.** A `sed` or script run through an agent's Bash tool is recorded
+     `:external`: the hook sees the command text but has no before/after content to prove what
+     it changed. Proposed: a hook before each Bash call and the existing one after it bracket the
+     call in time, and changes to open files in between are labelled "changed **while** session X
+     ran `cmd`", never "by", so attribution by timing never claims authorship (ADR-0032's rule).
+     Needs a `pre-tool-use` registration in `~/.captainHook/handlers.json`, a new message to geex,
+     and an ADR amendment. About the size of ADR-0032 step c.
+   - **`revert-call` from a line you rewrote.** It takes back the tool call that last wrote the
+     cursor's line, so on a line you've since edited it says "nothing to revert" even when other
+     lines of that call are still the agent's. Fine as designed; the alternative is to also look
+     at the call's other lines, or offer a picker of recent agent calls.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09); the shelf is currently clear.
