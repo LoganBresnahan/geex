@@ -24,8 +24,13 @@ as-of-write-time and can drift. When in doubt, read the code.
   through a tmux pty, the MCP server through a live loopback handshake. Run
   after any change a human or agent would *see*.
 
-There is no `/deploy` yet — geex has no installed form (no release, no
-launcher, no remote). It runs from this checkout via `mix`.
+- **`/deploy`** — builds geex into one executable with Burrito and installs it as
+  `~/.local/bin/geex` (`mix geex.deploy`, ADR-0036), then checks it live. Run when the
+  `geex` command should be the current build.
+
+The installed binary is local: it carries this machine's ERTS and the glibc NIF, so it runs
+here, not on a Mac or other Linux machines (ADR-0036). Development still runs from this
+checkout via `mix`.
 
 ## Architecture in one breath
 
@@ -65,8 +70,12 @@ One Mix app, `:geex`, under `lib/geex/`:
 4. **The terminal belongs to the renderer.** In TUI mode only
    `Geex.TerminalIO` writes the tty; `Logger` is redirected to
    `<tmp>/geex.log` before the app boots (`Geex.run/1`, hence `--no-start`).
-   No `IO.puts`/`IO.write` in `lib/` outside `terminal_io.ex` and the
-   `lib/mix/tasks/` CLI tasks.
+   No `IO.puts`/`IO.write` in `lib/` outside `terminal_io.ex`, the
+   `lib/mix/tasks/` CLI tasks, and `cli.ex`'s `--version`/`--help`/usage
+   (printed before the terminal is taken, then the VM halts). Anything that
+   stops the VM goes through `Geex.stop/0`, never `System.stop/0`: the
+   installed binary's application never finishes starting, so only an
+   explicit stop restores the terminal there (ADR-0036).
 5. **Grapheme addressing; width never addresses.** Commands address graphemes
    (and logical lines); display width (`Geex.Width`) is a *render* concern only
    — width can mis-render, never mis-address. Display→grapheme casts are pure.
@@ -96,6 +105,8 @@ mix geex.ledger list               # the durable ledgers (ADR-0033); also forget
 # mode that is the ONLY route — the frozen MCP surface needs mix geex.serve
 # the interactive TUI (needs a real tty — /dogfood drives it through tmux):
 elixir --erl "-noshell -noinput +Bd" -S mix run --no-start -e 'Geex.run("path")'
+mix geex.deploy                    # build the Burrito binary, install ~/.local/bin/geex (ADR-0036)
+mix geex.deploy --rollback         # put the previous binary back
 ```
 
 Feature gates live in `config/config.exs` (`start_terminal` / `start_reconcile`
@@ -172,6 +183,11 @@ session's `Co-Authored-By` trailer.
   test; tests pass `:ledger_dir`) and `ledger_dir`. Dogfood with `XDG_STATE_HOME` pointed at a
   scratch dir to keep the real one clean
 - TUI log: `<tmp>/geex.log` (`System.tmp_dir!/0`)
+- installed binary (ADR-0036): built to `burrito_out/geex_linux` (gitignored), installed at
+  `$XDG_DATA_HOME/geex/bin/geex` (default `~/.local/share/geex/bin`) with `geex.prev` beside it,
+  linked from `~/.local/bin/geex`; Burrito unpacks it to
+  `~/.local/share/.burrito/geex_erts-<erts>_<version>/`; a prod build's version is
+  `0.1.0+<sha8>` (`.dirty` added for an uncommitted tree)
 - sibling path dep: `~/tree_sitter_wasm` (Rustler NIF; must exist to compile)
 - harness presets: `presets/<harness>/` — copy into a *target* project, never
   geex's own root (it would deny your editor's writers here).

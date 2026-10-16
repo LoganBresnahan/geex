@@ -1987,3 +1987,66 @@ without the fix. **888 tests + 30 doctests**, green twice, `--warnings-as-errors
 **Not tested:** the maintainer's running geex (it still has the old code; it needs a restart, since
 reopening the buffer starts the old reactor again).
 
+
+### 2026-10-16 — The installed binary: Burrito, `mix geex.deploy` (ADR-0036)
+
+Built by the coordinator session at the maintainer's request. Several things changed during the
+build because the live checks failed first:
+
+- **Elixir's CLI evaluates the arguments.** Checked with plain `erl … -s elixir start_cli -extra
+  foo.txt`: it evaluates `foo.txt`, and with no argument the VM halts right after boot. So the
+  binary works inside `Application.start/2` and never returns from it.
+- **`System.stop/0` skipped every `terminate/2` under the binary.** The first build quit with
+  status 0 but left the alternate screen, the discovery file and a ledger lock. Hence `Geex.stop/0`
+  and the orderly stop in `Geex.CLI`.
+- **The terminal restore was racy.** After that change, one of two SIGTERM runs still left the
+  alternate screen on: `:prim_tty.write/2` is asynchronous, and the halt beat it. Hence the
+  synchronous restore in `TerminalIO.terminate/2`.
+- **Pointing Burrito's `custom_erts` at the asdf Erlang wasn't used.** Its copy step deletes the
+  matching NIF files in the source tree. Burrito's phases are cut down instead.
+
+**Live-verified** on `burrito_out/geex_linux` `0.1.0+797edb8a.dirty` (22 MB), in tmux with scratch
+`XDG_STATE_HOME`/`TMPDIR`. The maintainer's running geex instances were left alone.
+
+- **CLI:**
+  - `--version` prints `geex 0.1.0+797edb8a.dirty` and exits 0, in 1.6 s on the first run (unpack)
+    and 0.24 s after.
+  - `-h` prints usage and exits 0; `--frob` prints the error and usage and exits 2.
+  - `maintenance directory` names the unpack directory.
+- **The trap:** `geex trap.exs a.txt`, where `trap.exs` is `IO.puts("EVALUATED")`, opened both, and
+  nothing was printed.
+- **TUI:**
+  - The Elixir file was coloured, so the NIF loads in the release. The VM's command line has
+    `-Bd`.
+  - Typing and `Ctrl-O` saved to disk.
+  - Bare `geex` in a repo, and `geex repo` from its parent, both showed the tree over a scratch
+    buffer.
+  - `cd sub; geex n1.txt ../b.txt` opened both; `buffers` listed `sub/n1.txt` and `b.txt`.
+  - A clean quit removes the ledger lock and writes the ledger, under the scratch state dir.
+- **Quitting:**
+  - Three `Ctrl-X` and three SIGTERM runs each exited 0 with the alternate screen off, the cursor
+    shown, the discovery file removed and no `terminating`/`error` lines in the log.
+  - `mix run` launch, through the new `Geex.stop/0`: `Ctrl-X` exited 0, the terminal was restored
+    and the discovery file removed.
+- **Attestation through the binary:**
+  - With `new.txt` open, the coordinator's own `Edit` went through captAInHook's payload. The log
+    said `held` and the status line said "behind disk (Alt+L)".
+  - `Alt+L` read "caught up with the disk (claude-code/7ccbf3d1)", and the edits pane listed
+    `new.txt claude-code/7ccbf3d1`.
+
+**Found, not fixed:** Ctrl-C hard-kills geex, under `mix run` too ([BUG-3](bugs.md)).
+`prim_tty`'s raw mode leaves `isig` on (`stty`: `ixon isig -icanon -echo`).
+
+**Automated:** `cli_test` +8 tests and 5 doctests:
+- `parse/1`: paths, `--` anywhere, version and help, unknown options;
+- `standalone?/0` off under test;
+- `Geex.stop/0` and SIGTERM send `:geex_quit` to a registered `Geex.CLI`;
+- other signals are ignored.
+
+**896 tests + 35 doctests**, `--warnings-as-errors` clean.
+
+**Not tested:**
+- the install itself (`mix geex.deploy`'s copy, link and rollback), which runs after this commit
+  from a clean tree;
+- a Mac or another Linux machine (the binary isn't portable, by design);
+- `GEEX_SERVE=1` under the binary.

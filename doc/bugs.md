@@ -7,6 +7,31 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-3 — Ctrl-C kills geex outright: the terminal, the ledger lock and the discovery file are left behind
+
+- **Status:** open. Found 2026-10-16 by the coordinator session while checking the installed binary
+  (ADR-0036). It happens the same under `mix run`, so the binary doesn't cause it.
+- **Symptom:** Ctrl-C in geex doesn't quit through the keymap. The VM dies at once, and the shell
+  that ran it dies of SIGINT too (`tmux` reports the pane dead by signal 2). Nothing's
+  `terminate/2` runs, so:
+  - the terminal stays on the alternate screen;
+  - `$XDG_RUNTIME_DIR/geex/<pid>.json` is left behind;
+  - an open buffer's `<key>.lock` stays in the ledger directory;
+  - unsaved edits are lost.
+- **Verified cause:** `:prim_tty`'s raw input mode turns off `icanon` and `echo` but leaves `isig`
+  (and `ixon`) on. Checked with `stty -F <pane tty> -a` while geex ran: `ixon isig -icanon
+  -echo`. So the terminal turns Ctrl-C into SIGINT for the foreground process group, and the
+  keymap never sees the byte. With `+Bd` the break handler is off, so SIGINT ends the VM with no
+  cleanup. The same holds for Ctrl-Z (SIGTSTP) and Ctrl-\ (SIGQUIT). `Geex.run/1`'s doc says raw
+  mode "delivers it as a byte to the keymap". That is wrong.
+- **Recommended fix:** clear `isig` on the tty while geex owns it and restore it on teardown,
+  for example `stty -isig` against the tty at `Geex.TerminalIO` init. Then Ctrl-C reaches the
+  keymap, which already maps it to quit. Alternatively, `+Bi` ignores SIGINT, but then Ctrl-C does
+  nothing at all. Check that Ctrl-Z is still wanted as a key before clearing `isig` for it.
+- **Ruled out:** the binary. `mix run` with `--erl "-noshell -noinput +Bd"` behaves the same.
+
+---
+
 ## BUG-2 — Flicker at the line tail while typing (the highlighter's two-pass)  ✅ FIXED (2026-06-09)
 
 - **Status:** **FIXED** — the optimistic highlight-overlay shift. Verified: 503 tests + 9

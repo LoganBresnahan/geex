@@ -194,9 +194,28 @@ defmodule Geex.TerminalIO do
 
   @impl true
   def terminate(_reason, state) do
-    :prim_tty.write(state.tty, ["\e[?25h", "\e[?1049l"])
+    restore_screen(state.tty)
     _ = :prim_tty.reader_stop(state.tty)
     :ok
+  end
+
+  # `:prim_tty.write/2` only hands the bytes to its writer process. The installed binary halts
+  # right after the tree stops (ADR-0036), which can kill the writer before it writes, and the
+  # terminal stays on the alternate screen. So wait, briefly, for the writer to say it wrote.
+  @restore_timeout_ms 500
+
+  defp restore_screen(tty) do
+    %{write: writer_ref} = :prim_tty.handles(tty)
+    {:ok, monitor} = :prim_tty.write(tty, ["\e[?25h", "\e[?1049l"], self())
+
+    receive do
+      {^writer_ref, :ok} -> :ok
+      {:DOWN, ^monitor, :process, _pid, _reason} -> :ok
+    after
+      @restore_timeout_ms -> :ok
+    end
+
+    Process.demonitor(monitor, [:flush])
   end
 
   ## Internals

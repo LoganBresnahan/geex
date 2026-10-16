@@ -5,6 +5,16 @@ defmodule Geex.Application do
 
   @impl true
   def start(_type, _args) do
+    # The installed binary runs the editor from here and never returns (ADR-0036, `Geex.CLI`).
+    if Geex.CLI.standalone?() do
+      argv = Enum.map(:init.get_plain_arguments(), &List.to_string/1)
+      Geex.CLI.main(argv, &start_tree/0)
+    else
+      start_tree()
+    end
+  end
+
+  defp start_tree do
     children =
       [
         {Registry, keys: :unique, name: Geex.Registry},

@@ -20,9 +20,10 @@ defmodule Geex do
     * `+Bd` — **disable the ERTS break handler.** The BEAM normally reserves
       `SIGINT`/Ctrl-C for its `BREAK:` inspect-a-live-node menu (which is why a bare
       Ctrl-C doesn't quit and `sigint` is absent from `os:set_signal/2`). A TUI wants
-      Ctrl-C to be an ordinary keystroke, so we drop that claim; raw mode then delivers
-      it as a byte to the keymap. (`SIGTERM` still triggers a graceful shutdown that
-      restores the terminal, so `kill` is safe.)
+      Ctrl-C to be an ordinary keystroke, so we drop that claim. But `:prim_tty`'s raw mode
+      leaves the terminal's `isig` on, so Ctrl-C still arrives as SIGINT and ends the VM
+      without cleanup ([BUG-3](../doc/bugs.md)); quit with Ctrl-X. (`SIGTERM` triggers a
+      graceful shutdown that restores the terminal, so `kill` is safe.)
 
   Use `--no-start` so logging is redirected to a file *before* the app (and its
   terminal) come up — otherwise startup logs (e.g. the file-watcher's warnings)
@@ -41,10 +42,36 @@ defmodule Geex do
   def run(path \\ nil) do
     redirect_logs_to_file()
     {:ok, _} = Application.ensure_all_started(:geex)
+    open_paths(path)
+    Process.sleep(:infinity)
+  end
+
+  @doc """
+  Quit the editor: what `Ctrl-X`, the `quit` verb and the end of input call.
+
+  Under `mix run` this is `System.stop/0`: the application stops in order, and
+  `Geex.TerminalIO` restores the terminal on the way down. The installed binary's application
+  never finishes starting (`Geex.CLI`), and a `System.stop/0` there skips that orderly stop.
+  So when `Geex.CLI` is running, it is told instead, and it stops the tree itself.
+  """
+  @spec stop() :: :ok
+  def stop do
+    case Process.whereis(Geex.CLI) do
+      nil -> System.stop()
+      cli -> send(cli, :geex_quit)
+    end
+
+    :ok
+  end
+
+  @doc false
+  # Open what geex was started on: `run/1` above, and the installed binary's `Geex.CLI`.
+  @spec open_paths(String.t() | [String.t()] | nil) :: :ok
+  def open_paths(path) do
     # Where geex was started, for the edits pane's root and a relative `open` (ADR-0034 §5).
     with [first | _] <- List.wrap(path), do: Geex.Session.set_start(first)
     open(path)
-    Process.sleep(:infinity)
+    :ok
   end
 
   defp open([]), do: open(nil)
@@ -68,7 +95,8 @@ defmodule Geex do
   # warnings when inotify-tools is missing). Send logs to a file and detach every
   # other handler — done *before* the app starts (hence `mix run --no-start`).
   # Best-effort: a logging hiccup must never stop the editor from booting.
-  defp redirect_logs_to_file do
+  @doc false
+  def redirect_logs_to_file do
     file = System.tmp_dir!() |> Path.join("geex.log") |> String.to_charlist()
     _ = :logger.add_handler(:geex_file, :logger_std_h, %{config: %{type: {:file, file}}})
     for id <- :logger.get_handler_ids(), id != :geex_file, do: :logger.remove_handler(id)

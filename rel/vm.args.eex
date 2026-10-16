@@ -1,0 +1,9 @@
+## Flags for the installed binary's VM (ADR-0036). Burrito's launcher already passes
+## -noshell; these are what `Geex.run/1`'s `--erl` flags add under `mix run`.
+
+## Keep the Erlang shell's input driver off stdin, so `:prim_tty` owns the terminal.
+-noinput
+
+## Disable the break handler, so Ctrl-C reaches the keymap as a key instead of opening
+## the BEAM's BREAK menu.
++Bd

@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-16):** 888 tests + 30 doctests green, `--warnings-as-errors` clean. Since the
+**Current (2026-10-16):** 896 tests + 35 doctests green, `--warnings-as-errors` clean. geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -254,6 +254,11 @@ none — [adr/0016](adr/0016-external-harness-integration.md)).
 
 Each gated on a **named consumer** (the brain/world test, [vision.md](vision.md) §3):
 
+- **Distribution** — *local install built* ([adr/0036](adr/0036-installed-binary.md)):
+  a Burrito binary carrying this machine's ERTS and the glibc tree_sitter_wasm NIF, installed by
+  `mix geex.deploy`. *Portable* binaries (the Mac, other Linux machines) need the NIF built per
+  target (`rustler_precompiled`, or Zig-linked musl) and Burrito's default phases back; gated on
+  a second machine.
 - **Direction B (geex-calls-LLM)** — in-editor AI features (rename-suggestion,
   commit-message) on the thin `balance_beam` extraction helper; results become
   `%Command{}`s via the §2 composition rule ([adr/0011](adr/0011-direction-b-balance-beam.md)).

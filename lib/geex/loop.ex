@@ -318,7 +318,7 @@ defmodule Geex.Loop do
   # alone would just restart it (a permanent child), so stop the VM — the app's
   # shutdown restores the terminal.
   def handle_info({:geex_io, :eof}, state) do
-    System.stop()
+    Geex.stop()
     {:noreply, state}
   end
 
@@ -1398,7 +1398,7 @@ defmodule Geex.Loop do
         schedule_repaint(do_close(state))
 
       :quit ->
-        System.stop()
+        Geex.stop()
         state
     end
   end
@@ -1760,7 +1760,7 @@ defmodule Geex.Loop do
         close_minibuffer(state)
 
       {:ctrl, ?x} ->
-        System.stop()
+        Geex.stop()
         state
 
       _ ->
