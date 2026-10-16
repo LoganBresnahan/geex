@@ -1906,3 +1906,33 @@ above (the editor's current-line tint) and tmux omits it; with the cursor on lin
 
 **Not tested:** a real `userModified: true` from Claude Code's permission prompt (this session runs
 without prompts; the captured fixtures all say `false`).
+
+### 2026-10-16 — The tree: no cap, read in the background (ADR-0034 amendment)
+
+The coordinator's live test of `a64fb05` passed (a 10,000-file repository listed in about a second,
+Left to the parent, the walk outside a repository) and found that the 10,000-file cap cut the list
+without saying so, on the git path too. The maintainer chose no cap. Measured first: geex opened in the
+home directory (937,594 files, not a repository) froze the loop for 60 s cold, 18 s warm, at launch and
+whenever the tree took focus, and each directory open or close took 14 s. Now the tree is read in a
+monitored process of its own, in parallel inside it, and the rows come from an index built there.
+
+**Live-verified** (geex TUI in a tmux pty, 140×40, scratch `XDG_STATE_HOME`), `Geex.run("/home/oof")`:
+the tree said "reading…" and keys typed 0.8 s after launch landed in the scratch buffer; the tree filled
+at 17 s. `Alt+O` into the tree (which starts a re-read; the rows stayed), down to `captAInHook/`, Enter:
+it opened in about 60 ms and closed in about 60 ms (the polling's granularity is 50 ms). After the re-read
+landed, the open directory and the selection were still there. RSS about 500 MB. No warnings or errors
+in the log. Then `mix.exs` in the geex repository: the tree showed 0.8 s after launch.
+
+**Measured** (`mix run`, warm cache, 8 schedulers): the walk 8.0 s in parallel (18.0 s one directory at a
+time; 32 or 64 at once were no faster), sort 1.5 s, `Tree.index/1` 4.1 s in parallel (8.5 s in one process).
+
+**Automated:** `tree_test` +1: 11,000 files, all listed by the walk and by git, and indexed;
+`Tree.index/1` doctest; the rows tests now go through the index. `panes_test` +2: the loop doesn't wait
+(the reader is recorded, no rows yet), a second focus starts no second read, an answer from another
+process changes nothing, the answer brings the index; a reader that dies first gives the notice and an
+empty index (so no re-read on the next frame). The pane tests deliver the reader's answer. **886 tests + 30
+doctests**, green twice, `--warnings-as-errors` clean.
+
+**Not tested:** a reader that really crashes (the test hands the loop a `DOWN` from a process that
+exits `:boom`); a root too big for memory; the reader outliving a crashed loop (it finishes, and its
+answer goes nowhere).

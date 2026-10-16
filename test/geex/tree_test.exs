@@ -45,18 +45,35 @@ defmodule Geex.TreeTest do
     assert Tree.list(dir) == [".gitignore", "new.ex", "tracked.ex"]
   end
 
+  test "no cap: past 10,000 files, the walk and git list them all", %{dir: dir} do
+    # Found live by the coordinator: the old cap cut the list without saying so (untracked files
+    # first, since git lists them last). Logan's call (2026-10-16): no cap at all.
+    for d <- 1..11 do
+      File.mkdir_p!(Path.join(dir, "d#{d}"))
+      for f <- 1..1000, do: File.write!(Path.join(dir, "d#{d}/f#{f}"), "")
+    end
+
+    assert length(Tree.list(dir)) == 11_000
+    git(dir, ["init", "-q"])
+    files = Tree.list(dir)
+    assert length(files) == 11_000
+
+    index = Tree.index(files)
+    assert map_size(index) == 11 and map_size(index["d7"]) == 1000
+  end
+
   test "rows: directories first, alphabetical, opened ones expanded, depth for indent" do
-    files = ["z.txt", "a/x.ex", "a/b/y.ex", "c/w.ex"]
+    index = Tree.index(["z.txt", "a/x.ex", "a/b/y.ex", "c/w.ex"])
 
-    assert Tree.rows(files, MapSet.new()) |> Enum.map(& &1.path) == ["a", "c", "z.txt"]
+    assert Tree.rows(index, MapSet.new()) |> Enum.map(& &1.path) == ["a", "c", "z.txt"]
 
-    rows = Tree.rows(files, MapSet.new(["a", "a/b"]))
+    rows = Tree.rows(index, MapSet.new(["a", "a/b"]))
 
     assert Enum.map(rows, &{&1.path, &1.depth}) ==
              [{"a", 0}, {"a/b", 1}, {"a/b/y.ex", 2}, {"a/x.ex", 1}, {"c", 0}, {"z.txt", 0}]
 
     # an open directory under a closed one stays hidden
-    assert Tree.rows(files, MapSet.new(["a/b"])) |> Enum.map(& &1.path) == ["a", "c", "z.txt"]
+    assert Tree.rows(index, MapSet.new(["a/b"])) |> Enum.map(& &1.path) == ["a", "c", "z.txt"]
   end
 
   test "the layout's tree column: a quarter of the width, 20 to 36, none below 60 columns" do

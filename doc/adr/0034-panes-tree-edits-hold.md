@@ -2,7 +2,8 @@
 
 - **Status:** Accepted 2026-10-15 (open decisions A, F–K taken as recommended). **Built**
   2026-10-15: the hold (1), more than one buffer (2), the edits pane with the layout and `Alt+O`
-  (3), the file tree (4), "edited by you" (5).
+  (3), the file tree (4), "edited by you" (5). **Amended** 2026-10-16: the tree has no cap, and
+  is read in a process of its own.
   Rewritten the same day after the maintainer's redirect: the first draft's follow pane is dropped.
 - **Date:** 2026-10-15
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell; it deferred tabs and
@@ -157,8 +158,8 @@ the hold.
   geex runs through mix from its own checkout.
 - **The list comes from git:** inside a work tree,
   `git ls-files --cached --others --exclude-standard -z` (tracked files, plus untracked ones that
-  aren't ignored). Outside a repository, it is a directory walk that skips dot-directories, capped at
-  10,000 entries.
+  aren't ignored). Outside a repository, it is a directory walk that skips dot-directories. (Capped
+  at 10,000 entries until the 2026-10-16 amendment below: now no cap.)
 - **Plain:** names only. Directories start collapsed. Enter toggles a directory or opens a file.
 - **Re-read** whenever the tree is shown or takes focus. There is no directory watcher.
 
@@ -307,6 +308,31 @@ the hold.
 - **Not live with a real prompt:** this session's Claude Code runs without permission prompts,
   so `userModified: true` was posted by hand. The field path is the one the coordinator found
   in real `toolUseResult` records (always `false` in the captured fixtures).
+
+### Amended 2026-10-16: no cap, and the tree is read in the background
+
+The coordinator's live test of `a64fb05` found that the cap cut the list without saying so, and on the
+git path too. Git lists untracked files last, so in a big repository they were the ones dropped. The
+maintainer's call: no cap; if a root is too big, let it fail rather than cut it. Measured first, a
+root that big didn't fail, it hung: opened in the home directory (937,594 files, not a repository),
+the loop read it for 60 s (18 s warm) before drawing, and again whenever the tree took focus, and each
+directory open or close rebuilt the rows from every file (14 s).
+
+- **No cap** on either path.
+- **Read in a process of its own.** The loop starts a reader (`spawn_monitor`, not linked) when the
+  tree is first drawn, shown or focused, one at a time. The rows shown stay until its
+  `{:geex_tree, pid, index}` arrives; until the first one, the tree says "reading…". An answer from
+  any other process is ignored. If the reader dies first, the loop logs it, says "the file tree
+  couldn't be read", and doesn't try again until the tree is shown or focused.
+- **In parallel inside the reader.** The walk lists a level of directories at a time, one process
+  each (`Task.async_stream`). The git path drops deleted files in batches of 500, in parallel.
+  `Geex.Tree.index/1` builds the directories' index, one process per top-level directory.
+- **The rows come from the index** (`Geex.Tree.rows/2` takes it, not the file list), visiting only
+  the open directories, so opening or closing one costs what is shown.
+- **Measured** on the home directory, warm: walk 8.0 s (18 s one at a time), sort 1.5 s, index
+  4.1 s (8.5 s in one process). Live, the editor took keys 0.8 s after launch and the tree filled at
+  17 s; a directory opened or closed in about 60 ms; the VM held about 500 MB. The geex repository's
+  tree still shows within a second of launch.
 
 ## Consequences
 

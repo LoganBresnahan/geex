@@ -255,9 +255,11 @@ defmodule Geex.Loop do
       focus: :editor,
       edits_sel: 0,
       # The file tree (ADR-0034 §5): shown at start from 100 columns (once geex knows its
-      # root); `tree` toggles it. `files` is read when it is first drawn, shown, or focused.
+      # root); `tree` toggles it. The files are read when it is first drawn, shown, or focused,
+      # in a process of their own: `reading` is that process's `{pid, monitor}` until its
+      # `index` arrives.
       tree_shown: w >= 100,
-      tree: %{files: nil, open: MapSet.new(), rows: [], sel: 0}
+      tree: %{index: nil, reading: nil, open: MapSet.new(), rows: [], sel: 0}
     }
   end
 
@@ -345,9 +347,29 @@ defmodule Geex.Loop do
     end
   end
 
+  # The tree's files, from the process reload_tree/1 started. An answer from any other process
+  # (a read that was superseded) falls through to the catch-all.
+  def handle_info({:geex_tree, pid, index}, %{tree: %{reading: {pid, ref}} = tree} = state) do
+    Process.demonitor(ref, [:flush])
+    rows = Tree.rows(index, tree.open)
+    sel = min(tree.sel, max(length(rows) - 1, 0))
+    tree = %{tree | index: index, reading: nil, rows: rows, sel: sel}
+    {:noreply, schedule_repaint(%{state | tree: tree})}
+  end
+
   # The active buffer died — detach; a fresh open re-attaches via Session.
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{buffer_ref: ref} = state),
     do: {:noreply, schedule_repaint(%{state | buffer: nil, buffer_ref: nil, reactor: nil})}
+
+  # The tree's reader died before answering. Say so, and keep what is shown: an empty index
+  # rather than none, so the next frame doesn't start another read that dies the same way.
+  # Showing or focusing the tree tries again.
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{tree: %{reading: {_, ref}}} = state) do
+    Logger.warning("geex tree: reading the files failed: #{inspect(reason)}")
+    tree = %{state.tree | reading: nil, index: state.tree.index || %{}}
+    notice = "the file tree couldn't be read (see #{Path.join(System.tmp_dir!(), "geex.log")})"
+    {:noreply, schedule_repaint(%{state | tree: tree, notice: notice})}
+  end
 
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state), do: {:noreply, state}
 
@@ -661,7 +683,9 @@ defmodule Geex.Loop do
     n = max(h - 1, 0)
 
     if rows == [] do
-      Screen.draw_text(screen, 1, 1, palette_clip("no files", inner - 1), %Cell{
+      empty = if state.tree.reading, do: "reading…", else: "no files"
+
+      Screen.draw_text(screen, 1, 1, palette_clip(empty, inner - 1), %Cell{
         fg: pal.line_number,
         bg: pal.bg
       })
@@ -706,8 +730,13 @@ defmodule Geex.Loop do
   end
 
   # Read the root's files the first time the tree is drawn.
-  defp ensure_tree(%{tree_shown: true, tree: %{files: nil}} = state), do: reload_tree(state)
+  defp ensure_tree(%{tree_shown: true, tree: %{index: nil}} = state), do: reload_tree(state)
   defp ensure_tree(state), do: state
+
+  # Read the root's files in a process of their own, so a huge root never holds up the editor:
+  # the rows shown stay until its `{:geex_tree, …}` arrives. One read at a time. Monitored,
+  # not linked: if it crashes, the loop says so and carries on.
+  defp reload_tree(%{tree: %{reading: {_, _}}} = state), do: state
 
   defp reload_tree(state) do
     case safe_start().root do
@@ -715,12 +744,13 @@ defmodule Geex.Loop do
         state
 
       root ->
-        files = Tree.list(root)
-        rows = Tree.rows(files, state.tree.open)
-        sel = min(state.tree.sel, max(length(rows) - 1, 0))
-        %{state | tree: %{state.tree | files: files, rows: rows, sel: sel}}
+        loop = self()
+        reader = spawn_monitor(fn -> send(loop, {:geex_tree, self(), read_tree(root)}) end)
+        put_in(state.tree.reading, reader)
     end
   end
+
+  defp read_tree(root), do: root |> Tree.list() |> Tree.index()
 
   defp edits_entries do
     EditsPane.entries(Session.buffers(), safe_edits_rows(), safe_start().root)
@@ -807,7 +837,7 @@ defmodule Geex.Loop do
 
   defp set_open(%{tree: tree} = state, dir, open?) do
     open = if open?, do: MapSet.put(tree.open, dir), else: MapSet.delete(tree.open, dir)
-    %{state | tree: %{tree | open: open, rows: Tree.rows(tree.files || [], open)}}
+    %{state | tree: %{tree | open: open, rows: Tree.rows(tree.index || %{}, open)}}
   end
 
   # Keys while the edits pane has focus: move, Enter, back to the editor. The minibuffer, the

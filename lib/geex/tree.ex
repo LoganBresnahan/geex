@@ -1,15 +1,16 @@
 defmodule Geex.Tree do
   @moduledoc """
   The file tree's content ([ADR-0034](../../doc/adr/0034-panes-tree-edits-hold.md) §5): the files
-  under the root, and the rows to show for the directories you've opened.
+  under the root, an index of them by directory, and the rows to show for the directories
+  you've opened.
 
   `list/1` asks git where it can: inside a work tree, `git ls-files --cached --others
   --exclude-standard` (tracked files, plus untracked ones that aren't ignored), less any deleted
-  from disk. Outside a repository it walks the directory, skipping dot-directories. Both stop
-  at 10,000 files. `rows/2` is pure.
+  from disk. Outside a repository it walks the directory, skipping dot-directories. There is no
+  cap: a huge root is slow to list, not cut short, so the loop reads it in a process of its own.
+  Both the walk and `index/1` spread their work over processes. `rows/2` is pure and visits
+  only the open directories.
   """
-
-  @cap 10_000
 
   @type row :: %{
           path: String.t(),
@@ -19,39 +20,71 @@ defmodule Geex.Tree do
           open?: boolean()
         }
 
+  @typedoc "Each name under a directory: `:file`, or the directory's own index."
+  @type index :: %{String.t() => :file | index()}
+
   @doc "The files under `root`, as paths relative to it, sorted."
   @spec list(String.t()) :: [String.t()]
   def list(root) do
     files =
       case git_files(root) do
         {:ok, files} -> files
-        :error -> walk(root, "", @cap)
+        :error -> walk(root)
       end
 
-    files |> Enum.take(@cap) |> Enum.sort()
+    Enum.sort(files)
   end
+
+  @doc """
+  The files by directory. Each top-level directory is indexed in a process of its own.
+
+      iex> Geex.Tree.index(["README.md", "lib/a.ex", "lib/b/c.ex"])
+      %{"README.md" => :file, "lib" => %{"a.ex" => :file, "b" => %{"c.ex" => :file}}}
+  """
+  @spec index([String.t()]) :: index()
+  def index(files) do
+    files
+    |> Enum.group_by(&top/1, &rest/1)
+    |> Task.async_stream(
+      fn
+        {name, [nil]} -> {name, :file}
+        {name, rests} -> {name, Enum.reduce(rests, %{}, &put_file/2)}
+      end,
+      ordered: false,
+      timeout: :infinity
+    )
+    |> Map.new(fn {:ok, entry} -> entry end)
+  end
+
+  defp top(path), do: path |> :binary.split("/") |> hd()
+
+  defp rest(path) do
+    case :binary.split(path, "/") do
+      [_] -> nil
+      [_, rest] -> rest
+    end
+  end
+
+  defp put_file(path, index), do: put_in(index, keys(Path.split(path)), :file)
+
+  defp keys([name]), do: [Access.key(name, :file)]
+  defp keys([dir | rest]), do: [Access.key(dir, %{}) | keys(rest)]
 
   @doc """
   The rows to show: every top-level entry, and the contents of each directory in `open` (a set
   of directory paths). Directories come before files, each alphabetical.
 
-      iex> Geex.Tree.rows(["README.md", "lib/a.ex", "lib/b/c.ex"], MapSet.new(["lib"]))
+      iex> Geex.Tree.index(["README.md", "lib/a.ex", "lib/b/c.ex"])
+      ...> |> Geex.Tree.rows(MapSet.new(["lib"]))
       ...> |> Enum.map(&{&1.path, &1.depth, &1.dir?, &1.open?})
       [{"lib", 0, true, true}, {"lib/b", 1, true, false}, {"lib/a.ex", 1, false, false},
        {"README.md", 0, false, false}]
   """
-  @spec rows([String.t()], MapSet.t()) :: [row()]
-  def rows(files, open) do
-    files
-    |> Enum.reduce(%{}, fn path, tree -> put_in(tree, keys(Path.split(path)), :file) end)
-    |> rows("", 0, open)
-  end
+  @spec rows(index(), MapSet.t()) :: [row()]
+  def rows(index, open), do: rows(index, "", 0, open)
 
-  defp keys([name]), do: [Access.key(name, :file)]
-  defp keys([dir | rest]), do: [Access.key(dir, %{}) | keys(rest)]
-
-  defp rows(tree, prefix, depth, open) do
-    {dirs, files} = tree |> Enum.split_with(fn {_name, v} -> is_map(v) end)
+  defp rows(index, prefix, depth, open) do
+    {dirs, files} = index |> Enum.split_with(fn {_name, v} -> is_map(v) end)
 
     Enum.flat_map(Enum.sort(dirs), fn {name, sub} ->
       path = Path.join(prefix, name)
@@ -64,7 +97,8 @@ defmodule Geex.Tree do
       end)
   end
 
-  # git's stderr is dropped: in the TUI the terminal belongs to the renderer.
+  # git's stderr is dropped: in the TUI the terminal belongs to the renderer. The deleted files
+  # are dropped in batches, in parallel.
   defp git_files(root) do
     with git when is_binary(git) <- System.find_executable("git"),
          script =
@@ -73,8 +107,13 @@ defmodule Geex.Tree do
       files =
         out
         |> String.split(<<0>>, trim: true)
-        |> Stream.filter(&File.regular?(Path.join(root, &1)))
-        |> Enum.take(@cap)
+        |> Enum.chunk_every(500)
+        |> Task.async_stream(
+          &Enum.filter(&1, fn path -> File.regular?(Path.join(root, path)) end),
+          ordered: false,
+          timeout: :infinity
+        )
+        |> Enum.flat_map(fn {:ok, batch} -> batch end)
 
       {:ok, files}
     else
@@ -82,39 +121,45 @@ defmodule Geex.Tree do
     end
   end
 
-  # Depth-first, skipping dot-directories and symlinks (no loops), until `left` files are found.
-  defp walk(_root, _rel, left) when left <= 0, do: []
+  # Breadth-first, a level of directories at a time, each listed in a process of its own (the
+  # file calls run in parallel on the VM's dirty IO schedulers). Skips dot-directories and
+  # symlinks (no loops).
+  defp walk(root), do: walk(root, [""], [])
 
-  defp walk(root, rel, left) do
+  defp walk(_root, [], files), do: files
+
+  defp walk(root, dirs, files) do
+    {files, subdirs} =
+      dirs
+      |> Task.async_stream(&entries(root, &1), ordered: false, timeout: :infinity)
+      |> Enum.reduce({files, []}, fn {:ok, {found, sub}}, {files, subdirs} ->
+        {found ++ files, sub ++ subdirs}
+      end)
+
+    walk(root, subdirs, files)
+  end
+
+  # One directory's files and subdirectories.
+  defp entries(root, rel) do
     case File.ls(Path.join(root, rel)) do
       {:ok, names} ->
-        names
-        |> Enum.sort()
-        |> Enum.reduce_while({[], left}, fn name, {acc, left} ->
+        Enum.reduce(names, {[], []}, fn name, {files, dirs} ->
           path = if rel == "", do: name, else: Path.join(rel, name)
 
-          found =
-            case File.lstat(Path.join(root, path)) do
-              {:ok, %{type: :directory}} ->
-                if String.starts_with?(name, "."), do: [], else: walk(root, path, left)
+          case File.lstat(Path.join(root, path)) do
+            {:ok, %{type: :directory}} ->
+              if String.starts_with?(name, "."), do: {files, dirs}, else: {files, [path | dirs]}
 
-              {:ok, %{type: :regular}} ->
-                [path]
+            {:ok, %{type: :regular}} ->
+              {[path | files], dirs}
 
-              _ ->
-                []
-            end
-
-          # Built newest first, reversed once at the end.
-          acc = Enum.reverse(found, acc)
-          left = left - length(found)
-          if left <= 0, do: {:halt, {acc, 0}}, else: {:cont, {acc, left}}
+            _ ->
+              {files, dirs}
+          end
         end)
-        |> elem(0)
-        |> Enum.reverse()
 
       {:error, _} ->
-        []
+        {[], []}
     end
   end
 end
