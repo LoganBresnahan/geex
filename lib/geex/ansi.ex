@@ -35,6 +35,7 @@ defmodule Geex.Ansi do
     if n == 0 do
       ""
     else
+      # One run per stretch of bytes painted the same style: each styled run gets one SGR and one reset.
       0..(n - 1)//1
       |> Enum.chunk_by(&Map.get(painted, &1))
       |> Enum.map_join("", fn [first | _] = idxs ->
