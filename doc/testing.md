@@ -2050,3 +2050,24 @@ build because the live checks failed first:
   from a clean tree;
 - a Mac or another Linux machine (the binary isn't portable, by design);
 - `GEEX_SERVE=1` under the binary.
+
+### 2026-10-16 — The first real install, and `mix geex.deploy` prunes old unpacks (ADR-0036)
+
+`mix geex.deploy` was run from the clean tree at `4c31f8c`:
+- It built and installed `geex 0.1.0+4c31f8cd` at `~/.local/share/geex/bin/geex`, with the link
+  `~/.local/bin/geex`. Neither existed before.
+- `which geex` resolves to the link, and `geex --version` prints the commit's version.
+- `--no-build` reinstalled and kept `geex.prev`. `--rollback` swapped them and printed the
+  version now installed.
+
+**Found and fixed:** Burrito removes only versions that sort *older*, and semver ignores build
+metadata. The earlier `0.1.0+797edb8a.dirty` unpack (89 MB) stayed after `0.1.0+4c31f8cd` ran.
+`mix geex.deploy` now removes every `geex_erts-*` beside the new version's directory. Checked:
+`--no-build` printed "removed the old unpack geex_erts-16.1_0.1.0+797edb8a.dirty", and only the
+new version's directory remains. The ADR-0036 consequence that claimed Burrito cleans up was
+corrected.
+
+**Live-verified** with the installed `geex` from the PATH, in tmux with scratch
+`XDG_STATE_HOME`/`TMPDIR`: `geex b.txt` in the scratch repo showed the tree and the file. `Ctrl-X`
+exited 0 with the alternate screen off, the discovery file removed and no `terminating`/`error`
+in the log.

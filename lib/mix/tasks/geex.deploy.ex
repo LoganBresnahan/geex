@@ -20,8 +20,12 @@ defmodule Mix.Tasks.Geex.Deploy do
      `~/.local/share/geex/bin`), and the one it replaces is kept as `geex.prev`. The swap is a
      rename, so a running geex keeps its file. `~/.local/bin/geex` links to it. An existing
      `~/.local/bin/geex` that is anything else is left alone, and the task stops.
+  5. **Prune:** Burrito never removes an older geex unpack (semver ignores `+<sha>`), so the
+     task removes every `geex_erts-*` beside the new one.
 
-  Restart a running geex to use the new one. `--rollback` swaps `geex` and `geex.prev`.
+  Restart a running binary geex after a deploy: its unpacked files are gone, so a grammar it
+  hasn't loaded yet can't load. `--rollback` swaps `geex` and `geex.prev`; the rolled-back
+  binary unpacks again on its first run.
   """
   use Mix.Task
 
@@ -59,7 +63,8 @@ defmodule Mix.Tasks.Geex.Deploy do
   defp install(built, bin_dir, link) do
     unless File.regular?(built), do: Mix.raise("geex deploy: no build at #{built}")
 
-    fresh_unpack(built)
+    dir = unpack_dir(built)
+    File.rm_rf!(dir)
     version = check(built)
 
     File.mkdir_p!(bin_dir)
@@ -71,24 +76,35 @@ defmodule Mix.Tasks.Geex.Deploy do
     File.rename!(staged, target)
 
     link!(target, link)
+    prune_unpacks(dir)
     Mix.shell().info("geex deploy: installed #{version} at #{target}, linked from #{link}")
   end
 
-  # Remove the unpack directory this build would use, so its first run unpacks it.
-  defp fresh_unpack(built) do
+  # Where Burrito unpacks this binary: `~/.local/share/.burrito/geex_erts-<erts>_<version>`.
+  defp unpack_dir(built) do
     case System.cmd(built, ["maintenance", "directory"], stderr_to_stdout: true) do
       {out, 0} ->
         dir = out |> String.split("\n", trim: true) |> List.last("") |> String.trim()
 
-        if String.contains?(dir, "/.burrito/geex_erts-") do
-          File.rm_rf!(dir)
-        else
-          Mix.raise("geex deploy: unexpected unpack directory #{inspect(dir)}")
-        end
+        if String.contains?(dir, "/.burrito/geex_erts-"),
+          do: dir,
+          else: Mix.raise("geex deploy: unexpected unpack directory #{inspect(dir)}")
 
       {out, status} ->
         Mix.raise("geex deploy: `maintenance directory` failed (exit #{status}): #{out}")
     end
+  end
+
+  # Burrito removes only versions that sort older, and semver ignores the `+<sha>` part, so it
+  # never removes a geex build's unpack: each would stay (~90 MB). Keep only the new one. A
+  # rolled-back binary unpacks again on its first run.
+  defp prune_unpacks(keep) do
+    for dir <- Path.wildcard(Path.join(Path.dirname(keep), "geex_erts-*")), dir != keep do
+      File.rm_rf!(dir)
+      Mix.shell().info("geex deploy: removed the old unpack #{Path.basename(dir)}")
+    end
+
+    :ok
   end
 
   defp check(built) do

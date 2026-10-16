@@ -83,6 +83,6 @@ installed. `mix geex.deploy --no-build` reinstalls the last build without buildi
   again.
 - **`geex maintenance …` is Burrito's**, not a file. `geex -- maintenance` opens a file named
   `maintenance`.
-- **Running editors keep the old binary.** Restart them after a deploy. The new version's first
-  run removes the old version's unpacked files, which an old instance may still need for a
-  grammar it hasn't loaded yet.
+- **Restart running editors after a deploy.** They keep their old binary file, but the deploy
+  removes every older `geex_erts-*` unpack. Burrito never removes them itself, because semver
+  ignores `+<sha>`. An old instance can then fail to load a grammar it hasn't loaded yet.

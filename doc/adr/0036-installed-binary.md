@@ -113,10 +113,12 @@ returns.
   its own ADR when there is a second machine.
 - **Burrito reserves one first argument:** `geex maintenance …` goes to Burrito's maintenance
   commands. `geex -- maintenance` opens a file named `maintenance`.
-- **A deploy leaves running editors alone.** A running geex keeps its old binary. When the new
-  version first runs, Burrito removes the old version's unpacked directory, so an old
-  instance that later loads a grammar for the first time can fail to. Restart editors after a
-  deploy.
+- **A deploy removes old unpacks, so restart running editors.** Burrito removes only versions
+  that sort older, and semver ignores the `+<sha>` part, so it never removes a geex build's
+  unpack (about 90 MB each). Checked: `0.1.0+797edb8a.dirty` stayed after `0.1.0+4c31f8cd`
+  ran. `mix geex.deploy` removes every `geex_erts-*` except the new one. A running binary geex
+  keeps its old binary file, but its unpacked files are gone, so a grammar it hasn't loaded
+  yet can't load.
 - Under the binary the app never reaches "started" (its `start/2` doesn't return). Nothing in
   geex asks. `Application.ensure_all_started(:geex)` is only `Geex.run/1`'s, which the binary
   doesn't use. Anything that stops the VM must go through `Geex.stop/0`, never `System.stop/0`
