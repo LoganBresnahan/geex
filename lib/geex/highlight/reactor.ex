@@ -281,6 +281,12 @@ defmodule Geex.Highlight.Reactor do
 
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state), do: {:noreply, state}
 
+  # Everything else the buffer tells its subscribers (`:geex_buffer_behind`, `_attested`,
+  # `_notice`, and whatever comes later) is the loop's business, not ours. Without this the
+  # first one crashed the reactor, and it is `:temporary`: the file stayed uncoloured until
+  # reopened.
+  def handle_info(_msg, state), do: {:noreply, state}
+
   ## Internal — the latest-wins pass loop
 
   defp notify(%{subscribers: subs, buffer: buffer}, version) do

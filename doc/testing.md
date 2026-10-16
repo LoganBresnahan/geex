@@ -1959,3 +1959,31 @@ in its own process, one file at a time.
 
 No code changed; still **886 tests + 30 doctests**.
 
+### 2026-10-16 — Fix: a highlighted buffer's reactor crashed on the buffer's other notices
+
+Found live by the coordinator session in the maintainer's geex: with `lib/geex/ansi.ex` open, an agent
+`Edit` made it go behind, and the log showed `Geex.Highlight.Reactor` terminating with a
+`FunctionClauseError` on `{:geex_buffer_behind, …}`. The reactor subscribes to its buffer for
+`{:geex_buffer_change, …}` and so receives everything the buffer sends its subscribers:
+`:geex_buffer_behind` (since `b764891`), `:geex_buffer_attested` (since `a56cb85`, 2026-10-14) and
+`:geex_buffer_notice` (since `36766ed`, 2026-10-14, also sent at subscribe when the buffer opened with a
+notice). It had no clause for any of them. It is `:temporary`, so the file stayed uncoloured until it was
+reopened (the loop paints no highlights when the reactor is gone; no loop crash). Every hold test and
+live run since used `.txt` files, which have no grammar and so no reactor. Fixed with a catch-all
+`handle_info/2` in the reactor, as the loop has.
+
+**Live-verified** (geex TUI in a tmux pty, 100×24, scratch `XDG_STATE_HOME`; the maintainer's own geex
+left running and the shared log not truncated): a scratch `hl.ex` showed 6 distinct foreground colours
+on its 4 lines; a `printf` rewrote line 3 on disk, the status line read "behind disk (Alt+L)", and the
+colours were still 6 after a keypress; after `Alt+L` ("caught up with the disk") line 3 read `x + 2` and
+the colours were still 6. No `terminating` line from this instance (the two in the log are the
+maintainer's, at 09:22).
+
+**Automated:** `reactor_test` +2: a reactor sent `behind`, `attested` and `notice` messages still
+highlights the next edit (a comment); a buffer on a real `.ex` file going behind through
+`Buffer.disk_changed/2` leaves its reactor running. Both fail with the reported `FunctionClauseError`
+without the fix. **888 tests + 30 doctests**, green twice, `--warnings-as-errors` clean.
+
+**Not tested:** the maintainer's running geex (it still has the old code; it needs a restart, since
+reopening the buffer starts the old reactor again).
+

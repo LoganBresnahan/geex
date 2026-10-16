@@ -41,6 +41,36 @@ defmodule Geex.Highlight.ReactorTest do
     assert "comment" in captures(overlay)
   end
 
+  test "the buffer's other notices don't stop it: still highlighting after behind, attested, notice",
+       %{buf: buf, reactor: reactor} do
+    # Found live by the coordinator: a highlighted file that went behind (ADR-0034) crashed its
+    # reactor on `{:geex_buffer_behind, …}`, and nothing restarted it.
+    {:ok, _} = Reactor.await(reactor, 0)
+    send(reactor, {:geex_buffer_behind, buf, %{at: 1, sha256: "x"}})
+    send(reactor, {:geex_buffer_attested, buf, 1, {:agent, %{}}})
+    send(reactor, {:geex_buffer_notice, buf, "a notice"})
+
+    assert {:ok, _} = Buffer.dispatch(buf, insert(1, 0, "  # note\n"))
+    assert {:ok, %{version: 1} = overlay} = Reactor.await(reactor, 1)
+    assert "comment" in captures(overlay)
+  end
+
+  test "a file of its own going behind on disk leaves it running" do
+    dir = Path.join(System.tmp_dir!(), "geex_reactor_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+    path = Path.join(dir, "a.ex")
+    File.write!(path, "defmodule A do\nend\n")
+
+    buf = start_supervised!({Buffer, path: path}, id: :file_buffer)
+    reactor = start_supervised!({Reactor, buffer: buf, language: "elixir"}, id: :file_reactor)
+    {:ok, _} = Reactor.await(reactor, 0)
+
+    assert Buffer.disk_changed(buf, "defmodule B do\nend\n") == :behind
+    assert {:ok, _} = Buffer.dispatch(buf, insert(1, 0, "  # note\n"))
+    assert {:ok, %{version: 1}} = Reactor.await(reactor, 1)
+  end
+
   test "render/1 returns the exact overlay when nothing is pending", %{reactor: reactor} do
     {:ok, exact} = Reactor.await(reactor, 0)
     assert Reactor.render(reactor) == exact
