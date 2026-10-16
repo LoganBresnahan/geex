@@ -55,7 +55,7 @@ Why each flag (don't "simplify" them away):
 | flag | why |
 | --- | --- |
 | `-noshell -noinput` | keep the Erlang shell off stdin so `:prim_tty` owns the terminal |
-| `+Bd` | disable the BREAK handler — the BEAM reserves Ctrl-C for its `BREAK:` menu (`sigint` isn't trappable), so without this Ctrl-C never reaches the keymap |
+| `+Bd` | disable the BREAK handler — an outside SIGINT ends the VM instead of opening the BEAM's `BREAK:` menu on the terminal geex owns (`sigint` isn't trappable). Ctrl-C itself sends no SIGINT: `TerminalIO` runs `stty -isig -ixon`, so it reaches the keymap (BUG-3) |
 | `--no-start` | `Geex.run/1` redirects `Logger` to `<tmp>/geex.log` *before* the app boots; started early, the inotify warning paints over the alt-screen and the sparse cell-diff never clears it |
 
 Drive and observe:
@@ -71,8 +71,8 @@ tmux -L geexdf resize-window -t g -x 60 -y 15 # SIGWINCH path
 tail -20 "$(elixir -e 'IO.write System.tmp_dir!()')/geex.log"      # what Logger said
 ```
 
-Quit and clean up — **Ctrl-X** is the reliable quit (Ctrl-Q is XON, Ctrl-C can
-be intercepted). It does not save; `Ctrl-O` saves first if the pass needs disk.
+Quit and clean up — **Ctrl-X** (Ctrl-Q and Ctrl-C quit too; Ctrl-Z and Ctrl-S do
+nothing). It does not save; `Ctrl-O` saves first if the pass needs disk.
 
 ```sh
 tmux -L geexdf send-keys -t g C-x; sleep 1

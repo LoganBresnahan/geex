@@ -2071,3 +2071,47 @@ corrected.
 `XDG_STATE_HOME`/`TMPDIR`: `geex b.txt` in the scratch repo showed the tree and the file. `Ctrl-X`
 exited 0 with the alternate screen off, the discovery file removed and no `terminating`/`error`
 in the log.
+
+### 2026-10-16 — Ctrl-C and the other tty keys reach geex (BUG-3)
+
+`Geex.TerminalIO` runs `stty -isig -ixon` on the tty after `:prim_tty` takes it, and puts the
+`stty -g` settings from before back in `terminate/2`. `stty` runs on the VM's stdin device
+(`/proc/<pid>/fd/0`): a probe showed that a port's child can't open `/dev/tty` ("No such device
+or address"), since it has no controlling terminal. The same probe confirmed BUG-3's flags.
+After `:prim_tty.init/1`, the tty read `ixon isig -icanon -echo`; after the `stty`, `-ixon -isig`;
+after the VM halted, the shell's `ixon isig icanon` were back.
+
+**Live-verified** under `mix run` in tmux (`runhold.sh`, scratch `XDG_STATE_HOME`), with bash in
+the pane as the job-control shell:
+- While geex ran, `stty -F <pane tty> -a` read `-ixon -isig`.
+- Ctrl-Z: the process stayed `Sl+`, not `T`, and the frame stayed up.
+- Ctrl-\\: still running; nothing was inserted.
+- Ctrl-S, then `Z`: the `Z` appeared at once, so the screen didn't freeze.
+- Alt+M, then Ctrl-C in the minibuffer: exit 0. The alternate screen was off, the discovery file
+  and the ledger lock were removed, and the shell had `ixon isig` back.
+- `kill -STOP`: bash took the terminal back (`ixon isig` restored, geex a stopped job), so
+  `kill -CONT` left geex stopped in the background, as the coordinator saw. `fg` continued it in
+  the foreground with `-ixon -isig` set again (the SIGCONT path). Ctrl-Q from the editor then quit
+  cleanly.
+- The installed binary (`0.1.0+c686550f`, without this fix) has the tty on its VM's fd 0, as
+  `mix run` does. Ctrl-X exited 0.
+
+**Automated:** +3 tests.
+- `parser_test`: bytes 0 and 28–31 parse as `{:ctrl, ?@ | ?\\ | ?] | ?^ | ?_}`, not text. Ctrl-Z
+  and Ctrl-S parse as Ctrl keys.
+- `panes_test`: Ctrl-X, Ctrl-Q and Ctrl-C quit from the editor, both panes and the minibuffer.
+  The minibuffer took only Ctrl-X before.
+
+**899 tests + 35 doctests**, green twice, `--warnings-as-errors` clean.
+
+**Also in this commit:**
+- the shipshape IO gate allows `cli.ex`'s prints, matching CLAUDE.md;
+- `rel/vm.args.eex`, `Geex.run/1`'s doc and the dogfood skill no longer say Ctrl-C is a signal
+  or that Ctrl-Q and Ctrl-C are flaky quit keys;
+- ADR-0036's consequence notes the fix.
+
+**Not tested:**
+- the fix under the installed binary, which needs a deploy from a clean tree;
+- Windows Terminal, where the maintainer runs geex;
+- a terminal where `stty` fails: geex logs a warning and runs with the keys as before (the code
+  path is a `with`/`else`, not exercised live).

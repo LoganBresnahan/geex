@@ -107,4 +107,21 @@ defmodule Geex.Loop.PanesTest do
     # an index, so the next frame doesn't start the same read again
     assert state.tree.index == %{}
   end
+
+  # Ctrl-C and Ctrl-Q reach geex now that the tty's signal and flow-control keys are off
+  # (BUG-3), so each quit key has to quit wherever the keys go. The minibuffer took only Ctrl-X.
+  test "Ctrl-X, Ctrl-Q and Ctrl-C quit from the editor, both panes and the minibuffer" do
+    # Stand in for the binary's entry process, as cli_test does: with nothing registered,
+    # `Geex.stop/0` would stop this test run.
+    Process.register(self(), Geex.CLI)
+    on_exit(fn -> if Process.whereis(Geex.CLI), do: Process.unregister(Geex.CLI) end)
+
+    minibuffer = %{Loop.new_state(120, 30) | minibuffer: Minibuffer.open(:command)}
+
+    for state <- [Loop.new_state(120, 30), focused_on(:edits), focused_on(:tree), minibuffer],
+        c <- [?x, ?q, ?c] do
+      key(state, {:ctrl, c})
+      assert_receive :geex_quit, 100, "Ctrl-#{<<c>>} didn't quit from #{inspect(state.focus)}"
+    end
+  end
 end

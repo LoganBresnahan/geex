@@ -26,6 +26,7 @@ defmodule Geex.Input.Parser do
              :enter | :tab | :backspace | :esc}
       {:char, <<utf8 grapheme>>}
       {:ctrl, ?a..?z}            # Ctrl-letter as the lowercase atom
+      {:ctrl, 0x40 | 0x5C..0x5F} # bytes 0, 28–31: Ctrl-@, Ctrl-\\, Ctrl-], Ctrl-^, Ctrl-_
       {:alt, ?a..?z | ?A..?Z}   # Alt/Meta-letter (ESC-prefixed)
   """
 
@@ -137,6 +138,11 @@ defmodule Geex.Input.Parser do
   # that have their own meaning: 8 backspace, 9 tab, 10 nl, 13 cr, 27 esc).
   defp do_parse(<<b, rest::binary>>, acc) when b in 1..26 and b not in [8, 9, 10, 13],
     do: do_parse(rest, [{:ctrl, b + ?a - 1} | acc])
+
+  # The other control bytes: 0 Ctrl-@ (Ctrl-Space), 28 Ctrl-\, 29 Ctrl-], 30 Ctrl-^, 31 Ctrl-_.
+  # Keys, so they are never typed into the buffer as text.
+  defp do_parse(<<b, rest::binary>>, acc) when b == 0 or b in 28..31,
+    do: do_parse(rest, [{:ctrl, b + ?@} | acc])
 
   # Printable ASCII / UTF-8: grab one grapheme cluster at a time.
   defp do_parse(bytes, acc) do

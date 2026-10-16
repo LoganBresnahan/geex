@@ -7,28 +7,39 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-3 — Ctrl-C kills geex outright: the terminal, the ledger lock and the discovery file are left behind
+## BUG-3 — Ctrl-C kills geex outright: the terminal, the ledger lock and the discovery file are left behind  ✅ FIXED (2026-10-16)
 
-- **Status:** open. Found 2026-10-16 by the coordinator session while checking the installed binary
-  (ADR-0036). It happens the same under `mix run`, so the binary doesn't cause it.
-- **Symptom:** Ctrl-C in geex doesn't quit through the keymap. The VM dies at once, and the shell
-  that ran it dies of SIGINT too (`tmux` reports the pane dead by signal 2). Nothing's
-  `terminate/2` runs, so:
-  - the terminal stays on the alternate screen;
-  - `$XDG_RUNTIME_DIR/geex/<pid>.json` is left behind;
-  - an open buffer's `<key>.lock` stays in the ledger directory;
-  - unsaved edits are lost.
+- **Status:** **FIXED** 2026-10-16. `Geex.TerminalIO` runs `stty -isig -ixon` on the tty after
+  `:prim_tty` takes it, and puts the earlier settings back on exit. Verification is in the
+  [testing.md](testing.md) 2026-10-16 entry "Ctrl-C and the other tty keys reach
+  geex (BUG-3)". Found by the coordinator session while checking the installed binary (ADR-0036). It
+  happened the same under `mix run`, so the binary didn't cause it.
+- **Symptom:** Ctrl-C in geex didn't quit through the keymap. The VM died at once, and the shell
+  that ran it died of SIGINT too (`tmux` reported the pane dead by signal 2). Nothing's
+  `terminate/2` ran, so:
+  - the terminal stayed on the alternate screen;
+  - `$XDG_RUNTIME_DIR/geex/<pid>.json` was left behind;
+  - an open buffer's `<key>.lock` stayed in the ledger directory;
+  - unsaved edits were lost.
+
+  Ctrl-Z (SIGTSTP) suspended geex with the frame and raw mode left on screen, and `kill %1`
+  couldn't end it: the coordinator saw it under the binary, and a `mix run` geex of the
+  maintainer's sat suspended for hours holding `ansi.ex`'s ledger lock. Ctrl-\\ (SIGQUIT) ended
+  the VM with no restore. Ctrl-S (XOFF) froze the screen, and Ctrl-Q (XON), a quit key, never
+  reached geex.
 - **Verified cause:** `:prim_tty`'s raw input mode turns off `icanon` and `echo` but leaves `isig`
-  (and `ixon`) on. Checked with `stty -F <pane tty> -a` while geex ran: `ixon isig -icanon
-  -echo`. So the terminal turns Ctrl-C into SIGINT for the foreground process group, and the
-  keymap never sees the byte. With `+Bd` the break handler is off, so SIGINT ends the VM with no
-  cleanup. The same holds for Ctrl-Z (SIGTSTP) and Ctrl-\ (SIGQUIT). `Geex.run/1`'s doc says raw
-  mode "delivers it as a byte to the keymap". That is wrong.
-- **Recommended fix:** clear `isig` on the tty while geex owns it and restore it on teardown,
-  for example `stty -isig` against the tty at `Geex.TerminalIO` init. Then Ctrl-C reaches the
-  keymap, which already maps it to quit. Alternatively, `+Bi` ignores SIGINT, but then Ctrl-C does
-  nothing at all. Check that Ctrl-Z is still wanted as a key before clearing `isig` for it.
-- **Ruled out:** the binary. `mix run` with `--erl "-noshell -noinput +Bd"` behaves the same.
+  and `ixon` on. Checked with `stty -F <pane tty> -a` while geex ran: `ixon isig -icanon
+  -echo`. So the terminal turned Ctrl-C into SIGINT for the foreground process group, and the
+  keymap never saw the byte. With `+Bd` the break handler is off, so SIGINT ended the VM with no
+  cleanup.
+- **Fix notes:**
+  - `stty` runs on the VM's own stdin device (`/proc/<pid>/fd/0`), because a port's child has no
+    controlling terminal and can't open `/dev/tty`.
+  - After SIGCONT, `:prim_tty` sets its raw mode again, so `TerminalIO` turns the keys off again.
+  - Bytes 0 and 28–31 (Ctrl-@, Ctrl-\\, Ctrl-], Ctrl-^, Ctrl-_) now parse as Ctrl keys. They
+    used to come through as text, so Ctrl-\\ would have typed a control byte into the buffer.
+  - The minibuffer quits on Ctrl-Q and Ctrl-C as well as Ctrl-X, like the editor and the panes.
+- **Ruled out:** the binary. `mix run` with `--erl "-noshell -noinput +Bd"` behaved the same.
 
 ---
 

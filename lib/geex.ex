@@ -10,8 +10,8 @@ defmodule Geex do
   Starts the application — which brings up `Geex.TerminalIO` (raw-mode
   `:prim_tty`) and the event-driven `Geex.Loop` that paints the active buffer,
   highlights it live, and turns keys into commands on the one shared path — then
-  opens `path` as the active buffer and blocks. **Quit with Ctrl-Q** (the loop
-  calls `System.stop/0`, so the app's shutdown restores the terminal).
+  opens `path` as the active buffer and blocks. **Quit with Ctrl-X, Ctrl-Q or Ctrl-C** (the
+  loop calls `Geex.stop/0`, so the app's shutdown restores the terminal).
 
   Launch *outside* iex so `:prim_tty` has exclusive terminal ownership. The `--erl`
   flags matter:
@@ -19,11 +19,11 @@ defmodule Geex do
     * `-noshell -noinput` — keep the Erlang shell off stdin so `:prim_tty` owns it.
     * `+Bd` — **disable the ERTS break handler.** The BEAM normally reserves
       `SIGINT`/Ctrl-C for its `BREAK:` inspect-a-live-node menu (which is why a bare
-      Ctrl-C doesn't quit and `sigint` is absent from `os:set_signal/2`). A TUI wants
-      Ctrl-C to be an ordinary keystroke, so we drop that claim. But `:prim_tty`'s raw mode
-      leaves the terminal's `isig` on, so Ctrl-C still arrives as SIGINT and ends the VM
-      without cleanup ([BUG-3](../doc/bugs.md)); quit with Ctrl-X. (`SIGTERM` triggers a
-      graceful shutdown that restores the terminal, so `kill` is safe.)
+      Ctrl-C doesn't quit and `sigint` is absent from `os:set_signal/2`). Ctrl-C itself
+      never sends SIGINT here: `Geex.TerminalIO` turns the tty's signal keys off, so it
+      arrives as a key ([BUG-3](../doc/bugs.md)). With the menu off, a SIGINT from outside
+      ends the VM instead of the menu taking the terminal. (`SIGTERM` triggers a graceful
+      shutdown that restores the terminal, so `kill` is safe.)
 
   Use `--no-start` so logging is redirected to a file *before* the app (and its
   terminal) come up — otherwise startup logs (e.g. the file-watcher's warnings)
@@ -31,8 +31,7 @@ defmodule Geex do
 
       elixir --erl "-noshell -noinput +Bd" -S mix run --no-start -e 'Geex.run("lib/geex/loop.ex")'
 
-  Quit with **Ctrl-X** (Ctrl-Q is XON flow-control, Ctrl-C is SIGINT — both flaky as
-  quit keys). Logs go to `<tmpdir>/geex.log`. With no path, geex boots to an empty
+  Quit with **Ctrl-X**, Ctrl-Q or Ctrl-C. Logs go to `<tmpdir>/geex.log`. With no path, geex boots to an empty
   screen. The live dogfood: watch geex recolour its own source as you type.
 
   `path` may also be a **list** of paths, all opened, the first one shown (`buffers` switches,

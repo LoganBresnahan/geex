@@ -121,8 +121,9 @@ module/function the doc names still exists.
 ```bash
 grep -rnE '(^|[^A-Za-z])IO\.(puts|write|inspect)' lib --include=*.ex | grep -v '^\s*#'
 # (the [^A-Za-z] guard keeps `TerminalIO.write` from matching)
-# allowed: lib/geex/terminal_io.ex, lib/mix/tasks/*.ex — anything else paints
-# over the alt-screen in TUI mode
+# allowed: lib/geex/terminal_io.ex, lib/mix/tasks/*.ex, and lib/geex/cli.ex's
+# --version/--help/usage (printed before the terminal is taken, then the VM halts)
+# — anything else paints over the alt-screen in TUI mode
 ```
 
 **One shared path** (invariant 1) — nothing outside the dispatch path edits a

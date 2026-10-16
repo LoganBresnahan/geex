@@ -1759,7 +1759,8 @@ defmodule Geex.Loop do
       {:alt, c} when c in [?n, ?N] ->
         close_minibuffer(state)
 
-      {:ctrl, ?x} ->
+      # The keymap's quit keys (`Keymap.resolve/3`).
+      {:ctrl, c} when c in [?x, ?q, ?c] ->
         Geex.stop()
         state
 

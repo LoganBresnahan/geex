@@ -32,6 +32,17 @@ defmodule Geex.Input.ParserTest do
     test "Ctrl-a" do
       assert {[{:ctrl, ?a}], ""} = Parser.parse(<<1>>)
     end
+
+    # With the tty's signal keys off (BUG-3), Ctrl-\ arrives as byte 28; it and its neighbours
+    # must not be typed into the buffer as text.
+    test "Ctrl-@, Ctrl-\\, Ctrl-], Ctrl-^ and Ctrl-_ are Ctrl keys, not text" do
+      assert {[{:ctrl, ?@}, {:ctrl, ?\\}, {:ctrl, ?]}, {:ctrl, ?^}, {:ctrl, ?_}], ""} =
+               Parser.parse(<<0, 28, 29, 30, 31>>)
+    end
+
+    test "Ctrl-z and Ctrl-s are Ctrl keys" do
+      assert {[{:ctrl, ?z}, {:ctrl, ?s}], ""} = Parser.parse(<<26, 19>>)
+    end
   end
 
   describe "arrow keys" do

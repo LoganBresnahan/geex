@@ -136,13 +136,12 @@ defmodule Geex.Loop.Keymap do
   def resolve({:alt, c}, _cursor, _text) when c in [?v, ?V], do: :paste
   def resolve({:alt, c}, cursor, text), do: alt_motion(lower(c), cursor, text)
 
-  # Save (ADR-0026 reserved Ctrl-O for it — the CUA Ctrl-S is XOFF/flow-control and
-  # can freeze the tty before a raw-mode app ever sees it). An operation, not an edit.
+  # Save (ADR-0026 reserved Ctrl-O for it — the CUA Ctrl-S is XOFF/flow-control, which froze
+  # the tty until `Geex.TerminalIO` turned flow control off). An operation, not an edit.
   def resolve({:ctrl, c}, _cursor, _text) when c in [?o, ?O], do: :save
 
-  # Quit. Ctrl-X is the reliable key — Ctrl-Q is XON (software flow control) and
-  # Ctrl-C is SIGINT, both of which can be swallowed by the tty before they ever
-  # reach a raw-mode app, so accept all three.
+  # Quit. Ctrl-Q (XON) and Ctrl-C (SIGINT) reach geex because `Geex.TerminalIO` turns the
+  # tty's flow control and signal keys off; where it can't, Ctrl-X still works.
   def resolve({:ctrl, c}, _cursor, _text) when c in [?x, ?q, ?c], do: :quit
 
   def resolve(_event, _cursor, _text), do: :ignore

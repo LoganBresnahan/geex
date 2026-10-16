@@ -125,7 +125,8 @@ returns.
   (§3).
 - **Ctrl-C still kills geex outright,** under the binary and under `mix run` alike. `prim_tty`'s
   raw mode leaves `isig` on, so the terminal sends SIGINT. That is
-  [BUG-3](../bugs.md), not part of this ADR.
+  [BUG-3](../bugs.md), not part of this ADR. (Fixed the same day: `Geex.TerminalIO` turns the
+  tty's signal keys and flow control off, so Ctrl-C quits through the keymap.)
 
 ## See
 

@@ -4,7 +4,8 @@ defmodule Geex.TerminalIO do
 
   Wraps `:prim_tty` (OTP 26+ internal terminal primitive) to provide:
 
-    * raw-mode terminal setup on init, restore on teardown
+    * raw-mode terminal setup on init, restore on teardown; Ctrl-C, Ctrl-Z, Ctrl-\\, Ctrl-S
+      and Ctrl-Q arrive as keys, not as the tty's signals and flow control
     * input bytes parsed into key/resize events via `Geex.Input.Parser`
     * event publication to subscribed processes
     * write API for downstream renderers
@@ -28,6 +29,8 @@ defmodule Geex.TerminalIO do
   """
 
   use GenServer
+
+  require Logger
 
   alias Geex.Input.Parser
 
@@ -72,6 +75,7 @@ defmodule Geex.TerminalIO do
 
     tty = :prim_tty.init(%{input: :raw, output: :raw})
     %{read: reader_ref} = :prim_tty.handles(tty)
+    {tty_dev, tty_modes} = take_keys()
 
     :prim_tty.write(tty, [
       "\e[?1049h",
@@ -87,6 +91,9 @@ defmodule Geex.TerminalIO do
     state = %{
       tty: tty,
       reader_ref: reader_ref,
+      # The tty's device and its `stty -g` settings from before `take_keys/0`, put back on exit.
+      tty_dev: tty_dev,
+      tty_modes: tty_modes,
       esc_buf: <<>>,
       # The pending flush of `esc_buf` (a ref), stale once more bytes arrive.
       esc_flush: nil,
@@ -169,6 +176,9 @@ defmodule Geex.TerminalIO do
   # update its internal geometry, then publish a resize event.
   def handle_info({ref, {:signal, signal}}, %{reader_ref: ref} = state) do
     new_tty = :prim_tty.handle_signal(state.tty, signal)
+    # On SIGCONT (after an outside `kill -STOP`), `prim_tty` sets its raw mode again, which turns
+    # the signal and flow-control keys back on.
+    if signal == :sigcont and state.tty_dev, do: stty(state.tty_dev, ["-isig", "-ixon"])
 
     # `:prim_tty.window_size/1` returns {cols, rows}; the resize event carries
     # {rows, cols} (its documented order), so swap on the way out.
@@ -196,7 +206,37 @@ defmodule Geex.TerminalIO do
   def terminate(_reason, state) do
     restore_screen(state.tty)
     _ = :prim_tty.reader_stop(state.tty)
+    if state.tty_modes, do: stty(state.tty_dev, [state.tty_modes])
     :ok
+  end
+
+  # `:prim_tty`'s raw mode leaves the tty's signal keys on (ISIG: Ctrl-C, Ctrl-Z, Ctrl-\) and its
+  # flow control (IXON: Ctrl-S, Ctrl-Q), so those keys never reach geex: Ctrl-C killed the VM
+  # with no cleanup, Ctrl-Z suspended it, Ctrl-S froze the screen (BUG-3). Turn both off so they
+  # arrive as keys. Returns the tty's device and its settings from before, or `{nil, nil}` when
+  # that fails; geex runs on with the keys as they were.
+  defp take_keys do
+    with {:ok, dev} <- File.read_link("/proc/#{System.pid()}/fd/0"),
+         {modes, 0} <- stty(dev, ["-g"]),
+         {_, 0} <- stty(dev, ["-isig", "-ixon"]) do
+      {dev, String.trim(modes)}
+    else
+      failed ->
+        Logger.warning(
+          "geex terminal: couldn't turn off the tty's signal keys (#{inspect(failed)}); " <>
+            "Ctrl-C, Ctrl-Z and Ctrl-S act on the terminal, not geex"
+        )
+
+        {nil, nil}
+    end
+  end
+
+  # `stty` on the VM's own stdin device: a port's child has no controlling terminal, so it can't
+  # use `/dev/tty`. Its errors come back as a nonzero status, never raised.
+  defp stty(dev, args) do
+    System.cmd("sh", ["-c", ~s|exec stty "$@" < "$0"|, dev | args], stderr_to_stdout: true)
+  rescue
+    e in ErlangError -> {Exception.message(e), :no_sh}
   end
 
   # `:prim_tty.write/2` only hands the bytes to its writer process. The installed binary halts

@@ -4,6 +4,7 @@
 ## Keep the Erlang shell's input driver off stdin, so `:prim_tty` owns the terminal.
 -noinput
 
-## Disable the break handler, so Ctrl-C reaches the keymap as a key instead of opening
-## the BEAM's BREAK menu.
+## Disable the break handler, so a SIGINT from outside ends the VM instead of opening the
+## BEAM's BREAK menu on the terminal. Ctrl-C itself sends no SIGINT: `Geex.TerminalIO` turns
+## the tty's signal keys off, so it reaches the keymap as a key (BUG-3).
 +Bd
