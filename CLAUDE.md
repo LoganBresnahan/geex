@@ -119,6 +119,9 @@ inject a stub via `Geex.Reconcile`'s `:start_watcher` option.
 - **Named-consumer rule:** don't build a subsystem until its first real
   consumer lands (the clipboard waited for copy/paste; per-participant Views
   wait for multi-participant).
+- **The key loop never waits on slow work** (ADR-0035): anything that grows with file size,
+  file count, history length or an external program runs in a monitored process, and
+  `Geex.Loop` draws its answer when it arrives (the tree's reader is the model).
 - **Log lines** are prefixed by subsystem: `"geex reconcile: …"`,
   `"geex MCP: …"`. Lifecycle = `info`, degraded-but-running = `warning`,
   per-event chatter = `debug`.

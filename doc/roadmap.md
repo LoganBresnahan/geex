@@ -17,7 +17,7 @@ narrative below: the interactive TUI loop, highlighting, selection + clipboard, 
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
 the MCP door is frozen; v0.5 is now the **ledger track** (reconcile as the primary agent path,
-attested by captAInHook). Items 1–7 are built (item 5's display; item 6 the durable ledger, ADR-0033; item 7 panes, the file tree, the edits pane and holding open buffers, ADR-0034). Next is the maintainer's UI-testing review of the parked decisions (command-surface items 7–8); the command-surface track at the
+attested by captAInHook). Items 1–7 are built (item 5's display; item 6 the durable ledger, ADR-0033; item 7 panes, the file tree, the edits pane and holding open buffers, ADR-0034). Next is the maintainer's UI-testing review of the parked decisions (command-surface items 7–8; item 9 parks the slow work still in the key loop, [adr/0035](adr/0035-the-loop-never-waits.md)); the command-surface track at the
 end of this file continues alongside it, since editor comfort is the other half of the point. The reconcile watcher is
 now shown live against a real `inotify` backend. (Test counts quoted further down are as of their
 own dates.)
@@ -418,6 +418,19 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      - geex records both hashes of each disk text the watcher reads while a buffer is held. This
        needs no payload change but covers held buffers only.
      Small; it matters only for CRLF files.
+9. **Slow work still in the key loop** — *parked* ([adr/0035](adr/0035-the-loop-never-waits.md),
+   accepted 2026-10-16: the loop never waits on slow work; the tree's reader, `6a6e3df`, is the
+   first instance). Move each when a real file makes it measurably slow:
+   - **Save and fast-forward** (they read the file; a two-sided save runs `git merge-file`): a
+     clean merge and save 93 ms at 1 MB, 759 ms at 10 MB; a fast-forward 29 ms and 445 ms. Needs a
+     "saving…" status, with edits to that buffer queued meanwhile.
+   - **Opening a file** replays its ledger in `Buffer.init/1`: 9 ms at 1,000 entries, 137 ms at
+     10,000. `geex a b c` could also start its buffers in parallel.
+   - **Reconcile, one file at a time.** It never blocks typing; parallel would only land a big
+     rewrite's "behind" marks sooner.
+   Cheap on the rule, not decided: **project search** (files in parallel, results streamed into a
+   pane, a new query kills the old search); **git status marks** on tree rows (groundwork for the
+   diff view); **idle housekeeping** (`Ledger.compact`, highlighting buffers that aren't shown).
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09); the shelf is currently clear.

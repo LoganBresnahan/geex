@@ -1936,3 +1936,26 @@ doctests**, green twice, `--warnings-as-errors` clean.
 **Not tested:** a reader that really crashes (the test hands the loop a `DOWN` from a process that
 exits `:boom`); a root too big for memory; the reader outliving a crashed loop (it finishes, and its
 answer goes nowhere).
+
+### 2026-10-16 — The coordinator's live check of `6a6e3df`; slow work measured for ADR-0035
+
+**Live-verified by the coordinator session** (from this session's clean tree): it passed.
+- **A 100,000-file git repository** (200 directories × 500 files, committed): the editor was up 0.77 s
+  after launch; the tree said "reading…", then showed rows about 1 s after launch. `Alt+O` into the
+  tree started a re-read; Down Down Enter sent during it opened `d002/`, and the selection stayed on it.
+- **The home directory** (not a repository, warm cache): keys were live at once, and typing in the
+  scratch buffer during the read worked. With the tree focused and still "reading…" (no rows), Down,
+  Enter, Right, Left and Up did nothing, and nothing crashed. The tree filled about 10 s after launch.
+  Refocusing started a re-read; during it the old rows, the open folders and the selection stayed, and
+  navigation worked; all three were still there when the re-read landed. `Ctrl-X` exited cleanly (the
+  BEAM gone within about 2 s). RSS about 0.9 GB there (about 500 MB in this session's run).
+
+**Measured** for [ADR-0035](adr/0035-the-loop-never-waits.md) (`MIX_ENV=test mix run`, a scratch
+directory, real `git merge-file`; nothing in the repository): a clean merge and save 93 ms on a 1 MB file
+and 759 ms on 10 MB; a fast-forward 29 ms and 445 ms; opening a 1 MB file 5 ms, 10 MB 27 ms; reopening a
+file with a ledger of 1,000 entries 9 ms, 10,000 entries 137 ms. Read from the code, not timed: opening
+runs no git (`git rev-parse` runs once, from `Session.set_start/1`), and reconcile handles disk changes
+in its own process, one file at a time.
+
+No code changed; still **886 tests + 30 doctests**.
+
