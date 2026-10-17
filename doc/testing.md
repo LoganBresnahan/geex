@@ -2493,3 +2493,18 @@ full tab bar, the review's cases), Layout doctests (`ratio_at/3`, `handles/2`, `
 `resolve/3`'s sizes), `Panes.set_ratio/3`. **1003 tests + 51 doctests**, green twice.
 
 **Not tested:** Windows Terminal; a real mouse; the installed binary (next, with /deploy).
+
+### 2026-10-17 — `geex 0.1.0+839c64cb` deployed (the mouse, step 3)
+
+`mix geex.deploy` from the clean tree at `839c64c` (1003 tests + 51 doctests green twice). It
+installed `0.1.0+839c64cb`; no other geex was running. Live with `geex` from the PATH in tmux
+(`-L deploy`, 120×30, scratch state):
+- `--version` printed `geex 0.1.0+839c64cb`; `--frob` exited 2.
+- `geex a.txt notes.txt` opened, with the discovery file present.
+- `Alt+=`, then dragging the divider from column 74 to 54 and the tree's edge from 29 to 39,
+  resized both. The press on the tree's edge focused the tree, so the next keys went there.
+- In a second run, typing and Ctrl-O wrote `a.txt`.
+- Ctrl-X and SIGTERM left the mouse modes off and the alternate screen closed. The discovery
+  file was gone, and the log had no `terminating` lines.
+
+**Not tested:** Windows Terminal; a real mouse.
