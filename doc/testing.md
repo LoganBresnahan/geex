@@ -2333,3 +2333,12 @@ Fixed:
 
 **Automated:** `split_test` asserts the notice and the filled background. Both assertions fail
 without the fix. **939 tests + 41 doctests**, green twice.
+
+### 2026-10-17 — `geex 0.1.0+426290c1` deployed (the step 3 nits)
+
+`mix geex.deploy` from the clean tree at `426290c` (939 tests + 41 doctests green twice). It
+installed `0.1.0+426290c1`, kept `0.1.0+f4ea2e76` as `geex.prev`, and removed the old unpack; the
+only BEAM VMs running were pharos's (checked by executable path, not `pgrep -f`, which matches its
+own shell). Live with `geex` from the PATH: `geex a.txt notes.txt`, `Alt+=`, then `Alt+K` on the
+new pane's tab closed the pane with "closed the tab; a.txt is still open in another pane"; Ctrl-X
+exited 0, and the log had no `terminating` lines.
