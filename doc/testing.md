@@ -2115,3 +2115,35 @@ the pane as the job-control shell:
 - Windows Terminal, where the maintainer runs geex;
 - a terminal where `stty` fails: geex logs a warning and runs with the keys as before (the code
   path is a `with`/`else`, not exercised live).
+
+### 2026-10-16 — `geex 0.1.0+f9e59088` deployed: BUG-3's fix under the installed binary
+
+`mix geex.deploy` from the clean tree at `f9e5908` (899 tests + 35 doctests green twice just
+before it). It installed `0.1.0+f9e59088`, kept `0.1.0+c686550f` as `geex.prev`, and removed the
+old unpack `geex_erts-16.1_0.1.0+c686550f`. No binary geex was running.
+
+**Live-verified** with `geex` from the PATH in tmux (`-L deploy`), with bash as the pane's shell
+and scratch `XDG_STATE_HOME`/`TMPDIR`, in a scratch repo:
+- `geex --version` printed the version and exited 0; `geex --frob` exited 2.
+- `geex a.txt` showed the tree and the file. The VM had the tty on fd 0, and the tty read
+  `-ixon -isig`. The discovery file existed.
+- Ctrl-Z and Ctrl-\ left it running (`Sl+`). After Ctrl-S, typed `q` went in, and Ctrl-O wrote
+  `qalpha` to disk.
+- Ctrl-C exited 0 with the shell's `ixon isig` back and the discovery file gone.
+- `geex <dir>`, bare `geex` in the repo, and `geex notes.txt` (holding `IO.puts("x")`, not
+  printed) each opened as expected. Ctrl-X exited 0 with the cursor visible and the alternate
+  screen off.
+- `$TMPDIR/geex.log` had no `terminating` lines.
+
+**The coordinator's check** of the same binary, in its own tmux session with scratch state:
+- `-isig -ixon` while running; Ctrl-S didn't freeze.
+- Resizes 120×30 → 160×40 → 100×25 redrew at each size; Alt+O twice drew the pane hints right.
+- Ctrl-Q exited with the discovery file gone; no `terminating` in the log.
+- **Edge case, not a regression:** after an outside `kill -STOP`, `kill %1` (SIGTERM, then
+  SIGCONT) left geex stopped again. It resumes in the background and touches the tty (most
+  likely `prim_tty`'s raw-mode reset on SIGCONT), so the terminal stops it with SIGTTOU or
+  SIGTTIN. `fg` then finished the quit: exit, discovery file gone, the shell back on the main
+  screen with `isig`/`ixon`. `0.1.0+c686550f` behaved the same. With Ctrl-Z now a key, only a
+  SIGSTOP from outside gets geex there.
+
+**Not tested:** Windows Terminal; `--rollback` this time (it was checked at the first install).
