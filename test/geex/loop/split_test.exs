@@ -128,7 +128,7 @@ defmodule Geex.Loop.SplitTest do
 
     # a is in both panes: closing this pane's last tab closes the pane, not the buffer.
     state = key(state, {:alt, ?k})
-    assert state.notice =~ "still open in another"
+    assert state.notice =~ "still open in another pane"
     assert state.panes.split == {:pane, 1}
     assert Process.alive?(a)
     assert active() == a
@@ -209,9 +209,13 @@ defmodule Geex.Loop.SplitTest do
     assert state.notice == "no room to split this pane"
     assert state.panes.split == {:cols, {:pane, 1}, {:pane, 2}}
 
-    # Shrunk after splitting: the frame still draws.
+    # Shrunk after splitting: the frame still draws, and a pane too small to draw is filled
+    # with the background, not left as whatever the terminal showed before.
     {_state, rows} = frame(%{state | w: 6, h: 5})
     assert length(rows) == 5
+    screen = Geex.Renderer.current()
+    # 6 columns: the left half is 2 wide (skipped), then the divider, then a 3-wide pane.
+    assert Screen.get_cell(screen, 0, 1).bg == state.theme.palette.bg
   end
 
   test "an open shows its tab at once, so the next key acts on it", %{dir: dir} do

@@ -75,7 +75,7 @@ back. Session gained one call, `close_buffer/1`, to close a buffer without picki
 `Alt+K` closes the current tab, and the pane shows the tab before it:
 
 - a buffer still in another tab or pane stays open ("closed the tab; it is still open in
-  another");
+  another pane");
 - otherwise the buffer closes too, **refused while it has unsaved edits**;
 - **a pane left with no tabs closes**, and the pane that takes its space becomes current;
 - **the only pane** never closes: its last tab closes to the buffer shown before it (Session's

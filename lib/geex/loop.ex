@@ -689,9 +689,10 @@ defmodule Geex.Loop do
         current? = id == panes.pane
 
         case pane_view(panes, id, current?, active, active_pid) do
-          # A resize can leave a pane too small to draw (`split/2` refuses to make one).
+          # A resize can leave a pane too small to draw (`split/2` refuses to make one): fill it,
+          # so nothing the terminal showed there before the resize stays.
           _ when rect.w < 3 or rect.h < 3 ->
-            {screen, panes, cursor}
+            {fill_pane(screen, rect, state.theme), panes, cursor}
 
           nil ->
             {draw_empty_pane(screen, rect, current? and editing?, state), panes, cursor}
@@ -819,6 +820,14 @@ defmodule Geex.Loop do
     # loop (an outside open).
     {screen, %{tab | scroll: scroll, hscroll: hscroll, cursor: cursor}, at}
   end
+
+  defp fill_pane(screen, rect, %Theme{palette: pal}),
+    do:
+      Screen.fill_rect(screen, rect.x, rect.y, rect.w, rect.h, %Cell{
+        char: " ",
+        fg: pal.fg,
+        bg: pal.bg
+      })
 
   # A pane with no tabs: its tab bar, and a hint.
   defp draw_empty_pane(screen, rect, focused?, %{theme: %Theme{palette: pal}} = state) do
@@ -1936,7 +1945,7 @@ defmodule Geex.Loop do
         cond do
           Panes.elsewhere?(state.panes, pid) ->
             state = state |> put_panes(rest) |> enter()
-            %{state | notice: "closed the tab; #{name} is still open in another"}
+            %{state | notice: "closed the tab; #{name} is still open in another pane"}
 
           match?(%{dirty: true}, safe_status(pid)) ->
             %{state | notice: @dirty}

@@ -2310,3 +2310,26 @@ only its own shell; `ps` confirmed none).
 - The log had no `terminating` lines.
 
 **Not tested:** Windows Terminal; `--rollback` (checked at the first install).
+
+### 2026-10-17 — The coordinator's step 3 review: two nits fixed
+
+The coordinator approved `f4ea2e7` after its own live test of the installed binary:
+- tabs from the command line, splits, `Alt+O` into a pane, tab switching;
+- shared-buffer typing, every `Alt+K` case, `Alt+P`;
+- the split limit, a resize to 20×6.
+
+It also read the maintainer's Windows Terminal settings: the only Alt binding added is
+`alt+shift+d`, and the terminal's own pane and tab keys all need Shift or Ctrl, so `Alt+digit`,
+`Alt+-`, `Alt+=`, `Alt+,` and `Alt+.` should reach geex there.
+
+Fixed:
+- The notice now reads "closed the tab; … is still open in another pane": a pane holds a
+  buffer in one tab at most, so "another" always meant another pane.
+- At 20×6 with four side-by-side panes, the two narrowest showed a stale `──` on their top row.
+  A pane too small to draw was skipped, and after a resize the renderer assumes a blank
+  terminal, so whatever the terminal showed there before stayed. Skipped panes are now filled
+  with the theme background. Live: four panes, a resize to 20×6 drew the narrow ones blank, and
+  back to 140×34 they came back.
+
+**Automated:** `split_test` asserts the notice and the filled background. Both assertions fail
+without the fix. **939 tests + 41 doctests**, green twice.
