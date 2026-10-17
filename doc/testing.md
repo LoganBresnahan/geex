@@ -2388,3 +2388,18 @@ form). **968 tests + 46 doctests**, green twice.
 
 **Not tested:** Windows Terminal (its Shift+drag bypass, its OSC 52); a real mouse (reports were
 typed in as bytes); the installed binary (next, with /deploy).
+
+### 2026-10-17 — `geex 0.1.0+3647bb7c` deployed (the mouse, step 1)
+
+`mix geex.deploy` from the clean tree at `3647bb7` (968 tests + 46 doctests green twice). It
+installed `0.1.0+3647bb7c` and removed the old unpack; no other geex was running (checked by
+executable path). Live with `geex` from the PATH in tmux (`-L deploy`, 120×30, scratch state):
+- `--version` printed `geex 0.1.0+3647bb7c` (exit 0); `--frob` exited 2.
+- `geex a.txt notes.txt` showed both tabs, and `notes.txt` (holding `IO.puts("x")`) opened
+  without printing. Mouse modes were on, and the discovery file was present.
+- A drag over `foo_bar` and `Alt+C` put `foo_bar` in tmux's buffer (OSC 52). Typing and Ctrl-O
+  wrote the file.
+- Ctrl-X and SIGTERM both left the mouse modes off, the alternate screen closed and the cursor
+  visible. The discovery file was gone, and the log had no `terminating` lines.
+
+**Not tested:** Windows Terminal; a real mouse; `--rollback` (checked at the first install).
