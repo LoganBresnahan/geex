@@ -1,7 +1,8 @@
 # ADR-0028: The editor shell — screen regions, the minibuffer, and the buffer/view/pane model
 
 - **Status:** Accepted. **Keys amended** 2026-10-17 by [ADR-0037](0037-pane-and-file-keys.md):
-  the palette is `Alt+I` (`Alt+P` is now the next pane).
+  the palette is `Alt+I` (`Alt+P` is now the next pane). **Amended** 2026-10-17: the file finder
+  is built (`Alt+O`).
 - **Date:** 2026-06-08
 - **Relates to:** [ADR-0027](0027-grid-command-addressing.md) (grid commands — the minibuffer's
   marquee mode), [ADR-0019](0019-file-lifecycle-and-operation-tools.md) (multi-buffer / `max_children`),
@@ -190,6 +191,35 @@ folds into the grid-agent-parity work next).
 Live-verified via tmux (open → filter → `Alt+W/S` navigate → `Enter` on both an `{:action}` and a
 `{:typed}` hand-off → `Alt+N` close). `lib/geex/fuzzy.ex`, `lib/geex/command/catalog.ex`,
 `lib/geex/minibuffer.ex`, `lib/geex/loop.ex` (`draw_palette/2`, `move_palette/2`, `dispatch_palette/2`).
+
+## Amendment (2026-10-17): the file finder — built (`Alt+O`)
+
+The fuzzy finder §2 promised, for files (the maintainer's list, step 2 of roadmap item 10;
+[ADR-0037](0037-pane-and-file-keys.md) put it on `Alt+O`).
+
+- **A `:files` minibuffer mode** (`open:`) with the palette's popup and keys: typing filters,
+  `Alt+W`/`Alt+S` or the arrows move, Enter opens the highlighted file into the editor (which
+  takes the keys), `Esc`/`Alt+N` close. A row shows the file name, then its directory. The typed
+  twins are `open` with no path and `find`; the palette's `open` entry runs the finder. `open PATH`
+  still opens a path directly.
+- **The files are the tree's own list** (`Geex.Tree.list/1`), read again in the background each
+  time the finder opens, so new files show up: `git ls-files` inside a repository, and outside one
+  the tree's walk, which skips dot-directories and has no cap (the maintainer chose no cap for the
+  tree on 2026-10-16, and the finder shares its list). Until the read lands, the popup says
+  "reading the files…". With no root at all (geex started on nothing), `Alt+O` falls back to the
+  minibuffer with `open ` typed.
+- **Ranking** (`Geex.Finder`): a query is a subsequence of the path (`Geex.Fuzzy`). A match
+  within the file name ranks above any match spread across directories; ties go to the shorter
+  path, then alphabetical order. A blank query lists the files in order.
+- **Off the key loop** ([ADR-0035](0035-the-loop-never-waits.md)): each change to the query
+  starts a search in a monitored process and kills the previous one; only the newest answer
+  counts. The list is kept packed, one binary with a path per line, which processes share rather
+  than copy, and a search scores it in byte ranges in parallel. Measured with a million paths
+  (49 MB): 0.2–0.3 s a query on 8 schedulers; handing the list to a search costs about 1 µs.
+  Until a search answers, the popup keeps the last results. Enter pressed before it answers (or
+  before the files are read) waits and opens the top match when the answer comes.
+- **The `Completion` abstraction stays deferred.** The palette, the buffer picker and the finder
+  each compute their own rows; one abstraction waits for path tab-completion, its next consumer.
 
 ## See
 

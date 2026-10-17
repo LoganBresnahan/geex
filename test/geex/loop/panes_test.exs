@@ -49,8 +49,7 @@ defmodule Geex.Loop.PanesTest do
     test "Alt+O, Alt+T, Alt+L and Alt+P work from the #{pane} pane (ADR-0037)" do
       state = focused_on(unquote(pane))
 
-      assert %Minibuffer{mode: :command} = mb = key(state, {:alt, ?o}).minibuffer
-      assert Minibuffer.value(mb) == "open "
+      assert %Minibuffer{mode: :files} = key(state, {:alt, ?o}).minibuffer
 
       assert key(state, {:alt, ?t}).tree_shown == not state.tree_shown
       assert key(state, {:alt, ?l}).edits_shown == not state.edits_shown
@@ -101,10 +100,17 @@ defmodule Geex.Loop.PanesTest do
     assert Enum.map(state.tree.rows, & &1.path) == ["lib"]
   end
 
-  test "Alt+O, then Enter on a path, opens the file and gives the editor the keys", %{dir: dir} do
+  test "`open PATH` from the tree opens the file and gives the editor the keys", %{dir: dir} do
     File.write!(Path.join(dir, "b.txt"), "b\n")
-    state = key(focused_on(:tree), {:alt, ?o})
-    state = Enum.reduce(String.graphemes(Path.join(dir, "b.txt")), state, &key(&2, {:char, &1}))
+    state = key(focused_on(:tree), {:alt, ?m})
+
+    state =
+      Enum.reduce(
+        String.graphemes("open " <> Path.join(dir, "b.txt")),
+        state,
+        &key(&2, {:char, &1})
+      )
+
     state = key(state, {:key, :enter})
 
     assert state.focus == :editor

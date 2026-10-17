@@ -21,9 +21,9 @@ defmodule Geex.Loop.Verbs do
     * `edits` / `tree` — show or hide the edits pane / the file tree (= `Alt+L` / `Alt+T`;
       `Alt+P` moves between the panes). ADR-0034, ADR-0037.
     * `open PATH` — show a file, opening it if needed; a relative `PATH` is from the current
-      file's directory, and keeps its case (`Alt+O` starts one). `buffers` — pick an open
-      buffer. `close` — close this buffer (= `Alt+K`; refused while it has unsaved edits).
-      ADR-0034.
+      file's directory, and keeps its case. `open` alone or `find` — the file finder (= `Alt+O`,
+      ADR-0037). `buffers` — pick an open buffer. `close` — close this buffer (= `Alt+K`;
+      refused while it has unsaved edits). ADR-0034.
     * `quit` / `exit` — leave the editor (= `Ctrl-X`).
     * `no` — the typed twin of `Alt+N`: clears a live selection (a plain cancel when
       nothing is selected). An empty line just cancels.
@@ -125,8 +125,9 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("close"), do: {:action, :close}
   defp do_parse("edits"), do: {:action, :toggle_edits}
   defp do_parse("tree"), do: {:action, :toggle_tree}
-  # `open` with no path: nothing to open.
-  defp do_parse("open"), do: :unknown
+  # `open` with no path, or `find`: the file finder (= `Alt+O`, ADR-0037).
+  defp do_parse("open"), do: {:action, :find_file}
+  defp do_parse("find"), do: {:action, :find_file}
   defp do_parse("quit"), do: {:action, :quit}
   defp do_parse("exit"), do: {:action, :quit}
 

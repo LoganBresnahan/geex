@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-17):** 904 tests + 35 doctests green, `--warnings-as-errors` clean. geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
+**Current (2026-10-17):** 916 tests + 39 doctests green, `--warnings-as-errors` clean. geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -359,8 +359,11 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      `cut`, coordinate `select`, block/multi ranges, the `cursor_x`-oracle *automated* cast test.
    - **palette** (`Alt+P`, `Alt+I` since ADR-0037) — **built** (ADR-0028 §3 amendment): `Geex.Fuzzy` + `Geex.Command.Catalog`
      + the `:palette` minibuffer mode with a candidate popup (`Alt+W`/`Alt+S` navigate, Enter runs).
-   - Remaining: incremental **search** (`/`) and the **fuzzy file/buffer finder** (path
-     tab-completion — one `Completion` abstraction, sources per mode; reuses `Geex.Fuzzy`).
+   - **file finder** (`Alt+O`) — **built 2026-10-17** (ADR-0028's 2026-10-17 amendment):
+     `Geex.Finder` over the tree's file list, searched off the loop; the buffer picker
+     (`buffers`) shipped with ADR-0034.
+   - Remaining: incremental **search** (`/`) and path **tab-completion** (where the one
+     `Completion` abstraction, sources per mode, would earn its keep).
 5. **undo / redo** — **built** ([adr/0031](adr/0031-undo-redo-history-operations.md)): history
    operations on `Alt+Z` / `Alt+Shift+Z` (replay-from-base over the recorded history + the loaded
    `base`, [adr/0014](adr/0014-editor-state-and-dispatch-ownership.md)); a fresh edit clears the
@@ -443,7 +446,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       2026-10-17**: `Alt+P` next pane, `Alt+I` palette, `Alt+O` open, `Alt+K` close, `Alt+T` tree,
       `Alt+L` edits pane, `Alt+J` fast-forward; the pane chords work from the panes, and
       `Alt+A`/`Alt+D` move the tree.
-   2. **`Alt+O` fuzzy file open** — item 4's fuzzy finder: the repo's files, read off the loop.
+   2. **`Alt+O` fuzzy file open** — **built 2026-10-17** (ADR-0028's 2026-10-17 amendment):
+      item 4's fuzzy finder over the tree's file list (git, or the walk outside a repository),
+      searched in parallel off the key loop; Enter before the answer waits for it.
    3. **Split panes with tabs per pane** — a new ADR (ADR-0034 deferred both).
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass

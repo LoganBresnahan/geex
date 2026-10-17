@@ -14,7 +14,9 @@ defmodule Geex.Minibuffer do
   the display-column ruler + grid-line overlay while it is open, so the `x` the user types is a
   display column), and `:palette` (the command palette, [ADR-0028](../../doc/adr/0028-editor-shell-and-minibuffer.md)
   §3 — the `input` is a fuzzy filter over `Geex.Command.Catalog` and `sel` is the highlighted
-  candidate row). Incremental search and the fuzzy finder are the next modes.
+  candidate row), `:buffers` (the open buffers, the same way), and `:files` (the fuzzy file
+  finder, `Alt+O` — the input filters the root's files through `Geex.Finder`). Incremental search
+  is the next mode.
 
   `sel` is the only non-text state: the palette's highlighted-candidate index. Editing the input
   resets it to `0` (the top match) — the loop owns moving it (it knows the candidate count to
@@ -23,7 +25,7 @@ defmodule Geex.Minibuffer do
 
   defstruct mode: :inactive, input: "", cursor: 0, sel: 0
 
-  @type mode :: :inactive | :command | :grid | :palette | :buffers
+  @type mode :: :inactive | :command | :grid | :palette | :buffers | :files
   @type t :: %__MODULE__{
           mode: mode(),
           input: String.t(),
@@ -63,6 +65,7 @@ defmodule Geex.Minibuffer do
   def prompt(%__MODULE__{mode: :grid}), do: "grid:"
   def prompt(%__MODULE__{mode: :palette}), do: "palette:"
   def prompt(%__MODULE__{mode: :buffers}), do: "buffer:"
+  def prompt(%__MODULE__{mode: :files}), do: "open:"
   def prompt(%__MODULE__{}), do: ""
 
   @doc """

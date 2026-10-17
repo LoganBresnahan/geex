@@ -43,6 +43,7 @@ defmodule Geex.Loop do
     Coord,
     Dispatch,
     Edits,
+    Finder,
     Fuzzy,
     Layout,
     Tree,
@@ -79,6 +80,9 @@ defmodule Geex.Loop do
   # scrolls to keep the highlighted row in view. The column the command name is padded to.
   @palette_rows 8
   @palette_name_col 14
+
+  # The most files the finder (Alt+O) keeps for a query: far more than the popup shows at once.
+  @finder_limit 100
 
   ## Public API
 
@@ -259,7 +263,12 @@ defmodule Geex.Loop do
       # in a process of their own: `reading` is that process's `{pid, monitor}` until its
       # `index` arrives.
       tree_shown: w >= 100,
-      tree: %{index: nil, reading: nil, open: MapSet.new(), rows: [], sel: 0}
+      # `files` is the same read's file list, packed for the finder (`Geex.Finder.pack/1`).
+      tree: %{index: nil, files: nil, reading: nil, open: MapSet.new(), rows: [], sel: 0},
+      # The file finder (Alt+O, `:files` minibuffer mode): the best paths for the typed query;
+      # `matching` the search's `{pid, monitor}` until they arrive; `submit` when Enter came
+      # first, so the top match opens on arrival.
+      finder: %{matches: [], matching: nil, submit: false}
     }
   end
 
@@ -349,12 +358,34 @@ defmodule Geex.Loop do
 
   # The tree's files, from the process reload_tree/1 started. An answer from any other process
   # (a read that was superseded) falls through to the catch-all.
-  def handle_info({:geex_tree, pid, index}, %{tree: %{reading: {pid, ref}} = tree} = state) do
+  def handle_info(
+        {:geex_tree, pid, {files, index}},
+        %{tree: %{reading: {pid, ref}} = tree} = state
+      ) do
     Process.demonitor(ref, [:flush])
     rows = Tree.rows(index, tree.open)
     sel = min(tree.sel, max(length(rows) - 1, 0))
-    tree = %{tree | index: index, reading: nil, rows: rows, sel: sel}
-    {:noreply, schedule_repaint(%{state | tree: tree})}
+    tree = %{tree | index: index, files: files, reading: nil, rows: rows, sel: sel}
+    # An open finder searches the new list; if Enter is waiting and no search is needed (a blank
+    # query), it opens the first file now.
+    state = refresh_matches(%{state | tree: tree})
+
+    if state.finder.submit and state.finder.matching == nil and
+         state.minibuffer.mode == :files,
+       do: {:noreply, submit_minibuffer(state)},
+       else: {:noreply, schedule_repaint(state)}
+  end
+
+  # The finder's search answered (`refresh_matches/1`); an answer for an older query falls
+  # through to the catch-all. Enter pressed while it ran opens the top match now.
+  def handle_info({:geex_matches, pid, matches}, %{finder: %{matching: {pid, ref}}} = state) do
+    Process.demonitor(ref, [:flush])
+    finder = %{state.finder | matches: matches, matching: nil}
+    state = %{state | finder: finder}
+
+    if finder.submit,
+      do: {:noreply, submit_minibuffer(state)},
+      else: {:noreply, schedule_repaint(state)}
   end
 
   # The active buffer died — detach; a fresh open re-attaches via Session.
@@ -369,6 +400,14 @@ defmodule Geex.Loop do
     tree = %{state.tree | reading: nil, index: state.tree.index || %{}}
     notice = "the file tree couldn't be read (see #{Path.join(System.tmp_dir!(), "geex.log")})"
     {:noreply, schedule_repaint(%{state | tree: tree, notice: notice})}
+  end
+
+  # The finder's search died before answering: say so, and stop waiting on it.
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{finder: %{matching: {_, ref}}} = state) do
+    Logger.warning("geex finder: the search failed: #{inspect(reason)}")
+    finder = %{state.finder | matching: nil, submit: false}
+    notice = "the file search failed (see #{Path.join(System.tmp_dir!(), "geex.log")})"
+    {:noreply, schedule_repaint(%{state | finder: finder, notice: notice})}
   end
 
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state), do: {:noreply, state}
@@ -588,14 +627,14 @@ defmodule Geex.Loop do
   # input, Alt+W up — the on-screen direction matches the editor's own up/down. The highlighted
   # row takes the active-line tint (the same the input row wears), so eye + Enter agree.
   defp draw_palette(screen, %{minibuffer: %Minibuffer{mode: mode} = mb} = state)
-       when mode in [:palette, :buffers] do
-    candidates = candidates(mb)
+       when mode in [:palette, :buffers, :files] do
+    candidates = candidates(state)
     rows = min(length(candidates), min(@palette_rows, max(state.h - 1, 0)))
     name_col = name_col(mode, candidates, state.w)
 
     cond do
       candidates == [] ->
-        draw_palette_empty(screen, state, if(mode == :buffers, do: "buffers", else: "commands"))
+        draw_palette_empty(screen, state, empty_hint(state))
 
       # No vertical room for even one candidate row (a degenerate ≤1-row terminal): draw nothing
       # rather than the empty hint, which would mislead.
@@ -750,7 +789,45 @@ defmodule Geex.Loop do
     end
   end
 
-  defp read_tree(root), do: root |> Tree.list() |> Tree.index()
+  defp read_tree(root) do
+    files = Tree.list(root)
+    {Finder.pack(files), Tree.index(files)}
+  end
+
+  # Search the files for the finder's query (Alt+O), in a process of its own: the list can be
+  # huge (ADR-0035). The previous search is dropped first, so only the newest query's answer
+  # counts. A blank query lists the files in order, which costs nothing. No list yet: the
+  # tree's read is on its way, and its answer calls this again.
+  defp refresh_matches(
+         %{minibuffer: %Minibuffer{mode: :files} = mb, tree: %{files: files}} = state
+       )
+       when is_binary(files) do
+    state = stop_matching(state)
+    query = Minibuffer.value(mb)
+
+    if String.trim(query) == "" do
+      put_in(state.finder.matches, Finder.first(files, @finder_limit))
+    else
+      loop = self()
+
+      matcher =
+        spawn_monitor(fn ->
+          send(loop, {:geex_matches, self(), Finder.match(files, query, @finder_limit)})
+        end)
+
+      put_in(state.finder.matching, matcher)
+    end
+  end
+
+  defp refresh_matches(state), do: state
+
+  defp stop_matching(%{finder: %{matching: {pid, ref}}} = state) do
+    Process.demonitor(ref, [:flush])
+    Process.exit(pid, :kill)
+    put_in(state.finder.matching, nil)
+  end
+
+  defp stop_matching(state), do: state
 
   defp edits_entries do
     EditsPane.entries(Session.buffers(), safe_edits_rows(), safe_start().root)
@@ -933,10 +1010,27 @@ defmodule Geex.Loop do
     :exit, _ -> %{dir: nil, root: nil}
   end
 
-  # What the popup lists: the command catalog, or the open buffers (ADR-0034), filtered by the
-  # input. Draw, Enter and the highlight moves all read it, so they agree on what is where.
-  defp candidates(%Minibuffer{mode: :palette} = mb), do: Catalog.search(Minibuffer.value(mb))
-  defp candidates(%Minibuffer{mode: :buffers} = mb), do: buffer_candidates(Minibuffer.value(mb))
+  # What the popup lists: the command catalog, the open buffers (ADR-0034), or the finder's
+  # files, filtered by the input. Draw, Enter and the highlight moves all read it, so they agree
+  # on what is where.
+  defp candidates(%{minibuffer: %Minibuffer{mode: :palette} = mb}),
+    do: Catalog.search(Minibuffer.value(mb))
+
+  defp candidates(%{minibuffer: %Minibuffer{mode: :buffers} = mb}),
+    do: buffer_candidates(Minibuffer.value(mb))
+
+  # The file's name, then the directory it is in.
+  defp candidates(%{minibuffer: %Minibuffer{mode: :files}, finder: finder}) do
+    for path <- finder.matches do
+      dir = Path.dirname(path)
+
+      %{
+        name: Path.basename(path),
+        description: if(dir == ".", do: "", else: dir),
+        invoke: {:file, path}
+      }
+    end
+  end
 
   # One row per open buffer, most recent first: the file name (with ` [+]` when it has unsaved
   # edits) and where it is. A filter keeps the rows it fuzzy-matches, best first.
@@ -966,7 +1060,7 @@ defmodule Geex.Loop do
   # Commands line up at a fixed column; buffer names at the longest one, up to half the width.
   defp name_col(:palette, _candidates, _w), do: @palette_name_col
 
-  defp name_col(:buffers, candidates, w) do
+  defp name_col(mode, candidates, w) when mode in [:buffers, :files] do
     longest = candidates |> Enum.map(&String.length(&1.name)) |> Enum.max(fn -> 0 end)
     min(longest + 2, max(div(w, 2), 1))
   end
@@ -996,14 +1090,20 @@ defmodule Geex.Loop do
     )
   end
 
-  # Nothing matches the filter: a single dim hint row just above the input.
-  defp draw_palette_empty(screen, %{w: w, h: h, theme: %Theme{palette: pal}}, what) do
+  defp empty_hint(%{minibuffer: %Minibuffer{mode: :buffers}}), do: "(no buffers match)"
+  defp empty_hint(%{minibuffer: %Minibuffer{mode: :palette}}), do: "(no commands match)"
+  defp empty_hint(%{tree: %{files: nil}}), do: "(reading the files…)"
+  defp empty_hint(%{finder: %{matching: {_, _}}}), do: "(searching…)"
+  defp empty_hint(_state), do: "(no files match)"
+
+  # Nothing to list: a single dim hint row just above the input.
+  defp draw_palette_empty(screen, %{w: w, h: h, theme: %Theme{palette: pal}}, hint) do
     y = h - 2
 
     if y >= 0 do
       screen
       |> Screen.fill_rect(0, y, w, 1, %Cell{char: " ", fg: pal.line_number, bg: pal.bg})
-      |> Screen.draw_text(0, y, palette_clip("(no #{what} match)", w), %Cell{
+      |> Screen.draw_text(0, y, palette_clip(hint, w), %Cell{
         fg: pal.line_number,
         bg: pal.bg
       })
@@ -1378,9 +1478,16 @@ defmodule Geex.Loop do
       :next_pane ->
         schedule_repaint(next_pane(state))
 
-      # Alt+O (ADR-0037): the minibuffer, ready for `open PATH`.
+      # Alt+O (ADR-0037): the file finder over the root's files, read again in the background
+      # so new files show up. With no root (geex started on nothing), the minibuffer, ready for
+      # `open PATH`.
       :find_file ->
-        schedule_repaint(%{state | minibuffer: Minibuffer.open(:command, "open ")})
+        if safe_start().root do
+          state = %{state | minibuffer: Minibuffer.open(:files)}
+          schedule_repaint(state |> reload_tree() |> refresh_matches())
+        else
+          schedule_repaint(%{state | minibuffer: Minibuffer.open(:command, "open ")})
+        end
 
       :toggle_tree ->
         shown = not state.tree_shown
@@ -1729,7 +1836,11 @@ defmodule Geex.Loop do
   defp open_minibuffer(state),
     do: schedule_repaint(%{state | minibuffer: Minibuffer.open(:command)})
 
-  defp close_minibuffer(state), do: schedule_repaint(%{state | minibuffer: Minibuffer.new()})
+  defp close_minibuffer(state) do
+    state = stop_matching(state)
+    finder = %{state.finder | matches: [], submit: false}
+    schedule_repaint(%{state | minibuffer: Minibuffer.new(), finder: finder})
+  end
 
   # Keys while the minibuffer is open go to its input; Enter submits, Alt+N / Esc cancels,
   # and Ctrl-X still quits (so you are never trapped). Everything else is ignored.
@@ -1738,20 +1849,22 @@ defmodule Geex.Loop do
   # editor's own up/down, ADR-0028 §3) and the arrow Up/Down alias — handled *before* the
   # text-input cases so they move the highlight instead of typing. A plain `w`/`s` still types
   # into the fuzzy filter; the Alt modifier is what separates "move" from "type".
+  # The modes with a candidate popup.
+  @pickers [:palette, :buffers, :files]
+
   defp apply_minibuffer_key(event, %{minibuffer: mb} = state) do
     case event do
-      _ when mb.mode in [:palette, :buffers] and event in [{:alt, ?w}, {:alt, ?W}, {:key, :up}] ->
+      _ when mb.mode in @pickers and event in [{:alt, ?w}, {:alt, ?W}, {:key, :up}] ->
         move_palette(state, -1)
 
-      _
-      when mb.mode in [:palette, :buffers] and event in [{:alt, ?s}, {:alt, ?S}, {:key, :down}] ->
+      _ when mb.mode in @pickers and event in [{:alt, ?s}, {:alt, ?S}, {:key, :down}] ->
         move_palette(state, +1)
 
       {:char, g} ->
-        schedule_repaint(%{state | minibuffer: Minibuffer.insert(mb, g)})
+        schedule_repaint(refresh_matches(%{state | minibuffer: Minibuffer.insert(mb, g)}))
 
       {:key, :backspace} ->
-        schedule_repaint(%{state | minibuffer: Minibuffer.backspace(mb)})
+        schedule_repaint(refresh_matches(%{state | minibuffer: Minibuffer.backspace(mb)}))
 
       {:key, :left} ->
         schedule_repaint(%{state | minibuffer: Minibuffer.left(mb)})
@@ -1801,12 +1914,34 @@ defmodule Geex.Loop do
 
   # The buffer picker: Enter shows the highlighted buffer.
   defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :buffers} = mb} = state) do
-    case Enum.at(candidates(mb), mb.sel) do
+    case Enum.at(candidates(state), mb.sel) do
       %{invoke: {:buffer, pid}} -> Session.set_active_buffer(pid)
       nil -> :ok
     end
 
     close_minibuffer(state)
+  end
+
+  # The finder: Enter opens the highlighted file. While the files are still being read, or the
+  # search for what was typed is still running, wait for it: its answer opens the top match
+  # (`submit`).
+  defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :files}} = state)
+       when state.tree.files == nil or state.finder.matching != nil,
+       do: put_in(state.finder.submit, true)
+
+  defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :files} = mb} = state) do
+    query = String.trim(Minibuffer.value(mb))
+
+    case Enum.at(candidates(state), if(state.finder.submit, do: 0, else: mb.sel)) do
+      %{invoke: {:file, path}} ->
+        do_open(Path.join(safe_start().root, path), close_minibuffer(state))
+
+      nil when query != "" and is_binary(state.tree.files) ->
+        %{close_minibuffer(state) | notice: "no file matches “#{query}”"}
+
+      nil ->
+        close_minibuffer(state)
+    end
   end
 
   # Close first, then act: an action may open the minibuffer again (`buffers` opens its picker).
@@ -1827,7 +1962,7 @@ defmodule Geex.Loop do
   # list cycles. Clamp against the *current* candidate count (the filter may have narrowed it);
   # an empty list leaves `sel` untouched.
   defp move_palette(%{minibuffer: mb} = state, delta) do
-    case length(candidates(mb)) do
+    case length(candidates(state)) do
       0 ->
         state
 
@@ -1926,7 +2061,7 @@ defmodule Geex.Loop do
   defp apply_verb(:quit, state), do: apply_action(:quit, {0, 0}, "", state)
   # Switching and closing buffers need no text either (and work with none active).
   defp apply_verb(action, state)
-       when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane],
+       when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane, :find_file],
        do: apply_action(action, {0, 0}, "", state)
 
   defp apply_verb(action, state) do

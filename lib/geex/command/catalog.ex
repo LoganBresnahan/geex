@@ -55,8 +55,8 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "open",
-      description: "Open a file (a path from this file's directory), or switch to it (Alt+O).",
-      invoke: {:typed, "open"}
+      description: "Find a file by name and open it, or switch to it (Alt+O).",
+      invoke: {:action, :find_file}
     },
     %Entry{
       name: "buffers",

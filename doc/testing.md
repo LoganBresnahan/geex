@@ -2179,3 +2179,38 @@ focuses the editor; `Alt+K` closes). The `Alt+O`/`Alt+P`/`Alt+L` tests moved to 
 
 **Not tested:** Windows Terminal (where the maintainer runs geex); `Alt+K` on a buffer with
 unsaved edits live (the refusal is the `close` verb's, unchanged and tested).
+
+### 2026-10-17 — `Alt+O`, the fuzzy file finder (ADR-0028 amendment)
+
+A `:files` minibuffer mode over the tree's file list, ranked by `Geex.Finder` (a file-name
+match above any match across directories, then the shorter path), each query searched in a
+monitored process that the next key kills. The list is packed into one binary so a search gets it
+by reference. Enter before the answer (or before the read) waits and opens the top match.
+
+**Measured** (`MIX_ENV=test mix run`, a million synthetic paths, 49 MB packed, 8 schedulers):
+pack 150 ms; a query 208–303 ms; the first 100 of a blank query 12 µs; spawning a process that
+holds the list 1 µs.
+
+**Live-verified** under `mix run` in tmux (120×30, scratch `XDG_STATE_HOME`):
+- In geex's own repo: `Alt+O` listed the files (name, then directory). `keym` put `keymap.ex`
+  (`lib/geex/loop`) and `keymap_test.exs` first; `Alt+S` moved the highlight; Enter opened
+  `keymap_test.exs` with the editor focused. `finder.ex` typed and Enter sent at once opened
+  `lib/geex/finder.ex`. `qqqzzz` showed "(no files match)", and Enter said "no file matches
+  “qqqzzz”". Ctrl-X exited 0, with no warnings or errors in the log.
+- In the home directory (not a repository; the walk, about 937k files): `Alt+O` at once showed
+  "(reading the files…)" while the tree said "reading…". Once read (about 33 s under load), typing
+  `geex/lib/geex/finder.ex` and Enter opened it 0.8 s later, typing included. `keymap` kept the
+  last results until its search answered (under 2 s), then listed `keymap.ex` and
+  `keymap_test.exs` first. RSS was about 760 MB with the home directory loaded.
+
+**Automated:** `finder_test` (3 tests + 4 doctests: matches the slow reference ranking over
+30,000 paths and more than ten byte ranges; blank queries; the name band and tie order) and
+`loop/finder_test` (9: the background read and blank listing; search then Enter; Enter before the
+search; Enter before the read; a new key kills the old search and its late answer is ignored; Esc
+stops it; no match; a search that dies; the `open` and `find` verbs). `panes_test` and
+`buffers_test` moved to the new `open`.
+
+**916 tests + 39 doctests**, green twice, `--warnings-as-errors` clean.
+
+**Not tested:** Windows Terminal; a path containing a newline (it would split into two rows; git
+quotes such names, the walk doesn't).

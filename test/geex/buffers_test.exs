@@ -121,7 +121,9 @@ defmodule Geex.BuffersTest do
     test "`open PATH` keeps the path's case; `buffers`, `close`" do
       assert Verbs.parse("open lib/Geex/Foo.ex") == {:open, "lib/Geex/Foo.ex"}
       assert Verbs.parse("  OPEN   ~/My File.txt ") == {:open, "~/My File.txt"}
-      assert Verbs.parse("open") == :unknown
+      # `open` alone and `find` are the file finder (Alt+O, ADR-0037)
+      assert Verbs.parse("open") == {:action, :find_file}
+      assert Verbs.parse("find") == {:action, :find_file}
       assert Verbs.parse("buffers") == {:action, :buffers}
       assert Verbs.parse("close") == {:action, :close}
       assert Verbs.parse("edits") == {:action, :toggle_edits}
@@ -131,7 +133,7 @@ defmodule Geex.BuffersTest do
 
     test "the palette lists them" do
       by_name = Map.new(Catalog.all(), &{&1.name, &1.invoke})
-      assert by_name["open"] == {:typed, "open"}
+      assert by_name["open"] == {:action, :find_file}
       assert by_name["buffers"] == {:action, :buffers}
       assert by_name["close"] == {:action, :close}
       assert by_name["edits"] == {:action, :toggle_edits}
