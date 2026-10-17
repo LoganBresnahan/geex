@@ -2291,3 +2291,22 @@ startup tabs; another buffer's notice), plus `Layout.split/2`/`dividers/2` docte
 **Not tested:** Windows Terminal (`Alt+digit`, `Alt+-`, `Alt+=` there); the MCP surface driving
 opens while the TUI runs (not served together today); a cursor in another pane shifting with an
 edit above it (deferred: it is clamped, not moved).
+
+### 2026-10-17 — `geex 0.1.0+f4ea2e76` deployed (split panes and tabs)
+
+`mix geex.deploy` from the clean tree at `f4ea2e7` (939 tests + 41 doctests green twice just
+before it). It installed `0.1.0+f4ea2e76`, kept `0.1.0+e0beef53` as
+`geex.prev`, and removed the old unpack. No binary geex was running (a `pgrep -f` check matched
+only its own shell; `ps` confirmed none).
+
+**Live-verified** with `geex` from the PATH in tmux (`-L deploy`, scratch `XDG_STATE_HOME`/
+`TMPDIR`, a scratch repo):
+- `--version` printed it, and `--frob` exited 2.
+- `geex a.txt notes.txt` showed tabs `1 a.txt  2 notes.txt`, with the discovery file present.
+- `Alt+=` split the pane, and `Alt+O` `s.txt` opened as tab 2 of the new pane. Typing and Ctrl-O
+  wrote it, and `Alt+.` switched to tab 1.
+- Ctrl-X exited 0 with the cursor visible, the alternate screen off and the discovery file gone.
+- `geex <dir>` and `geex notes.txt` (holding `IO.puts("x")`, not printed) opened as expected.
+- The log had no `terminating` lines.
+
+**Not tested:** Windows Terminal; `--rollback` (checked at the first install).
