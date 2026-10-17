@@ -27,6 +27,8 @@ defmodule Geex.Loop.Verbs do
     * `split` / `vsplit` — split the pane top and bottom / side by side (= `Alt+-` / `Alt+=`);
       `tab next` / `tab prev` / `tab N` — switch the pane's tab (= `Alt+.` / `Alt+,` /
       `Alt+N`). ADR-0038.
+    * `mouse` — turn the mouse off, so the terminal selects and copies text itself, or back on
+      (ADR-0039).
     * `quit` / `exit` — leave the editor (= `Ctrl-X`).
     * `no` — the typed twin of `Alt+N`: clears a live selection (a plain cancel when
       nothing is selected). An empty line just cancels.
@@ -136,6 +138,7 @@ defmodule Geex.Loop.Verbs do
   # `open` with no path, or `find`: the file finder (= `Alt+O`, ADR-0037).
   defp do_parse("open"), do: {:action, :find_file}
   defp do_parse("find"), do: {:action, :find_file}
+  defp do_parse("mouse"), do: {:action, :toggle_mouse}
   defp do_parse("quit"), do: {:action, :quit}
   defp do_parse("exit"), do: {:action, :quit}
 

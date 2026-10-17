@@ -153,7 +153,8 @@ defmodule Geex.Input.ParserTest do
             "\e[3;5~",
             "\eOP",
             "\e[15~",
-            "\e[<0;12;5M",
+            "\e[<0;12M",
+            "\e[<0;0;5M",
             "\e[200~"
           ] do
         assert Parser.parse(bytes) == {[], ""}, inspect(bytes)
@@ -206,6 +207,62 @@ defmodule Geex.Input.ParserTest do
       {more, ""} = Parser.parse("[")
       {last, ""} = Parser.parse("a")
       assert events ++ more ++ last == [{:key, :esc}, {:char, "["}, {:char, "a"}]
+    end
+  end
+
+  # Mouse reports (ADR-0039): SGR mode 1006, and the old `ESC [ M` form for terminals without it.
+  describe "mouse reports" do
+    defp m(action, button, x, y, mods \\ []),
+      do: {:mouse, %{action: action, button: button, x: x, y: y, mods: mods}}
+
+    test "SGR press, release and drag, 1-based coordinates made 0-based" do
+      assert Parser.parse("\e[<0;10;5M") == {[m(:press, :left, 9, 4)], ""}
+      assert Parser.parse("\e[<0;10;5m") == {[m(:release, :left, 9, 4)], ""}
+      assert Parser.parse("\e[<1;1;1M") == {[m(:press, :middle, 0, 0)], ""}
+      assert Parser.parse("\e[<2;1;1M") == {[m(:press, :right, 0, 0)], ""}
+      assert Parser.parse("\e[<32;3;4M") == {[m(:drag, :left, 2, 3)], ""}
+      assert Parser.parse("\e[<35;3;4M") == {[m(:move, :none, 2, 3)], ""}
+      assert Parser.parse("\e[MCAA") == {[m(:move, :none, 32, 32)], ""}
+    end
+
+    test "coordinates past 223, which the old form can't carry" do
+      assert Parser.parse("\e[<0;224;300M") == {[m(:press, :left, 223, 299)], ""}
+      assert Parser.parse("\e[<32;1000;1000M") == {[m(:drag, :left, 999, 999)], ""}
+    end
+
+    test "the wheel, four ways" do
+      assert Parser.parse("\e[<64;5;6M") == {[m(:wheel, :up, 4, 5)], ""}
+      assert Parser.parse("\e[<65;5;6M") == {[m(:wheel, :down, 4, 5)], ""}
+      assert Parser.parse("\e[<66;5;6M") == {[m(:wheel, :wheel_left, 4, 5)], ""}
+      assert Parser.parse("\e[<67;5;6M") == {[m(:wheel, :wheel_right, 4, 5)], ""}
+    end
+
+    test "Shift, Alt and Ctrl" do
+      assert Parser.parse("\e[<4;2;2M") == {[m(:press, :left, 1, 1, [:shift])], ""}
+      assert Parser.parse("\e[<8;2;2M") == {[m(:press, :left, 1, 1, [:alt])], ""}
+      assert Parser.parse("\e[<16;2;2M") == {[m(:press, :left, 1, 1, [:ctrl])], ""}
+      assert Parser.parse("\e[<36;2;2M") == {[m(:drag, :left, 1, 1, [:shift])], ""}
+      assert Parser.parse("\e[<68;2;2M") == {[m(:wheel, :up, 1, 1, [:shift])], ""}
+    end
+
+    test "extra buttons" do
+      assert Parser.parse("\e[<128;1;1M") == {[m(:press, 8, 0, 0)], ""}
+      assert Parser.parse("\e[<129;1;1m") == {[m(:release, 9, 0, 0)], ""}
+    end
+
+    test "a report split across reads waits for the rest; text around it survives" do
+      assert {[{:char, "a"}], "\e[<0;12"} = Parser.parse("a\e[<0;12")
+      assert Parser.parse("\e[<0;12" <> ";5Mb") == {[m(:press, :left, 11, 4), {:char, "b"}], ""}
+    end
+
+    test "the old form: ESC [ M and three bytes, each value plus 32" do
+      assert Parser.parse("\e[M !\"") == {[m(:press, :left, 0, 1)], ""}
+      assert Parser.parse("\e[M#!!") == {[m(:release, :none, 0, 0)], ""}
+      assert Parser.parse("\e[M`!!") == {[m(:wheel, :up, 0, 0)], ""}
+      assert Parser.parse(<<"\e[M", 32, 255, 255>>) == {[m(:press, :left, 222, 222)], ""}
+      # Its bytes never land in the buffer, even split across reads.
+      assert {[], "\e[M "} = Parser.parse("\e[M ")
+      assert Parser.parse("\e[M " <> "!!x") == {[m(:press, :left, 0, 0), {:char, "x"}], ""}
     end
   end
 end

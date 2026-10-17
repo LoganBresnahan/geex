@@ -2342,3 +2342,49 @@ only BEAM VMs running were pharos's (checked by executable path, not `pgrep -f`,
 own shell). Live with `geex` from the PATH: `geex a.txt notes.txt`, `Alt+=`, then `Alt+K` on the
 new pane's tab closed the pane with "closed the tab; a.txt is still open in another pane"; Ctrl-X
 exited 0, and the log had no `terminating` lines.
+
+### 2026-10-17 — The mouse, step 1: the foundation in the file panes (ADR-0039)
+
+Live in tmux (`-L geexdf`, 100×30, `set-clipboard on`, a scratch `XDG_STATE_HOME`), with the
+mouse sent as raw SGR reports through `send-keys -l`:
+- At start tmux showed mouse modes on (`mouse_any_flag`, `mouse_sgr_flag`, `mouse_button_flag`).
+- A click on "baz" put the cursor at 2:9. A drag from the line's start over "foo_bar baz", then
+  `Alt+C`, put `foo_bar baz` in tmux's buffer: the OSC 52 copy arrived.
+- In a 200-line file: four wheel notches scrolled to line 13 with the cursor left at 1:1. A
+  double-click on "number" selected the word (copied, it read `number`). A drag held on the
+  scroll-bar row for half a second scrolled 9 lines and selected lines 21 to 38.
+- A drag held on a long line's last column scrolled right. After the wheel, Delete edited line 1
+  and the view came back to it.
+- `mouse` turned the modes off, with its notice, and on again.
+- The modes were reset by hand while geex was stopped, and bash's `fg` brought them back
+  (SIGCONT). An outside `kill -STOP`/`-CONT` from a shell job stops geex again on its next read,
+  as bash has taken the terminal; that is job control, not geex.
+- Ctrl-X and SIGTERM both left the modes off and the alternate screen closed.
+
+Reviewed adversarially (two agents: the loop and model; the terminal, parser and docs). Fixed:
+- a click on the vertical scroll bar's column placed the cursor on text hidden under it;
+- a drag to the right edge of a pane against the terminal's edge never scrolled right;
+- a drag outlived a tab switch, an outside open or an edit, and selected from a stale anchor;
+- a click's held scroll survived a split or a resize, leaving the cursor out of view (`hold`
+  now carries the pane's size);
+- after the wheel, a key that edits in place (Delete) acted out of view (any key in the editor now
+  ends the hold);
+- the auto-scroll kept going under the palette (a key now ends a drag; a tick checks the
+  minibuffer);
+- a double-click on a byte that isn't UTF-8 crashed the loop;
+- Shift+wheel stopped short of the widest line's end when there was a vertical scroll bar;
+- a mouse report split across reads more than 40 ms apart was typed into the buffer after the
+  Esc timeout (now waited for, `Parser.mouse_report?/1`);
+- the loop and TerminalIO could disagree on the mouse after a restart (the loop now sets it on
+  init); modes 1005/1015 are turned off at start; a buttonless move decodes as `:move`;
+- the ADR claimed tmux needs `mouse on` (it passes the mouse either way) and that the `at_exit`
+  hook covers a halt (it doesn't run on one).
+
+**Automated:** `test/geex/loop/mouse_test.exs` (22 tests: clicks by display column, focus, drag,
+Shift+click, double-click, the wheel under the pointer, the held scroll, auto-scroll both ways,
+the minibuffer, the verb, OSC 52 through a stand-in TerminalIO, and the review's cases) and the
+parser's "mouse reports" (SGR, past 223, the wheel, modifiers, extra buttons, split reads, the old
+form). **968 tests + 46 doctests**, green twice.
+
+**Not tested:** Windows Terminal (its Shift+drag bypass, its OSC 52); a real mouse (reports were
+typed in as bytes); the installed binary (next, with /deploy).

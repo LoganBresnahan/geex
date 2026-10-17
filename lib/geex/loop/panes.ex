@@ -9,10 +9,13 @@ defmodule Geex.Loop.Panes do
   - **`panes`** maps each pane's id to its tabs and which one it shows (`at`).
   - **`pane`** is the current file pane: where keys go when the editor has focus, and where a
     file opens. It stays current while the tree or the edits pane has focus.
-  - A **tab** is a buffer seen from one pane: `%{buffer, cursor, scroll, hscroll}`. The same
-    buffer in two panes is one buffer (one text, one history) with a cursor and scroll per pane.
-    The current tab's cursor lives in `Geex.Session` while it is current (the loop copies it
-    out when it leaves); every other tab keeps its own here.
+  - A **tab** is a buffer seen from one pane: `%{buffer, cursor, scroll, hscroll, hold}`. The
+    same buffer in two panes is one buffer (one text, one history) with a cursor and scroll per
+    pane. The current tab's cursor lives in `Geex.Session` while it is current (the loop copies
+    it out when it leaves); every other tab keeps its own here. `hold` is `{cursor, {w, h}}`: the
+    cursor and the pane's size when the mouse last set the scroll (the wheel, a click; ADR-0039).
+    While both stay so, the scroll stays where the mouse put it, and the cursor may be out of
+    view. `nil` otherwise.
 
   Closing a pane's last tab closes the pane, unless it is the only one.
   """
@@ -21,7 +24,10 @@ defmodule Geex.Loop.Panes do
           buffer: pid(),
           cursor: {non_neg_integer(), non_neg_integer()},
           scroll: non_neg_integer(),
-          hscroll: non_neg_integer()
+          hscroll: non_neg_integer(),
+          hold:
+            {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}}
+            | nil
         }
   @type pane :: %{tabs: [tab()], at: non_neg_integer()}
   @type t :: %{
@@ -37,7 +43,8 @@ defmodule Geex.Loop.Panes do
 
   @doc "A new tab for `buffer`, at the top of the file unless a cursor is given."
   @spec tab(pid(), {non_neg_integer(), non_neg_integer()}) :: tab()
-  def tab(buffer, cursor \\ {0, 0}), do: %{buffer: buffer, cursor: cursor, scroll: 0, hscroll: 0}
+  def tab(buffer, cursor \\ {0, 0}),
+    do: %{buffer: buffer, cursor: cursor, scroll: 0, hscroll: 0, hold: nil}
 
   @doc "The current pane's shown tab, or `nil` when it has none."
   @spec current(t()) :: tab() | nil

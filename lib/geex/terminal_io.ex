@@ -6,6 +6,9 @@ defmodule Geex.TerminalIO do
 
     * raw-mode terminal setup on init, restore on teardown; Ctrl-C, Ctrl-Z, Ctrl-\\, Ctrl-S
       and Ctrl-Q arrive as keys, not as the tty's signals and flow control
+    * mouse reports ([ADR-0039](../../doc/adr/0039-mouse.md)): on at start, off on the way out
+      and while `set_mouse(false)`, on again after SIGCONT; and the system clipboard through
+      OSC 52 (`copy/1`)
     * input bytes parsed into key/resize events via `Geex.Input.Parser`
     * event publication to subscribed processes
     * write API for downstream renderers
@@ -15,6 +18,7 @@ defmodule Geex.TerminalIO do
       {:geex_io, {:char, "a"}}
       {:geex_io, {:key, :up}}
       {:geex_io, {:ctrl, ?c}}
+      {:geex_io, {:mouse, %{action: :press, button: :left, x: 4, y: 2, mods: []}}}
       {:geex_io, {:resize, rows, cols}}
       {:geex_io, :eof}
 
@@ -56,6 +60,42 @@ defmodule Geex.TerminalIO do
   end
 
   @doc """
+  Turn the terminal's mouse reports on or off. Off, the terminal selects and copies text itself
+  again (the `mouse` verb). Fire-and-forget.
+  """
+  @spec set_mouse(boolean()) :: :ok
+  def set_mouse(on?) when is_boolean(on?), do: GenServer.cast(__MODULE__, {:mouse, on?})
+
+  @doc """
+  Put `text` on the system clipboard through the terminal (OSC 52, `osc52/1`). The terminal may
+  not support it or may refuse it; nothing comes back either way. Fire-and-forget.
+  """
+  @spec copy(String.t()) :: :ok
+  def copy(text) when is_binary(text), do: write(osc52(text))
+
+  # Mouse reports: 1000 presses and releases, 1002 drags with a button held, 1006 the SGR form
+  # (decimal coordinates, any size; `Geex.Input.Parser`). Turned off in the reverse order.
+  # 1005 and 1015 (other encodings) are turned off, in case something left them on.
+  @mouse_on ["\e[?1005l", "\e[?1015l", "\e[?1000h", "\e[?1002h", "\e[?1006h"]
+  @mouse_off ["\e[?1006l", "\e[?1002l", "\e[?1000l"]
+
+  # The most text sent to the system clipboard at once. A terminal caps what it takes (xterm a
+  # few hundred kilobytes by default) and can stall on more; past this, only geex's own clipboard
+  # has the text.
+  @osc52_max 100_000
+
+  @doc """
+  The OSC 52 sequence that puts `text` on the system clipboard: `ESC ] 52 ; c ; <base64> BEL`.
+  Empty for text over #{@osc52_max} bytes.
+
+      iex> Geex.TerminalIO.osc52("hi")
+      "\\e]52;c;aGk=\\a"
+  """
+  @spec osc52(String.t()) :: String.t()
+  def osc52(text) when byte_size(text) > @osc52_max, do: ""
+  def osc52(text), do: "\e]52;c;" <> Base.encode64(text) <> "\a"
+
+  @doc """
   Get the current `{cols, rows}` of the terminal — width first, then height, the
   order `:prim_tty.window_size/1` itself returns (`{State#state.cols, rows}`).
   """
@@ -69,9 +109,10 @@ defmodule Geex.TerminalIO do
   def init(_opts) do
     Process.flag(:trap_exit, true)
 
-    # Belt-and-suspenders: also restore on raw VM halt (brutal_kill timeout,
-    # `:erlang.halt/0`) where `terminate/2` doesn't get to run.
-    System.at_exit(fn _ -> IO.write(:stdio, ["\e[?25h", "\e[?1049l"]) end)
+    # Belt-and-suspenders: also restore when the VM's main script ends on its own. A halt
+    # (`:erlang.halt/0`, `System.halt/1`, the `+Bd` SIGINT halt) runs no `at_exit` hook, so after
+    # one the terminal stays as geex left it, as after a `kill -9`.
+    System.at_exit(fn _ -> IO.write(:stdio, [@mouse_off, "\e[?25h", "\e[?1049l"]) end)
 
     tty = :prim_tty.init(%{input: :raw, output: :raw})
     %{read: reader_ref} = :prim_tty.handles(tty)
@@ -81,7 +122,8 @@ defmodule Geex.TerminalIO do
       "\e[?1049h",
       "\e[?25l",
       "\e[2J",
-      "\e[H"
+      "\e[H",
+      @mouse_on
     ])
 
     # Arm the first read. `:prim_tty` sends `{ReaderRef, {data, bytes}}`
@@ -94,6 +136,8 @@ defmodule Geex.TerminalIO do
       # The tty's device and its `stty -g` settings from before `take_keys/0`, put back on exit.
       tty_dev: tty_dev,
       tty_modes: tty_modes,
+      # Whether mouse reports are on (`set_mouse/1`), so SIGCONT turns them on only if they were.
+      mouse: true,
       esc_buf: <<>>,
       # The pending flush of `esc_buf` (a ref), stale once more bytes arrive.
       esc_flush: nil,
@@ -139,6 +183,11 @@ defmodule Geex.TerminalIO do
     end
   end
 
+  def handle_cast({:mouse, on?}, state) do
+    :prim_tty.write(state.tty, if(on?, do: @mouse_on, else: @mouse_off))
+    {:noreply, %{state | mouse: on?}}
+  end
+
   def handle_cast({:write, iodata}, state) do
     :prim_tty.write(state.tty, iodata)
     {:noreply, state}
@@ -179,6 +228,8 @@ defmodule Geex.TerminalIO do
     # On SIGCONT (after an outside `kill -STOP`), `prim_tty` sets its raw mode again, which turns
     # the signal and flow-control keys back on.
     if signal == :sigcont and state.tty_dev, do: stty(state.tty_dev, ["-isig", "-ixon"])
+    # A shell that took the terminal back while geex was stopped may have reset its modes.
+    if signal == :sigcont and state.mouse, do: :prim_tty.write(new_tty, @mouse_on)
 
     # `:prim_tty.window_size/1` returns {cols, rows}; the resize event carries
     # {rows, cols} (its documented order), so swap on the way out.
@@ -246,7 +297,7 @@ defmodule Geex.TerminalIO do
 
   defp restore_screen(tty) do
     %{write: writer_ref} = :prim_tty.handles(tty)
-    {:ok, monitor} = :prim_tty.write(tty, ["\e[?25h", "\e[?1049l"], self())
+    {:ok, monitor} = :prim_tty.write(tty, [@mouse_off, "\e[?25h", "\e[?1049l"], self())
 
     receive do
       {^writer_ref, :ok} -> :ok
@@ -270,7 +321,11 @@ defmodule Geex.TerminalIO do
 
   defp schedule_flush(<<>>), do: nil
 
-  defp schedule_flush(_leftover) do
+  defp schedule_flush(leftover) do
+    if Parser.mouse_report?(leftover), do: nil, else: flush_later()
+  end
+
+  defp flush_later do
     ref = make_ref()
     Process.send_after(self(), {:flush_esc, ref}, @esc_timeout_ms)
     ref

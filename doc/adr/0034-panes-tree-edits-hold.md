@@ -44,7 +44,8 @@ What exists today:
 - **The payload POSTs every `Write` / `Edit` / `NotebookEdit` to every running geex.** A geex without
   the file open answers `not_open`. The payload counts only `attested`, `pending` and `ignored` as
   taken; if nobody took it, it appends it to the file's spool (ADR-0033 F).
-- **No mouse.** `Geex.Input.Parser` drops mouse reports.
+- **No mouse.** `Geex.Input.Parser` drops mouse reports. (The mouse came later:
+  [ADR-0039](0039-mouse.md).)
 
 Holding creates a danger: `Ctrl-O` on a buffer that hasn't taken a disk change would write over the
 agent's change. So saving a buffer that is behind must merge first, and that ships together with

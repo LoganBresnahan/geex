@@ -64,7 +64,7 @@ defmodule Geex.Loop do
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
-  alias Geex.Loop.{EditsPane, Keymap, Panes, Verbs}
+  alias Geex.Loop.{EditsPane, Keymap, Mouse, Panes, Verbs}
   alias Geex.MCP.ViewActions
 
   # Rows of context kept between the cursor and the top/bottom of the viewport
@@ -120,7 +120,9 @@ defmodule Geex.Loop do
   *is* the command grid's `y`). The text area `[gutter, w)` also scrolls **horizontally** to
   keep the cursor's column visible (the same `scroll_for/4` along the column axis, with an
   `@hscrolloff` margin); the cursor's `x` is shifted by the gutter width and the horizontal
-  scroll to match. Returns the resolved `hscroll` so the caller can persist it.
+  scroll to match. Returns the resolved `hscroll` so the caller can persist it. With `follow?`
+  false the given `hscroll` is kept even if the cursor is out of view (the mouse scrolled it,
+  ADR-0039).
   """
   @spec frame(
           String.t(),
@@ -130,7 +132,9 @@ defmodule Geex.Loop do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          non_neg_integer()
+          non_neg_integer(),
+          Selection.t() | nil,
+          boolean()
         ) ::
           {Screen.t(), {non_neg_integer(), integer()}, non_neg_integer()}
   def frame(
@@ -142,12 +146,13 @@ defmodule Geex.Loop do
         h,
         scroll,
         hscroll \\ 0,
-        selection \\ nil
+        selection \\ nil,
+        follow? \\ true
       ) do
     gw = gutter_width(text)
     text_w = max(w - gw, 0)
     {dcol, cy} = cursor_xy(text, cursor, scroll)
-    hscroll = scroll_for(hscroll, dcol, text_w, @hscrolloff)
+    hscroll = if follow?, do: scroll_for(hscroll, dcol, text_w, @hscrolloff), else: hscroll
 
     screen =
       text
@@ -223,6 +228,9 @@ defmodule Geex.Loop do
   @impl true
   def init(_opts) do
     TerminalIO.subscribe()
+    # The mouse starts on (`mouse` in `new_state/2`); say so, in case this loop restarted after
+    # the `mouse` verb turned it off.
+    TerminalIO.set_mouse(true)
     active = Session.subscribe()
     safe_subscribe_edits()
     {w, h} = safe_window_size()
@@ -266,7 +274,14 @@ defmodule Geex.Loop do
       # The file finder (Alt+O, `:files` minibuffer mode): the best paths for the typed query;
       # `matching` the search's `{pid, monitor}` until they arrive; `submit` when Enter came
       # first, so the top match opens on arrival.
-      finder: %{matches: [], matching: nil, submit: false}
+      finder: %{matches: [], matching: nil, submit: false},
+      # The mouse (ADR-0039): whether the terminal reports it (the `mouse` verb); a drag under
+      # way (`%{pane, anchor, at, timer}`: the pane it started in, the selection's fixed end,
+      # the pointer, the auto-scroll's pending tick); the last press (`{ms, x, y}`), for a
+      # double-click.
+      mouse: true,
+      drag: nil,
+      click: nil
     }
   end
 
@@ -295,7 +310,12 @@ defmodule Geex.Loop do
   # Any pane showing the buffer repaints; only the current tab's selection is affected.
   def handle_info({:geex_buffer_change, buffer, _v, _footprint}, %{watched: w} = state)
       when is_map_key(w, buffer) do
-    state = if current_buffer(state) == buffer, do: %{state | selection: nil}, else: state
+    # A drag's anchor was in the text before the change: the drag ends with the selection.
+    state =
+      if current_buffer(state) == buffer,
+        do: %{state | selection: nil, drag: nil},
+        else: state
+
     {:noreply, schedule_repaint(state)}
   end
 
@@ -358,12 +378,29 @@ defmodule Geex.Loop do
     {:noreply, state}
   end
 
+  # The mouse (ADR-0039). A release ends a drag wherever it is; the minibuffer takes no other
+  # mouse event yet.
+  def handle_info({:geex_io, {:mouse, %{action: :release}}}, state),
+    do: {:noreply, stop_drag(state)}
+
+  def handle_info({:geex_io, {:mouse, _m}}, %{minibuffer: %Minibuffer{mode: mode}} = state)
+      when mode != :inactive,
+      do: {:noreply, state}
+
+  def handle_info({:geex_io, {:mouse, m}}, state), do: {:noreply, apply_mouse(m, state)}
+
+  # A drag held past the edge of the text scrolls a line (or a column) at a time.
+  def handle_info({:geex_drag_scroll, ref}, %{drag: %{timer: ref}} = state),
+    do: {:noreply, drag_to(put_in(state.drag.timer, nil), :scroll)}
+
   # A key. When the minibuffer is open it captures input; otherwise resolve the key against
   # the current text + cursor (read fresh from Session) and apply via the one shared path
   # (edits) or a view-local cursor move.
   def handle_info({:geex_io, event}, state) do
     # Any key dismisses a notice (it has been seen), and any key but Ctrl-O disarms a refused save.
+    # A key ends a drag (ADR-0039): what it does may take the drag's pane or text away.
     state = if state.notice, do: schedule_repaint(%{state | notice: nil}), else: state
+    state = stop_drag(state)
     state = %{state | save_armed: state.save_armed and event in [{:ctrl, ?o}, {:ctrl, ?O}]}
 
     cond do
@@ -462,6 +499,10 @@ defmodule Geex.Loop do
   # A key for the editor: resolve it against the current text + cursor (read fresh from
   # Session).
   defp apply_editor_key(event, state) do
+    # The scroll the mouse set holds until a key acts on the text (ADR-0039): even one that
+    # doesn't move the cursor (Delete, Alt+H) should show where it acts.
+    state = %{state | panes: Panes.update_current(state.panes, &%{&1 | hold: nil})}
+
     case safe_session_snapshot() do
       {:ok, %{text: text, cursor: cursor}} -> apply_key(event, cursor, text, state)
       _ -> state
@@ -511,7 +552,7 @@ defmodule Geex.Loop do
         {panes, kind} = Panes.show(state.panes, pid, cursor)
         # A tab this pane already had keeps the cursor it had here.
         if kind == :existing, do: set_cursor(Panes.current(panes).cursor)
-        put_panes(%{state | selection: nil, goal: 0}, panes)
+        put_panes(%{state | selection: nil, goal: 0, drag: nil}, panes)
     end
   end
 
@@ -551,7 +592,7 @@ defmodule Geex.Loop do
         :ok
     end
 
-    %{state | selection: nil, goal: 0}
+    %{state | selection: nil, goal: 0, drag: nil}
   end
 
   # The only pane lost its only buffer some other way than Alt+K (an agent closed it, it
@@ -670,6 +711,204 @@ defmodule Geex.Loop do
     end
   end
 
+  ## The mouse (ADR-0039). A file pane under the pointer takes a press (focus it, place the
+  ## cursor; Shift extends the selection, a double-click selects a word), a drag (select, with
+  ## auto-scroll past the edge) and the wheel (scroll it, focused or not). Where a cell lands in
+  ## the text is `Geex.Loop.Mouse` (pure).
+
+  # Lines the wheel scrolls per notch; columns, sideways. How often a drag held past the edge
+  # scrolls.
+  @wheel_lines 3
+  @wheel_cols 6
+  @drag_tick_ms 50
+
+  defp apply_mouse(%{action: :wheel, button: button, mods: mods} = m, state) do
+    step =
+      case {button, :shift in mods} do
+        {:up, false} -> {0, -@wheel_lines}
+        {:down, false} -> {0, @wheel_lines}
+        {b, _} when b in [:up, :wheel_left] -> {-@wheel_cols, 0}
+        {b, _} when b in [:down, :wheel_right] -> {@wheel_cols, 0}
+      end
+
+    case file_pane_at(state, m.x, m.y) do
+      {id, rect} -> schedule_repaint(wheel(state, id, rect, step))
+      nil -> state
+    end
+  end
+
+  defp apply_mouse(%{action: :press, button: :left} = m, state) do
+    # A press, like a key, dismisses a notice and disarms a refused save.
+    state = schedule_repaint(%{stop_drag(state) | notice: nil, save_armed: false})
+
+    case file_pane_at(state, m.x, m.y) do
+      {id, rect} -> press(state, id, rect, m)
+      nil -> state
+    end
+  end
+
+  defp apply_mouse(%{action: :drag, button: :left} = m, %{drag: %{}} = state),
+    do: drag_to(put_in(state.drag.at, {m.x, m.y}), :move)
+
+  defp apply_mouse(_m, state), do: state
+
+  # Focus the pane, then place the cursor where the press landed. The tab bar's row only focuses.
+  defp press(state, id, rect, m) do
+    now = System.monotonic_time(:millisecond)
+    double? = m.mods == [] and Mouse.double?(state.click, now, {m.x, m.y})
+    state = %{enter_pane({:file, id}, state) | click: {now, m.x, m.y}}
+
+    case pane_text(state, id) do
+      {tab, text} when m.y > rect.y ->
+        {{line, col} = pos, _edge} =
+          Mouse.text_pos(text, rect, {tab.scroll, tab.hscroll}, {m.x, m.y})
+
+        cond do
+          double? ->
+            {from, to} = Mouse.word_at(line_at(text, line), col)
+            select_to(state, {id, rect}, {line, from}, {line, to}, text)
+
+          :shift in m.mods ->
+            anchor =
+              case {state.selection, safe_session_snapshot()} do
+                {%Selection{anchor: anchor}, _} -> anchor
+                {nil, {:ok, %{cursor: cursor}}} -> cursor
+                _ -> pos
+              end
+
+            state |> select_to({id, rect}, anchor, pos, text) |> start_drag(id, anchor)
+
+          true ->
+            state |> select_to({id, rect}, pos, pos, text) |> start_drag(id, pos)
+        end
+
+      _ ->
+        state
+    end
+  end
+
+  # Select from `anchor` to `active` (nothing, when they meet) with the cursor at `active`, and
+  # keep the pane's scroll where it is while the cursor stays there (`Panes` `hold`): a cursor
+  # placed by the mouse is on screen already, so it shouldn't scroll the text from under it.
+  defp select_to(state, {id, rect}, anchor, active, text) do
+    set_cursor(active)
+    sel = if anchor != active, do: Selection.new(anchor) |> Selection.extend(active)
+    panes = Panes.update_shown(state.panes, id, &%{&1 | hold: {active, {rect.w, rect.h}}})
+
+    schedule_repaint(%{
+      state
+      | panes: panes,
+        selection: sel,
+        goal: Keymap.goal_column(active, text)
+    })
+  end
+
+  # The drag remembers its buffer too: if the pane shows another tab when the pointer moves, the
+  # anchor means nothing there, and the drag ends.
+  defp start_drag(state, id, anchor) do
+    buffer = Panes.shown(state.panes, id).buffer
+    %{state | drag: %{pane: id, buffer: buffer, anchor: anchor, at: nil, timer: nil}}
+  end
+
+  defp stop_drag(state), do: %{state | drag: nil}
+
+  # The pointer moved with the button held (`:move`), or a drag past the edge is due its next
+  # step (`:scroll`): select from the drag's anchor to the pointer. Past the edge of the text,
+  # scroll that way every @drag_tick_ms until the pointer comes back, the text ends, or the
+  # button is let go. The drag ends if its pane isn't current any more or shows another buffer.
+  defp drag_to(%{drag: %{pane: id, buffer: buffer, anchor: anchor, at: at} = drag} = state, why) do
+    with true <- id == state.panes.pane and not Minibuffer.active?(state.minibuffer),
+         {^id, rect} <- pane_rect(state, id),
+         {%{buffer: ^buffer} = tab, text} <- pane_text(state, id) do
+      {_pos, edge} = Mouse.text_pos(text, rect, {tab.scroll, tab.hscroll}, at)
+      moved = if why == :scroll, do: scrolled(tab, text, rect, edge), else: tab
+      stuck? = why == :scroll and {moved.scroll, moved.hscroll} == {tab.scroll, tab.hscroll}
+      state = %{state | panes: Panes.update_shown(state.panes, id, fn _ -> moved end)}
+      {pos, edge} = Mouse.text_pos(text, rect, {moved.scroll, moved.hscroll}, at)
+      state = select_to(state, {id, rect}, anchor, pos, text)
+
+      cond do
+        edge == {0, 0} or stuck? ->
+          put_in(state.drag.timer, nil)
+
+        drag.timer ->
+          state
+
+        true ->
+          ref = make_ref()
+          Process.send_after(self(), {:geex_drag_scroll, ref}, @drag_tick_ms)
+          put_in(state.drag.timer, ref)
+      end
+    else
+      _ -> stop_drag(state)
+    end
+  end
+
+  # The wheel over pane `id`: scroll it, keeping its cursor where it is.
+  defp wheel(state, id, rect, step) do
+    case pane_text(state, id) do
+      {tab, text} ->
+        cursor =
+          case {id == state.panes.pane, safe_active_buffer(), safe_session_snapshot()} do
+            {true, {:ok, pid}, {:ok, %{cursor: cursor}}} when pid == tab.buffer -> cursor
+            _ -> clamp_cursor(tab.cursor, text)
+          end
+
+        tab = %{scrolled(tab, text, rect, step) | hold: {cursor, {rect.w, rect.h}}}
+        %{state | panes: Panes.update_shown(state.panes, id, fn _ -> tab end)}
+
+      nil ->
+        state
+    end
+  end
+
+  # Scroll a tab by `{columns, lines}`: not above the top or left of the text, and not further
+  # down than its last line at the bottom of the pane (nor right than its widest line), unless it
+  # was already there.
+  defp scrolled(tab, text, rect, {dx, dy}) do
+    rows = max(rect.h - 2, 1)
+    lines = line_count(text)
+    bottom = max(lines - rows, 0)
+    # The text columns: after the gutter, before the vertical scroll bar when there is one.
+    cols = max(rect.w - gutter_width(text) - if(lines > rows, do: 1, else: 0), 1)
+    right = max(max_line_width(text) - cols, 0)
+
+    %{
+      tab
+      | scroll: step_within(tab.scroll, dy, bottom),
+        hscroll: step_within(tab.hscroll, dx, right)
+    }
+  end
+
+  defp step_within(at, d, _max) when d < 0, do: max(at + d, 0)
+  defp step_within(at, d, max) when d > 0, do: max(min(at + d, max), at)
+  defp step_within(at, _d, _max), do: at
+
+  # The file pane under screen cell `{x, y}`, as `{id, rect}`, or `nil`.
+  defp file_pane_at(state, x, y) do
+    state
+    |> layout()
+    |> Map.fetch!(:editor)
+    |> Layout.split(state.panes.split)
+    |> Enum.find(fn {_id, r} -> x >= r.x and x < r.x + r.w and y >= r.y and y < r.y + r.h end)
+  end
+
+  defp pane_rect(state, id) do
+    layout(state).editor
+    |> Layout.split(state.panes.split)
+    |> Enum.find(fn {pane, _rect} -> pane == id end)
+  end
+
+  # Pane `id`'s shown tab and its buffer's text, or `nil` when it has none.
+  defp pane_text(state, id) do
+    with %{buffer: pid} = tab <- Panes.shown(state.panes, id),
+         {:ok, %{text: text}} <- safe_buffer_snapshot(pid) do
+      {tab, text}
+    else
+      _ -> nil
+    end
+  end
+
   # One frame: each file pane (its tab bar, then the text), the dividers between side-by-side
   # panes, the tree and the edits pane, then the status line (the current tab's) or the
   # minibuffer, and the palette's popup on top.
@@ -773,7 +1012,11 @@ defmodule Geex.Loop do
     vbar? = h_text > 0 and total > h_text
     tw = est.w - if(vbar?, do: 1, else: 0)
 
-    scroll = scroll_for(tab.scroll, line, h_text, @scrolloff)
+    # The mouse scrolled this tab, or placed its cursor (ADR-0039): keep the scroll it left while
+    # the cursor stays there and the pane keeps its size, even with the cursor out of view. A
+    # cursor that moved since, or a split or resize, follows the cursor again.
+    held? = tab.hold == {cursor, {rect.w, rect.h}}
+    scroll = if held?, do: tab.scroll, else: scroll_for(tab.scroll, line, h_text, @scrolloff)
 
     # `text` (the snapshot) and the overlay (Reactor.render) are read from two processes, so
     # painting assumes they are the same buffer version. A concurrent MCP/reconcile edit landing
@@ -789,7 +1032,8 @@ defmodule Geex.Loop do
         h_text,
         scroll,
         tab.hscroll,
-        if(current?, do: state.selection)
+        if(current?, do: state.selection),
+        not held?
       )
 
     gw = gutter_width(text)
@@ -818,7 +1062,8 @@ defmodule Geex.Loop do
 
     # The current tab's cursor is Session's; keep a copy, for when Session moves on without the
     # loop (an outside open).
-    {screen, %{tab | scroll: scroll, hscroll: hscroll, cursor: cursor}, at}
+    hold = if held?, do: tab.hold
+    {screen, %{tab | scroll: scroll, hscroll: hscroll, cursor: cursor, hold: hold}, at}
   end
 
   defp fill_pane(screen, rect, %Theme{palette: pal}),
@@ -1857,6 +2102,18 @@ defmodule Geex.Loop do
       :close ->
         schedule_repaint(do_close(state))
 
+      :toggle_mouse ->
+        on? = not state.mouse
+        TerminalIO.set_mouse(on?)
+
+        notice =
+          if on?,
+            do: "mouse on",
+            else:
+              "mouse off: the terminal selects and copies text again (`mouse` turns it back on)"
+
+        schedule_repaint(%{state | mouse: on?, drag: nil, notice: notice})
+
       :quit ->
         Geex.stop()
         state
@@ -2042,7 +2299,7 @@ defmodule Geex.Loop do
 
   defp do_copy(%{selection: sel} = state, text) do
     with {:ok, copied} <- Doc.slice(Doc.new(text), Selection.range(sel)),
-         do: Clipboard.push(copied)
+         do: clip(copied)
 
     %{state | selection: nil}
   end
@@ -2057,11 +2314,18 @@ defmodule Geex.Loop do
     {from, _to} = range
 
     with {:ok, cut_text} <- Doc.slice(Doc.new(text), range) do
-      Clipboard.push(cut_text)
+      clip(cut_text)
       apply_clipboard_edit(state, replace_cmd(range, ""), from)
     else
       _ -> %{state | selection: nil}
     end
+  end
+
+  # geex's own clipboard, and the system's through the terminal (OSC 52, ADR-0039): with the mouse
+  # on, the terminal's own selection can't copy.
+  defp clip(text) do
+    Clipboard.push(text)
+    TerminalIO.copy(text)
   end
 
   defp do_paste(state, cursor) do
@@ -2456,6 +2720,7 @@ defmodule Geex.Loop do
   # Switching and closing buffers need no text either (and work with none active).
   defp apply_verb(action, state)
        when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane, :find_file] or
+              action == :toggle_mouse or
               action in [:split_rows, :split_cols, :tab_next, :tab_prev] or
               (is_tuple(action) and elem(action, 0) == :tab),
        do: apply_action(action, {0, 0}, "", state)

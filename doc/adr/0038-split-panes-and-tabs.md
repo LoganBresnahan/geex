@@ -105,7 +105,8 @@ cursor, clamped to the text if an edit elsewhere shortened it.
 
 ### Out of scope (deferred)
 
-- **The mouse**: clicking a tab or a pane, dragging a divider.
+- **The mouse**: clicking a tab or a pane, dragging a divider. (Being built:
+  [ADR-0039](0039-mouse.md); a click in a pane focuses it.)
 - **Resizing panes by hand**: splits stay even.
 - **Keeping the layout across restarts**: geex starts with one pane.
 - **Moving a cursor in a pane you're not in when an edit elsewhere shifts its line**: it stays at

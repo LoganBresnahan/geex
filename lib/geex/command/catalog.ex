@@ -99,6 +99,11 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, :tab_prev}
     },
     %Entry{
+      name: "mouse",
+      description: "Turn the mouse off, so the terminal selects and copies text, or back on.",
+      invoke: {:action, :toggle_mouse}
+    },
+    %Entry{
       name: "fast-forward",
       description: "Take in the file's change on disk, merging your unsaved edits (Alt+J).",
       invoke: {:action, :fast_forward}
