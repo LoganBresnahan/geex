@@ -2214,3 +2214,18 @@ stops it; no match; a search that dies; the `open` and `find` verbs). `panes_tes
 
 **Not tested:** Windows Terminal; a path containing a newline (it would split into two rows; git
 quotes such names, the walk doesn't).
+
+### 2026-10-17 — `geex 0.1.0+e0beef53` deployed (the keys and the finder)
+
+`mix geex.deploy` from the clean tree at `e0beef5` (916 tests + 39 doctests green twice just
+before it). It installed `0.1.0+e0beef53`, kept `0.1.0+f9e59088` as `geex.prev`, and removed the
+old unpack. No binary geex was running.
+
+**Live-verified** with `geex` from the PATH in tmux (`-L deploy`, scratch `XDG_STATE_HOME`/
+`TMPDIR`, a scratch repo): `--version` printed it and `--frob` exited 2; `geex a.txt` showed the
+tree and the file with the discovery file present; `Alt+O`, `s.txt`, Enter opened `sub/s.txt`;
+typing and Ctrl-O wrote it; Ctrl-X exited 0 with the cursor visible, the alternate screen off and
+the discovery file gone. `geex <dir>`, bare `geex` and `geex notes.txt` (holding `IO.puts("x")`,
+not printed) opened as expected. The log had no `terminating` lines.
+
+**Not tested:** Windows Terminal; `--rollback` (checked at the first install).
