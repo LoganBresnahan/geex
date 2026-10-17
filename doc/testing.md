@@ -2438,3 +2438,18 @@ refusals, the tree, the edits list, the status line, the pickers, Alt+click, the
 `split_test` reads the new tab bar. **988 tests + 47 doctests**, green twice.
 
 **Not tested:** Windows Terminal; a real mouse; the installed binary (next, with /deploy).
+
+### 2026-10-17 — `geex 0.1.0+5370ea4c` deployed (the mouse, step 2)
+
+`mix geex.deploy` from the clean tree at `5370ea4` (988 tests + 47 doctests green twice). It
+installed `0.1.0+5370ea4c`; no other geex was running. Live with `geex` from the PATH in tmux
+(`-L deploy`, 120×30, scratch state):
+- `--version` printed `geex 0.1.0+5370ea4c`; `--frob` exited 2.
+- `geex a.txt notes.txt` drew `1 a.txt ×  2 notes.txt ×`, with the discovery file present.
+- A click on tab 1 showed it. A click on the tree's `long.txt` opened it as tab 3. `Alt+=`, then
+  the new pane's `×`, closed the pane ("closed the pane").
+- Typing and Ctrl-O wrote the file.
+- Ctrl-X left the mouse modes off, the alternate screen closed and the cursor visible. The
+  discovery file was gone, and the log had no `terminating` lines.
+
+**Not tested:** Windows Terminal; a real mouse.
