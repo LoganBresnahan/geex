@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-17):** 968 tests + 46 doctests green, `--warnings-as-errors` clean. geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
+**Current (2026-10-17):** 988 tests + 47 doctests green, `--warnings-as-errors` clean. geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -461,8 +461,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       to focus and place the cursor, a drag to select (scrolling past the edge), Shift+click,
       double-click for a word, the wheel under the pointer; the `mouse` verb; `Alt+C`/`Alt+X` also
       copy to the system clipboard (OSC 52).
-   2. **Everything clickable** — the tree, the edits pane, the tabs and a close button on each, a
-      close button per pane, the pickers, the status line's "behind disk".
+   2. **Everything clickable** — **built 2026-10-17**: the tree, the edits pane, the tabs and a
+      `×` on each, a `×` per pane, the pickers, the status line's "behind disk"; Alt+click
+      extends a selection (Windows Terminal keeps Shift+click).
    3. **Resizing** — drag handles on the split dividers, the tree's edge and the edits pane's
       edge; splits keep a ratio (an ADR-0038 amendment).
 

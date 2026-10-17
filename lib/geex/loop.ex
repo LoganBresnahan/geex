@@ -64,7 +64,7 @@ defmodule Geex.Loop do
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
-  alias Geex.Loop.{EditsPane, Keymap, Mouse, Panes, Verbs}
+  alias Geex.Loop.{EditsPane, Keymap, Mouse, Panes, TabBar, Verbs}
   alias Geex.MCP.ViewActions
 
   # Rows of context kept between the cursor and the top/bottom of the viewport
@@ -84,6 +84,12 @@ defmodule Geex.Loop do
 
   # The most files the finder (Alt+O) keeps for a query: far more than the popup shows at once.
   @finder_limit 100
+
+  # The minibuffer modes with a candidate popup.
+  @pickers [:palette, :buffers, :files]
+
+  # The status line's mark for a buffer behind its file on disk; a click on it fast-forwards.
+  @behind "behind disk (Alt+J)"
 
   ## Public API
 
@@ -264,13 +270,25 @@ defmodule Geex.Loop do
       edits_shown: h >= 20,
       focus: :editor,
       edits_sel: 0,
+      edits_view: %{top: 0, hold: nil, entries: []},
       # The file tree (ADR-0034 §5): shown at start from 100 columns (once geex knows its
       # root); `tree` toggles it. The files are read when it is first drawn, shown, or focused,
       # in a process of their own: `reading` is that process's `{pid, monitor}` until its
       # `index` arrives.
       tree_shown: w >= 100,
       # `files` is the same read's file list, packed for the finder (`Geex.Finder.pack/1`).
-      tree: %{index: nil, files: nil, reading: nil, open: MapSet.new(), rows: [], sel: 0},
+      # `top` is the first row shown and `hold` the `sel` the wheel last scrolled at
+      # (`settle_lists/3`, ADR-0039).
+      tree: %{
+        index: nil,
+        files: nil,
+        reading: nil,
+        open: MapSet.new(),
+        rows: [],
+        sel: 0,
+        top: 0,
+        hold: nil
+      },
       # The file finder (Alt+O, `:files` minibuffer mode): the best paths for the typed query;
       # `matching` the search's `{pid, monitor}` until they arrive; `submit` when Enter came
       # first, so the top match opens on arrival.
@@ -378,14 +396,14 @@ defmodule Geex.Loop do
     {:noreply, state}
   end
 
-  # The mouse (ADR-0039). A release ends a drag wherever it is; the minibuffer takes no other
-  # mouse event yet.
+  # The mouse (ADR-0039). A release ends a drag wherever it is; while the minibuffer is open, only
+  # its pickers take the mouse.
   def handle_info({:geex_io, {:mouse, %{action: :release}}}, state),
     do: {:noreply, stop_drag(state)}
 
-  def handle_info({:geex_io, {:mouse, _m}}, %{minibuffer: %Minibuffer{mode: mode}} = state)
+  def handle_info({:geex_io, {:mouse, m}}, %{minibuffer: %Minibuffer{mode: mode}} = state)
       when mode != :inactive,
-      do: {:noreply, state}
+      do: {:noreply, picker_mouse(m, state)}
 
   def handle_info({:geex_io, {:mouse, m}}, state), do: {:noreply, apply_mouse(m, state)}
 
@@ -712,9 +730,11 @@ defmodule Geex.Loop do
   end
 
   ## The mouse (ADR-0039). A file pane under the pointer takes a press (focus it, place the
-  ## cursor; Shift extends the selection, a double-click selects a word), a drag (select, with
-  ## auto-scroll past the edge) and the wheel (scroll it, focused or not). Where a cell lands in
-  ## the text is `Geex.Loop.Mouse` (pure).
+  ## cursor; Shift or Alt extends the selection, a double-click selects a word), a drag (select,
+  ## with auto-scroll past the edge) and the wheel (scroll it, focused or not); its tab bar a
+  ## click on a tab, a tab's `×` or the pane's `×`. The tree and the edits list take a click on a
+  ## row and the wheel; the status line's "behind disk" a click. Where a cell lands in the text is
+  ## `Geex.Loop.Mouse` (pure); on the tab bar, `Geex.Loop.TabBar`.
 
   # Lines the wheel scrolls per notch; columns, sideways. How often a drag held past the edge
   # scrolls.
@@ -731,9 +751,11 @@ defmodule Geex.Loop do
         {b, _} when b in [:down, :wheel_right] -> {@wheel_cols, 0}
       end
 
-    case file_pane_at(state, m.x, m.y) do
-      {id, rect} -> schedule_repaint(wheel(state, id, rect, step))
-      nil -> state
+    case region(state, m.x, m.y) do
+      {:file, id, rect} -> schedule_repaint(wheel(state, id, rect, step))
+      {:tree, rect} -> schedule_repaint(scroll_tree(state, rect, elem(step, 1)))
+      {:edits, rect} -> schedule_repaint(scroll_edits(state, rect, elem(step, 1)))
+      _ -> state
     end
   end
 
@@ -741,8 +763,12 @@ defmodule Geex.Loop do
     # A press, like a key, dismisses a notice and disarms a refused save.
     state = schedule_repaint(%{stop_drag(state) | notice: nil, save_armed: false})
 
-    case file_pane_at(state, m.x, m.y) do
-      {id, rect} -> press(state, id, rect, m)
+    case region(state, m.x, m.y) do
+      {:file, id, %{y: y} = rect} when m.y == y -> tab_bar_press(state, id, rect, m.x - rect.x)
+      {:file, id, rect} -> press(state, id, rect, m)
+      {:tree, rect} -> tree_press(state, rect, m)
+      {:edits, rect} -> edits_press(state, rect, m)
+      :status -> status_press(state, m.x)
       nil -> state
     end
   end
@@ -756,6 +782,8 @@ defmodule Geex.Loop do
   defp press(state, id, rect, m) do
     now = System.monotonic_time(:millisecond)
     double? = m.mods == [] and Mouse.double?(state.click, now, {m.x, m.y})
+    # Alt as well as Shift: Windows Terminal keeps Shift+click for its own selection.
+    extend? = :shift in m.mods or :alt in m.mods
     state = %{enter_pane({:file, id}, state) | click: {now, m.x, m.y}}
 
     case pane_text(state, id) do
@@ -768,7 +796,7 @@ defmodule Geex.Loop do
             {from, to} = Mouse.word_at(line_at(text, line), col)
             select_to(state, {id, rect}, {line, from}, {line, to}, text)
 
-          :shift in m.mods ->
+          extend? ->
             anchor =
               case {state.selection, safe_session_snapshot()} do
                 {%Selection{anchor: anchor}, _} -> anchor
@@ -884,14 +912,205 @@ defmodule Geex.Loop do
   defp step_within(at, d, max) when d > 0, do: max(min(at + d, max), at)
   defp step_within(at, _d, _max), do: at
 
-  # The file pane under screen cell `{x, y}`, as `{id, rect}`, or `nil`.
-  defp file_pane_at(state, x, y) do
-    state
-    |> layout()
-    |> Map.fetch!(:editor)
-    |> Layout.split(state.panes.split)
-    |> Enum.find(fn {_id, r} -> x >= r.x and x < r.x + r.w and y >= r.y and y < r.y + r.h end)
+  # What is under screen cell `{x, y}`: a file pane (`{:file, id, rect}`), the tree or the edits
+  # pane (`{:tree | :edits, rect}`), the status line, or nothing (a divider).
+  defp region(state, x, y) do
+    l = layout(state)
+    inside? = fn r -> r != nil and x >= r.x and x < r.x + r.w and y >= r.y and y < r.y + r.h end
+
+    cond do
+      y == l.status ->
+        :status
+
+      inside?.(l.tree) ->
+        {:tree, l.tree}
+
+      inside?.(l.edits) ->
+        {:edits, l.edits}
+
+      true ->
+        # A pane too small to draw (`repaint/1` fills it) takes no click either.
+        l.editor
+        |> Layout.split(state.panes.split)
+        |> Enum.find_value(fn {id, r} ->
+          inside?.(r) && r.w >= 3 && r.h >= 3 && {:file, id, r}
+        end)
+    end
   end
+
+  # A press on a pane's tab bar: a tab shows it, a tab's `×` closes it (as Alt+K does, refused
+  # with unsaved edits), the pane's `×` closes the pane. Each focuses the pane first.
+  defp tab_bar_press(state, id, rect, x) do
+    pane = state.panes.panes[id]
+
+    case TabBar.hit(tab_bar(state, pane, rect), x) do
+      # The pane you were in stays current, unless it is the one closing.
+      :close_pane ->
+        close_pane(state, id)
+
+      # The tab already shown, in the current pane: nothing to switch (and the selection stays).
+      {:tab, i} when i == pane.at and id == state.panes.pane ->
+        %{state | focus: :editor}
+
+      {:tab, i} ->
+        state |> enter_pane({:file, id}) |> switch(&Panes.select(&1, i))
+
+      {:close_tab, i} ->
+        %{buffer: buf} = Enum.at(pane.tabs, i)
+
+        # Refused without switching to it: the tab holds the only copy of unsaved edits.
+        if match?(%{dirty: true}, safe_status(buf)) and
+             not Panes.in_other_pane?(state.panes, buf, id) do
+          name = status_label(safe_status(buf)[:path])
+
+          %{
+            state
+            | notice: "not closed: #{name} has unsaved changes (save them, or undo them, first)"
+          }
+        else
+          state |> enter_pane({:file, id}) |> switch(&Panes.select(&1, i)) |> do_close()
+        end
+
+      nil ->
+        enter_pane({:file, id}, state)
+    end
+  end
+
+  # The pane's `×` (ADR-0039): close the pane and its tabs. Refused while one of its tabs holds the
+  # only copy of a buffer with unsaved edits; the only pane never closes. A buffer no other pane
+  # has closes with it, as Alt+K's does.
+  defp close_pane(state, id) do
+    tabs = state.panes.panes[id].tabs
+
+    own =
+      tabs
+      |> Enum.map(& &1.buffer)
+      |> Enum.uniq()
+      |> Enum.reject(&Panes.in_other_pane?(state.panes, &1, id))
+
+    cond do
+      map_size(state.panes.panes) == 1 ->
+        %{state | notice: "the only pane doesn't close"}
+
+      dirty = Enum.find(own, &match?(%{dirty: true}, safe_status(&1))) ->
+        name = status_label(safe_status(dirty)[:path])
+
+        %{
+          state
+          | notice:
+              "pane not closed: #{name} has unsaved changes (save them, or undo them, first)"
+        }
+
+      true ->
+        state = switch(state, &Panes.close_pane(&1, id))
+        Enum.each(own, &safe_close_buffer/1)
+        %{state | notice: "closed the pane"}
+    end
+  end
+
+  # A press on the tree: its title focuses it; a row is highlighted, and a directory opens or
+  # closes, a file opens (as Enter does). Its right edge is the divider.
+  defp tree_press(state, rect, m) do
+    i = state.tree.top + m.y - rect.y - 1
+    now = System.monotonic_time(:millisecond)
+    # A double-click on a folder would open it and close it again: the second press does nothing.
+    double? = Mouse.double?(state.click, now, {m.x, m.y})
+    state = %{state | focus: :tree, click: {now, m.x, m.y}}
+
+    case Enum.at(state.tree.rows, i) do
+      _ when m.x >= rect.x + rect.w - 1 ->
+        state
+
+      _ when m.y == rect.y ->
+        state
+
+      nil ->
+        state
+
+      %{dir?: true} when double? ->
+        state
+
+      row ->
+        apply_tree_key({:key, :enter}, put_in(state.tree.sel, i)) |> then(&keep_tree(&1, row))
+    end
+  end
+
+  # After a click on a directory, the tree stays where it is.
+  defp keep_tree(state, %{dir?: true}), do: put_in(state.tree.hold, state.tree.sel)
+  defp keep_tree(state, _file), do: state
+
+  # A press on the edits list: its title focuses it; an entry opens, as Enter does.
+  defp edits_press(state, rect, m) do
+    i = state.edits_view.top + m.y - rect.y - 1
+    state = %{state | focus: :edits}
+
+    case m.y > rect.y && Enum.at(state.edits_view.entries, i) do
+      entry when is_map(entry) -> open_entry(entry, %{state | focus: :editor, edits_sel: i})
+      _ -> state
+    end
+  end
+
+  # A press on the status line's "behind disk (Alt+J)": fast-forward.
+  defp status_press(state, x) do
+    with {:ok, %{behind: behind} = snap} when behind not in [nil, false] <-
+           safe_session_snapshot(),
+         from =
+           1 + Width.string(status_label(snap.path) <> if(snap.dirty, do: " [+]", else: "")) + 2,
+         true <- x >= from and x < from + Width.string(@behind) do
+      do_fast_forward(state)
+    else
+      _ -> state
+    end
+  end
+
+  # The wheel over the tree or the edits list scrolls it, leaving its highlighted row (which may
+  # go out of view until a key moves it).
+  defp scroll_tree(%{tree: tree} = state, rect, d) do
+    view =
+      scroll_list(
+        tree,
+        min(tree.sel, max(length(tree.rows) - 1, 0)),
+        rect.h - 1,
+        length(tree.rows),
+        d
+      )
+
+    %{state | tree: Map.merge(tree, view)}
+  end
+
+  defp scroll_edits(state, rect, d) do
+    n = length(state.edits_view.entries)
+    sel = min(state.edits_sel, max(n - 1, 0))
+    %{state | edits_view: scroll_list(state.edits_view, sel, rect.h - 1, n, d)}
+  end
+
+  defp scroll_list(view, _sel, _rows, _count, 0), do: view
+
+  defp scroll_list(%{top: top} = view, sel, rows, count, d),
+    do: %{view | top: (top + d) |> min(max(count - rows, 0)) |> max(0), hold: sel}
+
+  # The mouse while the minibuffer is open (ADR-0039): in a picker (the palette, the buffers, the
+  # finder) the wheel moves the highlight and a click on a row picks it; a click off the list
+  # closes the picker. The other modes take no mouse.
+  defp picker_mouse(%{action: :wheel, button: b}, %{minibuffer: %{mode: mode}} = state)
+       when mode in @pickers and b in [:up, :down] do
+    count = length(candidates(state))
+    sel = (state.minibuffer.sel + if(b == :up, do: -1, else: 1)) |> min(count - 1) |> max(0)
+    schedule_repaint(%{state | minibuffer: Minibuffer.select(state.minibuffer, sel)})
+  end
+
+  defp picker_mouse(%{action: :press, button: :left, y: y}, %{minibuffer: %{mode: mode}} = state)
+       when mode in @pickers do
+    {candidates, start, rows, top} = popup_window(state)
+
+    cond do
+      y == state.h - 1 -> state
+      y >= top and y < top + rows -> pick(Enum.at(candidates, start + y - top), state)
+      true -> close_minibuffer(state)
+    end
+  end
+
+  defp picker_mouse(_m, state), do: state
 
   defp pane_rect(state, id) do
     layout(state).editor
@@ -915,6 +1134,8 @@ defmodule Geex.Loop do
   defp repaint(state) do
     state = ensure_tree(state)
     layout = layout(state)
+    entries = if layout.edits, do: edits_entries(), else: []
+    state = settle_lists(state, layout, entries)
     editing? = focused(state, layout) == :editor
     active = safe_session_snapshot()
     active_pid = safe_active_buffer()
@@ -955,7 +1176,7 @@ defmodule Geex.Loop do
       |> Layout.dividers(state.panes.split)
       |> Enum.reduce(screen, &draw_divider(&2, &1, state.theme))
       |> draw_tree(layout.tree, state)
-      |> draw_edits_pane(layout.edits, state)
+      |> draw_edits_pane(layout.edits, state, entries)
 
     {screen, cursor} =
       case active do
@@ -1090,21 +1311,12 @@ defmodule Geex.Loop do
     )
   end
 
-  # The pane's tab bar (ADR-0038) on its top row: each tab numbered (Alt+1..9) with its file name
-  # and ` [+]` for unsaved edits; the shown tab tinted, brighter in the focused pane. Tabs that
-  # don't fit are cut from the left so the shown one stays visible.
-  defp draw_tab_bar(screen, rect, %{tabs: tabs, at: at}, focused?, %{
-         theme: %Theme{palette: pal}
-       }) do
-    labels =
-      tabs
-      |> Enum.with_index()
-      |> Enum.map(fn {tab, i} -> {" #{i + 1} " <> tab_label(tab.buffer) <> " ", i == at} end)
-
-    shown_end =
-      labels |> Enum.take(at + 1) |> Enum.map(fn {l, _} -> Width.string(l) end) |> Enum.sum()
-
-    labels = drop_until_fits(labels, shown_end, rect.w)
+  # The pane's tab bar (ADR-0038) on its top row (`Geex.Loop.TabBar`): each tab numbered (Alt+1..9)
+  # with its file name, ` [+]` for unsaved edits and a `×` that closes it; the shown tab tinted,
+  # brighter in the focused pane; the pane's own `×` at the right end when it isn't the only one
+  # (ADR-0039).
+  defp draw_tab_bar(screen, rect, pane, focused?, %{theme: %Theme{palette: pal}} = state) do
+    bar = tab_bar(state, pane, rect)
 
     screen =
       Screen.fill_rect(screen, rect.x, rect.y, rect.w, 1, %Cell{
@@ -1113,27 +1325,35 @@ defmodule Geex.Loop do
         bg: pal.bg
       })
 
-    {screen, _x} =
-      Enum.reduce(labels, {screen, rect.x}, fn {label, shown?}, {acc, x} ->
+    screen =
+      Enum.reduce(bar.tabs, screen, fn %{i: i, x: x, label: label}, acc ->
         style =
           cond do
-            shown? and focused? -> %Cell{fg: pal.bg, bg: pal.fg}
-            shown? -> %Cell{fg: pal.fg, bg: pal.active_line_bg}
+            i == pane.at and focused? -> %Cell{fg: pal.bg, bg: pal.fg}
+            i == pane.at -> %Cell{fg: pal.fg, bg: pal.active_line_bg}
             true -> %Cell{fg: pal.line_number, bg: pal.bg}
           end
 
-        text = palette_clip(label, rect.x + rect.w - x)
-        {Screen.draw_text(acc, x, rect.y, text, style), x + Width.string(label)}
+        Screen.draw_text(acc, rect.x + x, rect.y, palette_clip(label, bar.w - x), style)
       end)
 
-    screen
+    case bar.close do
+      nil ->
+        screen
+
+      x ->
+        Screen.draw_text(screen, rect.x + x, rect.y, TabBar.pane_close(), %Cell{
+          fg: pal.line_number,
+          bg: pal.bg
+        })
+    end
   end
 
-  # Drop tabs from the left while the shown one would end past the bar.
-  defp drop_until_fits([{label, false} | rest], shown_end, w) when shown_end > w,
-    do: drop_until_fits(rest, shown_end - Width.string(label), w)
-
-  defp drop_until_fits(labels, _shown_end, _w), do: labels
+  # The tab bar's layout for a pane at `rect`: what is drawn, and what a click hits.
+  defp tab_bar(state, %{tabs: tabs, at: at}, rect) do
+    names = Enum.map(tabs, &tab_label(&1.buffer))
+    TabBar.layout(names, at, rect.w, map_size(state.panes.panes) > 1)
+  end
 
   defp tab_label(pid) do
     case safe_status(pid) do
@@ -1189,8 +1409,7 @@ defmodule Geex.Loop do
   # row takes the active-line tint (the same the input row wears), so eye + Enter agree.
   defp draw_palette(screen, %{minibuffer: %Minibuffer{mode: mode} = mb} = state)
        when mode in [:palette, :buffers, :files] do
-    candidates = candidates(state)
-    rows = min(length(candidates), min(@palette_rows, max(state.h - 1, 0)))
+    {candidates, start, rows, top} = popup_window(state)
     name_col = name_col(mode, candidates, state.w)
 
     cond do
@@ -1203,11 +1422,6 @@ defmodule Geex.Loop do
         screen
 
       true ->
-        # Scroll the window so the highlighted row (`mb.sel`) stays visible: once the selection
-        # passes the first page it rides the bottom of the window.
-        start = mb.sel |> Kernel.-(rows - 1) |> max(0) |> min(max(length(candidates) - rows, 0))
-        top = state.h - 1 - rows
-
         candidates
         |> Enum.slice(start, rows)
         |> Enum.with_index()
@@ -1219,17 +1433,27 @@ defmodule Geex.Loop do
 
   defp draw_palette(screen, _state), do: screen
 
+  # The popup's candidates, the first one shown, how many rows, and the screen row of the first.
+  # The window scrolls so the highlighted row (`sel`) stays visible: once the selection passes the
+  # first page it rides the bottom of the window. Drawing and a click both read it.
+  defp popup_window(%{minibuffer: mb} = state) do
+    candidates = candidates(state)
+    rows = min(length(candidates), min(@palette_rows, max(state.h - 1, 0)))
+    start = mb.sel |> Kernel.-(rows - 1) |> max(0) |> min(max(length(candidates) - rows, 0))
+    {candidates, start, rows, state.h - 1 - rows}
+  end
+
   # The edits pane (ADR-0034 §6): a title row, then the entries, the highlighted one tinted
   # while the pane has focus. `nil` when it isn't shown.
-  defp draw_edits_pane(screen, nil, _state), do: screen
+  defp draw_edits_pane(screen, nil, _state, _entries), do: screen
 
   defp draw_edits_pane(
          screen,
          %Geex.Rect{x: x, y: y, w: w, h: h},
-         %{theme: %Theme{palette: pal}} = state
+         %{theme: %Theme{palette: pal}} = state,
+         entries
        ) do
     focused? = state.focus == :edits
-    entries = edits_entries()
     hint = if focused?, do: " Enter opens · Esc back ", else: " Alt+P "
     title = "── edits " <> String.duplicate("─", max(w - 9 - String.length(hint), 0)) <> hint
 
@@ -1247,7 +1471,7 @@ defmodule Geex.Loop do
       sel = min(state.edits_sel, length(entries) - 1)
 
       entries
-      |> EditsPane.lines(safe_start().root, w, h - 1, sel, focused?)
+      |> EditsPane.lines(safe_start().root, w, h - 1, sel, focused?, state.edits_view.top)
       |> Enum.with_index(y + 1)
       |> Enum.reduce(screen, fn {{text, entry, selected?}, row}, acc ->
         bg = if selected? and focused?, do: pal.active_line_bg, else: pal.bg
@@ -1291,7 +1515,7 @@ defmodule Geex.Loop do
       })
     else
       sel = min(state.tree.sel, length(rows) - 1)
-      start = sel |> Kernel.-(n - 1) |> max(0) |> min(max(length(rows) - n, 0))
+      start = state.tree.top
 
       rows
       |> Enum.with_index()
@@ -1318,6 +1542,41 @@ defmodule Geex.Loop do
       edits: state.edits_shown,
       tree: state.tree_shown and safe_start().root != nil
     })
+  end
+
+  # Where the tree and the edits list start (ADR-0039): the row the wheel scrolled them to, until a
+  # key acts on the list; else where they were, scrolled only as far as keeps the highlighted row in
+  # view. (Before the mouse, the window was a function of the highlight alone, so Up from the
+  # bottom row scrolled at once.)
+  defp settle_lists(state, layout, entries) do
+    state =
+      case layout.tree do
+        nil ->
+          state
+
+        rect ->
+          rows = length(state.tree.rows)
+          view = list_view(state.tree, min(state.tree.sel, max(rows - 1, 0)), rect.h - 1, rows)
+          %{state | tree: Map.merge(state.tree, view)}
+      end
+
+    case layout.edits do
+      nil ->
+        state
+
+      rect ->
+        n = length(entries)
+        sel = min(state.edits_sel, max(n - 1, 0))
+        view = list_view(state.edits_view, sel, rect.h - 1, n)
+        # The entries as drawn: a click picks from what you saw.
+        %{state | edits_view: Map.merge(state.edits_view, Map.put(view, :entries, entries))}
+    end
+  end
+
+  defp list_view(%{top: top, hold: hold}, sel, rows, count) do
+    held? = hold != nil and hold == sel
+    top = if held?, do: top, else: scroll_for(top, sel, rows, 0)
+    %{top: top |> min(max(count - rows, 0)) |> max(0), hold: if(held?, do: hold)}
   end
 
   # Which pane has focus, of those on screen (a pane a resize hid gives it back to the editor).
@@ -1421,8 +1680,15 @@ defmodule Geex.Loop do
 
   # The edits pane starts at its newest entry; the tree re-reads the files; a file pane becomes
   # current, and its tab Session's active buffer.
-  defp enter_pane(:edits, state), do: %{state | focus: :edits, edits_sel: 0}
-  defp enter_pane(:tree, state), do: %{reload_tree(state) | focus: :tree}
+  defp enter_pane(:edits, state),
+    do: %{state | focus: :edits, edits_sel: 0, edits_view: %{state.edits_view | hold: nil}}
+
+  defp enter_pane(:tree, state) do
+    state = reload_tree(state)
+    %{state | focus: :tree, tree: %{state.tree | hold: nil}}
+  end
+
+  defp enter_pane(state, {:file, _id} = pane), do: enter_pane(pane, state)
 
   defp enter_pane({:file, id}, state) do
     state = if id == state.panes.pane, do: state, else: switch(state, &Panes.focus(&1, id))
@@ -1439,7 +1705,12 @@ defmodule Geex.Loop do
   defp apply_tree_key({:alt, c}, state) when c in [?d, ?D],
     do: apply_tree_key({:key, :right}, state)
 
-  defp apply_tree_key(event, %{tree: tree} = state) do
+  defp apply_tree_key(event, state) do
+    # A key shows the highlighted row again, wherever the wheel left the list (ADR-0039).
+    tree_key(event, put_in(state.tree.hold, nil))
+  end
+
+  defp tree_key(event, %{tree: tree} = state) do
     count = length(tree.rows)
     row = Enum.at(tree.rows, min(tree.sel, count - 1))
 
@@ -1502,6 +1773,7 @@ defmodule Geex.Loop do
   # palette and quitting work from here too; other keys do nothing (they'd edit a buffer you
   # aren't looking at).
   defp apply_edits_key(event, state) do
+    state = put_in(state.edits_view.hold, nil)
     count = length(edits_entries())
 
     case event do
@@ -1696,7 +1968,7 @@ defmodule Geex.Loop do
     left =
       status_label(snap.path) <>
         if(snap.dirty, do: " [+]", else: "") <>
-        if(snap[:behind], do: "  behind disk (Alt+J)", else: "") <>
+        if(snap[:behind], do: "  " <> @behind, else: "") <>
         if(state.notice, do: "  " <> state.notice, else: "")
 
     {line, _col} = snap.cursor
@@ -2504,9 +2776,6 @@ defmodule Geex.Loop do
   # editor's own up/down, ADR-0028 §3) and the arrow Up/Down alias — handled *before* the
   # text-input cases so they move the highlight instead of typing. A plain `w`/`s` still types
   # into the fuzzy filter; the Alt modifier is what separates "move" from "type".
-  # The modes with a candidate popup.
-  @pickers [:palette, :buffers, :files]
-
   defp apply_minibuffer_key(event, %{minibuffer: mb} = state) do
     case event do
       _ when mb.mode in @pickers and event in [{:alt, ?w}, {:alt, ?W}, {:key, :up}] ->
@@ -2561,23 +2830,12 @@ defmodule Geex.Loop do
   # exactly what is highlighted), pick the `sel`-th, and dispatch it (`dispatch_palette/2`).
   # No match under the cursor (empty list) just closes.
   defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :palette} = mb} = state) do
-    case Enum.at(Catalog.search(Minibuffer.value(mb)), mb.sel) do
-      %Catalog.Entry{invoke: invoke} -> dispatch_palette(invoke, state)
-      nil -> close_minibuffer(state)
-    end
+    pick(Enum.at(Catalog.search(Minibuffer.value(mb)), mb.sel), state)
   end
 
   # The buffer picker: Enter shows the highlighted buffer.
   defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :buffers} = mb} = state) do
-    case Enum.at(candidates(state), mb.sel) do
-      %{invoke: {:buffer, pid}} ->
-        state = leave(state)
-        safe_set_active(pid)
-        close_minibuffer(adopt_active(state, pid))
-
-      nil ->
-        close_minibuffer(state)
-    end
+    pick(Enum.at(candidates(state), mb.sel), state)
   end
 
   # The finder: Enter opens the highlighted file. While the files are still being read, or the
@@ -2591,8 +2849,8 @@ defmodule Geex.Loop do
     query = String.trim(Minibuffer.value(mb))
 
     case Enum.at(candidates(state), if(state.finder.submit, do: 0, else: mb.sel)) do
-      %{invoke: {:file, path}} ->
-        do_open(Path.join(safe_start().root, path), close_minibuffer(state))
+      %{invoke: {:file, _path}} = entry ->
+        pick(entry, state)
 
       nil when query != "" and is_binary(state.tree.files) ->
         %{close_minibuffer(state) | notice: "no file matches “#{query}”"}
@@ -2615,6 +2873,20 @@ defmodule Geex.Loop do
       :unknown -> state
     end
   end
+
+  # Run a picker's candidate, by Enter or a click (ADR-0039): a file opens, a buffer shows, a
+  # command runs. Nothing (an empty list) just closes.
+  defp pick(%{invoke: {:file, path}}, state),
+    do: do_open(Path.join(safe_start().root, path), close_minibuffer(state))
+
+  defp pick(%{invoke: {:buffer, pid}}, state) do
+    state = leave(state)
+    safe_set_active(pid)
+    close_minibuffer(adopt_active(state, pid))
+  end
+
+  defp pick(%{invoke: invoke}, state), do: dispatch_palette(invoke, state)
+  defp pick(nil, state), do: close_minibuffer(state)
 
   # Move the palette highlight by `delta` (Alt+W/S, arrows), **wrapping** at the ends so a long
   # list cycles. Clamp against the *current* candidate count (the filter may have narrowed it);

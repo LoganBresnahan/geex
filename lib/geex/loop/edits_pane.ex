@@ -44,8 +44,9 @@ defmodule Geex.Loop.EditsPane do
   end
 
   @doc """
-  The `n` rows to show in a pane `w` columns wide, scrolled so entry `sel` is visible:
-  `[{text, entry, selected?}]`. The selected row starts with `▸` when `focused?`.
+  The `n` rows to show in a pane `w` columns wide, from entry `start` (by default scrolled so
+  entry `sel` is visible): `[{text, entry, selected?}]`. The selected row starts with `▸` when
+  `focused?`.
 
       iex> e = %{kind: :edit, path: "/r/lib/a.ex", who: "you", time: "17:21", row: nil}
       iex> [{text, ^e, true}] = Geex.Loop.EditsPane.lines([e], "/r", 30, 5, 0, true)
@@ -58,14 +59,15 @@ defmodule Geex.Loop.EditsPane do
           non_neg_integer(),
           non_neg_integer(),
           integer(),
-          boolean()
+          boolean(),
+          non_neg_integer() | nil
         ) ::
           [{String.t(), entry(), boolean()}]
-  def lines(entries, root, w, n, sel, focused?) do
+  def lines(entries, root, w, n, sel, focused?, start \\ nil) do
     names = Enum.map(entries, &relative(&1.path, root))
     name_w = names |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end) |> min(div(w, 2))
     who_w = entries |> Enum.map(&String.length(&1.who)) |> Enum.max(fn -> 0 end) |> min(36)
-    start = sel |> Kernel.-(n - 1) |> max(0) |> min(max(length(entries) - n, 0))
+    start = start || sel |> Kernel.-(n - 1) |> max(0) |> min(max(length(entries) - n, 0))
 
     entries
     |> Enum.zip(names)

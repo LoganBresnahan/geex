@@ -2403,3 +2403,38 @@ executable path). Live with `geex` from the PATH in tmux (`-L deploy`, 120×30, 
   visible. The discovery file was gone, and the log had no `terminating` lines.
 
 **Not tested:** Windows Terminal; a real mouse; `--rollback` (checked at the first install).
+
+### 2026-10-17 — The mouse, step 2: everything clickable (ADR-0039 §6)
+
+The coordinator approved step 1 (`3647bb7`) after its own live test of the installed binary:
+clicks on the right grapheme (after `日本語`, on the second half of `本`), drag, Shift+click and
+double-click copies through OSC 52 (`日本語` too), the wheel, a held drag to line 54. It asked for
+Alt+click to extend a selection as well, since Windows Terminal keeps Shift+click; built here.
+
+Live in tmux (`-L geexdf`, 120×30, the tree and the edits pane shown), with raw SGR reports:
+- Clicking the tree's `long.txt` opened it as tab 2, and a click on tab 1 showed `a.txt`.
+  Clicking `sub/` opened it, and a second click closed it.
+- Tab 2's `×` closed it ("closed long.txt"). `Alt+=` drew a `×` at each pane's right end; the
+  second pane's `×` closed it ("closed the pane").
+- `Alt+I`, `vsplit`, and a click on its row split the pane.
+- After a save, the edits list's `a.txt  you` entry opened `a.txt` on a click.
+- `a.txt` was written from outside. A click on "behind disk (Alt+J)" said "caught up with the
+  disk" and showed the new line.
+- Ctrl-X left the mouse modes off.
+
+Reviewed adversarially (one agent). Fixed:
+- a pane too small to draw closed from its invisible `×`;
+- the wheel's hold on the tree or edits list survived a key that moved nothing, and focusing the
+  list (`Alt+P`), so the highlight stayed out of view; Shift+wheel held a list it didn't scroll;
+- a double-click on a folder opened and closed it;
+- a dirty tab's `×` switched to the tab before refusing (now refused in place, naming the file);
+- a click on the edits list read the entries again, so an edit arriving since the last frame
+  shifted the rows (it now uses the rows drawn);
+- a pane's `×` on another pane moved the current pane to its heir;
+- a click on the tab already shown dropped the selection.
+
+**Automated:** `test/geex/loop/mouse_click_test.exs` (20 tests: tabs, both `×`s and their
+refusals, the tree, the edits list, the status line, the pickers, Alt+click, the review's cases);
+`split_test` reads the new tab bar. **988 tests + 47 doctests**, green twice.
+
+**Not tested:** Windows Terminal; a real mouse; the installed binary (next, with /deploy).

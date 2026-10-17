@@ -68,7 +68,7 @@ defmodule Geex.Loop.SplitTest do
     assert cursor() == {1, 2}
 
     {_state, rows} = frame(state)
-    assert hd(rows) =~ ~r/^ 1 a\.txt +│ 1 a\.txt/
+    assert hd(rows) =~ ~r/^ 1 a\.txt × +× │ 1 a\.txt × +× $/
     assert Enum.at(rows, 1) =~ ~r/a\.txt.*│.*a\.txt/
   end
 
@@ -112,7 +112,7 @@ defmodule Geex.Loop.SplitTest do
     assert Panes.current(state.panes).buffer == a
 
     {_state, rows} = frame(state)
-    assert hd(rows) =~ ~r/│ 1 a\.txt  2 b\.txt  3 c\.txt/
+    assert hd(rows) =~ ~r/│ 1 a\.txt ×  2 b\.txt ×  3 c\.txt × +× $/
   end
 
   test "Alt+K closes a tab; the buffer stays open while another pane has it", %{dir: dir} do

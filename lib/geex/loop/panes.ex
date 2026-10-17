@@ -142,6 +142,23 @@ defmodule Geex.Loop.Panes do
       else: ps
   end
 
+  @doc """
+  Close pane `id` and its tabs (ADR-0039's pane `×`). The pane that takes its space becomes
+  current if it was. The only pane never closes.
+  """
+  @spec close_pane(t(), pos_integer()) :: t()
+  def close_pane(ps, id) when is_map_key(ps.panes, id) do
+    if map_size(ps.panes) == 1, do: ps, else: put_tabs(ps, id, [], 0)
+  end
+
+  @doc "Whether `buffer` is in a tab of a pane other than `id`."
+  @spec in_other_pane?(t(), pid(), pos_integer()) :: boolean()
+  def in_other_pane?(ps, buffer, id) do
+    Enum.any?(ps.panes, fn {other, %{tabs: tabs}} ->
+      other != id and Enum.any?(tabs, &(&1.buffer == buffer))
+    end)
+  end
+
   @doc "Drop every tab of `buffer` (it ended), closing panes left with none (not the last)."
   @spec drop_buffer(t(), pid()) :: t()
   def drop_buffer(ps, buffer) do

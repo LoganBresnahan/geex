@@ -94,7 +94,7 @@ acts on the tab you see. A notice from a buffer you aren't looking at names its 
 Each pane is drawn on a screen of its own and copied into the frame (`Geex.Screen.blit/4`):
 
 - **a tab bar on its top row**: each tab numbered with its file name and ` [+]` for unsaved
-  edits. The shown tab is tinted, in reverse video in the focused pane. Tabs that don't fit are
+  edits (and, since [ADR-0039](0039-mouse.md) §6, a `×` per tab and one per pane). The shown tab is tinted, in reverse video in the focused pane. Tabs that don't fit are
   cut from the left so the shown one stays visible;
 - **the text, gutter and scroll bars** as before, with grid mode's ruler (ADR-0027) in the
   current pane only;
@@ -105,8 +105,8 @@ cursor, clamped to the text if an edit elsewhere shortened it.
 
 ### Out of scope (deferred)
 
-- **The mouse**: clicking a tab or a pane, dragging a divider. (Being built:
-  [ADR-0039](0039-mouse.md); a click in a pane focuses it.)
+- **The mouse**: clicking a tab or a pane, dragging a divider. (Built in
+  [ADR-0039](0039-mouse.md): clicks on panes, tabs and their `×`; dragging a divider is its step 3.)
 - **Resizing panes by hand**: splits stay even.
 - **Keeping the layout across restarts**: geex starts with one pane.
 - **Moving a cursor in a pane you're not in when an edit elsewhere shifts its line**: it stays at
