@@ -32,7 +32,7 @@ defmodule Geex.Loop.PanesModelTest do
   test "split copies the tab into a new current pane, in reading order", %{a: a, b: b} do
     {ps, _} = Panes.show(Panes.new(), a, {5, 0})
     ps = Panes.split(ps, :cols)
-    assert ps.split == {:cols, {:pane, 1}, {:pane, 2}}
+    assert ps.split == {:cols, {:pane, 1}, {:pane, 2}, 0.5}
     assert ps.pane == 2
     assert %{buffer: ^a, cursor: {5, 0}} = Panes.current(ps)
 

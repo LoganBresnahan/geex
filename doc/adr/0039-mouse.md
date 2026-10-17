@@ -3,8 +3,8 @@
 - **Status:** Accepted 2026-10-17 (the maintainer's asks, with the coordinator session's
   additions, relayed by the coordinator session and built autonomously at the maintainer's word).
   Step 1 of 3: the foundation, in the file panes. **Amended 2026-10-17, step 2:** the rest of
-  the screen clickable (§6), and Alt+click extends a selection (§3). Step 3 (resizing) amends
-  [ADR-0038](0038-split-panes-and-tabs.md).
+  the screen clickable (§6), and Alt+click extends a selection (§3). **Step 3, 2026-10-17:**
+  resizing by drag handles, which amends [ADR-0038](0038-split-panes-and-tabs.md) §6.
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0026](0026-terminal-input-model.md) (the terminal input model),
   [ADR-0027](0027-grid-command-addressing.md) (width never addresses), [ADR-0029](0029-selection-primitive.md)
@@ -130,11 +130,13 @@ text in.
   finder's newer search is still running. A click off the list closes the picker. The other
   minibuffer modes (typed commands, grid) take no mouse.
 - **The status line**: a click on "behind disk (Alt+J)" fast-forwards.
-- The dividers take no click yet; step 3 makes them handles.
+- The dividers, the tree's edge and the edits pane's title row are drag handles (step 3,
+  [ADR-0038](0038-split-panes-and-tabs.md) §6): a press there resizes, before anything else
+  takes it.
 
 ### Out of scope (deferred)
 
-- Step 3: resizing panes by dragging.
+- Keeping the sizes the handles set across restarts.
 - Middle-click paste, a right-click menu, triple-click, dragging by words after a double-click,
   dragging the scroll bars.
 - Starting with the mouse off (a setting).

@@ -62,7 +62,7 @@ defmodule Geex.Loop.SplitTest do
     Session.set_cursor({1, 2})
     state = key(state, {:alt, ?=})
 
-    assert state.panes.split == {:cols, {:pane, 1}, {:pane, 2}}
+    assert state.panes.split == {:cols, {:pane, 1}, {:pane, 2}, 0.5}
     assert state.panes.pane == 2
     assert active() == a
     assert cursor() == {1, 2}
@@ -204,10 +204,10 @@ defmodule Geex.Loop.SplitTest do
     {state, _a} = start(dir)
     state = %{state | w: 40, h: 12}
     state = key(state, {:alt, ?=})
-    assert state.panes.split == {:cols, {:pane, 1}, {:pane, 2}}
+    assert state.panes.split == {:cols, {:pane, 1}, {:pane, 2}, 0.5}
     state = key(state, {:alt, ?=})
     assert state.notice == "no room to split this pane"
-    assert state.panes.split == {:cols, {:pane, 1}, {:pane, 2}}
+    assert state.panes.split == {:cols, {:pane, 1}, {:pane, 2}, 0.5}
 
     # Shrunk after splitting: the frame still draws, and a pane too small to draw is filled
     # with the background, not left as whatever the terminal showed before.
@@ -261,9 +261,9 @@ defmodule Geex.Loop.SplitTest do
     end
 
     state = type.(state, "vsplit")
-    assert state.panes.split == {:cols, {:pane, 1}, {:pane, 2}}
+    assert state.panes.split == {:cols, {:pane, 1}, {:pane, 2}, 0.5}
     state = type.(state, "split")
-    assert state.panes.split == {:cols, {:pane, 1}, {:rows, {:pane, 2}, {:pane, 3}}}
+    assert state.panes.split == {:cols, {:pane, 1}, {:rows, {:pane, 2}, {:pane, 3}, 0.5}, 0.5}
 
     {state, b} = open(state, dir, "b.txt")
     state = type.(state, "tab 1")

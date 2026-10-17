@@ -120,7 +120,7 @@ defmodule Geex.Loop.Panes do
 
         %{
           ps
-          | split: replace(ps.split, ps.pane, {dir, {:pane, ps.pane}, {:pane, id}}),
+          | split: replace(ps.split, ps.pane, {dir, {:pane, ps.pane}, {:pane, id}, 0.5}),
             panes: Map.put(ps.panes, id, %{tabs: [tab], at: 0}),
             pane: id,
             next: id + 1
@@ -197,6 +197,19 @@ defmodule Geex.Loop.Panes do
     end)
   end
 
+  @doc """
+  Set the ratio of the split at `path` (`Geex.Layout.handles/2`): dragging its handle, or `0.5`
+  (even) for a double-click on it ([ADR-0039](../../../doc/adr/0039-mouse.md) step 3). A path
+  that doesn't name a split changes nothing.
+  """
+  @spec set_ratio(t(), [:a | :b], float()) :: t()
+  def set_ratio(ps, path, ratio), do: %{ps | split: put_ratio(ps.split, path, ratio)}
+
+  defp put_ratio({dir, a, b, _r}, [], ratio), do: {dir, a, b, ratio}
+  defp put_ratio({dir, a, b, r}, [:a | path], ratio), do: {dir, put_ratio(a, path, ratio), b, r}
+  defp put_ratio({dir, a, b, r}, [:b | path], ratio), do: {dir, a, put_ratio(b, path, ratio), r}
+  defp put_ratio(leaf, _path, _ratio), do: leaf
+
   @doc "The panes' ids in reading order (left to right, top to bottom)."
   @spec ids(t()) :: [pos_integer()]
   def ids(ps), do: leaves(ps.split)
@@ -219,24 +232,26 @@ defmodule Geex.Loop.Panes do
   defp put_tabs(ps, id, tabs, at), do: put_in(ps.panes[id], %{tabs: tabs, at: at})
 
   defp leaves({:pane, id}), do: [id]
-  defp leaves({_dir, a, b}), do: leaves(a) ++ leaves(b)
+  defp leaves({_dir, a, b, _ratio}), do: leaves(a) ++ leaves(b)
 
   defp replace({:pane, id}, id, with), do: with
   defp replace({:pane, _} = leaf, _id, _with), do: leaf
-  defp replace({dir, a, b}, id, with), do: {dir, replace(a, id, with), replace(b, id, with)}
+
+  defp replace({dir, a, b, r}, id, with),
+    do: {dir, replace(a, id, with), replace(b, id, with), r}
 
   # Remove pane `id`: its sibling takes the split's place. Returns the new split and the pane
   # that inherits the space (the sibling's first pane).
-  defp remove({_dir, {:pane, id}, other}, id), do: {other, hd(leaves(other))}
-  defp remove({_dir, other, {:pane, id}}, id), do: {other, hd(leaves(other))}
+  defp remove({_dir, {:pane, id}, other, _r}, id), do: {other, hd(leaves(other))}
+  defp remove({_dir, other, {:pane, id}, _r}, id), do: {other, hd(leaves(other))}
 
-  defp remove({dir, a, b}, id) do
+  defp remove({dir, a, b, r}, id) do
     if id in leaves(a) do
       {a2, heir} = remove(a, id)
-      {{dir, a2, b}, heir}
+      {{dir, a2, b, r}, heir}
     else
       {b2, heir} = remove(b, id)
-      {{dir, a, b2}, heir}
+      {{dir, a, b2, r}, heir}
     end
   end
 end

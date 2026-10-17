@@ -6,8 +6,10 @@ defmodule Geex.Loop.TabBar do
 
   A tab reads ` N name × `: its number (`Alt+N`), its file name (with ` [+]` for unsaved edits),
   and a `×` that closes it. When the pane can close (it isn't the only one), the bar's last three
-  columns are ` × `, which closes the pane. Tabs that don't fit are cut from the left so the shown
-  one stays visible.
+  columns are ` × `, which closes the pane. When the bar is the top of a stacked split's lower
+  half, it keeps a `⠿` handle and a space after it, just before the pane's `×` ([ADR-0038](../../../doc/adr/0038-split-panes-and-tabs.md)
+  §6), so the split can be dragged however many tabs there are. Tabs that don't fit are cut from
+  the left so the shown one stays visible.
   """
 
   alias Geex.Width
@@ -17,22 +19,28 @@ defmodule Geex.Loop.TabBar do
   @type t :: %{
           tabs: [%{i: non_neg_integer(), x: non_neg_integer(), label: String.t()}],
           close: non_neg_integer() | nil,
+          handle: non_neg_integer() | nil,
           w: non_neg_integer()
         }
 
   @doc """
   The bar for tabs named `names`, tab `at` shown, `w` columns wide; `closable?` when the pane
-  has its own `×`. Each tab's `x` is from the bar's left edge.
+  has its own `×`; `handle?` when it keeps a split's handle. Each tab's `x` is from the bar's left
+  edge.
 
       iex> bar = Geex.Loop.TabBar.layout(["a.txt", "b.txt [+]"], 0, 40, true)
       iex> Enum.map(bar.tabs, &{&1.i, &1.x, &1.label})
       [{0, 0, " 1 a.txt × "}, {1, 11, " 2 b.txt [+] × "}]
-      iex> bar.close
-      37
+      iex> {bar.close, bar.handle}
+      {37, nil}
+      iex> Geex.Loop.TabBar.layout(["a.txt"], 0, 40, true, true).handle
+      35
   """
-  @spec layout([String.t()], non_neg_integer(), non_neg_integer(), boolean()) :: t()
-  def layout(names, at, w, closable?) do
+  @spec layout([String.t()], non_neg_integer(), non_neg_integer(), boolean(), boolean()) :: t()
+  def layout(names, at, w, closable?, handle? \\ false) do
     room = if closable?, do: max(w - Width.string(@pane_close), 0), else: w
+    handle = if handle? and room >= 2, do: room - 2
+    room = if handle, do: handle, else: room
 
     labels =
       names
@@ -50,14 +58,23 @@ defmodule Geex.Loop.TabBar do
     %{
       tabs: Enum.filter(tabs, &(&1.x < room)),
       close: if(closable? and w >= Width.string(@pane_close), do: w - 3),
+      handle: handle,
       w: room
     }
   end
 
-  @doc "What the bar's column `x` is: a tab, a tab's `×`, the pane's `×`, or nothing."
+  @doc """
+  What the bar's column `x` is: a tab, a tab's `×`, the pane's `×`, the split's handle (and the
+  space after it), or nothing.
+  """
   @spec hit(t(), integer()) ::
-          {:tab, non_neg_integer()} | {:close_tab, non_neg_integer()} | :close_pane | nil
+          {:tab, non_neg_integer()}
+          | {:close_tab, non_neg_integer()}
+          | :close_pane
+          | :handle
+          | nil
   def hit(%{close: close}, x) when is_integer(close) and x >= close, do: :close_pane
+  def hit(%{handle: h}, x) when is_integer(h) and x in h..(h + 1)//1, do: :handle
 
   def hit(%{tabs: tabs, w: room}, x) when x < room do
     Enum.find_value(tabs, fn %{i: i, x: tx, label: label} ->
@@ -73,6 +90,10 @@ defmodule Geex.Loop.TabBar do
   end
 
   def hit(_bar, _x), do: nil
+
+  @doc "A split's handle, as drawn on its boundaries."
+  @spec handle() :: String.t()
+  def handle, do: "⠿"
 
   @doc "The pane's `×`, as drawn in the bar's last three columns."
   @spec pane_close() :: String.t()

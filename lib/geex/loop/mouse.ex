@@ -110,18 +110,26 @@ defmodule Geex.Loop.Mouse do
   end
 
   @doc """
-  Whether a press at `{x, y}` at time `now` (milliseconds) is the second of a double-click,
-  given the last press (`{time, x, y}`, or `nil`).
+  Whether a press of `kind` (text, a handle, a tree row…) at `{x, y}` at time `now`
+  (milliseconds) is the second of a double-click, given the last press (`{time, x, y, kind}`, or
+  `nil`). Presses on different kinds of thing are never a double-click, even on the same cell: a
+  handle dragged away leaves text where it was.
 
-      iex> Geex.Loop.Mouse.double?({1000, 5, 5}, 1300, {5, 5})
+      iex> Geex.Loop.Mouse.double?({1000, 5, 5, :text}, 1300, {5, 5}, :text)
       true
-      iex> Geex.Loop.Mouse.double?({1000, 5, 5}, 1500, {5, 5})
+      iex> Geex.Loop.Mouse.double?({1000, 5, 5, :text}, 1500, {5, 5}, :text)
       false
-      iex> Geex.Loop.Mouse.double?({1000, 5, 5}, 1100, {6, 5})
+      iex> Geex.Loop.Mouse.double?({1000, 5, 5, :text}, 1100, {6, 5}, :text)
+      false
+      iex> Geex.Loop.Mouse.double?({1000, 5, 5, :handle}, 1100, {5, 5}, :text)
       false
   """
-  @spec double?({integer(), integer(), integer()} | nil, integer(), {integer(), integer()}) ::
-          boolean()
-  def double?({t, x, y}, now, {x, y}), do: now - t <= @double_ms
-  def double?(_last, _now, _at), do: false
+  @spec double?(
+          {integer(), integer(), integer(), atom()} | nil,
+          integer(),
+          {integer(), integer()},
+          atom()
+        ) :: boolean()
+  def double?({t, x, y, kind}, now, {x, y}, kind), do: now - t <= @double_ms
+  def double?(_last, _now, _at, _kind), do: false
 end

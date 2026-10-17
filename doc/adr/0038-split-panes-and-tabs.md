@@ -1,7 +1,8 @@
 # ADR-0038: Split panes, each with its own tabs
 
 - **Status:** Accepted 2026-10-17 (the defaults the maintainer accepted, relayed by the
-  coordinator session; built autonomously at the maintainer's word). **Builds** what
+  coordinator session; built autonomously at the maintainer's word). **Amended 2026-10-17:**
+  splits keep a ratio, and the mouse resizes them (§6). **Builds** what
   [ADR-0034](0034-panes-tree-edits-hold.md) deferred ("splits and tabs") and
   [ADR-0028](0028-editor-shell-and-minibuffer.md) put "behind the pane system".
 - **Date:** 2026-10-17
@@ -22,8 +23,9 @@ and to keep several files open per pane as tabs.
 ### 1. The model
 
 - **File panes split the editor's rectangle.** A split is two halves, top and bottom (`:rows`)
-  or side by side (`:cols`), each a pane or another split (`Geex.Layout.split/2`, pure). Splits
-  are even; side-by-side halves keep one column for a `│` divider.
+  or side by side (`:cols`), each a pane or another split (`Geex.Layout.split/2`, pure). A new
+  split is even; side-by-side halves keep one column for a `│` divider. (Since the amendment, a
+  split carries its ratio: §6.)
 - **Each pane has its own tabs** and shows one of them. A tab is a buffer seen from that pane:
   its own cursor and scroll. **The same file in two panes is one buffer**: one text, one undo
   history, one ledger. An edit from anywhere (you in another pane, an agent, reconcile) shows in
@@ -103,12 +105,48 @@ Each pane is drawn on a screen of its own and copied into the frame (`Geex.Scree
 The hardware cursor is the current pane's. Another pane showing the same buffer keeps its own
 cursor, clamped to the text if an edit elsewhere shortened it.
 
+### 6. Amendment (2026-10-17): splits keep a ratio, and the mouse resizes them
+
+Built with the mouse's step 3 ([ADR-0039](0039-mouse.md)):
+
+- **A split is `{dir, a, b, ratio}`**: the first half takes `ratio` of the room (a side-by-side
+  split's room is its width less the divider). A new split is `0.5`, which lays out as the even
+  split did, except where the even split would make a pane below the least size. `Geex.Layout`
+  keeps each half at least as big as the panes in it need, 12 columns and 4 rows a pane
+  (`Layout.min_pane/0`); short of room for both, the least sizes shrink in proportion, so
+  neither half collapses before the other. The ratio stays as it was, so a terminal resize keeps
+  the proportions.
+- **Handles**, drawn `⠿` (one column in any font; not East Asian ambiguous width):
+  - a side-by-side split: its divider column, the glyph in the middle;
+  - a stacked split: the top row of its lower half, where the tab bars have no tab and no `×`.
+    Each of those bars keeps the glyph and a space just before its pane's `×`
+    (`Geex.Loop.TabBar`), so the handle stays there however many tabs the bar holds, and the
+    glyph is drawn where the hit test takes it;
+  - the tree's right edge, the glyph half way down;
+  - the edits pane's title row, the glyph in the middle of its rule, between its name and its
+    hint.
+- **Dragging a handle** puts the edge under the pointer: a split's ratio (`Layout.ratio_at/3`,
+  kept to the least sizes, `Panes.set_ratio/3`), the tree's width (at least 12, leaving the
+  editor 40 columns or what its panes need, `Layout.least/1`) or the edits pane's height (at
+  least 2 rows, leaving the editor 6 rows or what its panes need). A drag whose split changed
+  under it (a pane closed) ends. The tree's and
+  edits pane's sizes are stored as laid out, so they stay what you see across a resize, clamped
+  to the terminal.
+- **A double-click on a handle** puts it back: an even split, or the tree's and edits pane's
+  default sizes.
+- A press on the edits pane's title still focuses it, on the tree's edge the tree, and on a
+  stacked split's handle the pane it is on.
+- A double-click needs both presses on the same kind of thing: a handle dragged away leaves
+  text, or a blank tab bar, where it was, and a press there isn't its second click.
+- Closing a pane keeps the other splits' ratios; the split it was in goes.
+
 ### Out of scope (deferred)
 
 - **The mouse**: clicking a tab or a pane, dragging a divider. (Built in
   [ADR-0039](0039-mouse.md): clicks on panes, tabs and their `×`; dragging a divider is its step 3.)
-- **Resizing panes by hand**: splits stay even.
-- **Keeping the layout across restarts**: geex starts with one pane.
+- **Resizing panes by hand**: splits stay even. (Built: §6.)
+- **Keeping the layout across restarts**: geex starts with one pane (and, since §6, even, with
+  the tree and the edits pane at their default sizes).
 - **Moving a cursor in a pane you're not in when an edit elsewhere shifts its line**: it stays at
   its line and column, clamped to the text.
 

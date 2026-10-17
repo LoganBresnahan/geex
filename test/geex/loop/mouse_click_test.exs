@@ -216,7 +216,7 @@ defmodule Geex.Loop.MouseClickTest do
       # The popup's rows end just above the input row (29): one match, on row 28.
       state = click(state, 3, 28)
       assert state.minibuffer.mode == :inactive
-      assert state.panes.split == {:cols, {:pane, 1}, {:pane, 2}}
+      assert state.panes.split == {:cols, {:pane, 1}, {:pane, 2}, 0.5}
     end
 
     test "a click in the buffer picker shows that buffer; the wheel steps", %{dir: dir} do

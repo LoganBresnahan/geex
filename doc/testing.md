@@ -2453,3 +2453,43 @@ installed `0.1.0+5370ea4c`; no other geex was running. Live with `geex` from the
   discovery file was gone, and the log had no `terminating` lines.
 
 **Not tested:** Windows Terminal; a real mouse.
+
+### 2026-10-17 — The mouse, step 3: resizing by drag handles (ADR-0038 §6)
+
+The coordinator approved step 2 (`5370ea4`) after its own live test of the installed binary,
+with nothing to fix. It noted that an `outside` edits entry opens where the cursor was (only
+tool-call entries jump to their line), as Enter does; that is on the roadmap as a later nicety.
+
+Live in tmux (`-L geexdf`, 120×30, the tree and the edits pane shown), with raw SGR reports:
+- `Alt+=` then `Alt+-` drew `⠿` on the divider's middle, on the lower right pane's tab bar just
+  before its `×`, on the tree's edge, and in the edits title's rule.
+- Dragging the stacked handle from row 10 to row 5 moved pane 3's tab bar to row 5.
+- Dragging the divider from column 74 to 59 narrowed the left pane; a double-click on it put it
+  back to even.
+- Dragging the tree's edge to column 40 and the edits title up to row 14 resized them (seen
+  before the review fixes).
+- The terminal resized to 90×24 kept the proportions.
+- Ctrl-X left the mouse modes off.
+
+Reviewed adversarially (two agents: the layout and model math, with sweeps over hundreds of
+split trees and every size up to 110×45; the loop's mouse interplay). Even splits lay out as
+before wherever the old layout kept panes at least 12×4. Fixed:
+- short of room, a dragged split could collapse a pane to 0 rows or columns, and `ratio_at`
+  could pass 1 (the least sizes now shrink in proportion);
+- a dragged tree or edits pane could squeeze the editor below what its splits need
+  (`Layout.least/1` now bounds them);
+- a drag whose split changed under it (a pane closed) moved another split;
+- the stacked handle was drawn on any blank cell, a tab's space included, where a press didn't
+  take it, and a full tab bar left no cell to grab (each bar on a boundary now keeps a handle
+  cell, drawn and hit-tested by `TabBar`);
+- a press where a handle had been dragged from, or on a tab bar blanked by a `×`, counted as a
+  double-click (presses now carry their kind);
+- the edits handle vanished under the focused title's longer hint; a press on the tree's edge
+  stopped focusing the tree; hiding a panel mid-drag reset its size.
+
+**Automated:** `test/geex/loop/resize_test.exs` (15 tests: dividers, clamps, double-click, a
+stacked and a nested split, a terminal resize, the tree and edits sizes, the drawn handles, a
+full tab bar, the review's cases), Layout doctests (`ratio_at/3`, `handles/2`, `least/1`,
+`resolve/3`'s sizes), `Panes.set_ratio/3`. **1003 tests + 51 doctests**, green twice.
+
+**Not tested:** Windows Terminal; a real mouse; the installed binary (next, with /deploy).

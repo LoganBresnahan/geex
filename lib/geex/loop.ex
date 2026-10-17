@@ -299,7 +299,13 @@ defmodule Geex.Loop do
       # double-click.
       mouse: true,
       drag: nil,
-      click: nil
+      click: nil,
+      # Resizing by a handle (ADR-0039 step 3): what is being dragged, until the release. The
+      # tree's width and the edits pane's height once dragged (`nil`: the default, by the
+      # terminal's size); the splits keep their ratios in `panes`.
+      resizing: nil,
+      tree_w: nil,
+      edits_h: nil
     }
   end
 
@@ -650,10 +656,11 @@ defmodule Geex.Loop do
     :ok
   end
 
-  # The smallest pane a split may make: a tab bar, two text rows and the scroll-bar row; a
-  # gutter and a few columns of text.
-  @min_pane_h 4
-  @min_pane_w 12
+  # The smallest pane a split may make (`Geex.Layout.min_pane/0`): a tab bar, two text rows and the
+  # scroll-bar row; a gutter and a few columns of text.
+  {min_w, min_h} = Layout.min_pane()
+  @min_pane_w min_w
+  @min_pane_h min_h
 
   # Alt+- / Alt+=: split the current pane, unless the halves would be smaller than a pane can be.
   defp split(state, dir) do
@@ -763,6 +770,22 @@ defmodule Geex.Loop do
     # A press, like a key, dismisses a notice and disarms a refused save.
     state = schedule_repaint(%{stop_drag(state) | notice: nil, save_armed: false})
 
+    case handle_at(state, m.x, m.y) do
+      nil -> region_press(state, m)
+      target -> start_resize(state, target, m)
+    end
+  end
+
+  # A handle that moved isn't double-clicked by the next press where it was.
+  defp apply_mouse(%{action: :drag, button: :left} = m, %{resizing: %{}} = state),
+    do: schedule_repaint(resize_to(%{state | click: nil}, m.x, m.y))
+
+  defp apply_mouse(%{action: :drag, button: :left} = m, %{drag: %{}} = state),
+    do: drag_to(put_in(state.drag.at, {m.x, m.y}), :move)
+
+  defp apply_mouse(_m, state), do: state
+
+  defp region_press(state, m) do
     case region(state, m.x, m.y) do
       {:file, id, %{y: y} = rect} when m.y == y -> tab_bar_press(state, id, rect, m.x - rect.x)
       {:file, id, rect} -> press(state, id, rect, m)
@@ -773,18 +796,13 @@ defmodule Geex.Loop do
     end
   end
 
-  defp apply_mouse(%{action: :drag, button: :left} = m, %{drag: %{}} = state),
-    do: drag_to(put_in(state.drag.at, {m.x, m.y}), :move)
-
-  defp apply_mouse(_m, state), do: state
-
   # Focus the pane, then place the cursor where the press landed. The tab bar's row only focuses.
   defp press(state, id, rect, m) do
     now = System.monotonic_time(:millisecond)
-    double? = m.mods == [] and Mouse.double?(state.click, now, {m.x, m.y})
+    double? = m.mods == [] and Mouse.double?(state.click, now, {m.x, m.y}, :text)
     # Alt as well as Shift: Windows Terminal keeps Shift+click for its own selection.
     extend? = :shift in m.mods or :alt in m.mods
-    state = %{enter_pane({:file, id}, state) | click: {now, m.x, m.y}}
+    state = %{enter_pane({:file, id}, state) | click: {now, m.x, m.y, :text}}
 
     case pane_text(state, id) do
       {tab, text} when m.y > rect.y ->
@@ -838,7 +856,7 @@ defmodule Geex.Loop do
     %{state | drag: %{pane: id, buffer: buffer, anchor: anchor, at: nil, timer: nil}}
   end
 
-  defp stop_drag(state), do: %{state | drag: nil}
+  defp stop_drag(state), do: %{state | drag: nil, resizing: nil}
 
   # The pointer moved with the button held (`:move`), or a drag past the edge is due its next
   # step (`:scroll`): select from the drag's anchor to the pointer. Past the edge of the text,
@@ -912,6 +930,129 @@ defmodule Geex.Loop do
   defp step_within(at, d, max) when d > 0, do: max(min(at + d, max), at)
   defp step_within(at, _d, _max), do: at
 
+  ## Resizing (ADR-0039 step 3, ADR-0038's amendment). The handles: each split's boundary (a
+  ## side-by-side split's divider column; a stacked split's second half's top row, where the tab
+  ## bars have nothing), the tree's right edge and the edits pane's title row. Each shows `⠿`.
+  ## Dragging one resizes; a double-click on one puts it back (an even split, the default size).
+
+  @handle TabBar.handle()
+
+  # The handle under `{x, y}`, or `nil`: `:tree`, `:edits`, or `{:split, path}`.
+  defp handle_at(state, x, y) do
+    l = layout(state)
+    in_rows? = fn r -> y >= r.y and y < r.y + r.h end
+    in_cols? = fn r -> x >= r.x and x < r.x + r.w end
+
+    cond do
+      y == l.status ->
+        nil
+
+      l.tree && x == l.tree.x + l.tree.w - 1 && in_rows?.(l.tree) ->
+        :tree
+
+      l.edits && y == l.edits.y && in_cols?.(l.edits) ->
+        :edits
+
+      true ->
+        l.editor
+        |> Layout.handles(state.panes.split)
+        |> Enum.find_value(fn
+          %{dir: :cols, node: n, at: at, path: path} ->
+            x == at and in_rows?.(n) and {:split, path}
+
+          %{dir: :rows, node: n, at: at, path: path} ->
+            y == at and in_cols?.(n) and tab_bar_blank?(state, x, y) and {:split, path}
+        end)
+    end
+  end
+
+  # Whether `{x, y}` is on a tab bar where it has no tab and no `×`: its handle, or a blank.
+  defp tab_bar_blank?(state, x, y) do
+    case region(state, x, y) do
+      {:file, id, %{y: ^y} = rect} ->
+        TabBar.hit(tab_bar(state, state.panes.panes[id], rect), x - rect.x) in [nil, :handle]
+
+      _ ->
+        false
+    end
+  end
+
+  # A press on a handle: a double-click puts it back; else the drag begins. The edits pane's
+  # title still focuses it, and a stacked split's handle the pane it is on, as before.
+  defp start_resize(state, target, m) do
+    now = System.monotonic_time(:millisecond)
+    double? = Mouse.double?(state.click, now, {m.x, m.y}, :handle)
+    state = %{state | click: {now, m.x, m.y, :handle}}
+
+    state =
+      case {target, region(state, m.x, m.y)} do
+        {:edits, _} -> %{state | focus: :edits}
+        {:tree, _} -> %{state | focus: :tree}
+        {{:split, _}, {:file, id, _rect}} -> enter_pane({:file, id}, state)
+        _ -> state
+      end
+
+    cond do
+      # A split's drag remembers the split, in case a pane closes under it (`resize_to/3`).
+      not double? -> %{state | resizing: %{target: target, node: node_of(state, target)}}
+      target == :tree -> %{state | tree_w: nil}
+      target == :edits -> %{state | edits_h: nil}
+      true -> %{state | panes: Panes.set_ratio(state.panes, elem(target, 1), 0.5)}
+    end
+  end
+
+  # The pointer moved with a handle held: put the edge under it. Stored as laid out (clamped), so
+  # a later terminal resize starts from what you see.
+  # A panel hidden while its edge was held (Alt+T, Alt+L) ends the drag, keeping its size.
+  defp resize_to(%{resizing: %{target: :tree}} = state, x, _y) do
+    case layout(%{state | tree_w: x + 1}).tree do
+      nil -> stop_drag(state)
+      tree -> %{state | tree_w: tree.w}
+    end
+  end
+
+  defp resize_to(%{resizing: %{target: :edits}} = state, _x, y) do
+    case layout(%{state | edits_h: state.h - 1 - y}).edits do
+      nil -> stop_drag(state)
+      edits -> %{state | edits_h: edits.h}
+    end
+  end
+
+  defp resize_to(%{resizing: %{target: {:split, path} = target, node: was}} = state, x, y) do
+    l = layout(state)
+    same? = was == node_of(state, target)
+
+    case Enum.find(Layout.handles(l.editor, state.panes.split), &(&1.path == path)) do
+      %{dir: dir, node: node} when same? ->
+        at = if dir == :cols, do: x, else: y
+        ratio = Layout.ratio_at(node, split_at(state.panes.split, path), at)
+        %{state | panes: Panes.set_ratio(state.panes, path, ratio)}
+
+      _gone_or_changed ->
+        stop_drag(state)
+    end
+  end
+
+  # A split's direction and panes: the same path names another split after a pane closes.
+  defp node_of(state, {:split, path}) do
+    case split_at(state.panes.split, path) do
+      {dir, _a, _b, _r} = node ->
+        {dir, %Geex.Rect{x: 0, y: 0, w: 0, h: 0} |> Layout.split(node) |> ids()}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp node_of(_state, _target), do: nil
+
+  defp ids(laid_out), do: Enum.map(laid_out, &elem(&1, 0))
+
+  defp split_at(split, []), do: split
+  defp split_at({_dir, a, _b, _r}, [:a | path]), do: split_at(a, path)
+  defp split_at({_dir, _a, b, _r}, [:b | path]), do: split_at(b, path)
+  defp split_at(_leaf, _path), do: nil
+
   # What is under screen cell `{x, y}`: a file pane (`{:file, id, rect}`), the tree or the edits
   # pane (`{:tree | :edits, rect}`), the status line, or nothing (a divider).
   defp region(state, x, y) do
@@ -942,6 +1083,7 @@ defmodule Geex.Loop do
   # with unsaved edits), the pane's `×` closes the pane. Each focuses the pane first.
   defp tab_bar_press(state, id, rect, x) do
     pane = state.panes.panes[id]
+    state = %{state | click: {System.monotonic_time(:millisecond), rect.x + x, rect.y, :tab}}
 
     case TabBar.hit(tab_bar(state, pane, rect), x) do
       # The pane you were in stays current, unless it is the one closing.
@@ -971,7 +1113,7 @@ defmodule Geex.Loop do
           state |> enter_pane({:file, id}) |> switch(&Panes.select(&1, i)) |> do_close()
         end
 
-      nil ->
+      _nothing_or_handle ->
         enter_pane({:file, id}, state)
     end
   end
@@ -1014,8 +1156,8 @@ defmodule Geex.Loop do
     i = state.tree.top + m.y - rect.y - 1
     now = System.monotonic_time(:millisecond)
     # A double-click on a folder would open it and close it again: the second press does nothing.
-    double? = Mouse.double?(state.click, now, {m.x, m.y})
-    state = %{state | focus: :tree, click: {now, m.x, m.y}}
+    double? = Mouse.double?(state.click, now, {m.x, m.y}, :tree)
+    state = %{state | focus: :tree, click: {now, m.x, m.y, :tree}}
 
     case Enum.at(state.tree.rows, i) do
       _ when m.x >= rect.x + rect.w - 1 ->
@@ -1337,6 +1479,18 @@ defmodule Geex.Loop do
         Screen.draw_text(acc, rect.x + x, rect.y, palette_clip(label, bar.w - x), style)
       end)
 
+    screen =
+      case bar.handle do
+        nil ->
+          screen
+
+        x ->
+          Screen.draw_text(screen, rect.x + x, rect.y, @handle, %Cell{
+            fg: pal.active_line_number,
+            bg: pal.bg
+          })
+      end
+
     case bar.close do
       nil ->
         screen
@@ -1350,9 +1504,12 @@ defmodule Geex.Loop do
   end
 
   # The tab bar's layout for a pane at `rect`: what is drawn, and what a click hits.
+  # A pane below the editor's top row is the lower half of a stacked split: its bar keeps the
+  # split's handle (ADR-0038 §6).
   defp tab_bar(state, %{tabs: tabs, at: at}, rect) do
     names = Enum.map(tabs, &tab_label(&1.buffer))
-    TabBar.layout(names, at, rect.w, map_size(state.panes.panes) > 1)
+    handle? = rect.y > layout(state).editor.y
+    TabBar.layout(names, at, rect.w, map_size(state.panes.panes) > 1, handle?)
   end
 
   defp tab_label(pid) do
@@ -1362,10 +1519,16 @@ defmodule Geex.Loop do
     end
   end
 
+  # A side-by-side split's divider, its handle in the middle (ADR-0039 step 3).
   defp draw_divider(screen, %Geex.Rect{x: x, y: y, h: h}, %Theme{palette: pal}) do
     Enum.reduce(y..(y + h - 1)//1, screen, fn row, acc ->
       Screen.set_cell(acc, x, row, %Cell{char: "│", fg: pal.line_number, bg: pal.bg})
     end)
+    |> Screen.set_cell(x, y + div(h, 2), %Cell{
+      char: @handle,
+      fg: pal.active_line_number,
+      bg: pal.bg
+    })
   end
 
   # Two rows at the bottom are reserved: the status line (h-1) and the horizontal scroll
@@ -1462,6 +1625,17 @@ defmodule Geex.Loop do
       |> Screen.fill_rect(x, y, w, h, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
       |> Screen.draw_text(x, y, palette_clip(title, w), %Cell{fg: pal.line_number, bg: pal.bg})
 
+    # Its handle (ADR-0038 §6), in the middle of the title's rule, between its name and the hint:
+    # drag the title row to resize.
+    rule = max(w - 9 - String.length(hint), 0)
+    mid = x + 9 + div(rule, 2)
+
+    screen =
+      if rule > 0,
+        do:
+          Screen.draw_text(screen, mid, y, @handle, %Cell{fg: pal.active_line_number, bg: pal.bg}),
+        else: screen
+
     if entries == [] do
       Screen.draw_text(screen, x + 2, y + 1, palette_clip("no edits yet", w - 2), %Cell{
         fg: pal.line_number,
@@ -1502,6 +1676,8 @@ defmodule Geex.Loop do
       Enum.reduce(0..(h - 1)//1, screen, fn row, acc ->
         Screen.draw_text(acc, inner, row, "│", %Cell{fg: pal.line_number, bg: pal.bg})
       end)
+      # Its handle (ADR-0039 step 3): drag the edge to resize.
+      |> Screen.draw_text(inner, div(h, 2), @handle, %Cell{fg: pal.active_line_number, bg: pal.bg})
 
     rows = state.tree.rows
     n = max(h - 1, 0)
@@ -1540,7 +1716,10 @@ defmodule Geex.Loop do
   defp layout(state) do
     Layout.resolve(state.w, state.h, %{
       edits: state.edits_shown,
-      tree: state.tree_shown and safe_start().root != nil
+      tree: state.tree_shown and safe_start().root != nil,
+      tree_w: state.tree_w,
+      edits_h: state.edits_h,
+      least: Layout.least(state.panes.split)
     })
   end
 

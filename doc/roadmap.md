@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-17):** 988 tests + 47 doctests green, `--warnings-as-errors` clean. geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
+**Current (2026-10-17):** 1003 tests + 51 doctests green, `--warnings-as-errors` clean. geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -464,8 +464,13 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    2. **Everything clickable** — **built 2026-10-17**: the tree, the edits pane, the tabs and a
       `×` on each, a `×` per pane, the pickers, the status line's "behind disk"; Alt+click
       extends a selection (Windows Terminal keeps Shift+click).
-   3. **Resizing** — drag handles on the split dividers, the tree's edge and the edits pane's
-      edge; splits keep a ratio (an ADR-0038 amendment).
+   3. **Resizing** — **built 2026-10-17** ([adr/0038](adr/0038-split-panes-and-tabs.md) §6): drag
+      handles (`⠿`) on the split dividers, the tree's edge and the edits pane's title row; splits
+      keep a ratio, kept to the least pane size, across terminal resizes; a double-click evens.
+      Deferred: keeping the layout and sizes across restarts.
+   - Later (the coordinator's note, 2026-10-17): an `outside` edits entry opens its file where the
+     cursor was, as Enter does; only tool-call entries jump to their first changed line. Jumping
+     to an outside change's first line would be a nicety.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the
