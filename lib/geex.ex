@@ -75,8 +75,12 @@ defmodule Geex do
 
   defp open([]), do: open(nil)
 
-  # Open the last first, so the first is shown and the recent list reads in argument order.
-  defp open([_ | _] = paths), do: paths |> Enum.reverse() |> Enum.each(&open/1)
+  # Open the last first, so the first is shown and the recent list reads in argument order. The
+  # editor shows them as tabs in argument order (ADR-0038).
+  defp open([_ | _] = paths) do
+    pids = paths |> Enum.reverse() |> Enum.map(&open/1) |> Enum.reverse()
+    Geex.Loop.open_tabs(for {:ok, pid} <- pids, do: pid)
+  end
 
   defp open(path) when is_binary(path) do
     if File.dir?(path), do: open(nil), else: Geex.Session.open_file(path)
@@ -87,6 +91,7 @@ defmodule Geex do
   defp open(nil) do
     {:ok, buf} = Geex.BufferSupervisor.start_scratch()
     Geex.Session.set_active_buffer(buf)
+    {:ok, buf}
   end
 
   # geex draws on the terminal via :prim_tty, so any console/Logger output would

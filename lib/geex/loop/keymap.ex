@@ -45,6 +45,11 @@ defmodule Geex.Loop.Keymap do
           | :close
           | :toggle_tree
           | :toggle_edits
+          | :split_rows
+          | :split_cols
+          | :tab_prev
+          | :tab_next
+          | {:tab, non_neg_integer()}
           | :save
           | :quit
           | :ignore
@@ -133,6 +138,14 @@ defmodule Geex.Loop.Keymap do
   def resolve({:alt, c}, _cursor, _text) when c in [?t, ?T], do: :toggle_tree
   def resolve({:alt, c}, _cursor, _text) when c in [?l, ?L], do: :toggle_edits
   def resolve({:alt, c}, _cursor, _text) when c in [?j, ?J], do: :fast_forward
+  # Split panes and tabs (ADR-0038):
+  #   Alt+-  split the pane top and bottom;  Alt+=  split it side by side
+  #   Alt+,  the previous tab;  Alt+.  the next tab;  Alt+1..9  tab 1 to 9
+  def resolve({:alt, ?-}, _cursor, _text), do: :split_rows
+  def resolve({:alt, ?=}, _cursor, _text), do: :split_cols
+  def resolve({:alt, ?,}, _cursor, _text), do: :tab_prev
+  def resolve({:alt, ?.}, _cursor, _text), do: :tab_next
+  def resolve({:alt, d}, _cursor, _text) when d in ?1..?9, do: {:tab, d - ?1}
   # Selection (ADR-0029): Alt+H starts a selection at the cursor (motion then extends it),
   # Alt+B selects the whole buffer ("highlight all"), Alt+N / Esc clear. The loop owns the
   # live selection.

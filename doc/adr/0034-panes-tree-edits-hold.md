@@ -5,7 +5,8 @@
   (3), the file tree (4), "edited by you" (5). **Amended** 2026-10-16: the tree has no cap, and
   is read in a process of its own. **Keys amended** 2026-10-17 by
   [ADR-0037](0037-pane-and-file-keys.md): `Alt+P` is the next pane, `Alt+L` the edits pane,
-  `Alt+J` fast-forward, `Alt+O` opens a file.
+  `Alt+J` fast-forward, `Alt+O` opens a file. **Splits and tabs** (deferred here) built
+  2026-10-17 by [ADR-0038](0038-split-panes-and-tabs.md).
   Rewritten the same day after the maintainer's redirect: the first draft's follow pane is dropped.
 - **Date:** 2026-10-15
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell; it deferred tabs and

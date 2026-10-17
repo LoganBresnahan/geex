@@ -63,7 +63,8 @@ Drive and observe:
 ```sh
 tmux -L geexdf send-keys -t g "text"          # literal typing
 tmux -L geexdf send-keys -t g Enter BSpace Left  # named keys
-tmux -L geexdf send-keys -t g M-m             # Alt+<key> (minibuffer); M-i palette, M-p next pane, M-o open, M-g grid, M-h highlight
+tmux -L geexdf send-keys -t g M-m             # Alt+<key> (minibuffer); M-i palette, M-p next pane, M-o open, M-g grid, M-h highlight;
+                                              # M-- / M-= split, M-, / M-. tabs, M-1..9 tab N, M-k close
 tmux -L geexdf capture-pane -t g -p           # the rendered grid as text — READ it
 tmux -L geexdf capture-pane -t g -p -e        # with SGR colour (truecolor 38;2;r;g;b / 48;2;…)
 tmux -L geexdf display-message -t g -p '#{cursor_x},#{cursor_y}'   # the hardware cursor, 0-based

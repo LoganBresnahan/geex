@@ -4,8 +4,9 @@ defmodule Geex.Loop do
   — the **event-driven** frame owner.
 
   It sits *above* `Geex.Session` and **drives** the generic TUI core from editor
-  state. It owns no editor state (Session owns the active buffer + cursor + scroll;
-  `Geex.Buffer` owns the text + history); it owns only the event→repaint cycle:
+  state. Session owns the active buffer and its cursor; `Geex.Buffer` owns the text + history.
+  The loop owns the file panes and their tabs (`Geex.Loop.Panes`, ADR-0038: every other tab's
+  cursor, every tab's scroll) and the event→repaint cycle:
 
       Geex.TerminalIO          (resize, keys)        ┐
       Geex.Session             (active-buffer change) ├─▶ mark dirty ─▶ coalesce
@@ -63,7 +64,7 @@ defmodule Geex.Loop do
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
-  alias Geex.Loop.{EditsPane, Keymap, Verbs}
+  alias Geex.Loop.{EditsPane, Keymap, Panes, Verbs}
   alias Geex.MCP.ViewActions
 
   # Rows of context kept between the cursor and the top/bottom of the viewport
@@ -225,7 +226,7 @@ defmodule Geex.Loop do
     active = Session.subscribe()
     safe_subscribe_edits()
     {w, h} = safe_window_size()
-    {:ok, schedule_repaint(new_state(w, h) |> attach(active))}
+    {:ok, schedule_repaint(new_state(w, h) |> adopt_active(active))}
   end
 
   @doc false
@@ -235,14 +236,13 @@ defmodule Geex.Loop do
     %{
       w: w,
       h: h,
-      scroll: 0,
-      hscroll: 0,
       goal: 0,
       selection: nil,
       theme: Theme.default(),
-      buffer: nil,
-      buffer_ref: nil,
-      reactor: nil,
+      # The file panes and their tabs (ADR-0038); `watched` every buffer in a tab: its monitor
+      # and its highlight reactor, `%{pid => %{ref, reactor}}`.
+      panes: Panes.new(),
+      watched: %{},
       repaint?: false,
       minibuffer: Minibuffer.new(),
       # A one-line message from the buffer (`{:geex_buffer_notice, …}`, e.g. a reconcile
@@ -251,8 +251,6 @@ defmodule Geex.Loop do
       # Ctrl-O was just refused over a leftover conflict block: the next key, if it is
       # Ctrl-O again, saves anyway (ADR-0034 §3).
       save_armed: false,
-      # Each buffer's last `{scroll, hscroll}`, restored when it is shown again (ADR-0034).
-      scrolls: %{},
       # The edits pane (ADR-0034 §6): shown at start when the terminal has 20 rows; `edits`
       # toggles it (Alt+L). `focus` is where keys go (`Alt+P`); `edits_sel` its highlighted entry.
       edits_shown: h >= 20,
@@ -276,32 +274,61 @@ defmodule Geex.Loop do
 
   @impl true
   def handle_info({:geex_active_buffer, pid}, state),
-    do: {:noreply, schedule_repaint(attach(state, pid))}
+    do: {:noreply, schedule_repaint(adopt_active(state, pid))}
+
+  def handle_info({:geex_open_tabs, [_ | _] = pids}, state) do
+    state = leave(state)
+
+    panes =
+      Enum.reduce(pids, state.panes, fn pid, acc -> acc |> Panes.show(pid) |> elem(0) end)
+
+    %{tabs: tabs} = pane = panes.panes[panes.pane]
+    {given, others} = Enum.split_with(tabs, &(&1.buffer in pids))
+    given = Enum.sort_by(given, fn tab -> Enum.find_index(pids, &(&1 == tab.buffer)) end)
+    panes = put_in(panes.panes[panes.pane], %{pane | tabs: given ++ others, at: 0})
+    {:noreply, schedule_repaint(state |> put_panes(panes) |> enter())}
+  end
 
   # Any buffer change drops the live selection: our own edits already cleared it, and an
   # out-of-band edit (agent/reconcile) would otherwise leave a stale selection whose carets
   # no longer match the text — a later copy/cut would grab the wrong region.
-  def handle_info({:geex_buffer_change, buffer, _v, _footprint}, %{buffer: buffer} = state),
-    do: {:noreply, schedule_repaint(%{state | selection: nil})}
+  # Any pane showing the buffer repaints; only the current tab's selection is affected.
+  def handle_info({:geex_buffer_change, buffer, _v, _footprint}, %{watched: w} = state)
+      when is_map_key(w, buffer) do
+    state = if current_buffer(state) == buffer, do: %{state | selection: nil}, else: state
+    {:noreply, schedule_repaint(state)}
+  end
 
-  def handle_info({:geex_buffer_notice, buffer, text}, %{buffer: buffer} = state),
-    do: {:noreply, schedule_repaint(%{state | notice: text})}
+  # A notice from a buffer you aren't looking at (another tab or pane) names its file, so it
+  # doesn't read as being about the current one.
+  def handle_info({:geex_buffer_notice, buffer, text}, %{watched: w} = state)
+      when is_map_key(w, buffer) do
+    text =
+      if buffer == current_buffer(state),
+        do: text,
+        else: status_label(safe_status(buffer)[:path]) <> ": " <> text
+
+    {:noreply, schedule_repaint(%{state | notice: text})}
+  end
 
   # A late attestation relabelled an agent's lines (ADR-0032): repaint so the gutter mark and
   # the status-line author show now, not on the next keystroke.
-  def handle_info({:geex_buffer_attested, buffer, _group, _actor}, %{buffer: buffer} = state),
-    do: {:noreply, schedule_repaint(state)}
+  def handle_info({:geex_buffer_attested, buffer, _group, _actor}, %{watched: w} = state)
+      when is_map_key(w, buffer),
+      do: {:noreply, schedule_repaint(state)}
 
   # The file changed on disk, or caught up (ADR-0034): the status line says "behind disk".
-  def handle_info({:geex_buffer_behind, buffer, _behind}, %{buffer: buffer} = state),
-    do: {:noreply, schedule_repaint(state)}
+  def handle_info({:geex_buffer_behind, buffer, _behind}, %{watched: w} = state)
+      when is_map_key(w, buffer),
+      do: {:noreply, schedule_repaint(state)}
 
   # The edits list changed: an agent wrote, a file changed on disk, you saved (ADR-0034 §6).
   def handle_info({:geex_edits, :changed}, %{edits_shown: true} = state),
     do: {:noreply, schedule_repaint(state)}
 
-  def handle_info({:geex_highlights, buffer, _v}, %{buffer: buffer} = state),
-    do: {:noreply, schedule_repaint(state)}
+  def handle_info({:geex_highlights, buffer, _v}, %{watched: w} = state)
+      when is_map_key(w, buffer),
+      do: {:noreply, schedule_repaint(state)}
 
   # Someone else moved the view cursor (an agent's `line` view action, ADR-0030) — treat
   # it as the jump it is, mirroring jump_to_line: drop the live selection (its active end
@@ -388,9 +415,22 @@ defmodule Geex.Loop do
       else: {:noreply, schedule_repaint(state)}
   end
 
-  # The active buffer died — detach; a fresh open re-attaches via Session.
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{buffer_ref: ref} = state),
-    do: {:noreply, schedule_repaint(%{state | buffer: nil, buffer_ref: nil, reactor: nil})}
+  # A buffer in a tab ended (closed elsewhere, or crashed): its tabs go, in every pane, and a
+  # pane left with none closes. If it was the current tab, the tab now shown becomes current.
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, %{watched: w} = state)
+      when is_map_key(w, pid) do
+    was_current? = current_buffer(state) == pid
+    state = put_panes(state, Panes.drop_buffer(state.panes, pid))
+
+    state =
+      cond do
+        not was_current? -> state
+        Panes.current(state.panes) -> enter(state)
+        true -> fallback(state, pid)
+      end
+
+    {:noreply, schedule_repaint(state)}
+  end
 
   # The tree's reader died before answering. Say so, and keep what is shown: an empty index
   # rather than none, so the next frame doesn't start another read that dies the same way.
@@ -436,13 +476,167 @@ defmodule Geex.Loop do
     %{state | repaint?: true}
   end
 
-  # (Re)attach to `pid` as the active buffer: monitor it, subscribe to its change
-  # stream and its highlight reactor (if one is running). Old subscriptions are
-  # dropped first.
-  defp attach(state, nil), do: detach(state)
+  ## Panes and tabs (ADR-0038). Session's active buffer is the current pane's shown tab, so the
+  ## keymap, the verbs and the MCP surface act on what you are looking at. The loop owns the
+  ## other tabs' cursors and every tab's scroll (`Geex.Loop.Panes`).
 
-  defp attach(state, pid) when is_pid(pid) do
-    state = detach(state)
+  defp current_buffer(state) do
+    case Panes.current(state.panes) do
+      %{buffer: pid} -> pid
+      nil -> nil
+    end
+  end
+
+  # Session's active buffer changed (a file opened, a buffer picked, an agent's open): show it in
+  # the current pane, in its tab there or a new one. The loop's own switches arrive here too,
+  # already shown. An event that Session has since moved past is ignored, so two quick switches
+  # can't bring back the first.
+  defp adopt_active(state, nil), do: state
+
+  defp adopt_active(state, pid) do
+    cond do
+      current_buffer(state) == pid ->
+        state
+
+      safe_active_buffer() != {:ok, pid} ->
+        state
+
+      true ->
+        cursor =
+          case safe_session_snapshot() do
+            {:ok, %{cursor: cursor}} -> cursor
+            _ -> {0, 0}
+          end
+
+        {panes, kind} = Panes.show(state.panes, pid, cursor)
+        # A tab this pane already had keeps the cursor it had here.
+        if kind == :existing, do: set_cursor(Panes.current(panes).cursor)
+        put_panes(%{state | selection: nil, goal: 0}, panes)
+    end
+  end
+
+  # Open `path` as the current pane's tab, the loop's way: leave this tab, open, and show the
+  # buffer now rather than when Session's event comes back, so a key queued behind this one acts
+  # on the tab you see.
+  defp open_tab(path, state) do
+    state = leave(state)
+
+    case safe_open_file(path) do
+      {:ok, pid} -> {:ok, pid, adopt_active(state, pid)}
+      {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  # Before the loop makes another tab current: copy Session's cursor (the current tab's while it
+  # is current) into the tab.
+  defp leave(state) do
+    with %{buffer: pid} <- Panes.current(state.panes),
+         {:ok, ^pid} <- safe_active_buffer(),
+         {:ok, %{cursor: cursor}} <- safe_session_snapshot() do
+      %{state | panes: Panes.update_current(state.panes, &%{&1 | cursor: cursor})}
+    else
+      _ -> state
+    end
+  end
+
+  # Make the current tab Session's active buffer, at the cursor it had in this pane. A selection
+  # and the goal column belong to the tab you left.
+  defp enter(state) do
+    case Panes.current(state.panes) do
+      %{buffer: pid, cursor: cursor} ->
+        safe_set_active(pid)
+        set_cursor(cursor)
+
+      nil ->
+        :ok
+    end
+
+    %{state | selection: nil, goal: 0}
+  end
+
+  # The only pane lost its only buffer some other way than Alt+K (an agent closed it, it
+  # crashed): show another open buffer, or a new scratch one, as `close_active/0` would.
+  defp fallback(state, dead) do
+    next =
+      case Enum.find(safe_buffers(), &(&1.pid != dead)) do
+        %{pid: pid} ->
+          pid
+
+        nil ->
+          case Geex.BufferSupervisor.start_scratch() do
+            {:ok, pid} -> pid
+            _ -> nil
+          end
+      end
+
+    if next do
+      safe_set_active(next)
+      adopt_active(state, next)
+    else
+      state
+    end
+  end
+
+  defp safe_buffers do
+    Session.buffers()
+  catch
+    :exit, _ -> []
+  end
+
+  # `geex a b c` (`Geex.open_paths/1`): the files as tabs in that order, the first shown. Their
+  # opens' own events race this; whatever tabs those added stay, after these.
+  @doc false
+  def open_tabs(pids) do
+    if loop = Process.whereis(__MODULE__), do: send(loop, {:geex_open_tabs, pids})
+    :ok
+  end
+
+  # The smallest pane a split may make: a tab bar, two text rows and the scroll-bar row; a
+  # gutter and a few columns of text.
+  @min_pane_h 4
+  @min_pane_w 12
+
+  # Alt+- / Alt+=: split the current pane, unless the halves would be smaller than a pane can be.
+  defp split(state, dir) do
+    rect =
+      layout(state).editor
+      |> Layout.split(state.panes.split)
+      |> Enum.find_value(fn {id, rect} -> id == state.panes.pane && rect end)
+
+    roomy? =
+      case {dir, rect} do
+        {:rows, %Geex.Rect{h: h}} -> div(h, 2) >= @min_pane_h
+        {:cols, %Geex.Rect{w: w}} -> div(w - 1, 2) >= @min_pane_w
+        _ -> false
+      end
+
+    if roomy?,
+      do: switch(state, &Panes.split(&1, dir)),
+      else: %{state | notice: "no room to split this pane"}
+  end
+
+  # Switch tabs or panes the loop's way: leave, change, enter.
+  defp switch(state, fun), do: state |> leave() |> then(&put_panes(&1, fun.(&1.panes))) |> enter()
+
+  # Set the panes, then watch every buffer in a tab: monitor it, subscribe to its changes and its
+  # highlight reactor. Buffers no tab holds any more are let go.
+  defp put_panes(state, panes) do
+    want = Panes.buffers(panes)
+
+    state =
+      Enum.reduce(Map.keys(state.watched), state, fn pid, acc ->
+        if MapSet.member?(want, pid), do: acc, else: unwatch(acc, pid)
+      end)
+
+    state =
+      Enum.reduce(want, state, fn pid, acc ->
+        if Map.has_key?(acc.watched, pid), do: acc, else: watch(acc, pid)
+      end)
+
+    %{state | panes: panes}
+  end
+
+  defp watch(state, pid) do
     ref = Process.monitor(pid)
     _ = safe_subscribe_buffer(pid)
 
@@ -456,135 +650,248 @@ defmodule Geex.Loop do
           nil
       end
 
-    {{scroll, hscroll}, scrolls} = Map.pop(state.scrolls, pid, {0, 0})
-
-    %{
-      state
-      | buffer: pid,
-        buffer_ref: ref,
-        reactor: reactor,
-        scroll: scroll,
-        hscroll: hscroll,
-        scrolls: scrolls
-    }
+    put_in(state.watched[pid], %{ref: ref, reactor: reactor})
   end
 
-  defp detach(%{buffer_ref: ref, buffer: buf, reactor: reactor} = state) when is_reference(ref) do
+  # Drop our subscriptions too, not just our monitor: otherwise the buffer and its reactor keep
+  # us in their subscriber sets (and keep sending us changes) until they end.
+  defp unwatch(state, pid) do
+    {%{ref: ref, reactor: reactor}, watched} = Map.pop(state.watched, pid)
     Process.demonitor(ref, [:flush])
-    # Drop our subscriptions too, not just our monitor: otherwise the old buffer and
-    # its reactor keep us in their subscriber sets (and keep sending us now-dropped
-    # change/overlay messages) until they die — a leak across buffer switches.
-    if is_pid(buf), do: Buffer.unsubscribe(buf, self())
+    Buffer.unsubscribe(pid, self())
     if is_pid(reactor), do: Reactor.unsubscribe(reactor, self())
-    # A selection is buffer-specific; drop it (and reset the goal) on a buffer switch. Where
-    # the buffer was scrolled to comes back with it.
-    scrolls =
-      if is_pid(buf),
-        do: Map.put(state.scrolls, buf, {state.scroll, state.hscroll}),
-        else: state.scrolls
-
-    %{
-      state
-      | buffer: nil,
-        buffer_ref: nil,
-        reactor: nil,
-        selection: nil,
-        goal: 0,
-        scrolls: scrolls
-    }
+    %{state | watched: watched}
   end
 
-  defp detach(state), do: state
+  defp reactor_of(state, pid) do
+    case state.watched do
+      %{^pid => %{reactor: reactor}} -> reactor
+      _ -> nil
+    end
+  end
 
+  # One frame: each file pane (its tab bar, then the text), the dividers between side-by-side
+  # panes, the tree and the edits pane, then the status line (the current tab's) or the
+  # minibuffer, and the palette's popup on top.
   defp repaint(state) do
-    case safe_session_snapshot() do
-      {:ok, %{text: text, cursor: {line, _} = cursor} = snap} ->
-        # The bottom row is the status line; the buffer renders into the rows above
-        # it, the cursor stays within that text area, and a scrolloff margin keeps it
-        # off the top/bottom edges. Paint the text rect, grow to the full height, then
-        # overlay the status row.
-        #
-        # Grid mode (ADR-0027) reserves one more row at the **top** for the display-column
-        # ruler; the text frame is painted at the reduced height and shifted down by `top`.
-        grid? = grid_mode?(state)
-        top = if grid?, do: 1, else: 0
-        # The editor draws above the edits pane (ADR-0034 §4): it renders as if the terminal
-        # ended one row below its own rectangle, where its status line would be.
-        state = ensure_tree(state)
-        layout = layout(state)
-        est = %{state | w: layout.editor.w, h: layout.editor.h + 1}
-        h_text = max(text_height(est.h) - top, 0)
-        # Reserve the rightmost column for a vertical scroll bar when the buffer overflows
-        # the viewport; the text then renders into a one-column-narrower area.
-        total = line_count(text)
-        vbar? = h_text > 0 and total > h_text
-        tw = est.w - if(vbar?, do: 1, else: 0)
+    state = ensure_tree(state)
+    layout = layout(state)
+    editing? = focused(state, layout) == :editor
+    active = safe_session_snapshot()
+    active_pid = safe_active_buffer()
 
-        scroll = scroll_for(state.scroll, line, h_text, @scrolloff)
+    {screen, panes, cursor} =
+      layout.editor
+      |> Layout.split(state.panes.split)
+      |> Enum.reduce({Screen.new(state.w, state.h), state.panes, :hidden}, fn {id, rect},
+                                                                              {screen, panes,
+                                                                               cursor} ->
+        current? = id == panes.pane
 
-        # `text` (Session.snapshot) and the overlay (Reactor.render) are read from two
-        # processes, so painting assumes they are the same buffer version. That holds in
-        # the single-frontend flow — the buffer emits its change to the reactor *before*
-        # this repaint's render call can reach it, so the optimistic overlay is already at
-        # `text`'s version. A *concurrent* MCP/reconcile edit landing between these two
-        # reads can briefly pair text@vN with spans@v(N+1); the overlay only ever clips
-        # (Paint tolerates out-of-range spans, never crashes) and the change's own repaint
-        # corrects it next frame. Enforce-the-versions-match is a deferred refinement.
-        {screen, {cx, cy}, hscroll} =
-          frame(
-            text,
-            overlay_spans(state.reactor),
-            state.theme,
-            cursor,
-            tw,
-            h_text,
-            scroll,
-            state.hscroll,
-            state.selection
-          )
+        case pane_view(panes, id, current?, active, active_pid) do
+          # A resize can leave a pane too small to draw (`split/2` refuses to make one).
+          _ when rect.w < 3 or rect.h < 3 ->
+            {screen, panes, cursor}
 
-        gw = gutter_width(text)
-        text_w = max(tw - gw, 0)
-        content_w = max_line_width(text)
+          nil ->
+            {draw_empty_pane(screen, rect, current? and editing?, state), panes, cursor}
 
-        screen =
-          screen
-          |> agent_marks(snap.blame, scroll, h_text, state.theme)
-          |> Screen.resize(est.w, state.h)
-          |> maybe_vscrollbar(vbar?, est.w - 1, h_text, scroll, total, state.theme)
-          # Shift the text + scroll bar down past the reserved ruler row, then paint the
-          # contextual grid chrome over the now-vacant top row + the text region.
-          |> Screen.translate_y(top)
-          |> draw_ruler(grid?, gw, text_w, hscroll, state.theme)
-          |> draw_grid_lines(grid?, gw, text_w, h_text, top, hscroll, state.theme)
-          |> draw_hbar(est, gw, text_w, content_w, hscroll)
-          # Over beside the tree, then the panels (ADR-0034 §4).
-          |> Screen.resize(state.w, state.h)
-          |> Screen.translate_x(layout.editor.x)
-          |> draw_tree(layout.tree, state)
-          |> draw_edits_pane(layout.edits, state)
+          {tab, snap} ->
+            {pane, tab, at} = draw_pane(rect, tab, snap, current?, current? and editing?, state)
+            panes = Panes.update_shown(panes, id, fn _ -> tab end)
+            cursor = if current? and editing?, do: at, else: cursor
 
-        # The hardware cursor is the editor's; a focused panel shows its selection instead.
-        target =
-          case {focused(state, layout), cursor_target(est.w, h_text, cx, cy)} do
-            {:editor, {x, y}} -> {x + layout.editor.x, y + top}
-            _ -> :hidden
+            screen =
+              screen
+              |> Screen.blit(pane, rect.x, rect.y)
+              |> draw_tab_bar(rect, panes.panes[id], current? and editing?, state)
+
+            {screen, panes, cursor}
+        end
+      end)
+
+    screen =
+      layout.editor
+      |> Layout.dividers(state.panes.split)
+      |> Enum.reduce(screen, &draw_divider(&2, &1, state.theme))
+      |> draw_tree(layout.tree, state)
+      |> draw_edits_pane(layout.edits, state)
+
+    {screen, cursor} =
+      case active do
+        {:ok, snap} -> draw_bottom(screen, state, snap, cursor)
+        _ -> draw_bottom(screen, state, nil, cursor)
+      end
+
+    # The palette popup (ADR-0028 §3) overlays the rows just above the minibuffer input —
+    # painted last so it sits on top of the text; a no-op outside the picker modes.
+    screen = draw_palette(screen, state)
+
+    Renderer.flush(screen, cursor)
+    %{state | panes: panes}
+  end
+
+  # What pane `id` shows: its tab and a snapshot of the tab's buffer at the tab's cursor. The
+  # current tab, while it is Session's active buffer, reads Session's snapshot (its cursor lives
+  # there); any other tab reads its buffer and keeps its own cursor, clamped to the text (another
+  # pane's edit can have shortened it).
+  defp pane_view(panes, id, current?, active, active_pid) do
+    case Panes.shown(panes, id) do
+      nil ->
+        nil
+
+      %{buffer: pid} = tab ->
+        case {current?, active, active_pid} do
+          {true, {:ok, snap}, {:ok, ^pid}} ->
+            {tab, snap}
+
+          _ ->
+            case safe_buffer_snapshot(pid) do
+              {:ok, snap} -> {tab, Map.put(snap, :cursor, clamp_cursor(tab.cursor, snap.text))}
+              :error -> nil
+            end
+        end
+    end
+  end
+
+  # One file pane, drawn on a screen of its own size: the tab bar row (drawn after, over the
+  # whole frame), the text, and the horizontal scroll-bar row at the bottom. Grid mode's ruler
+  # (ADR-0027) takes the top text row of the current pane. Returns the pane's screen, the tab
+  # with where it scrolled to, and the hardware cursor's place on the frame (or `:hidden`).
+  defp draw_pane(rect, tab, snap, current?, focused?, state) do
+    %{text: text, cursor: {line, _} = cursor} = snap
+    grid? = current? and grid_mode?(state)
+    top = if grid?, do: 1, else: 0
+    # `est` is the pane as the single-editor drawing below knew it: its text rows, then the
+    # scroll-bar row, then one row past the pane (where the old editor's status line sat).
+    est = %{state | w: rect.w, h: rect.h}
+    h_text = max(text_height(est.h) - top, 0)
+    # Reserve the rightmost column for a vertical scroll bar when the buffer overflows the
+    # viewport; the text then renders into a one-column-narrower area.
+    total = line_count(text)
+    vbar? = h_text > 0 and total > h_text
+    tw = est.w - if(vbar?, do: 1, else: 0)
+
+    scroll = scroll_for(tab.scroll, line, h_text, @scrolloff)
+
+    # `text` (the snapshot) and the overlay (Reactor.render) are read from two processes, so
+    # painting assumes they are the same buffer version. A concurrent MCP/reconcile edit landing
+    # between the two reads can briefly pair text@vN with spans@v(N+1); the overlay only ever
+    # clips (Paint tolerates out-of-range spans) and the change's own repaint corrects it.
+    {screen, {cx, cy}, hscroll} =
+      frame(
+        text,
+        overlay_spans(reactor_of(state, tab.buffer)),
+        state.theme,
+        cursor,
+        tw,
+        h_text,
+        scroll,
+        tab.hscroll,
+        if(current?, do: state.selection)
+      )
+
+    gw = gutter_width(text)
+    text_w = max(tw - gw, 0)
+    content_w = max_line_width(text)
+
+    screen =
+      screen
+      |> agent_marks(snap.blame, scroll, h_text, state.theme)
+      |> Screen.resize(est.w, est.h)
+      |> maybe_vscrollbar(vbar?, est.w - 1, h_text, scroll, total, state.theme)
+      # Shift the text + scroll bar down past the reserved ruler row, then paint the
+      # contextual grid chrome over the now-vacant top row + the text region.
+      |> Screen.translate_y(top)
+      |> draw_ruler(grid?, gw, text_w, hscroll, state.theme)
+      |> draw_grid_lines(grid?, gw, text_w, h_text, top, hscroll, state.theme)
+      |> draw_hbar(est, gw, text_w, content_w, hscroll)
+      # Down one more, under the tab bar.
+      |> Screen.translate_y(1)
+
+    at =
+      case {focused?, cursor_target(est.w, h_text, cx, cy)} do
+        {true, {x, y}} -> {x + rect.x, y + top + 1 + rect.y}
+        _ -> :hidden
+      end
+
+    # The current tab's cursor is Session's; keep a copy, for when Session moves on without the
+    # loop (an outside open).
+    {screen, %{tab | scroll: scroll, hscroll: hscroll, cursor: cursor}, at}
+  end
+
+  # A pane with no tabs: its tab bar, and a hint.
+  defp draw_empty_pane(screen, rect, focused?, %{theme: %Theme{palette: pal}} = state) do
+    screen
+    |> Screen.fill_rect(rect.x, rect.y, rect.w, rect.h, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
+    |> draw_tab_bar(rect, %{tabs: [], at: 0}, focused?, state)
+    |> Screen.draw_text(
+      rect.x + 1,
+      rect.y + 2,
+      palette_clip("no file (Alt+O opens one)", rect.w - 1),
+      %Cell{
+        fg: pal.line_number,
+        bg: pal.bg
+      }
+    )
+  end
+
+  # The pane's tab bar (ADR-0038) on its top row: each tab numbered (Alt+1..9) with its file name
+  # and ` [+]` for unsaved edits; the shown tab tinted, brighter in the focused pane. Tabs that
+  # don't fit are cut from the left so the shown one stays visible.
+  defp draw_tab_bar(screen, rect, %{tabs: tabs, at: at}, focused?, %{
+         theme: %Theme{palette: pal}
+       }) do
+    labels =
+      tabs
+      |> Enum.with_index()
+      |> Enum.map(fn {tab, i} -> {" #{i + 1} " <> tab_label(tab.buffer) <> " ", i == at} end)
+
+    shown_end =
+      labels |> Enum.take(at + 1) |> Enum.map(fn {l, _} -> Width.string(l) end) |> Enum.sum()
+
+    labels = drop_until_fits(labels, shown_end, rect.w)
+
+    screen =
+      Screen.fill_rect(screen, rect.x, rect.y, rect.w, 1, %Cell{
+        char: " ",
+        fg: pal.line_number,
+        bg: pal.bg
+      })
+
+    {screen, _x} =
+      Enum.reduce(labels, {screen, rect.x}, fn {label, shown?}, {acc, x} ->
+        style =
+          cond do
+            shown? and focused? -> %Cell{fg: pal.bg, bg: pal.fg}
+            shown? -> %Cell{fg: pal.fg, bg: pal.active_line_bg}
+            true -> %Cell{fg: pal.line_number, bg: pal.bg}
           end
 
-        {screen, cursor} = draw_bottom(screen, state, snap, target)
+        text = palette_clip(label, rect.x + rect.w - x)
+        {Screen.draw_text(acc, x, rect.y, text, style), x + Width.string(label)}
+      end)
 
-        # The palette popup (ADR-0028 §3) overlays the rows just above the minibuffer input —
-        # painted last so it sits on top of the text; a no-op outside `:palette` mode.
-        screen = draw_palette(screen, state)
+    screen
+  end
 
-        Renderer.flush(screen, cursor)
-        %{state | scroll: scroll, hscroll: hscroll}
+  # Drop tabs from the left while the shown one would end past the bar.
+  defp drop_until_fits([{label, false} | rest], shown_end, w) when shown_end > w,
+    do: drop_until_fits(rest, shown_end - Width.string(label), w)
 
-      _ ->
-        screen = draw_empty_status(Screen.new(state.w, state.h), state)
-        Renderer.flush(screen, :hidden)
-        %{state | scroll: 0, hscroll: 0}
+  defp drop_until_fits(labels, _shown_end, _w), do: labels
+
+  defp tab_label(pid) do
+    case safe_status(pid) do
+      %{path: path, dirty: dirty} -> status_label(path) <> if(dirty, do: " [+]", else: "")
+      nil -> "?"
     end
+  end
+
+  defp draw_divider(screen, %Geex.Rect{x: x, y: y, h: h}, %Theme{palette: pal}) do
+    Enum.reduce(y..(y + h - 1)//1, screen, fn row, acc ->
+      Screen.set_cell(acc, x, row, %Cell{char: "│", fg: pal.line_number, bg: pal.bg})
+    end)
   end
 
   # Two rows at the bottom are reserved: the status line (h-1) and the horizontal scroll
@@ -595,10 +902,10 @@ defmodule Geex.Loop do
   # The bottom row is the status line, or the **minibuffer** when it is open — which takes
   # over the status row and owns the hardware cursor while active.
   defp draw_bottom(screen, %{minibuffer: mb} = state, snap, buffer_cursor) do
-    if Minibuffer.active?(mb) do
-      {draw_minibuffer(screen, state), minibuffer_cursor(state)}
-    else
-      {draw_status(screen, state, snap), buffer_cursor}
+    cond do
+      Minibuffer.active?(mb) -> {draw_minibuffer(screen, state), minibuffer_cursor(state)}
+      snap == nil -> {draw_empty_status(screen, state), :hidden}
+      true -> {draw_status(screen, state, snap), buffer_cursor}
     end
   end
 
@@ -835,25 +1142,38 @@ defmodule Geex.Loop do
     :exit, _ -> []
   end
 
-  # Alt+P: the next pane on screen, in the order tree · editor · edits, wrapping.
+  # Alt+P: the next pane on screen, in the order tree · each file pane (reading order) · edits,
+  # wrapping (ADR-0038).
   defp next_pane(state) do
     l = layout(state)
-    panes = for {pane, rect} <- [tree: l.tree, editor: true, edits: l.edits], rect, do: pane
+    files = for id <- Panes.ids(state.panes), do: {:file, id}
+    panes = if(l.tree, do: [:tree], else: []) ++ files ++ if(l.edits, do: [:edits], else: [])
 
     case panes do
-      [:editor] ->
+      [{:file, _}] ->
         %{state | notice: "no other pane: the tree and edits pane are hidden (Alt+T, Alt+L)"}
 
       _ ->
-        i = Enum.find_index(panes, &(&1 == focused(state, l)))
+        here =
+          case focused(state, l) do
+            :editor -> {:file, state.panes.pane}
+            pane -> pane
+          end
+
+        i = Enum.find_index(panes, &(&1 == here)) || 0
         enter_pane(Enum.at(panes, rem(i + 1, length(panes))), state)
     end
   end
 
-  # The edits pane starts at its newest entry; the tree re-reads the files.
+  # The edits pane starts at its newest entry; the tree re-reads the files; a file pane becomes
+  # current, and its tab Session's active buffer.
   defp enter_pane(:edits, state), do: %{state | focus: :edits, edits_sel: 0}
   defp enter_pane(:tree, state), do: %{reload_tree(state) | focus: :tree}
-  defp enter_pane(:editor, state), do: %{state | focus: :editor}
+
+  defp enter_pane({:file, id}, state) do
+    state = if id == state.panes.pane, do: state, else: switch(state, &Panes.focus(&1, id))
+    %{state | focus: :editor}
+  end
 
   # Keys while the tree has focus: move, Enter opens a file or opens/closes a directory,
   # Right opens one, Left closes one (or, on a file, goes up to its directory), Esc goes back.
@@ -954,19 +1274,19 @@ defmodule Geex.Loop do
   # Enter on an entry: a "disk is newer" row opens the file and fast-forwards it; any other row
   # opens the file, at the first line that write changed when its group is in the history.
   defp open_entry(%{kind: :behind, path: path}, state) do
-    case Session.open_file(path) do
-      {:ok, _pid} -> do_fast_forward(state)
-      {:error, reason} -> %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
+    case open_tab(path, state) do
+      {:ok, _pid, state} -> do_fast_forward(state)
+      {:error, reason, state} -> %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
     end
   end
 
   defp open_entry(%{kind: :edit, path: path, row: row}, state) do
-    case Session.open_file(path) do
-      {:ok, pid} ->
+    case open_tab(path, state) do
+      {:ok, pid, state} ->
         if line = row.tool_use && first_line_of(pid, row.tool_use), do: set_cursor({line, 0})
         state
 
-      {:error, reason} ->
+      {:error, reason, state} ->
         %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
     end
   end
@@ -1425,7 +1745,7 @@ defmodule Geex.Loop do
 
         schedule_repaint(state)
 
-      action when is_atom(action) ->
+      action when is_atom(action) or is_tuple(action) ->
         apply_action(action, cursor, text, state)
     end
   end
@@ -1477,6 +1797,22 @@ defmodule Geex.Loop do
 
       :next_pane ->
         schedule_repaint(next_pane(state))
+
+      # Split panes and tabs (ADR-0038). The new pane shows the same tab and becomes current.
+      :split_rows ->
+        schedule_repaint(split(state, :rows))
+
+      :split_cols ->
+        schedule_repaint(split(state, :cols))
+
+      :tab_next ->
+        schedule_repaint(switch(state, &Panes.step(&1, 1)))
+
+      :tab_prev ->
+        schedule_repaint(switch(state, &Panes.step(&1, -1)))
+
+      {:tab, i} ->
+        schedule_repaint(switch(state, &Panes.select(&1, i)))
 
       # Alt+O (ADR-0037): the file finder over the root's files, read again in the background
       # so new files show up. With no root (geex started on nothing), the minibuffer, ready for
@@ -1556,10 +1892,14 @@ defmodule Geex.Loop do
         %{state | notice: "#{path} is a directory"}
 
       true ->
-        # The file you opened is what you look at next, from whichever pane you opened it.
-        case Session.open_file(full) do
-          {:ok, _pid} -> %{state | focus: :editor}
-          {:error, reason} -> %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
+        # The file you opened is what you look at next, from whichever pane you opened it: a
+        # tab in the current file pane.
+        case open_tab(full, state) do
+          {:ok, _pid, state} ->
+            %{state | focus: :editor}
+
+          {:error, reason, state} ->
+            %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
         end
     end
   end
@@ -1578,11 +1918,53 @@ defmodule Geex.Loop do
     Path.expand(path, base)
   end
 
+  # Alt+K / `close` (ADR-0038): close the current tab. A buffer still in another tab or pane stays
+  # open; otherwise the buffer closes too, refused while it has unsaved edits. The pane then shows
+  # the tab before; a pane left with none closes, unless it is the only one, which shows the
+  # buffer before (Session's `close_active/0`, a new scratch buffer when none is left).
+  @dirty "not closed: unsaved changes (save them, or undo them, first)"
+
   defp do_close(state) do
+    case Panes.current(state.panes) do
+      nil ->
+        close_active(state)
+
+      %{buffer: pid} ->
+        name = status_label(safe_status(pid)[:path])
+        rest = Panes.close_tab(state.panes)
+
+        cond do
+          Panes.elsewhere?(state.panes, pid) ->
+            state = state |> put_panes(rest) |> enter()
+            %{state | notice: "closed the tab; #{name} is still open in another"}
+
+          match?(%{dirty: true}, safe_status(pid)) ->
+            %{state | notice: @dirty}
+
+          # The only pane's last tab: Session closes it and picks what to show next, which
+          # `adopt_active/2` then shows. Only while Session agrees what that tab is.
+          Panes.current(rest) == nil ->
+            if safe_active_buffer() == {:ok, pid},
+              do: close_active(state),
+              else: state
+
+          true ->
+            state = state |> put_panes(rest) |> enter()
+
+            case safe_close_buffer(pid) do
+              {:ok, label} -> %{state | notice: "closed " <> Path.basename(label)}
+              {:error, :dirty} -> %{state | notice: @dirty}
+              {:error, _} -> state
+            end
+        end
+    end
+  end
+
+  defp close_active(state) do
     notice =
       case Session.close_active() do
         {:ok, label} -> "closed " <> Path.basename(label)
-        {:error, :dirty} -> "not closed: unsaved changes (save them, or undo them, first)"
+        {:error, :dirty} -> @dirty
         {:error, :no_active_buffer} -> nil
       end
 
@@ -1915,11 +2297,14 @@ defmodule Geex.Loop do
   # The buffer picker: Enter shows the highlighted buffer.
   defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :buffers} = mb} = state) do
     case Enum.at(candidates(state), mb.sel) do
-      %{invoke: {:buffer, pid}} -> Session.set_active_buffer(pid)
-      nil -> :ok
-    end
+      %{invoke: {:buffer, pid}} ->
+        state = leave(state)
+        safe_set_active(pid)
+        close_minibuffer(adopt_active(state, pid))
 
-    close_minibuffer(state)
+      nil ->
+        close_minibuffer(state)
+    end
   end
 
   # The finder: Enter opens the highlighted file. While the files are still being read, or the
@@ -2061,7 +2446,9 @@ defmodule Geex.Loop do
   defp apply_verb(:quit, state), do: apply_action(:quit, {0, 0}, "", state)
   # Switching and closing buffers need no text either (and work with none active).
   defp apply_verb(action, state)
-       when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane, :find_file],
+       when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane, :find_file] or
+              action in [:split_rows, :split_cols, :tab_next, :tab_prev] or
+              (is_tuple(action) and elem(action, 0) == :tab),
        do: apply_action(action, {0, 0}, "", state)
 
   defp apply_verb(action, state) do
@@ -2108,6 +2495,42 @@ defmodule Geex.Loop do
     Session.snapshot()
   catch
     :exit, _ -> {:error, :down}
+  end
+
+  defp safe_active_buffer do
+    Session.active_buffer()
+  catch
+    :exit, _ -> :error
+  end
+
+  defp safe_set_active(pid) do
+    Session.set_active_buffer(pid)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp safe_open_file(path) do
+    Session.open_file(path)
+  catch
+    :exit, _ -> {:error, :down}
+  end
+
+  defp safe_close_buffer(pid) do
+    Session.close_buffer(pid)
+  catch
+    :exit, _ -> {:error, :down}
+  end
+
+  defp safe_buffer_snapshot(pid) do
+    {:ok, Buffer.snapshot(pid)}
+  catch
+    :exit, _ -> :error
+  end
+
+  defp safe_status(pid) do
+    Buffer.status(pid)
+  catch
+    :exit, _ -> nil
   end
 
   # The overlay to paint: the optimistically-shifted overlay when a recent edit's

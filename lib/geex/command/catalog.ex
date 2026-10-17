@@ -65,7 +65,7 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "close",
-      description: "Close this buffer, not while it has unsaved changes (Alt+K).",
+      description: "Close this tab; the buffer too, unless it has unsaved changes (Alt+K).",
       invoke: {:action, :close}
     },
     %Entry{
@@ -77,6 +77,26 @@ defmodule Geex.Command.Catalog do
       name: "edits",
       description: "Show or hide the edits pane: who changed which file, and when (Alt+L).",
       invoke: {:action, :toggle_edits}
+    },
+    %Entry{
+      name: "split",
+      description: "Split the pane top and bottom (Alt+-).",
+      invoke: {:action, :split_rows}
+    },
+    %Entry{
+      name: "vsplit",
+      description: "Split the pane side by side (Alt+=).",
+      invoke: {:action, :split_cols}
+    },
+    %Entry{
+      name: "tab next",
+      description: "Show the pane's next tab (Alt+.; Alt+1..9 jumps to one).",
+      invoke: {:action, :tab_next}
+    },
+    %Entry{
+      name: "tab prev",
+      description: "Show the pane's previous tab (Alt+,).",
+      invoke: {:action, :tab_prev}
     },
     %Entry{
       name: "fast-forward",

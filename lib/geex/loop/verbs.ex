@@ -24,6 +24,9 @@ defmodule Geex.Loop.Verbs do
       file's directory, and keeps its case. `open` alone or `find` — the file finder (= `Alt+O`,
       ADR-0037). `buffers` — pick an open buffer. `close` — close this buffer (= `Alt+K`;
       refused while it has unsaved edits). ADR-0034.
+    * `split` / `vsplit` — split the pane top and bottom / side by side (= `Alt+-` / `Alt+=`);
+      `tab next` / `tab prev` / `tab N` — switch the pane's tab (= `Alt+.` / `Alt+,` /
+      `Alt+N`). ADR-0038.
     * `quit` / `exit` — leave the editor (= `Ctrl-X`).
     * `no` — the typed twin of `Alt+N`: clears a live selection (a plain cancel when
       nothing is selected). An empty line just cancels.
@@ -39,7 +42,7 @@ defmodule Geex.Loop.Verbs do
 
   @type verb ::
           {:line, non_neg_integer()}
-          | {:action, atom()}
+          | {:action, atom() | {:tab, non_neg_integer()}}
           | {:open, String.t()}
           | :cancel
           | :unknown
@@ -125,6 +128,11 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("close"), do: {:action, :close}
   defp do_parse("edits"), do: {:action, :toggle_edits}
   defp do_parse("tree"), do: {:action, :toggle_tree}
+  defp do_parse("split"), do: {:action, :split_rows}
+  defp do_parse("vsplit"), do: {:action, :split_cols}
+  defp do_parse("tab next"), do: {:action, :tab_next}
+  defp do_parse("tab prev"), do: {:action, :tab_prev}
+  defp do_parse("tab " <> n), do: parse_tab(String.trim(n))
   # `open` with no path, or `find`: the file finder (= `Alt+O`, ADR-0037).
   defp do_parse("open"), do: {:action, :find_file}
   defp do_parse("find"), do: {:action, :find_file}
@@ -145,4 +153,12 @@ defmodule Geex.Loop.Verbs do
   end
 
   defp parse_line(_input), do: :unknown
+
+  # `tab N`, 1-based as the tab bar numbers them.
+  defp parse_tab(n) do
+    case Integer.parse(n) do
+      {i, ""} when i >= 1 -> {:action, {:tab, i - 1}}
+      _ -> :unknown
+    end
+  end
 end

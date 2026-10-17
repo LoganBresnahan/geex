@@ -2,7 +2,8 @@
 
 - **Status:** Accepted. **Keys amended** 2026-10-17 by [ADR-0037](0037-pane-and-file-keys.md):
   the palette is `Alt+I` (`Alt+P` is now the next pane). **Amended** 2026-10-17: the file finder
-  is built (`Alt+O`).
+  is built (`Alt+O`). Tabs and splits built 2026-10-17 by
+  [ADR-0038](0038-split-panes-and-tabs.md).
 - **Date:** 2026-06-08
 - **Relates to:** [ADR-0027](0027-grid-command-addressing.md) (grid commands — the minibuffer's
   marquee mode), [ADR-0019](0019-file-lifecycle-and-operation-tools.md) (multi-buffer / `max_children`),

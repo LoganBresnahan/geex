@@ -180,6 +180,15 @@ defmodule Geex.Screen do
     %{s | cells: moved}
   end
 
+  @doc """
+  Copy `src`'s cells onto `dst` with `src`'s origin at `{x, y}`, dropping what falls outside
+  `dst`. How each file pane, drawn on a screen of its own, lands in the frame (ADR-0038).
+  """
+  @spec blit(t(), t(), integer(), integer()) :: t()
+  def blit(%__MODULE__{} = dst, %__MODULE__{cells: cells}, x, y) do
+    Enum.reduce(cells, dst, fn {{cx, cy}, cell}, acc -> set_cell(acc, cx + x, cy + y, cell) end)
+  end
+
   @doc "Clear the screen — every cell becomes blank."
   @spec clear(t()) :: t()
   def clear(%__MODULE__{} = s), do: %{s | cells: %{}}

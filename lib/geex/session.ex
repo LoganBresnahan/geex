@@ -155,6 +155,16 @@ defmodule Geex.Session do
   def close_active, do: GenServer.call(__MODULE__, :close_active)
 
   @doc """
+  Close the buffer `pid` without choosing another to show: a pane closing one of its tabs while
+  another tab is shown (ADR-0038). Refuses a buffer with unsaved edits (`{:error, :dirty}`). The
+  active pointer clears only if it pointed here. Returns `{:ok, label}` (the path, or
+  `"[scratch]"`), `{:error, :dirty}`, or `{:error, :no_such_buffer}` for a buffer that already
+  ended.
+  """
+  @spec close_buffer(pid()) :: {:ok, String.t()} | {:error, :dirty | :no_such_buffer}
+  def close_buffer(pid) when is_pid(pid), do: GenServer.call(__MODULE__, {:close_buffer, pid})
+
+  @doc """
   Record where geex was started (ADR-0034 §5): `path` is the directory named, or a file (its
   directory is used). Sets `dir`, and `root` = `git -C dir rev-parse --show-toplevel`, or `dir`
   outside a repository. Returns `%{dir, root}`.
@@ -371,6 +381,14 @@ defmodule Geex.Session do
 
             {:reply, {:ok, label}, put_active(state, next)}
         end
+    end
+  end
+
+  def handle_call({:close_buffer, pid}, _from, state) do
+    case safe_status(pid) do
+      nil -> {:reply, {:error, :no_such_buffer}, state}
+      %{dirty: true} -> {:reply, {:error, :dirty}, state}
+      status -> {:reply, {:ok, status.path || "[scratch]"}, drop_buffer(pid, state)}
     end
   end
 

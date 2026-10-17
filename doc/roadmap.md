@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-17):** 916 tests + 39 doctests green, `--warnings-as-errors` clean. geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
+**Current (2026-10-17):** 939 tests + 41 doctests green, `--warnings-as-errors` clean. geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -449,7 +449,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    2. **`Alt+O` fuzzy file open** — **built 2026-10-17** (ADR-0028's 2026-10-17 amendment):
       item 4's fuzzy finder over the tree's file list (git, or the walk outside a repository),
       searched in parallel off the key loop; Enter before the answer waits for it.
-   3. **Split panes with tabs per pane** — a new ADR (ADR-0034 deferred both).
+   3. **Split panes with tabs per pane** ([adr/0038](adr/0038-split-panes-and-tabs.md)) —
+      **built 2026-10-17**: `Alt+-`/`Alt+=` split evenly, each pane's tabs (`Alt+,`/`Alt+.`,
+      `Alt+1..9`, a tab bar), one buffer per file with a cursor per pane, `Alt+K` closes a tab and
+      an emptied pane. Deferred: the mouse, resizing by hand, keeping the layout across restarts.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the

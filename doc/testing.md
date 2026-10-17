@@ -2229,3 +2229,65 @@ the discovery file gone. `geex <dir>`, bare `geex` and `geex notes.txt` (holding
 not printed) opened as expected. The log had no `terminating` lines.
 
 **Not tested:** Windows Terminal; `--rollback` (checked at the first install).
+
+### 2026-10-17 — Split panes, each with its own tabs (ADR-0038)
+
+File panes split the editor evenly (`Alt+-` top/bottom, `Alt+=` side by side), each with its own
+tabs (`Alt+,`/`Alt+.`, `Alt+1..9`, a tab bar). The same file in two panes is one buffer with a
+cursor per pane. Session's active buffer is the current pane's shown tab. `Alt+K` closes a tab;
+an emptied pane closes; the only pane falls back to the buffer before. `Geex.Loop.Panes` is the
+pure model, `Geex.Layout.split/2` the rectangles, and `Session.close_buffer/1` the one new Session
+call.
+
+**Adversarial review** (three reviewers, in parallel, read-only, each refuting its own
+candidates against the code before reporting; nine findings survived, all fixed with tests):
+- *Hand-off with Session:*
+  - an edits-pane jump onto a background tab was overwritten by the tab's old cursor;
+  - a key queued behind an open acted on the old tab (Alt+K could close the file just opened).
+  Both fixed: an open now shows its tab in the same step. Also:
+  - a tab left by an outside switch kept a stale cursor (fixed: each repaint copies the current
+    tab's cursor);
+  - `geex a b c` gave one to three tabs in reverse order, depending on scheduling (fixed:
+    `Geex.Loop.open_tabs/1` makes them tabs a, b, c, a shown);
+  - the only pane emptied by a crashed buffer stayed empty (fixed: it falls back to another
+    open buffer or a scratch one).
+- *Model and layout:*
+  - a zero-width pane crashed the loop (also found by the render lens): splitting is now refused
+    below 12×4 per half ("no room to split this pane"), and a pane a resize leaves under 3×3
+    isn't drawn;
+  - splitting an empty pane made an unclosable empty pane (fixed: it isn't split);
+  - a buffer ending showed the next tab, not the one before (fixed).
+- *Rendering:* a notice from another tab's buffer read as about the current file (fixed: it
+  names its file).
+- *Refuted* (checked, no defect): Panes invariants over 3,000 × 30 random operations; Layout
+  tiling over 5,000 random trees; the parser's new Alt chords against CSI/SS3 and a lone Esc;
+  the verbs' `tab` prefixes; the row arithmetic and hardware cursor; the tab bar with CJK and
+  emoji names; subscription leaks.
+
+**Live-verified** under `mix run` in tmux (scratch repo):
+- `Alt+=` then `Alt+-`: three panes with dividers and tab bars.
+- `Alt+O` opened `notes.txt` as tab 2 of the current pane.
+- `Alt+P` went tree → each pane → edits.
+- Typing in one pane showed in the other pane on the same buffer.
+- `Alt+K`:
+  - closed a tab whose buffer was in another pane, leaving the buffer open;
+  - refused a dirty buffer;
+  - after undo, closed the buffer;
+  - closed a pane by its last tab;
+  - closed the only pane's last tab to a scratch buffer.
+- `geex a.txt notes.txt sub/s.txt` showed tabs 1–3 in order with `a.txt` shown.
+- A third `Alt+=` in a narrow pane said "no room to split this pane".
+- A resize to 20×6 and back drew without a crash.
+- Ctrl-X exited 0, with no warnings or errors in the log.
+
+**Automated:** `panes_model_test` (9: show, step/select, split, closing panes, the only pane, a
+buffer ending, elsewhere?), `split_test` (14: the frame read back from the Renderer for side-by-side
+panes and the tab bar; a cursor per pane; tabs; every Alt+K case; a buffer ending; a stale event;
+an agent's edit in both panes; the verbs and palette; the size limit; an open showing at once;
+startup tabs; another buffer's notice), plus `Layout.split/2`/`dividers/2` doctests.
+
+**939 tests + 41 doctests**, green twice, `--warnings-as-errors` clean.
+
+**Not tested:** Windows Terminal (`Alt+digit`, `Alt+-`, `Alt+=` there); the MCP surface driving
+opens while the TUI runs (not served together today); a cursor in another pane shifting with an
+edit above it (deferred: it is clamped, not moved).
