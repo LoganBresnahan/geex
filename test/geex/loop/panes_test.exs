@@ -38,12 +38,23 @@ defmodule Geex.Loop.PanesTest do
   end
 
   for pane <- [:edits, :tree] do
-    test "Alt+M and Alt+P open the minibuffer and the palette from the #{pane} pane" do
-      for {event, mode} <- [{{:alt, ?m}, :command}, {{:alt, ?p}, :palette}] do
+    test "Alt+M and Alt+I open the minibuffer and the palette from the #{pane} pane" do
+      for {event, mode} <- [{{:alt, ?m}, :command}, {{:alt, ?i}, :palette}] do
         state = key(focused_on(unquote(pane)), event)
         assert %Minibuffer{mode: ^mode} = state.minibuffer
         assert state.focus == unquote(pane)
       end
+    end
+
+    test "Alt+O, Alt+T, Alt+L and Alt+P work from the #{pane} pane (ADR-0037)" do
+      state = focused_on(unquote(pane))
+
+      assert %Minibuffer{mode: :command} = mb = key(state, {:alt, ?o}).minibuffer
+      assert Minibuffer.value(mb) == "open "
+
+      assert key(state, {:alt, ?t}).tree_shown == not state.tree_shown
+      assert key(state, {:alt, ?l}).edits_shown == not state.edits_shown
+      assert key(state, {:alt, ?p}).focus != unquote(pane)
     end
 
     test "other keys from the #{pane} pane don't reach a buffer; Esc goes back" do
@@ -53,19 +64,19 @@ defmodule Geex.Loop.PanesTest do
     end
   end
 
-  test "Alt+O cycles tree · editor · edits" do
+  test "Alt+P cycles tree · editor · edits" do
     state = Loop.new_state(120, 30)
-    state = key(state, {:alt, ?o})
+    state = key(state, {:alt, ?p})
     assert state.focus == :edits
-    state = key(state, {:alt, ?o}) |> tree_read()
+    state = key(state, {:alt, ?p}) |> tree_read()
     assert state.focus == :tree
     assert state.tree.rows |> Enum.map(& &1.path) == ["lib"]
-    assert key(state, {:alt, ?o}).focus == :editor
+    assert key(state, {:alt, ?p}).focus == :editor
   end
 
   test "in the tree, Enter opens a directory; Left on a file goes up to it, then closes it",
        %{dir: _dir} do
-    state = key(Loop.new_state(120, 30), {:alt, ?o}) |> key({:alt, ?o}) |> tree_read()
+    state = key(Loop.new_state(120, 30), {:alt, ?p}) |> key({:alt, ?p}) |> tree_read()
     state = key(state, {:key, :enter})
     assert Enum.map(state.tree.rows, & &1.path) == ["lib", "lib/a.ex"]
 
@@ -77,13 +88,43 @@ defmodule Geex.Loop.PanesTest do
     assert Enum.map(state.tree.rows, & &1.path) == ["lib"]
   end
 
+  test "in the tree, Alt+A and Alt+D act as Left and Right; Alt+W and Alt+S as Up and Down" do
+    state = key(Loop.new_state(120, 30), {:alt, ?p}) |> key({:alt, ?p}) |> tree_read()
+    state = key(state, {:alt, ?d})
+    assert Enum.map(state.tree.rows, & &1.path) == ["lib", "lib/a.ex"]
+
+    state = key(state, {:alt, ?s})
+    assert state.tree.sel == 1
+    state = key(state, {:alt, ?a})
+    assert state.tree.sel == 0
+    state = key(state, {:alt, ?A})
+    assert Enum.map(state.tree.rows, & &1.path) == ["lib"]
+  end
+
+  test "Alt+O, then Enter on a path, opens the file and gives the editor the keys", %{dir: dir} do
+    File.write!(Path.join(dir, "b.txt"), "b\n")
+    state = key(focused_on(:tree), {:alt, ?o})
+    state = Enum.reduce(String.graphemes(Path.join(dir, "b.txt")), state, &key(&2, {:char, &1}))
+    state = key(state, {:key, :enter})
+
+    assert state.focus == :editor
+    assert {:ok, %{path: path}} = Session.snapshot()
+    assert path == Path.join(dir, "b.txt")
+    assert {:ok, _} = Session.close_active()
+  end
+
+  test "Alt+K closes the file, as the `close` verb does" do
+    state = key(Loop.new_state(120, 30), {:alt, ?k})
+    assert state.notice == "closed a.ex"
+  end
+
   test "the tree is read in a process of its own: the loop doesn't wait, one read at a time" do
-    state = key(Loop.new_state(120, 30), {:alt, ?o}) |> key({:alt, ?o})
+    state = key(Loop.new_state(120, 30), {:alt, ?p}) |> key({:alt, ?p})
     assert {pid, _ref} = state.tree.reading
     assert state.tree.rows == []
 
     # Back to the editor and into the tree again while the read runs: no second read.
-    again = state |> key({:key, :esc}) |> key({:alt, ?o}) |> key({:alt, ?o})
+    again = state |> key({:key, :esc}) |> key({:alt, ?p}) |> key({:alt, ?p})
     assert again.tree.reading == state.tree.reading
 
     # An answer from another process (a superseded read) changes nothing.

@@ -2147,3 +2147,35 @@ and scratch `XDG_STATE_HOME`/`TMPDIR`, in a scratch repo:
   SIGSTOP from outside gets geex there.
 
 **Not tested:** Windows Terminal; `--rollback` this time (it was checked at the first install).
+
+### 2026-10-17 — The pane and file keys (ADR-0037)
+
+The maintainer's keymap, relayed by the coordinator: `Alt+P` next pane, `Alt+I` palette, `Alt+O`
+open a file (the minibuffer with `open ` typed, until the fuzzy finder lands), `Alt+K` close,
+`Alt+T` tree, `Alt+L` edits pane, `Alt+J` fast-forward. The pane chords work from the tree and the
+edits pane, the tree takes `Alt+A`/`Alt+D` as Left/Right, and opening a file gives the editor the
+keys.
+
+**Live-verified** under `mix run` in tmux (120×30, scratch `XDG_STATE_HOME`, a scratch git repo
+with `a.txt`, `notes.txt`, `sub/s.txt`):
+- `Alt+P` went editor → edits → tree; the edits pane's header reads `Alt+P`, and the tree's
+  `Enter` hint showed when focused.
+- In the tree, `Alt+W`/`Alt+S` moved, `Alt+D` on `sub/` opened it (`▾ sub/`, `s.txt` under it),
+  and `Alt+A` closed it.
+- From the tree: `Alt+I` opened the palette, whose `open` entry names `Alt+O`; `Alt+O` showed
+  `geex:open `. Typing `notes.txt` and Enter opened it, and the next key typed into it, so the
+  editor had the keys.
+- `Alt+K` (after `Alt+Z` undid the typing) said "closed notes.txt" and showed `a.txt`.
+- `Alt+J` said "already up to date with the disk". After `a.txt` changed on disk, the status line
+  read "behind disk (Alt+J)", and `Alt+J` caught up and showed the new line.
+- `Alt+L` hid and showed the edits pane; `Alt+T` hid and showed the tree.
+- Ctrl-X exited 0, with no errors in the log.
+
+**Automated:** +6 tests: `keymap_test` (the seven keys, both cases), `panes_test` (`Alt+O`,
+`Alt+T`, `Alt+L` and `Alt+P` from each pane; the tree's `Alt+A`/`Alt+D`; `Alt+O` then Enter
+focuses the editor; `Alt+K` closes). The `Alt+O`/`Alt+P`/`Alt+L` tests moved to the new keys.
+
+**904 tests + 35 doctests**, green twice, `--warnings-as-errors` clean.
+
+**Not tested:** Windows Terminal (where the maintainer runs geex); `Alt+K` on a buffer with
+unsaved edits live (the refusal is the `close` verb's, unchanged and tested).

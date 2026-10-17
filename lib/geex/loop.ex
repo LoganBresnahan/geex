@@ -250,7 +250,7 @@ defmodule Geex.Loop do
       # Each buffer's last `{scroll, hscroll}`, restored when it is shown again (ADR-0034).
       scrolls: %{},
       # The edits pane (ADR-0034 §6): shown at start when the terminal has 20 rows; `edits`
-      # toggles it. `focus` is where keys go (`Alt+O`); `edits_sel` its highlighted entry.
+      # toggles it (Alt+L). `focus` is where keys go (`Alt+P`); `edits_sel` its highlighted entry.
       edits_shown: h >= 20,
       focus: :editor,
       edits_sel: 0,
@@ -630,7 +630,7 @@ defmodule Geex.Loop do
        ) do
     focused? = state.focus == :edits
     entries = edits_entries()
-    hint = if focused?, do: " Enter opens · Esc back ", else: " Alt+O "
+    hint = if focused?, do: " Enter opens · Esc back ", else: " Alt+P "
     title = "── edits " <> String.duplicate("─", max(w - 9 - String.length(hint), 0)) <> hint
 
     screen =
@@ -758,14 +758,14 @@ defmodule Geex.Loop do
     :exit, _ -> []
   end
 
-  # Alt+O: the next pane on screen, in the order tree · editor · edits, wrapping.
+  # Alt+P: the next pane on screen, in the order tree · editor · edits, wrapping.
   defp next_pane(state) do
     l = layout(state)
     panes = for {pane, rect} <- [tree: l.tree, editor: true, edits: l.edits], rect, do: pane
 
     case panes do
       [:editor] ->
-        %{state | notice: "no other pane: the tree and edits pane are hidden (`tree`, `edits`)"}
+        %{state | notice: "no other pane: the tree and edits pane are hidden (Alt+T, Alt+L)"}
 
       _ ->
         i = Enum.find_index(panes, &(&1 == focused(state, l)))
@@ -779,8 +779,15 @@ defmodule Geex.Loop do
   defp enter_pane(:editor, state), do: %{state | focus: :editor}
 
   # Keys while the tree has focus: move, Enter opens a file or opens/closes a directory,
-  # Right opens one, Left closes one (or, on a file, goes up to its directory), Esc goes back. As in the edits pane, the minibuffer, the palette
-  # and quitting work; other keys do nothing.
+  # Right opens one, Left closes one (or, on a file, goes up to its directory), Esc goes back.
+  # Alt+W/A/S/D act as the arrows, as they do in the editor. The panel chords work as in the
+  # edits pane (`panel_chord/2`); other keys do nothing.
+  defp apply_tree_key({:alt, c}, state) when c in [?a, ?A],
+    do: apply_tree_key({:key, :left}, state)
+
+  defp apply_tree_key({:alt, c}, state) when c in [?d, ?D],
+    do: apply_tree_key({:key, :right}, state)
+
   defp apply_tree_key(event, %{tree: tree} = state) do
     count = length(tree.rows)
     row = Enum.at(tree.rows, min(tree.sel, count - 1))
@@ -815,22 +822,22 @@ defmodule Geex.Loop do
       e when e in [{:key, :esc}] ->
         schedule_repaint(%{state | focus: :editor})
 
-      e when e in [{:alt, ?o}, {:alt, ?O}] ->
-        schedule_repaint(next_pane(state))
-
       _ ->
         panel_chord(event, state)
     end
   end
 
-  # The chords that work from either panel: the minibuffer, the palette, quitting. They open
+  # The chords that work from either panel (ADR-0037): the minibuffer, the palette, the next
+  # pane, open a file, show or hide the tree and the edits pane, and quitting. The openers go
   # through the same branches the editor's keys use (`apply_key/4`); `apply_action/4` has no
-  # clause for the openers.
+  # clause for them.
+  @panel_actions [:next_pane, :find_file, :toggle_tree, :toggle_edits, :quit]
+
   defp panel_chord(event, state) do
     case Keymap.resolve(event, {0, 0}, "") do
       :minibuffer -> open_minibuffer(state)
       :palette -> schedule_repaint(%{state | minibuffer: Minibuffer.open(:palette)})
-      :quit -> apply_action(:quit, {0, 0}, "", state)
+      action when action in @panel_actions -> apply_action(action, {0, 0}, "", state)
       _ -> state
     end
   end
@@ -861,9 +868,6 @@ defmodule Geex.Loop do
 
       {:key, :esc} ->
         schedule_repaint(%{state | focus: :editor})
-
-      e when e in [{:alt, ?o}, {:alt, ?O}] ->
-        schedule_repaint(next_pane(state))
 
       _ ->
         panel_chord(event, state)
@@ -1018,7 +1022,7 @@ defmodule Geex.Loop do
     left =
       status_label(snap.path) <>
         if(snap.dirty, do: " [+]", else: "") <>
-        if(snap[:behind], do: "  behind disk (Alt+L)", else: "") <>
+        if(snap[:behind], do: "  behind disk (Alt+J)", else: "") <>
         if(state.notice, do: "  " <> state.notice, else: "")
 
     {line, _col} = snap.cursor
@@ -1374,6 +1378,10 @@ defmodule Geex.Loop do
       :next_pane ->
         schedule_repaint(next_pane(state))
 
+      # Alt+O (ADR-0037): the minibuffer, ready for `open PATH`.
+      :find_file ->
+        schedule_repaint(%{state | minibuffer: Minibuffer.open(:command, "open ")})
+
       :toggle_tree ->
         shown = not state.tree_shown
         state = %{state | tree_shown: shown, focus: if(shown, do: state.focus, else: :editor)}
@@ -1441,8 +1449,9 @@ defmodule Geex.Loop do
         %{state | notice: "#{path} is a directory"}
 
       true ->
+        # The file you opened is what you look at next, from whichever pane you opened it.
         case Session.open_file(full) do
-          {:ok, _pid} -> state
+          {:ok, _pid} -> %{state | focus: :editor}
           {:error, reason} -> %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
         end
     end
@@ -1473,7 +1482,7 @@ defmodule Geex.Loop do
     %{state | notice: notice}
   end
 
-  # Take in what the disk holds now (Alt+L / `fast-forward`, ADR-0034 §1). The buffer's change
+  # Take in what the disk holds now (Alt+J / `fast-forward`, ADR-0034 §1). The buffer's change
   # notification repaints; a merge with conflicts sends its own notice.
   defp do_fast_forward(state) do
     notice =

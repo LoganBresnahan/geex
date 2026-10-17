@@ -17,12 +17,13 @@ defmodule Geex.Loop.Verbs do
     * `highlight` / `select` — start a selection at the cursor (= `Alt+H`, ADR-0029);
       `highlight all` / `select all` — select the whole buffer (= `Alt+B`).
     * `save` — write the active buffer to disk (= `Ctrl-O`; an operation, ADR-0019).
-    * `fast-forward` — take in the file's change on disk (= `Alt+L`, ADR-0034).
-    * `edits` / `tree` — show or hide the edits pane / the file tree (`Alt+O` moves between
-      the panes). ADR-0034.
+    * `fast-forward` — take in the file's change on disk (= `Alt+J`, ADR-0034, ADR-0037).
+    * `edits` / `tree` — show or hide the edits pane / the file tree (= `Alt+L` / `Alt+T`;
+      `Alt+P` moves between the panes). ADR-0034, ADR-0037.
     * `open PATH` — show a file, opening it if needed; a relative `PATH` is from the current
-      file's directory, and keeps its case. `buffers` — pick an open buffer. `close` — close
-      this buffer (refused while it has unsaved edits). ADR-0034.
+      file's directory, and keeps its case (`Alt+O` starts one). `buffers` — pick an open
+      buffer. `close` — close this buffer (= `Alt+K`; refused while it has unsaved edits).
+      ADR-0034.
     * `quit` / `exit` — leave the editor (= `Ctrl-X`).
     * `no` — the typed twin of `Alt+N`: clears a live selection (a plain cancel when
       nothing is selected). An empty line just cancels.

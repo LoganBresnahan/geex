@@ -16,7 +16,7 @@ defmodule Geex.Reconcile do
 
   The watcher no longer reconciles. It tells the buffer what the disk now holds
   (`Geex.Buffer.disk_changed/2`), and the buffer is marked **behind** without changing. The
-  change is taken in only when you ask: `fast_forward/1` (`Alt+L`), or `save/2`, which
+  change is taken in only when you ask: `fast_forward/1` (`Alt+J`), or `save/2`, which
   fast-forwards a buffer that is behind before it writes. Both run the core below. A dirty
   buffer is merged with `git merge-file` (`Geex.Edit.GitMerge`): a conflict leaves git's
   marked block in the buffer, and a save with conflicts doesn't write.
@@ -141,7 +141,7 @@ defmodule Geex.Reconcile do
   end
 
   @doc """
-  Take in what the disk holds now (ADR-0034 §1): `Alt+L`, the `fast-forward` verb. Reads the
+  Take in what the disk holds now (ADR-0034 §1): `Alt+J`, the `fast-forward` verb. Reads the
   buffer's file and runs the reconcile core once, `synced` → disk, so a clean buffer takes the
   disk text and a dirty one is merged. Agent writes the buffer held are credited by the chain
   rule as the group is recorded.

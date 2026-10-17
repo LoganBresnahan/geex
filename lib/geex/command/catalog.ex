@@ -55,7 +55,7 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "open",
-      description: "Open a file (a path from this file's directory), or switch to it.",
+      description: "Open a file (a path from this file's directory), or switch to it (Alt+O).",
       invoke: {:typed, "open"}
     },
     %Entry{
@@ -65,22 +65,22 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "close",
-      description: "Close this buffer (not while it has unsaved changes).",
+      description: "Close this buffer, not while it has unsaved changes (Alt+K).",
       invoke: {:action, :close}
     },
     %Entry{
       name: "tree",
-      description: "Show or hide the file tree (Alt+O moves into it).",
+      description: "Show or hide the file tree (Alt+T; Alt+P moves into it).",
       invoke: {:action, :toggle_tree}
     },
     %Entry{
       name: "edits",
-      description: "Show or hide the edits pane: who changed which file, and when (Alt+O).",
+      description: "Show or hide the edits pane: who changed which file, and when (Alt+L).",
       invoke: {:action, :toggle_edits}
     },
     %Entry{
       name: "fast-forward",
-      description: "Take in the file's change on disk, merging your unsaved edits (Alt+L).",
+      description: "Take in the file's change on disk, merging your unsaved edits (Alt+J).",
       invoke: {:action, :fast_forward}
     },
     %Entry{

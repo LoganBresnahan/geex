@@ -203,21 +203,28 @@ defmodule Geex.Loop.KeymapTest do
       assert :grid = Keymap.resolve({:alt, ?G}, {0, 0}, "abc")
     end
 
-    test "Alt+P opens the command palette (ADR-0028 §3)" do
-      assert :palette = Keymap.resolve({:alt, ?p}, {0, 0}, "abc")
-      assert :palette = Keymap.resolve({:alt, ?P}, {0, 0}, "abc")
+    test "Alt+I opens the command palette (ADR-0028 §3, ADR-0037)" do
+      assert :palette = Keymap.resolve({:alt, ?i}, {0, 0}, "abc")
+      assert :palette = Keymap.resolve({:alt, ?I}, {0, 0}, "abc")
     end
 
-    test "the retired ERTYUIOP letters and other unbound Alt letters are ignored" do
-      assert :ignore = Keymap.resolve({:alt, ?t}, {0, 0}, "abc")
+    test "unbound Alt letters are ignored" do
       assert :ignore = Keymap.resolve({:alt, ?y}, {0, 0}, "abc")
-      assert :ignore = Keymap.resolve({:alt, ?k}, {0, 0}, "abc")
-      assert :ignore = Keymap.resolve({:alt, ?j}, {0, 0}, "abc")
+      assert :ignore = Keymap.resolve({:alt, ?Y}, {0, 0}, "abc")
     end
 
-    test "Alt+O moves to the next pane, Alt+L fast-forwards (ADR-0034)" do
-      assert :next_pane = Keymap.resolve({:alt, ?o}, {0, 0}, "abc")
-      assert :fast_forward = Keymap.resolve({:alt, ?l}, {0, 0}, "abc")
+    test "the pane and file keys (ADR-0037)" do
+      for {letter, action} <- [
+            {?p, :next_pane},
+            {?o, :find_file},
+            {?k, :close},
+            {?t, :toggle_tree},
+            {?l, :toggle_edits},
+            {?j, :fast_forward}
+          ],
+          c <- [letter, letter - 32] do
+        assert Keymap.resolve({:alt, c}, {0, 0}, "abc") == action, "Alt+#{<<c>>}"
+      end
     end
   end
 

@@ -39,6 +39,12 @@ defmodule Geex.Loop.Keymap do
           | :redo
           | :revert_hunk
           | :revert_call
+          | :fast_forward
+          | :next_pane
+          | :find_file
+          | :close
+          | :toggle_tree
+          | :toggle_edits
           | :save
           | :quit
           | :ignore
@@ -101,10 +107,10 @@ defmodule Geex.Loop.Keymap do
   # Grid mode (ADR-0027): Alt+G opens the minibuffer in `:grid` mode and shows the
   # display-column ruler + grid-line overlay for picking coordinates.
   def resolve({:alt, c}, _cursor, _text) when c in [?g, ?G], do: :grid
-  # Command palette (ADR-0028 §3): Alt+P opens the minibuffer in `:palette` mode — a fuzzy
-  # browser over `Geex.Command.Catalog`. Inside it, Alt+W/Alt+S (the editor's own up/down)
-  # move the highlight; the loop owns that, not the keymap.
-  def resolve({:alt, c}, _cursor, _text) when c in [?p, ?P], do: :palette
+  # Command palette (ADR-0028 §3; on Alt+I since ADR-0037): opens the minibuffer in `:palette`
+  # mode — a fuzzy browser over `Geex.Command.Catalog`. Inside it, Alt+W/Alt+S (the editor's
+  # own up/down) move the highlight; the loop owns that, not the keymap.
+  def resolve({:alt, c}, _cursor, _text) when c in [?i, ?I], do: :palette
   # Undo / redo (ADR-0031): Alt+Z undoes, Alt+Shift+Z redoes — these are case-*sensitive*
   # (the terminal sends `M-z` vs `M-Z`), the one Alt chord where shift means something other
   # than the same action. History operations, not edits; the loop runs them on the buffer.
@@ -114,12 +120,19 @@ defmodule Geex.Loop.Keymap do
   # Revert the agent's (or outside) change under the cursor, one hunk, keeping later edits
   # (ADR-0033 §7). `revert-call` (the whole tool call) is typed or picked from the palette.
   def resolve({:alt, c}, _cursor, _text) when c in [?u, ?U], do: :revert_hunk
-  # Fast-forward (ADR-0034 §1): take in the file's change on disk, which an open buffer holds
-  # until you ask. Merges with your unsaved edits.
-  def resolve({:alt, c}, _cursor, _text) when c in [?l, ?L], do: :fast_forward
-  # Next pane (ADR-0034 §7): the editor and the edits pane. Alt+Shift+O can't arrive: it sends
-  # `ESC O`, an SS3 prefix.
-  def resolve({:alt, c}, _cursor, _text) when c in [?o, ?O], do: :next_pane
+  # The panes and files (ADR-0037):
+  #   Alt+P — the next pane (tree · editor · edits)
+  #   Alt+O — open a file (Alt+Shift+O can't arrive: it sends `ESC O`, an SS3 prefix)
+  #   Alt+K — close the file (refused with unsaved edits)
+  #   Alt+T — show or hide the file tree;  Alt+L — show or hide the edits pane
+  #   Alt+J — fast-forward: take in the file's change on disk, which an open buffer holds until
+  #           you ask (ADR-0034 §1), merging your unsaved edits
+  def resolve({:alt, c}, _cursor, _text) when c in [?p, ?P], do: :next_pane
+  def resolve({:alt, c}, _cursor, _text) when c in [?o, ?O], do: :find_file
+  def resolve({:alt, c}, _cursor, _text) when c in [?k, ?K], do: :close
+  def resolve({:alt, c}, _cursor, _text) when c in [?t, ?T], do: :toggle_tree
+  def resolve({:alt, c}, _cursor, _text) when c in [?l, ?L], do: :toggle_edits
+  def resolve({:alt, c}, _cursor, _text) when c in [?j, ?J], do: :fast_forward
   # Selection (ADR-0029): Alt+H starts a selection at the cursor (motion then extends it),
   # Alt+B selects the whole buffer ("highlight all"), Alt+N / Esc clear. The loop owns the
   # live selection.

@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-16):** 899 tests + 35 doctests green, `--warnings-as-errors` clean. geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
+**Current (2026-10-17):** 904 tests + 35 doctests green, `--warnings-as-errors` clean. geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -181,7 +181,7 @@ The ledger track, in order (each builds on the one before):
 7. **Panes, the file tree, the edits pane, and holding open buffers**
    ([adr/0034](adr/0034-panes-tree-edits-hold.md), accepted 2026-10-15). An open buffer no
    longer changes when its file does. It is marked "behind disk" and fast-forwards on demand
-   (`Alt+L`, `fast-forward`, or Enter on its "disk is newer" row). Agent writes it holds are
+   (`Alt+L`, `Alt+J` since ADR-0037; `fast-forward`; or Enter on its "disk is newer" row). Agent writes it holds are
    credited at the fast-forward by the spool's chain rule. A dirty buffer, and a save of a buffer
    that is behind, merge with `git merge-file`: conflicts become markers in the buffer, and a
    conflicting merge doesn't write. Panes are a tree (git's file list, rooted at the path's git
@@ -357,7 +357,7 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      `:coord`/`:coord_range` (the same `Coord.parse/1` grammar, resolved as buffer-absolute
      graphemes) + `Geex.MCP.Grid` (`goto`, `copy` onto the shared clipboard ring). Remaining: agent
      `cut`, coordinate `select`, block/multi ranges, the `cursor_x`-oracle *automated* cast test.
-   - **palette** (`Alt+P`) — **built** (ADR-0028 §3 amendment): `Geex.Fuzzy` + `Geex.Command.Catalog`
+   - **palette** (`Alt+P`, `Alt+I` since ADR-0037) — **built** (ADR-0028 §3 amendment): `Geex.Fuzzy` + `Geex.Command.Catalog`
      + the `:palette` minibuffer mode with a candidate popup (`Alt+W`/`Alt+S` navigate, Enter runs).
    - Remaining: incremental **search** (`/`) and the **fuzzy file/buffer finder** (path
      tab-completion — one `Completion` abstraction, sources per mode; reuses `Geex.Fuzzy`).
@@ -437,8 +437,18 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    pane, a new query kills the old search); **git status marks** on tree rows (groundwork for the
    diff view); **idle housekeeping** (`Ledger.compact`, highlighting buffers that aren't shown).
 
+10. **Panes and files** — the maintainer's 2026-10-17 list, relayed by the coordinator session and
+   built in three steps:
+   1. **The pane and file keys** ([adr/0037](adr/0037-pane-and-file-keys.md)) — **built
+      2026-10-17**: `Alt+P` next pane, `Alt+I` palette, `Alt+O` open, `Alt+K` close, `Alt+T` tree,
+      `Alt+L` edits pane, `Alt+J` fast-forward; the pane chords work from the panes, and
+      `Alt+A`/`Alt+D` move the tree.
+   2. **`Alt+O` fuzzy file open** — item 4's fuzzy finder: the repo's files, read off the loop.
+   3. **Split panes with tabs per pane** — a new ADR (ADR-0034 deferred both).
+
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
-tail flicker) are both **FIXED** (2026-06-09); the shelf is currently clear.
+tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the
+tty) is **FIXED** (2026-10-16); the shelf is currently clear.
 
 ---
 
