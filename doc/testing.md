@@ -2968,3 +2968,15 @@ wasn't captured.
 - **1067 tests + 67 doctests**, green twice.
 
 **Not tested:** Windows Terminal; the view at very small sizes (under ~40×10).
+
+### 2026-10-18 — `geex 0.1.0+ae9b714f.89a87236` deployed (the settings view)
+
+Live with `geex` from the PATH, scratch XDG directories:
+- `geex install go` installed it; again, it said "go is already installed (up to date; --force
+  installs it again)" and fetched nothing.
+- `geex a.py m.go` said "Python highlighting available: Alt+Y".
+- `Alt+Y`, Tab, ↑, Enter chose `terminal`: "✓ in use", "theme terminal kept", and
+  `settings.json` held `{"theme":"terminal"}`.
+- Ctrl-X was clean, with no `terminating` lines.
+
+**Not tested:** Windows Terminal.
