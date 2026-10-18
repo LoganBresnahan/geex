@@ -11,6 +11,9 @@ defmodule Geex.MixProject do
       start_permanent: Mix.env() == :prod,
       # Cassette fixtures are data loaded via Code.eval_file/1, not test modules.
       test_ignore_filters: [&String.starts_with?(&1, "test/fixtures/")],
+      # Keep OTP's applications on the code path under mix: :inets and :ssl aren't dependencies
+      # (they're loaded only in the release, ADR-0040 §3), and Mix hides undeclared ones.
+      prune_code_paths: false,
       deps: deps(),
       releases: releases()
     ]
@@ -63,8 +66,12 @@ defmodule Geex.MixProject do
     [
       geex: [
         steps: [:assemble, &Burrito.wrap/1],
-        # Carried, loaded, not started at boot (ADR-0040 §3).
-        applications: [inets: :load, ssl: :load],
+        # :inets (`:httpc`) downloads a grammar or theme the user asked for (ADR-0040 §3).
+        # Carried and loaded, not started at boot, and not a dependency of :geex (Mix won't let
+        # a permanent app depend on a loaded one): `Geex.Install` starts it when a download
+        # begins, so a geex that installs nothing never starts an HTTP client. (:ssl is already
+        # started at boot, for Bandit's ThousandIsland.)
+        applications: [inets: :load],
         burrito: [
           targets: [linux: [os: :linux, cpu: :x86_64]],
           phases: [
@@ -78,10 +85,7 @@ defmodule Geex.MixProject do
 
   def application do
     [
-      # :inets (`:httpc`) and :ssl download a grammar or theme the user asked for (ADR-0040 §3).
-      # Optional, and loaded but not started in the release: `Geex.Install` starts them when a
-      # download begins, so a geex that installs nothing never starts an HTTP client.
-      extra_applications: [:logger, :crypto, inets: :optional, ssl: :optional],
+      extra_applications: [:logger, :crypto],
       mod: {Geex.Application, []}
     ]
   end

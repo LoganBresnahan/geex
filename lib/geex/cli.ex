@@ -127,7 +127,16 @@ defmodule Geex.CLI do
 
       {:install, args} ->
         Geex.redirect_logs_to_file()
-        System.halt(install(args))
+        # Always halt: a write to a closed stdout (`geex install --list | head`) raises here,
+        # inside the application's start, and the VM would otherwise hang.
+        code =
+          try do
+            install(args)
+          catch
+            _kind, _reason -> 1
+          end
+
+        System.halt(code)
 
       {:open, paths} ->
         Geex.redirect_logs_to_file()
