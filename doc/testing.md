@@ -3773,3 +3773,15 @@ alongside), sharing one install directory:
 - the built release's script has no problems.
 
 Patch B, in Zig, is checked live only.
+
+**Deployed** as `0.2.0+08883564.89a87236`, built with the fork by its git sha. The lock changes
+only Burrito's entry: hpax and mint stay at 1.0.3 and 1.10.2.
+
+**Checked in the installed binary** (tmux, scratch state, `geex .`):
+- the log reads "loading code in embedded mode";
+- `beam.smp` holds `.burrito-in-use` (fd 3), as `/proc/locks` shows.
+- **The coordinator's question:** do port programs inherit the lock? No. `erl_child_setup`
+  (the beam's child) and the `inotifywait`s it starts have no descriptor for it, so a port
+  program that outlives the VM can't keep an old unpack alive.
+- After `Ctrl-X` the shell came back, the lock was gone from `/proc/locks`, and the log had no
+  `terminating` or `undef` lines.
