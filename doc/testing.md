@@ -3722,3 +3722,54 @@ use.
 
 The maintainer's own Birds of Paradise updates the same way, with Alt+Y, then Themes, then
 Enter on it.
+
+### 2026-10-18 — a Burrito fork: real embedded mode, and cleanup that spares a running unpack (ADR-0036 §6)
+
+**What changed:**
+- The fork `LoganBresnahan/burrito`, branch `geex`, is `e008df9`: one commit on v1.5.0
+  (`ec6c8cc`), described in its `FORK.md`. geex's `mix.exs` takes Burrito from it, by sha.
+- geex logs its code-loading mode at boot.
+- `trim_release/1` also emulates the boot (`boot_problems/2`).
+- The `older_in_use` deploy guard is removed.
+
+**Embedded mode,** checked in a fork build:
+- `geex.log` reads "geex: 0.2.0+…, loading code in embedded mode";
+- `/proc/<pid>/cmdline` has `-noshell -mode embedded -setcookie …`, with `-mode` and `embedded`
+  separate;
+- the boot script preloads 1,068 modules.
+
+**The cost** (`measure.sh`, a scratch `GEEX_INSTALL_DIR`, the same code with Hex Burrito against
+the fork):
+
+| | Interactive | Embedded |
+|---|---|---|
+| first run (unpack and `--version`) | 801 ms | 967 ms |
+| warm `--version`, median of 7 | 229 ms | 422 ms |
+| warm launch to the first frame, median of 5 | 356 ms | 480 ms |
+
+**The lock:** the running `beam.smp` holds `<unpack>/.burrito-in-use` as fd 4, and
+`/proc/locks` shows a `FLOCK ADVISORY READ` held by the beam's pid.
+
+**Across versions,** with fork builds of 0.2.0 and a fake 0.2.1 (the version bumped and built
+alongside), sharing one install directory:
+- With 0.2.0 open in tmux, `0.2.1 --version` ran and both unpacks stayed.
+- The open 0.2.0 geex then saved a file, and Alt+Y installed Markdown over the network, which
+  spawned `inet_gethost` from its unpack.
+- After 0.2.0 quit, the next `0.2.1 --version` printed "Uninstalled older version
+  (v0.2.0+…)", and the unpack was gone.
+- With a pre-fork 0.2.0 build running (no lock file), 0.2.1 kept its unpack, seen in `/proc`,
+  and removed it once that geex had quit.
+
+**The unpack deleted by hand under a running embedded geex** (`rm -rf`):
+- saving, Alt+Y, Alt+O and a split still worked;
+- the first network install killed the VM: "Can not execute …/erts-16.1/bin/inet_gethost :
+  enoent", a crash dump, exit 1, the terminal not restored. ERTS treats a port program that
+  won't start as fatal, and `inet_gethost` starts on the first DNS lookup;
+- `erl_child_setup` starts at boot, so `git` and `inotifywait` were unaffected.
+
+**Automated:** `deploy_test.exs`:
+- `boot_problems/2` on a fake script finds a missing path and a missing module, and on a good
+  one finds none;
+- the built release's script has no problems.
+
+Patch B, in Zig, is checked live only.

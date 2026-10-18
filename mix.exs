@@ -119,9 +119,14 @@ defmodule Geex.MixProject do
       # github/hex once its highlight/4 API stabilizes.
       {:tree_sitter_wasm, path: "../tree_sitter_wasm"},
       # Wraps the release into one executable (ADR-0036). Build-time only, and only for prod
-      # builds. Pinned to 1.5: 1.6 needs Zig 0.16, and this machine has Zig 0.15.2, the same
-      # pin as pharos-mcp.
-      {:burrito, "~> 1.5.0", only: :prod, runtime: false}
+      # builds. The fork of 1.5.0 (ADR-0036 §6: embedded mode, and cleanup that spares a running
+      # unpack; fork-only, never upstream), pinned by sha. 1.5: 1.6 needs Zig 0.16, and this
+      # machine has Zig 0.15.2, the same pin as pharos-mcp.
+      {:burrito,
+       github: "LoganBresnahan/burrito",
+       ref: "e008df96c870b6300eedc4eef6f838bc35503b22",
+       only: :prod,
+       runtime: false}
     ]
   end
 end

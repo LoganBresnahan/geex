@@ -507,6 +507,29 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      ADR-0023's `[grammars]` path line waits for it. `geex install ./path` is the offline path
      meanwhile.
 
+13. **Portable builds, with less Burrito or none at all** — the maintainer's decision 2026-10-18,
+   relayed by the coordinator session. Not started. See [adr/0036](adr/0036-installed-binary.md)
+   (the binary, and §6 the fork) and [adr/0040](adr/0040-bare-geex-and-the-catalog.md) (packages
+   on GitHub releases).
+   1. **Goal:** depend on Burrito less, then not at all. Until then, the patched fork
+      (`LoganBresnahan/burrito`, fork-only, never upstream) is the stopgap.
+   2. **Approach:** plain release tarballs per target, built in GitHub Actions.
+      - Targets: linux-x86_64 (its own ERTS, no system OpenSSL), linux-aarch64, macos-arm64 and
+        macos-x86_64. Windows only if wanted later.
+      - The tree_sitter_wasm NIF cross-built per target, in the manner of rustler_precompiled.
+   3. **Install:** a curl installer, with the tarballs hosted on GitHub Releases.
+      - It unpacks into a versioned folder (by version or content hash), atomically, then flips
+        a `geex` link.
+      - It removes old versions only when no process uses them.
+      - There is no self-extracting wrapper, so Burrito's unpack-and-cleanup problem can't arise.
+   4. **Shared:** pharos-mcp, whose npm platform packages could carry the unpacked release
+      directly, and possibly captAInHook. One pipeline, not three.
+   5. **Not a blocker:** GitHub's CI provides macOS and Linux arm runners.
+   6. **Decided:** no npm for geex.
+   7. **Open:**
+      - where the shared pipeline lives (its own repository, or a workflow in each app);
+      - how the ERTS is built (from source in CI, or from a trusted precompiled source).
+
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the
 tty) is **FIXED** (2026-10-16), and BUG-4 (a deploy removed a running geex's unpack) is **FIXED** (2026-10-18); the shelf is currently clear.

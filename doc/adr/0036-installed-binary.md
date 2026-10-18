@@ -175,6 +175,48 @@ same check against the last built release.
 
 Of the 38.8 MB unpacked, the tree_sitter_wasm NIF (wasmtime) is 14.5 MB, already stripped.
 
+### 6. A fork of Burrito: embedded mode, and cleanup that spares a running unpack (amended 2026-10-18)
+
+The 0.2.0 deploy showed that Burrito deletes the unpacks of older versions on every run,
+whatever runs from them. The coordinator session then found why that kills a running geex:
+Burrito's launcher passes `"-mode embedded"` as one argv element, which `init` doesn't split,
+so every Burrito binary ran in interactive mode and loaded modules from its unpack lazily. The
+maintainer approved a fork: `LoganBresnahan/burrito`, branch `geex`, which is v1.5.0 plus two
+patches. It is fork-only, never sent upstream. Its `FORK.md` is the contract.
+
+- **Patch A: the VM runs in embedded mode.** `"-mode", "embedded"` are two elements now, and
+  the boot script loads all 1,068 modules up front.
+  - The two other combined elements (`-s elixir start_cli`, `-elixir ansi_enabled true`) never
+    took effect, so they are dropped, not split. Split, `start_cli` would hand the arguments to
+    Elixir's CLI after boot, the trap §2 avoids (geex's boot never finishes, but another app's
+    would), and ANSI colour would reach the log.
+  - geex logs "loading code in embedded mode" at boot.
+  - **The cost:** about 125 ms more to the first frame (356 → 480 ms warm) and 193 ms more for
+    `--version` (229 → 422 ms).
+- **Embedded mode is strict:** a boot-script path or module that isn't there stops the boot
+  (pharos-mcp found one in its release). So `trim_release/1` now also emulates the boot
+  (`boot_problems/2`): every `{path, …}` directory must exist, and every preloaded module must
+  have a `.beam` on that path. Checked for geex's release: none missing.
+- **Patch B: cleanup spares an unpack in use.**
+  - A running app holds a shared `flock` on `<unpack>/.burrito-in-use`. Its descriptor
+    survives both execs into `beam.smp`, with close-on-exec cleared.
+  - The cleanup deletes an older unpack only after taking an exclusive lock without waiting.
+  - A pre-fork unpack with no lock file is kept while any process's `/proc/<pid>/exe` lies under
+    it.
+- **What still needs the unpack** with both patches: a port program started lazily.
+  `inet_gethost` starts on the first DNS lookup, so with an unpack deleted by hand, geex's next
+  download kills the VM ("Can not execute …/inet_gethost : enoent", a crash dump, the terminal
+  not restored). Patch B keeps that from happening by itself; a person can still `rm -rf` it.
+- **Checked live** with fork builds sharing an install directory:
+  - With 0.2.0 open, a 0.2.1 launch kept the 0.2.0 unpack. The open geex then saved a file and
+    installed Markdown over the network. Once 0.2.0 quit, the next 0.2.1 launch removed it.
+  - A pre-fork 0.2.0 build was kept while it ran and removed after it quit.
+- **The deploy guard of the previous amendment is gone.** `older_in_use` refused a deploy while
+  an older geex ran, because the new binary's first run would delete its unpack. Patch B makes
+  that run safe, and the guard would only block a deploy that now does no harm. The advice to
+  restart open editors after a version change stands only for a binary built before the fork.
+- `mix.exs` takes Burrito from the fork, pinned by its git sha.
+
 ## Consequences
 
 - `geex`, `geex PATH…` and `geex DIR` work from any directory, and the bashrc function goes
@@ -185,7 +227,8 @@ Of the 38.8 MB unpacked, the tree_sitter_wasm NIF (wasmtime) is 14.5 MB, already
 - **Not portable yet.** The binary carries this machine's glibc ERTS and NIF. A Mac build, or a
   Linux binary for other machines, needs the NIF built for that target (for example
   `rustler_precompiled`, or Zig-linked musl builds) and Burrito's default phases back. That is
-  its own ADR when there is a second machine.
+  its own ADR when there is a second machine. (2026-10-18: the plan is now roadmap item 13:
+  plain release tarballs per target built in CI and a curl installer, with no Burrito.)
 - **Burrito reserves one first argument:** `geex maintenance …` goes to Burrito's maintenance
   commands. `geex -- maintenance` opens a file named `maintenance`.
 - **A deploy removes old unpacks, but never one in use.** Burrito removes only versions
@@ -210,7 +253,8 @@ Of the 38.8 MB unpacked, the tree_sitter_wasm NIF (wasmtime) is 14.5 MB, already
     its line among Burrito's.
   - **Not covered:** launching the new `geex` later while an older one is still open deletes
     the older one's unpack the same way, and only Burrito could check that. So after a deploy
-    that changes the version, restart every open geex before starting the new one.
+    that changes the version, restart every open geex before starting the new one. (Since §6,
+    Burrito's fork checks it, and this guard is gone.)
 - Under the binary the app never reaches "started" (its `start/2` doesn't return). Nothing in
   geex asks. `Application.ensure_all_started(:geex)` is only `Geex.run/1`'s, which the binary
   doesn't use. Anything that stops the VM must go through `Geex.stop/0`, never `System.stop/0`

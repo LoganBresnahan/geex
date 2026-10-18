@@ -81,6 +81,43 @@ defmodule Geex.DeployTest do
              }
     end
 
+    test "boot_problems/2 emulates the boot: each path must exist, each preloaded module on it",
+         %{dir: dir} do
+      for d <- ["lib/a-1/ebin", "erts-1/lib"], do: File.mkdir_p!(Path.join(dir, d))
+      File.write!(Path.join(dir, "lib/a-1/ebin/a.beam"), "")
+
+      script = Path.join(dir, "start.script")
+
+      write = fn instructions ->
+        File.write!(script, :io_lib.format(~c"~p.~n", [{:script, {~c"x", ~c"1"}, instructions}]))
+      end
+
+      write.([
+        {:path, [~c"$RELEASE_LIB/a-1/ebin"]},
+        {:primLoad, [:a]},
+        {:kernel_load_completed}
+      ])
+
+      assert Deploy.boot_problems(script, dir) == []
+
+      write.([
+        {:path, [~c"$RELEASE_LIB/a-1/ebin", ~c"$ROOT/lib/gone-2/ebin"]},
+        {:primLoad, [:a, :b]}
+      ])
+
+      assert Deploy.boot_problems(script, dir) == [
+               "no directory #{dir}/lib/gone-2/ebin",
+               "no b.beam on the boot path"
+             ]
+    end
+
+    test "the built release boots, by its boot script" do
+      case Path.wildcard("_build/prod/rel/geex/releases/*/start.script") do
+        [script] -> assert Deploy.boot_problems(script, "_build/prod/rel/geex") == []
+        _ -> :ok
+      end
+    end
+
     # The safety net under the trim: on the release the last build assembled, geex's code reaches
     # nothing missing but the known few.
     test "the built release lacks nothing geex calls" do

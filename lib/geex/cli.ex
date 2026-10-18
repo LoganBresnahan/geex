@@ -149,6 +149,14 @@ defmodule Geex.CLI do
 
       {:open, paths} ->
         Geex.redirect_logs_to_file()
+        # Embedded mode loads every module at boot, so a running geex no longer needs its unpack
+        # (ADR-0036's 2026-10-18 amendment: the Burrito fork passes `-mode embedded` right).
+        require Logger
+
+        Logger.info(
+          "geex: #{Application.spec(:geex, :vsn)}, loading code in #{:code.get_mode()} mode"
+        )
+
         # Registered first, so a quit (`Geex.stop/0`) finds this process from the first key.
         Process.register(self(), __MODULE__)
         _ = Geex.CLI.Signals.install()
