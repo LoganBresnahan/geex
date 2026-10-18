@@ -3243,3 +3243,16 @@ sent by `send-keys -l`:
 - a real mouse in Windows Terminal.
 
 **1090 tests + 75 doctests**, green twice.
+
+**Deployed** as `0.1.0+08c39067.89a87236` and checked in the installed binary. Setup: tmux at
+120 × 30, scratch XDG directories, the tree and the edits pane hidden, and a 60-line file whose
+lines grow to 300 columns. Raw SGR reports were sent by `send-keys -l`.
+
+- **The horizontal bar:** a press at the track's right end moved the thumb to the end. A press on
+  the thumb, dragged left past the start, brought it back to column 0.
+- **The vertical bar:** a press at the bottom of the track put the last line at the bottom, with
+  the cursor still at 1:1. Down then moved the cursor to 2:1 and scrolled back to it.
+- `Ctrl-X` gave the shell back.
+- The log had no errors.
+
+The deploy entry above covers the rest of the binary's checks.
