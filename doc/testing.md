@@ -3311,3 +3311,14 @@ launch was timed in tmux to the first frame.
 **Not checked:**
 - a remote shell or distribution, now impossible (no `epmd`);
 - the release's own `bin/geex` script, broken by the missing `erl` and unused by Burrito.
+
+**Deployed** as `0.1.0+712750a1.89a87236`: the binary is 9,632,232 B, and its unpack in
+`~/.local/share/.burrito` is 40 MB, with only the four programs in `erts-16.1/bin`.
+
+**Checked in the installed binary** (tmux, scratch state):
+- `--version`, and `--frob` exits 2;
+- `geex notes.txt` opened the file without running it, and typing and `Ctrl-O` saved;
+- `geex .` showed the tree;
+- the discovery file was there while geex ran and gone after `Ctrl-X`;
+- `Ctrl-X` gave the shell back;
+- the log had no `terminating`, `undef` or `nofile` lines.
