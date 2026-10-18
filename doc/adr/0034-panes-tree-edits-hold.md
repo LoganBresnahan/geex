@@ -397,6 +397,11 @@ coordinator session proposed the design.
   - Several geex instances share the file. Each line is a single short append-mode write, so it
     lands whole, and no instance holds the file open between writes.
   - A test runs two writers of 300 lines each, and all 600 come back whole.
+  - **Each write starts a fresh line**: `"\n"`, the row, `"\n"`, as one write. A write torn
+    mid-line (a full disk, a crash) leaves the file ending in a fragment. The coordinator
+    session's review found that the next row, written straight after it, joined the fragment
+    and was lost with it. The leading newline ends the fragment first; loading skips the empty
+    lines this leaves.
   - A write that fails (a full disk, a directory that can't be made) is logged once; the list
     carries on in memory.
 - **On start** the file is read in `Geex.Edits`' own process, not the loop's.
@@ -414,7 +419,10 @@ coordinator session proposed the design.
     instance appended during the rewrite. A rename can't: a write already under way lands in
     the renamed file, which is still read.
   - The size is read again just before the rename, so two instances crossing the bound
-    together rename once.
+    together usually rename once. **A window stays:** A and B both read the big size, A
+    renames, C appends a new small `edits.jsonl`, and B renames that over the generation A just
+    kept. That costs about 2,500 rows. It needs three instances writing within moments of each
+    other at the bound, so it is accepted, not locked against.
   - The cost of rotation: rows go by age across all roots, not per root. A quiet project's rows
     can age out behind a busy one's after a few thousand edits.
 - **What a kept row's actions do.**

@@ -194,6 +194,30 @@ defmodule Geex.EditsTest do
       assert [{"/r/b.ex", :you}] = whos(e)
     end
 
+    # The coordinator's repro: a write torn mid-line (a full disk, a crash), then geex appends.
+    # The appended rows must start lines of their own, not join the fragment and be lost with it.
+    @tag :capture_log
+    test "a row appended after a torn line comes back", %{tmp_dir: dir} do
+      file = Path.join(dir, "edits.jsonl")
+      {e, _} = start_kept(file)
+      Edits.saved("/r/a.ex", e)
+      Edits.saved("/r/b.ex", e)
+      _ = Edits.rows(e)
+      stop_supervised!(e)
+      File.write!(file, ~s|{"at":"2026-10-18T15:31:56","path":"/x/torn|, [:append])
+
+      {e, _} = start_kept(file)
+      Edits.saved("/r/c.ex", e)
+      Edits.saved("/r/d.ex", e)
+      _ = Edits.rows(e)
+      stop_supervised!(e)
+
+      assert {rows, 1} = Log.load(file)
+      assert Enum.map(rows, & &1.path) == ~w(/r/a.ex /r/b.ex /r/c.ex /r/d.ex)
+      {e, _} = start_kept(file)
+      assert length(Edits.rows(e)) == 4
+    end
+
     @tag :capture_log
     test "a file that can't be written stops the writing, not the list", %{tmp_dir: dir} do
       # Its directory would have to be a file.
@@ -231,7 +255,8 @@ defmodule Geex.EditsTest do
 
     test "past the bound the file rotates; loading reads both generations", %{tmp_dir: dir} do
       file = Path.join(dir, "edits.jsonl")
-      line = byte_size(Log.encode(kept_row("/r/f10", :you)))
+      # A row on disk: its line and the newline written before it.
+      line = byte_size(Log.encode(kept_row("/r/f10", :you))) + 1
 
       # Rotate past three lines' worth: f10–f13 move to edits.1.jsonl, f14–f17 the next.
       for i <- 10..17, do: :ok = Log.append(file, kept_row("/r/f#{i}", :you), 3 * line)

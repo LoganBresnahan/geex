@@ -3408,3 +3408,27 @@ had no `terminating` or `undef` lines.
 
 From this build on, the maintainer's own geex keeps its list in
 `~/.local/state/geex/edits.jsonl`.
+
+### 2026-10-18 — a row after a torn line was lost (found in review, fixed)
+
+**Found by** the coordinator session, in `0.1.0+c1a9cb7e` with scratch XDG directories:
+1. Two saves gave two rows.
+2. A fragment was appended with no newline (`{"at":"…","path":"/x/torn`), as a full disk or a
+   crash mid-write leaves.
+3. Then geex relaunched and saved twice.
+
+The first new row joined the fragment's line, so it failed to decode and was lost for good: the
+pane showed 3 earlier rows, not 4.
+
+**Fix:** `Log.append/3` writes `"\n"`, the row, `"\n"` as one write, so a row always starts a
+line of its own. Loading already skipped empty lines.
+
+**Automated:** a new `edits_test.exs` test replays the repro: two saves, a torn fragment, a
+restart, two more saves. `load/1` gives all four rows with one line skipped, and a restarted list
+shows 4. With `log.ex` stashed (the old code) it fails, missing `/r/c.ex`. The rotation test now
+counts the extra byte per row.
+
+**Also from that review:** rotation's remaining window (three instances at the bound at once
+can clobber one generation) is now named in ADR-0034's amendment and in `log.ex`, and accepted.
+
+**1101 tests + 79 doctests**, green twice.

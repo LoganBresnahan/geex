@@ -10,7 +10,8 @@ defmodule Geex.Edits.Log do
   **Appending.** Each row added, or upgraded (`outside` becoming an agent's), is one line, written
   by opening the file in append mode, one `write`, and closing it. Several geex instances append
   to the same file: an append-mode write of one short line lands whole, and no instance holds
-  the file open between writes.
+  the file open between writes. Each write starts with a newline too, so a row never joins a
+  torn line left by an earlier failed write.
 
   **Bounded by rotation.** Past 512 KB (about 2,500 rows) the file is renamed to
   `edits.1.jsonl`, replacing the one before, and the next row starts a new file. `load/1` reads
@@ -43,10 +44,13 @@ defmodule Geex.Edits.Log do
   def append(file, row, rotate_bytes \\ @rotate_bytes) do
     dir = Path.dirname(file)
 
+    # The line starts with a newline of its own: after a torn write (a full disk, a crash) the
+    # file ends mid-line, and a row appended there would join that fragment and be lost with it.
+    # Still one write; loading skips the empty lines this leaves.
     with :ok <- File.mkdir_p(dir),
          :ok <- File.chmod(dir, 0o700),
          {:ok, fd} <- :file.open(file, [:append, :binary, :raw]),
-         written = :file.write(fd, encode(row)),
+         written = :file.write(fd, ["\n", encode(row)]),
          :ok <- :file.close(fd),
          :ok <- written,
          :ok <- File.chmod(file, 0o600) do
@@ -55,7 +59,10 @@ defmodule Geex.Edits.Log do
   end
 
   # Another instance may cross the bound at the same moment: the size is read again just before
-  # the rename, so only the one that still finds the file big renames it.
+  # the rename, so only the one that still finds the file big renames it. A window stays: two
+  # instances both read the big size, one renames, a third appends a new small file, and the
+  # second renames that over the generation just kept. Unlikely with a few instances; it costs
+  # one generation's rows (ADR-0034's amendment).
   defp rotate(file, rotate_bytes) do
     case File.stat(file) do
       {:ok, %{size: size}} when size > rotate_bytes ->
