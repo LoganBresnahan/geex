@@ -2744,3 +2744,19 @@ answer, the palette's `mark` fallback, and the `theme` verb.
 
 **Not tested:** Windows Terminal's answer to OSC 11 (the maintainer's terminal; the ADR's
 "verify" item); a light terminal live.
+
+### 2026-10-18 — `geex 0.1.0+4a5b7268.89a87236` deployed (the terminal theme; the version names the NIF)
+
+`mix geex.deploy` from the clean trees at geex `4a5b726` and `tree_sitter_wasm` `89a8723`
+(1031 tests + 58 doctests green twice).
+- **The version:** it installed `0.1.0+4a5b7268.89a87236`, the first version of the new shape
+  (`60dadc9`). Its unpack sits beside `geex.prev`'s `+10439898`; no other was left to prune.
+- **Live** with `geex` from the PATH in tmux (`-L deploy`, scratch state):
+  - `--version` printed it; `--frob` exited 2.
+  - `geex a.ex notes.txt` opened, with the discovery file present; `notes.txt`'s `IO.puts` didn't
+    run.
+  - `theme terminal` redrew in 16-colour SGR (`defmodule` 35, `A` 36).
+  - Typing and Ctrl-O wrote `a.ex`.
+  - Ctrl-X: alternate screen and mouse off, the discovery file gone, no `terminating` lines.
+
+**Not tested:** Windows Terminal.
