@@ -3201,3 +3201,45 @@ So geex's own share of a key on loop.ex is about 5 ms for Down and 9 ms for typi
 - the log had no `terminating` lines.
 
 **Not checked:** a terminal other than tmux.
+
+### 2026-10-18 — the scroll bars take the mouse; the edits handle stays put (ADR-0039 §7)
+
+**What changed:**
+- A press on a file pane's vertical or horizontal bar takes the thumb. On the track, the thumb
+  jumps to centre on the pointer.
+- Dragging scrolls live, and the release ends it. The cursor stays where it was until a key
+  moves it.
+- `Geex.Loop.ScrollBar` is pure: the layout, the thumb, the hit test and the exact inverse. The
+  drawing and the mouse share it.
+- The coordinator session relayed the maintainer's bug report and its cause: the edits pane's
+  `⠿` jumped about 8 columns when a click focused the pane, because it was centred in a rule
+  whose length depends on the hint. It now sits at the pane's centre, clamped into the rule.
+
+**Automated:**
+- `scroll_bar_test.exs` (7 tests + 5 doctests):
+  - the bar the mouse finds is where the frame draws the thumb;
+  - a track press jumps there (the thumb's middle on the pointer) and leaves the cursor;
+  - a thumb dragged row by row keeps the grabbed row under the pointer;
+  - a drag past the ends stops at the top, or with the last line at the bottom, off the bar too;
+  - a key brings the cursor back into view;
+  - the horizontal bar jumps and drags;
+  - a press on the other pane's bar focuses that pane;
+  - with no bar, the last column is text.
+- `resize_test.exs`: the handle at the pane's centre, focused and not; a click on the title
+  leaves it under the pointer (the old code moved it to column 67); a narrow pane keeps it
+  between the name and the hint.
+
+**Live, dev build in tmux** (120 × 30, scratch XDG directories, loop.ex), with raw SGR reports
+sent by `send-keys -l`:
+- a press on the track's last row jumped to the end (line 3,713 at the bottom);
+- a drag to row 10 put line 1,740 at the top, with the thumb at row 10;
+- a drag off the bar to row 2 went back to line 1;
+- the cursor stayed at 1:1 throughout;
+- the edits handle stayed at column 60 when a click on it focused the pane and swapped the hint;
+- the log had no errors.
+
+**Not checked:**
+- the horizontal bar live (loop.ex had no line wider than the pane);
+- a real mouse in Windows Terminal.
+
+**1090 tests + 75 doctests**, green twice.

@@ -5,6 +5,8 @@
   Step 1 of 3: the foundation, in the file panes. **Amended 2026-10-17, step 2:** the rest of
   the screen clickable (§6), and Alt+click extends a selection (§3). **Step 3, 2026-10-17:**
   resizing by drag handles, which amends [ADR-0038](0038-split-panes-and-tabs.md) §6.
+  **Amended 2026-10-18:** the scroll bars take the mouse (§7), and the edits pane's handle no
+  longer moves when the pane takes focus.
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0026](0026-terminal-input-model.md) (the terminal input model),
   [ADR-0027](0027-grid-command-addressing.md) (width never addresses), [ADR-0029](0029-selection-primitive.md)
@@ -134,11 +136,46 @@ text in.
   [ADR-0038](0038-split-panes-and-tabs.md) §6): a press there resizes, before anything else
   takes it.
 
+### 7. The scroll bars (amended 2026-10-18)
+
+The maintainer asked for the scroll bars to take the mouse; the coordinator session relayed it.
+The scroll bars geex draws are a file pane's two: the vertical bar in its last column beside the
+text rows, shown when the text has more lines than rows, and the horizontal bar in its last row
+under the text columns, shown when a line is wider than they are. The tree, the edits list and
+the pickers draw none.
+
+- **A press on the track jumps** so the thumb is centred on the pointer, rather than paging. One
+  press reaches anywhere in a long file, and the press then continues as a drag from the thumb's
+  middle, so jump and drag are one gesture.
+- **A press on the thumb takes it** where it was pressed.
+- **Dragging scrolls the pane live.** Each drag event puts the grabbed cell of the thumb under
+  the pointer, along the bar; the pointer may wander off the bar sideways. Past either end, the
+  scroll stops at the top, or with the last line at the bottom of the pane (the widest line's end
+  at the right edge, for the horizontal bar). The release ends the drag.
+- **The inverse is exact.** The scroll for a thumb position is the least offset whose thumb is
+  drawn there (`ScrollBar.offset_at/2`), so a drag back and forth returns to the same scroll.
+- **It is the wheel's kind of scroll.** The press focuses the pane, and the cursor stays where it
+  is (the tab's `hold`, §3), in view or not. The first key that moves the cursor brings it back
+  into view.
+- **One layout for drawing and clicking.** Where the bars are, the thumb, the hit and the inverse
+  are `Geex.Loop.ScrollBar`, which is pure. The drawing takes its thumb from it
+  (`Loop.scrollbar_thumb/3` delegates), and a test checks the mouse finds the thumb where the
+  frame drew it.
+- **Grid mode is unaffected**, since the mouse goes to the minibuffer while grid mode is open
+  (§6), so its ruler row never shifts a bar under the pointer.
+- **Out of scope:** pointer shapes over a bar (OSC 22). The maintainer dropped them.
+
+**A fix to step 3's handles.** The edits pane's `⠿` sat in the middle of the title's rule, and
+the rule's length depends on the hint. A click on the title focuses the pane, which swaps
+" Alt+P " for the longer " Enter opens · Esc back ", so the handle jumped about 8 columns left
+from under the pointer. The maintainer reported it; the coordinator session found the cause. The
+handle now sits at the pane's centre and moves only when a narrow pane's rule doesn't reach it,
+staying between the name and the hint.
+
 ### Out of scope (deferred)
 
 - Keeping the sizes the handles set across restarts.
-- Middle-click paste, a right-click menu, triple-click, dragging by words after a double-click,
-  dragging the scroll bars.
+- Middle-click paste, a right-click menu, triple-click, dragging by words after a double-click.
 - Starting with the mouse off (a setting).
 
 ## Consequences
@@ -159,3 +196,6 @@ text in.
   `status_press/2`, `picker_mouse/2`, `pick/2`, `settle_lists/3`).
 - `test/geex/loop/mouse_test.exs`, `test/geex/loop/mouse_click_test.exs`,
   `test/geex/input/parser_test.exs` ("mouse reports").
+- §7: `lib/geex/loop/scroll_bar.ex`, `lib/geex/loop.ex` (`bar_or_text_press/4`,
+  `scroll_bar_to/2`, `hold_scroll/5`, `draw_edits_pane/4`), `test/geex/loop/scroll_bar_test.exs`,
+  `test/geex/loop/resize_test.exs` (the handle).

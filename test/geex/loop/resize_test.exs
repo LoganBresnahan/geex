@@ -177,14 +177,34 @@ defmodule Geex.Loop.ResizeTest do
     test "both handles are drawn", %{dir: dir} do
       state = start_panels(dir)
       {_state, rows} = frame(state)
-      # The tree's edge, half way down its 29 rows; the middle of the edits title's rule (from
-      # column 39, after "── edits ", to the hint " Alt+P ").
+      # The tree's edge, half way down its 29 rows; the edits pane's centre (columns 30–119).
       assert String.at(Enum.at(rows, 14), 29) == "⠿"
-      assert String.at(Enum.at(rows, 20), 39 + 37) == "⠿"
+      assert String.at(Enum.at(rows, 20), 74) == "⠿"
 
-      # Focused, its longer hint still leaves the handle in the rule.
+      # Focused, its longer hint doesn't move the handle.
       {_state, rows} = frame(%{state | focus: :edits})
-      assert String.at(Enum.at(rows, 20), 39 + 28) == "⠿"
+      assert String.at(Enum.at(rows, 20), 74) == "⠿"
+    end
+
+    test "a click on the edits title focuses it and leaves the handle under the pointer",
+         %{dir: dir} do
+      state = start_panels(dir)
+      {state, before} = frame(state)
+      assert String.at(Enum.at(before, 20), 74) == "⠿"
+      state = state |> send_io(mouse(:press, 74, 20)) |> send_io(mouse(:release, 74, 20))
+      assert state.focus == :edits
+      {_state, rows} = frame(state)
+      assert String.at(Enum.at(rows, 20), 74) == "⠿"
+      assert Enum.at(rows, 20) =~ "Enter opens"
+    end
+
+    test "in a narrow edits pane the handle stays between the name and the hint" do
+      state = %{Loop.new_state(60, 30) | tree_shown: true, edits_shown: true, focus: :edits}
+      {_state, rows} = frame(state)
+      title = Enum.at(rows, Layout.resolve(60, 30, %{tree: true, edits: true}).edits.y)
+      [before, _after] = String.split(title, "⠿")
+      assert before =~ "── edits "
+      refute before =~ "Enter"
     end
   end
 

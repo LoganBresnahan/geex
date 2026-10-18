@@ -65,7 +65,7 @@ defmodule Geex.Loop do
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
-  alias Geex.Loop.{EditsPane, Keymap, Mouse, Panes, Settings, TabBar, Verbs}
+  alias Geex.Loop.{EditsPane, Keymap, Mouse, Panes, ScrollBar, Settings, TabBar, Verbs}
   alias Geex.MCP.ViewActions
 
   # Rows of context kept between the cursor and the top/bottom of the viewport
@@ -348,6 +348,9 @@ defmodule Geex.Loop do
       # tree's width and the edits pane's height once dragged (`nil`: the default, by the
       # terminal's size); the splits keep their ratios in `panes`.
       resizing: nil,
+      # A scroll bar's thumb held (ADR-0039 §7): `%{pane, buffer, axis, grab}`, the cell within
+      # the thumb under the pointer. Until the release.
+      scrolling: nil,
       tree_w: nil,
       edits_h: nil
     }
@@ -1006,6 +1009,9 @@ defmodule Geex.Loop do
   defp apply_mouse(%{action: :drag, button: :left} = m, %{resizing: %{}} = state),
     do: schedule_repaint(resize_to(%{state | click: nil}, m.x, m.y))
 
+  defp apply_mouse(%{action: :drag, button: :left} = m, %{scrolling: %{}} = state),
+    do: schedule_repaint(scroll_bar_to(state, {m.x, m.y}))
+
   defp apply_mouse(%{action: :drag, button: :left} = m, %{drag: %{}} = state),
     do: drag_to(put_in(state.drag.at, {m.x, m.y}), :move)
 
@@ -1014,7 +1020,7 @@ defmodule Geex.Loop do
   defp region_press(state, m) do
     case region(state, m.x, m.y) do
       {:file, id, %{y: y} = rect} when m.y == y -> tab_bar_press(state, id, rect, m.x - rect.x)
-      {:file, id, rect} -> press(state, id, rect, m)
+      {:file, id, rect} -> bar_or_text_press(state, id, rect, m)
       {:tree, rect} -> tree_press(state, rect, m)
       {:edits, rect} -> edits_press(state, rect, m)
       :status -> status_press(state, m.x)
@@ -1082,7 +1088,7 @@ defmodule Geex.Loop do
     %{state | drag: %{pane: id, buffer: buffer, anchor: anchor, at: nil, timer: nil}}
   end
 
-  defp stop_drag(state), do: %{state | drag: nil, resizing: nil}
+  defp stop_drag(state), do: %{state | drag: nil, resizing: nil, scrolling: nil}
 
   # The pointer moved with the button held (`:move`), or a drag past the edge is due its next
   # step (`:scroll`): select from the drag's anchor to the pointer. Past the edge of the text,
@@ -1119,18 +1125,60 @@ defmodule Geex.Loop do
   # The wheel over pane `id`: scroll it, keeping its cursor where it is.
   defp wheel(state, id, rect, step) do
     case pane_text(state, id) do
-      {tab, text} ->
-        cursor =
-          case {id == state.panes.pane, safe_active_buffer(), safe_session_snapshot()} do
-            {true, {:ok, pid}, {:ok, %{cursor: cursor}}} when pid == tab.buffer -> cursor
-            _ -> clamp_cursor(tab.cursor, text)
-          end
+      {tab, text} -> hold_scroll(state, id, rect, scrolled(tab, text, rect, step), text)
+      nil -> state
+    end
+  end
 
-        tab = %{scrolled(tab, text, rect, step) | hold: {cursor, {rect.w, rect.h}}}
-        %{state | panes: Panes.update_shown(state.panes, id, fn _ -> tab end)}
+  # Show `tab` (scrolled by the mouse) in pane `id`, keeping its cursor where it is, out of view
+  # or not (`Panes` `hold`), until a key moves it.
+  defp hold_scroll(state, id, rect, tab, text) do
+    cursor =
+      case {id == state.panes.pane, safe_active_buffer(), safe_session_snapshot()} do
+        {true, {:ok, pid}, {:ok, %{cursor: cursor}}} when pid == tab.buffer -> cursor
+        _ -> clamp_cursor(tab.cursor, text)
+      end
 
-      nil ->
-        state
+    tab = %{tab | hold: {cursor, {rect.w, rect.h}}}
+    %{state | panes: Panes.update_shown(state.panes, id, fn _ -> tab end)}
+  end
+
+  ## The scroll bars (ADR-0039 §7). A press on a bar takes its thumb: on the thumb, where it was
+  ## pressed; on the track, by the middle, so the text jumps there. Dragging then scrolls the
+  ## pane live, the thumb staying under the pointer, until the release. Where the bars are is
+  ## `Geex.Loop.ScrollBar` (pure), from the same text and scroll the frame drew.
+
+  defp bar_or_text_press(state, id, rect, m) do
+    with {tab, text} <- pane_text(state, id),
+         {bar, cell} <-
+           ScrollBar.hit(ScrollBar.layout(text, rect, {tab.scroll, tab.hscroll}), {m.x, m.y}) do
+      now = System.monotonic_time(:millisecond)
+      state = %{enter_pane({:file, id}, state) | click: {now, m.x, m.y, :bar}}
+      grab = ScrollBar.grab(bar, cell)
+      state = %{state | scrolling: %{pane: id, buffer: tab.buffer, axis: bar.axis, grab: grab}}
+      scroll_bar_to(state, {m.x, m.y})
+    else
+      _ -> press(state, id, rect, m)
+    end
+  end
+
+  # The pointer at `{x, y}` with a thumb held: scroll so the thumb's grabbed cell is under it
+  # (along the bar; the pointer may wander off it sideways). The drag ends if the pane shows
+  # another buffer now, or has lost that bar.
+  defp scroll_bar_to(
+         %{scrolling: %{pane: id, buffer: buffer, axis: axis, grab: grab}} = state,
+         {x, y}
+       ) do
+    with {^id, rect} <- pane_rect(state, id),
+         {%{buffer: ^buffer} = tab, text} <- pane_text(state, id),
+         %ScrollBar{} = bar <-
+           Enum.find(ScrollBar.layout(text, rect, {tab.scroll, tab.hscroll}), &(&1.axis == axis)) do
+      at = if axis == :v, do: y - bar.y, else: x - bar.x
+      offset = ScrollBar.offset_at(bar, at - grab)
+      tab = if axis == :v, do: %{tab | scroll: offset}, else: %{tab | hscroll: offset}
+      hold_scroll(state, id, rect, tab, text)
+    else
+      _ -> stop_drag(state)
     end
   end
 
@@ -1871,10 +1919,11 @@ defmodule Geex.Loop do
       |> Screen.fill_rect(x, y, w, h, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
       |> Screen.draw_text(x, y, palette_clip(title, w), %Cell{fg: pal.line_number, bg: pal.bg})
 
-    # Its handle (ADR-0038 §6), in the middle of the title's rule, between its name and the hint:
-    # drag the title row to resize.
+    # Its handle (ADR-0038 §6): drag the title row to resize. At the pane's centre, so focusing
+    # the pane (a click on the title does) and its longer hint don't move it from under the
+    # pointer; kept within the rule, between the name and the hint, when the pane is too narrow.
     rule = max(w - 9 - String.length(hint), 0)
-    mid = x + 9 + div(rule, 2)
+    mid = (x + div(w - 1, 2)) |> max(x + 9) |> min(x + 9 + rule - 1)
 
     screen =
       if rule > 0,
@@ -2684,12 +2733,7 @@ defmodule Geex.Loop do
   """
   @spec scrollbar_thumb(pos_integer(), pos_integer(), non_neg_integer()) ::
           {non_neg_integer(), pos_integer()}
-  def scrollbar_thumb(viewport, content, offset) do
-    len = max(div(viewport * viewport, content), 1)
-    span = max(viewport - len, 0)
-    pos = min(div(offset * span, max(content - viewport, 1)), span)
-    {pos, len}
-  end
+  def scrollbar_thumb(viewport, content, offset), do: ScrollBar.thumb(viewport, content, offset)
 
   @doc """
   The widest display width among **all** lines of `text` — the horizontal extent the buffer

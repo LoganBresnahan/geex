@@ -472,6 +472,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       handles (`⠿`) on the split dividers, the tree's edge and the edits pane's title row; splits
       keep a ratio, kept to the least pane size, across terminal resizes; a double-click evens.
       Deferred: keeping the layout and sizes across restarts.
+   4. **The scroll bars** — **built 2026-10-18** (ADR-0039 §7, the maintainer's ask relayed by
+      the coordinator session): a press on a file pane's bar takes its thumb, and a press on the
+      track jumps there, centring the thumb. Dragging scrolls live, on both bars. The edits pane's
+      handle now stays put when a click focuses the pane.
    - Later (the coordinator's note, 2026-10-17): an `outside` edits entry opens its file where the
      cursor was, as Enter does; only tool-call entries jump to their first changed line. Jumping
      to an outside change's first line would be a nicety.
