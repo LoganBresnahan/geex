@@ -2801,3 +2801,28 @@ tested, tested:
 
 **Not tested:** the packages from the release host (it doesn't exist yet); installing them
 (step 5).
+
+### 2026-10-18 — Windows Terminal answers OSC 11 (step 3, hand-verified by the maintainer)
+
+The maintainer ran `theme terminal` in Windows Terminal (`0.1.0+4a5b7268.89a87236`) on
+`lib/geex.ex` and sent the coordinator session a screenshot:
+- the cursor's line (104) was tinted, which needs the terminal's answer to OSC 11;
+- the syntax was in the scheme's own ANSI colours.
+
+This closes step 3's "Windows Terminal" item. In the same screenshot:
+- the edits pane listed `NOTICE`, `CLAUDE.md`, ADR-0040 and `testing.md` as this session's
+  (`claude-code/d25a8b6d`), through the live captAInHook path;
+- the tree showed `catalog/` as it was being made.
+
+### 2026-10-18 — `geex 0.1.0+7b5a2931.89a87236` deployed (the review's fixes, the catalog)
+
+`mix geex.deploy` from the clean trees at `7b5a293` and `tree_sitter_wasm` `89a8723` (1036
+tests + 63 doctests green). It installed `0.1.0+7b5a2931.89a87236` and removed the unused
+`+10439898` unpack. Live with `geex` from the PATH in tmux (`-L deploy`, scratch state):
+- `--version` printed it; `--frob` exited 2.
+- `geex a.ex notes.txt` opened, with the discovery file present; `IO.puts` didn't run.
+- `theme terminal`: the comment drew dim and italic (`2;3m`), the status line in reverse video
+  (`7m`).
+- Ctrl-X was clean: no discovery file left, no `terminating` lines.
+
+**Not tested:** installing a package (step 5; the catalog is embedded, nothing reads it yet).
