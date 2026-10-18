@@ -3177,3 +3177,27 @@ drains late events before writing there.
 goes in the deploy entry.
 
 **1081 tests + 70 doctests**, green twice.
+
+**Deployed** as `0.1.0+571a2782.89a87236` and timed in the installed binary. Setup: tmux at
+120 × 40 with scratch XDG directories, in a scratch repository holding a copy of loop.ex. The
+time runs from `send-keys` until `capture-pane` shows the new cursor position on the status
+line, so it includes tmux's round trip. Medians of 11 runs:
+
+| | Time |
+|---|---|
+| Down at line 1,200 of loop.ex | 15 ms (12–24) |
+| a typed character there | 19 ms (15–24) |
+| the same round trip on a one-line file (the floor) | 10 ms (8–12) |
+| Down in the previous binary (`geex.prev`, `0.1.0+ce000aec`), 7 runs | 364 ms (360–392) |
+
+So geex's own share of a key on loop.ex is about 5 ms for Down and 9 ms for typing.
+
+**Also checked:**
+- `--version`, and `--frob` exits 2;
+- `geex notes.txt` (holding `IO.puts("x")`) opened the file, and typing and `Ctrl-O` saved it;
+- `geex .` showed the tree and a scratch buffer;
+- `Ctrl-X` gave the shell back;
+- the attestation file was there while geex ran and gone after;
+- the log had no `terminating` lines.
+
+**Not checked:** a terminal other than tmux.
