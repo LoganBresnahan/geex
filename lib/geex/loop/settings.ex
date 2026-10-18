@@ -369,12 +369,7 @@ defmodule Geex.Loop.Settings do
         else: String.duplicate("─", w)
 
     screen = Screen.draw_text(screen, 0, 1, clip(rule, w), dim)
-    # Columns as wide as their cells, a path's aside (it is cut to fit instead).
-    widths =
-      case Enum.reject(rows, & &1[:left_cut]) do
-        [] -> column_widths(rows, w)
-        sized -> column_widths(sized, w)
-      end
+    widths = column_widths(rows, w)
 
     # The highlight stays on screen, even after the terminal shrank.
     %{top: top} = scroll(view, h)
@@ -428,11 +423,14 @@ defmodule Geex.Loop.Settings do
   # Each column as wide as its widest cell, the last taking what's left.
   defp column_widths([], _w), do: []
 
+  # Each column as wide as its widest cell, a path that is cut to fit aside (`left_cut`).
   defp column_widths(rows, _w) do
     rows
-    |> Enum.map(& &1.cells)
-    |> Enum.zip_with(& &1)
-    |> Enum.map(fn column -> column |> Enum.map(&Width.string/1) |> Enum.max() end)
+    |> Enum.map(fn row ->
+      for {cell, i} <- Enum.with_index(row.cells),
+          do: if(row[:left_cut] == i, do: 0, else: Width.string(cell))
+    end)
+    |> Enum.zip_with(&Enum.max/1)
   end
 
   defp pad(text, width), do: text <> String.duplicate(" ", max(width - Width.string(text), 0))
