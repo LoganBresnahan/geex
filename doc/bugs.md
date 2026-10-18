@@ -7,6 +7,30 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-4 — A deploy deletes the unpack a running geex runs from, and that geex crashes  ✅ FIXED (2026-10-18)
+
+- **Status:** **FIXED** 2026-10-18. `mix geex.deploy` keeps any unpack a running process uses,
+  and `geex.prev`'s. Verification is in the [testing.md](testing.md) 2026-10-18 entry "A deploy
+  keeps the unpack a running geex uses (BUG-4)". Found by the coordinator session: the deploy
+  of `dcce38b` crashed the maintainer's open `geex .`.
+- **Symptom:** the maintainer's geex (`0.1.0+839c64cb`, started from the installed binary)
+  died during a deploy. The terminal filled with "DEFAULT FORMATTER CRASHED" and the UI stopped
+  answering. The VM was still alive and quit on SIGTERM, cleanly (discovery file removed, no
+  ledger locks left).
+- **Verified cause:** the deploy's prune (`prune_unpacks/1`) removed every `geex_erts-*` but the
+  new build's, `geex_erts-16.1_0.1.0+839c64cb` included, which that geex ran from. A running
+  VM loads modules from its unpack as it first needs them (interactive mode), so the next ones
+  were missing: `{undef, [{sys, get_log, …}]}` in ThousandIsland's shutdown, and
+  `io_lib_pretty` `nofile` in the logger's formatter, whose crash report went to the
+  terminal. The earlier note "restart running editors after a deploy" assumed only an unloaded
+  grammar would fail.
+- **Fix:** the prune skips an unpack named by a process's `/proc/<pid>/exe` (Burrito's
+  `beam.smp` lives in the unpack) or by a path in its `cmdline` (`-root <unpack>`), and
+  `geex.prev`'s. The removal of the new build's own unpack, before its first run, is skipped
+  the same way for a committed build (the same code); a dirty one stops the deploy.
+
+---
+
 ## BUG-3 — Ctrl-C kills geex outright: the terminal, the ledger lock and the discovery file are left behind  ✅ FIXED (2026-10-16)
 
 - **Status:** **FIXED** 2026-10-16. `Geex.TerminalIO` runs `stty -isig -ixon` on the tty after
