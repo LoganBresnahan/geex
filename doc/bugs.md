@@ -7,6 +7,29 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-6 — The installed binary carried every earlier geex release, the bundled grammars included  ✅ FIXED (2026-10-18)
+
+- **Status:** **FIXED** 2026-10-18. `mix geex.deploy` removes `_build/prod/rel/geex` before
+  building, and Burrito's working copy after. Verification is in the
+  [testing.md](testing.md) 2026-10-18 entry "BUG-6: one release in the binary". Found by the
+  coordinator session in the unpack of `0.1.0+1cbe3f34.89a87236`, the first "bare" binary.
+- **Symptom:**
+  - The unpack's `lib/` held 23 `geex-0.1.0+<sha>` application directories, one per deploy since
+    the first (`.dirty` builds too). That is 46 MB of a ~114 MB unpack and a 22.3 MB binary,
+    growing with each deploy.
+  - Several still carried `priv/grammars/{elixir,json}` and `priv/themes/birds-of-paradise.json`.
+    So the bare binary redistributed them, and without the NOTICE entries, which now name only
+    the catalog and the test fixtures.
+- **Verified cause:** `mix release` keeps the releases already in `_build/prod/rel/geex/{lib,
+  releases}` beside a new one, and every build's version differs (it names the commits). Burrito
+  packs the whole release directory. The boot script names one release, so the old ones were
+  never loaded: a cost and a licence problem, not a correctness one.
+- **Also found:** Burrito's working copy of each build, `/tmp/burrito_build_*` (~120 MB), was
+  never removed: 15 from this one day's deploys. The deploy now removes the ones its build made,
+  found by listing before and after, so another project's build isn't touched.
+
+---
+
 ## BUG-5 — Flaky: the reconcile quiet-period test finds the buffer behind an *empty* file  (OPEN, 2026-10-18)
 
 - **Status:** open. Seen once in about 13 full-suite runs, while checking the step 6 review's

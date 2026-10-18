@@ -11,7 +11,9 @@ defmodule Mix.Tasks.Geex.Deploy do
   1. **Build:** `MIX_ENV=prod mix release --overwrite`. That assembles the release, and
      Burrito wraps it into `burrito_out/geex_linux`. The first prod build compiles the
      tree_sitter_wasm NIF in release mode, which takes a few minutes. The old `geex.app` is
-     removed first, so the version is this commit's even when no module changed.
+     removed first, so the version is this commit's even when no module changed, and so is
+     the old release directory, so the binary carries this release only (BUG-6). Burrito's
+     working copy in the temp directory is removed after.
   2. **Fresh unpack:** Burrito runs the binary from a directory named after the version, and it
      skips unpacking when that directory already exists. A dirty build's version (`….dirty`)
      repeats across builds, so the new build's directory is removed first, and the first run
@@ -55,6 +57,11 @@ defmodule Mix.Tasks.Geex.Deploy do
     # The version names the commit, but Mix rewrites geex.app only when a module changed, so a
     # docs-only commit would keep the previous commit's version. Removing it makes it fresh.
     File.rm("_build/prod/lib/geex/ebin/geex.app")
+    # `mix release` keeps every earlier release beside the new one (each build's version
+    # differs), and Burrito packs the whole directory: the binary carried every geex since the
+    # first deploy, grammars and themes included after geex went bare (BUG-6). Start empty.
+    File.rm_rf!("_build/prod/rel/geex")
+    staged = burrito_work_dirs()
 
     {_, status} =
       System.cmd("mix", ["release", "--overwrite"],
@@ -63,8 +70,14 @@ defmodule Mix.Tasks.Geex.Deploy do
         stderr_to_stdout: true
       )
 
+    # Burrito leaves its working copy of the release (~120 MB) in the temp directory. Remove the
+    # ones this build made, not another project's that may be building now.
+    for dir <- burrito_work_dirs() -- staged, do: File.rm_rf(dir)
+
     if status != 0, do: Mix.raise("geex deploy: the build failed (exit #{status})")
   end
+
+  defp burrito_work_dirs, do: Path.wildcard(Path.join(System.tmp_dir!(), "burrito_build_*"))
 
   defp install(built, bin_dir, link) do
     unless File.regular?(built), do: Mix.raise("geex deploy: no build at #{built}")
