@@ -56,7 +56,7 @@ defmodule Geex.Highlight.ReactorTest do
   end
 
   test "a file of its own going behind on disk leaves it running" do
-    dir = Path.join(System.tmp_dir!(), "geex_reactor_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_reactor_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf(dir) end)
     path = Path.join(dir, "a.ex")

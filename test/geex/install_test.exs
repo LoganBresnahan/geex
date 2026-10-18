@@ -14,7 +14,7 @@ defmodule Geex.InstallTest do
   @json_dir Geex.Fixtures.grammar_dir("json")
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_install_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_install_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     previous = Application.get_env(:geex, :data_dir)
     Application.put_env(:geex, :data_dir, Path.join(dir, "data"))

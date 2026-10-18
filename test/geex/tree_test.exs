@@ -7,7 +7,7 @@ defmodule Geex.TreeTest do
   alias Geex.Tree
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_tree_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_tree_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf(dir) end)
     %{dir: dir}

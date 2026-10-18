@@ -86,7 +86,7 @@ defmodule Geex.Theme.LoadTest do
       assert {:error, {:read, :enoent}} = Theme.load("/no/such/theme.json")
 
       path =
-        Path.join(System.tmp_dir!(), "geex_bad_theme_#{System.unique_integer([:positive])}.json")
+        Path.join(System.tmp_dir!(), "geex_bad_theme_#{Geex.Fixtures.uniq()}.json")
 
       File.write!(path, "{not json")
       on_exit(fn -> File.rm(path) end)

@@ -12,6 +12,14 @@ defmodule Geex.Fixtures do
 
   @root Path.expand("../fixtures", __DIR__)
 
+  @doc """
+  A suffix for a temporary file's or directory's name, unique on this machine: the OS pid and a
+  unique integer. A unique integer alone repeats in another VM, and two suites running at once
+  (two checkouts) would share, and delete, each other's files.
+  """
+  @spec uniq() :: String.t()
+  def uniq, do: "#{System.pid()}_#{System.unique_integer([:positive])}"
+
   @doc "A fixture grammar's directory: `parser.wasm`, `highlights.scm`, `manifest.json`."
   @spec grammar_dir(String.t()) :: Path.t()
   def grammar_dir(name), do: Path.join([@root, "grammars", name])

@@ -8,7 +8,7 @@ defmodule Geex.Loop.SplitTest do
   alias Geex.Loop.Panes
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_split_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_split_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     for f <- ["a.txt", "b.txt", "c.txt"], do: File.write!(Path.join(dir, f), "#{f}\nline 2\n")
     Session.set_start(dir)

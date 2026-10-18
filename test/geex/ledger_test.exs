@@ -13,7 +13,7 @@ defmodule Geex.LedgerTest do
   @agent {:agent, %{harness: "claude-code", session: "s1", turn: "t1", tool_use: "u1"}}
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_ledger_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_ledger_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf(dir) end)
     %{dir: dir, ledger: Path.join(dir, "ledger"), doc: Path.join(dir, "doc.txt")}

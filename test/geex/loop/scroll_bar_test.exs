@@ -10,7 +10,7 @@ defmodule Geex.Loop.ScrollBarTest do
   alias Geex.Loop.{Panes, ScrollBar}
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_scroll_bar_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_scroll_bar_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     File.write!(Path.join(dir, "long.txt"), Enum.map_join(0..99, "\n", &"line #{&1}"))
     File.write!(Path.join(dir, "wide.txt"), "short\n" <> String.duplicate("w", 300) <> "\nend")

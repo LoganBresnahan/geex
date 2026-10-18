@@ -3785,3 +3785,42 @@ only Burrito's entry: hpax and mint stay at 1.0.3 and 1.10.2.
   program that outlives the VM can't keep an old unpack alive.
 - After `Ctrl-X` the shell came back, the lock was gone from `/proc/locks`, and the log had no
   `terminating` or `undef` lines.
+
+### 2026-10-18 — two test suites at once shared temp files (the unexplained failure, found and fixed)
+
+**Found** by the coordinator session: its full suite, run from an export of `d61f9cf`, failed
+`TreeTest "outside a repository: a walk that skips dot-directories"` once, then passed three
+times. This is very likely the "1 failure" behind `4cd2fd3` too. Both sessions were running
+suites then.
+
+**The cause** has two parts.
+- **Temp names that repeat across VMs:** 28 tests named their temp directories or files
+  `"…_#{System.unique_integer([:positive])}"`, and so did `Geex.Edit.GitMerge`'s private merge
+  directory. A unique integer is unique only within one VM: a second suite, from another
+  checkout and in the same `/tmp`, makes the same names, and each sees, or deletes, the other's
+  files.
+- **A shared data directory:** under test, `data_dir` and `settings_path` were
+  `/tmp/geex-test-data-<user>` and `…-settings-<user>.json`. These were the same for every suite,
+  and `test_helper.exs` `rm_rf`s the data directory and reinstalls the fixtures at each suite's
+  start, so one suite's start wiped the other's installed grammars and theme mid-run.
+
+**Proof, before the fix:** two copies of HEAD (`d61f9cf`) ran their full suites concurrently,
+three rounds. Round one had 4 failures in one and 1 in the other:
+- three theme tests ("names/0 starts with the built-in one", "named/1 loads an installed
+  theme", two in `Loop.ThemeTest`): Birds of Paradise was gone from the shared data directory;
+- "two writers at once: every line lands whole" found 95 rows, not 600: the other suite was
+  writing to the same temp directory.
+
+**The fix:**
+- `Geex.Fixtures.uniq/0` is the OS pid plus a unique integer, and every temp name in the tests
+  uses it.
+- `GitMerge`'s directory adds the OS pid too. That is a product fix: two geex merging at the same
+  moment shared it the same way.
+- `config/config.exs` names the test data directory and settings file for the run's OS pid.
+- `test_helper.exs` removes both when the suite ends.
+- Process names (atoms) stay as they were, since they are per-VM.
+
+**Proof, after:** this tree and a copy of it ran their full suites concurrently, four rounds.
+All 8 runs were green, and no `geex-test-data-*` directory was left behind.
+
+**1109 tests + 79 doctests**, green.

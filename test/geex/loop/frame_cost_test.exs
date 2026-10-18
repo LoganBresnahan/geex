@@ -13,7 +13,7 @@ defmodule Geex.Loop.FrameCostTest do
   @bound_ms 150
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_frame_cost_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_frame_cost_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     path = Path.join(dir, "big.ex")
     File.write!(path, String.duplicate(File.read!("lib/geex/loop.ex"), 3))
@@ -61,6 +61,7 @@ defmodule Geex.Loop.FrameCostTest do
 
     # The window is the right one: the rows shown mid-file are highlighted.
     screen = Geex.Renderer.current()
+
     fgs =
       for y <- 0..(screen.h - 1),
           x <- 0..(screen.w - 1),

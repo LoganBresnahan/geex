@@ -34,7 +34,7 @@ defmodule Geex.AttestPayloadTest do
   end
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_payload_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_payload_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf(dir) end)
 

@@ -10,7 +10,7 @@ defmodule Geex.EditsTest do
   alias Geex.Loop.EditsPane
 
   setup do
-    name = :"edits_#{System.unique_integer([:positive])}"
+    name = :"edits_#{Geex.Fixtures.uniq()}"
     start_supervised!({Edits, name: name, max: 5})
     %{edits: name}
   end
@@ -121,7 +121,7 @@ defmodule Geex.EditsTest do
     alias Geex.Edits.Log
 
     setup do
-      dir = Path.join(System.tmp_dir!(), "geex_edits_#{System.unique_integer([:positive])}")
+      dir = Path.join(System.tmp_dir!(), "geex_edits_#{Geex.Fixtures.uniq()}")
       File.mkdir_p!(dir)
       on_exit(fn -> File.rm_rf(dir) end)
       %{tmp_dir: dir}
@@ -134,7 +134,7 @@ defmodule Geex.EditsTest do
       do: %{path: path, who: who, at: ~N[2026-10-17 09:00:00], sha256: sha256, tool_use: nil}
 
     defp start_kept(file) do
-      name = :"kept_#{System.unique_integer([:positive])}"
+      name = :"kept_#{Geex.Fixtures.uniq()}"
       pid = start_supervised!({Edits, name: name, file: file}, id: name)
       {name, pid}
     end

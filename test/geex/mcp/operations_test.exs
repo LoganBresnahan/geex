@@ -7,7 +7,7 @@ defmodule Geex.MCP.OperationsTest do
   alias Geex.Session
 
   defp tmp_path do
-    name = "geex_ops_#{System.unique_integer([:positive])}.txt"
+    name = "geex_ops_#{Geex.Fixtures.uniq()}.txt"
     path = Path.join(System.tmp_dir!(), name)
     on_exit(fn -> File.rm(path) end)
     path

@@ -28,9 +28,13 @@ defmodule Geex.MCP.PortTest do
 
   describe "write_file/1 (port-file discovery, like pharos)" do
     test "writes the URL when GEEX_MCP_PORT_FILE is set" do
-      path = Path.join(System.tmp_dir!(), "geex_port_#{System.unique_integer([:positive])}")
+      path = Path.join(System.tmp_dir!(), "geex_port_#{Geex.Fixtures.uniq()}")
       System.put_env("GEEX_MCP_PORT_FILE", path)
-      on_exit(fn -> System.delete_env("GEEX_MCP_PORT_FILE"); File.rm(path) end)
+      on_exit(fn ->
+        System.delete_env("GEEX_MCP_PORT_FILE")
+        File.rm(path)
+      end)
+
 
       assert Port.write_file(4242) == path
       assert File.read!(path) == "http://127.0.0.1:4242/mcp\n"

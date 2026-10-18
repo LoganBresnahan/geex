@@ -58,7 +58,13 @@ defmodule Geex.Edit.GitMerge do
   end
 
   defp in_private_dir(fun) do
-    dir = Path.join(System.tmp_dir!(), "geex-merge-#{System.unique_integer([:positive])}")
+    # The OS pid as well: a unique integer is unique only within this VM, and another geex may
+    # be merging in the same temp directory now.
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "geex-merge-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
 
     with :ok <- File.mkdir(dir),
          :ok <- File.chmod(dir, 0o700) do

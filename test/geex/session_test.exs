@@ -135,7 +135,7 @@ defmodule Geex.SessionTest do
 
   describe "open_file/1 (multi-buffer, active-buffer model — ADR-0019)" do
     defp tmp_path do
-      name = "geex_sess_#{System.unique_integer([:positive])}.txt"
+      name = "geex_sess_#{Geex.Fixtures.uniq()}.txt"
       path = Path.join(System.tmp_dir!(), name)
       on_exit(fn -> File.rm(path) end)
       path
@@ -229,7 +229,7 @@ defmodule Geex.SessionTest do
 
     test "surfaces a posix error (missing parent directory) rather than crashing" do
       missing =
-        Path.join([System.tmp_dir!(), "geex_nope_#{System.unique_integer([:positive])}", "f.txt"])
+        Path.join([System.tmp_dir!(), "geex_nope_#{Geex.Fixtures.uniq()}", "f.txt"])
 
       assert {:error, :enoent} = Session.create_file(missing, "x")
     end

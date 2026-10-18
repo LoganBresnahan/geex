@@ -9,7 +9,7 @@ defmodule Geex.Tree.WatcherTest do
   doctest Watcher
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_tree_watch_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_tree_watch_#{Geex.Fixtures.uniq()}")
 
     for d <- ["lib/geex", "_build/dev", ".git/objects", "empty"],
         do: File.mkdir_p!(Path.join(dir, d))

@@ -10,7 +10,7 @@ defmodule Geex.Loop.MouseClickTest do
   alias Geex.Loop.{Panes, TabBar}
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_click_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_click_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(Path.join(dir, "sub"))
     for f <- ["a.txt", "b.txt", "c.txt"], do: File.write!(Path.join(dir, f), "#{f}\nline 2\n")
     File.write!(Path.join(dir, "sub/s.txt"), "s\n")

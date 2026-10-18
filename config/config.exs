@@ -32,14 +32,14 @@ config :geex,
   wasm_cache: config_env() != :test,
   # Installed grammars and themes (ADR-0040 §4): $XDG_DATA_HOME/geex, unless this is set. Tests
   # get an empty directory of their own, never the user's; a test that installs sets its own.
+  # Named for this run's OS process, so two suites at once (two checkouts) never share it.
   data_dir:
     if(config_env() == :test,
-      do: Path.join(System.tmp_dir!(), "geex-test-data-#{System.get_env("USER", "user")}")
+      do: Path.join(System.tmp_dir!(), "geex-test-data-#{System.pid()}")
     ),
   # What the settings view keeps (ADR-0040 §7): $XDG_CONFIG_HOME/geex/settings.json, unless this
   # is set. Tests never read or write the user's.
   settings_path:
     if(config_env() == :test,
-      do:
-        Path.join(System.tmp_dir!(), "geex-test-settings-#{System.get_env("USER", "user")}.json")
+      do: Path.join(System.tmp_dir!(), "geex-test-settings-#{System.pid()}.json")
     )

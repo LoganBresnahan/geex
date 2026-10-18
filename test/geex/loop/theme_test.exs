@@ -7,7 +7,7 @@ defmodule Geex.Loop.ThemeTest do
   alias Geex.{Loop, Screen, Session, Theme}
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_theme_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_theme_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     for f <- ["a.txt", "b.txt"], do: File.write!(Path.join(dir, f), "#{f}\n")
     Session.set_start(dir)

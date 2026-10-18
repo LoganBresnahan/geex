@@ -11,7 +11,7 @@ defmodule Geex.Loop.SettingsTest do
   doctest KeyHelp
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_settings_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_settings_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     old = {Application.get_env(:geex, :data_dir), Application.get_env(:geex, :settings_path)}
     Application.put_env(:geex, :data_dir, Path.join(dir, "data"))

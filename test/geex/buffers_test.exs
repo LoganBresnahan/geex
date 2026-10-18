@@ -9,7 +9,7 @@ defmodule Geex.BuffersTest do
   alias Geex.Loop.Verbs
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_buffers_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_buffers_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
 
     on_exit(fn ->

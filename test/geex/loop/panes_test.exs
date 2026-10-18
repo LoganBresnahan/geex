@@ -7,7 +7,7 @@ defmodule Geex.Loop.PanesTest do
   alias Geex.{Loop, Minibuffer, Session}
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_panes_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_panes_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(Path.join(dir, "lib"))
     File.write!(Path.join(dir, "lib/a.ex"), "a\n")
     Session.set_start(dir)

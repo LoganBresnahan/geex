@@ -243,7 +243,7 @@ defmodule Geex.AttestTest do
 
   describe "POST /attest + discovery" do
     setup do
-      dir = Path.join(System.tmp_dir!(), "geex_disc_#{System.unique_integer([:positive])}")
+      dir = Path.join(System.tmp_dir!(), "geex_disc_#{Geex.Fixtures.uniq()}")
       on_exit(fn -> File.rm_rf(dir) end)
       start_supervised!({Discovery, url: "http://127.0.0.1:1/attest", dir: dir})
       %{dir: dir, token: Discovery.token()}
@@ -340,7 +340,7 @@ defmodule Geex.AttestTest do
       assert conn.status == 200
       assert JSON.decode!(conn.resp_body) == %{"status" => "not_open"}
 
-      path = Path.join(System.tmp_dir!(), "geex_att_#{System.unique_integer([:positive])}.txt")
+      path = Path.join(System.tmp_dir!(), "geex_att_#{Geex.Fixtures.uniq()}.txt")
       File.write!(path, "v1\n")
       on_exit(fn -> File.rm(path) end)
       {:ok, buf} = Geex.BufferSupervisor.start_buffer(Path.expand(path))

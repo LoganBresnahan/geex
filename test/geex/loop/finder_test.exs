@@ -8,7 +8,7 @@ defmodule Geex.Loop.FinderTest do
   alias Geex.{Loop, Minibuffer, Session}
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_finder_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_finder_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(Path.join(dir, "lib/loop"))
 
     for f <- ["lib/a.ex", "lib/loop.ex", "lib/loop/keymap.ex", "README.md"],

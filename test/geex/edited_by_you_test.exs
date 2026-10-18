@@ -72,7 +72,7 @@ defmodule Geex.EditedByYouTest do
   end
 
   test "it survives the ledger: a reopen keeps it" do
-    dir = Path.join(System.tmp_dir!(), "geex_ebu_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_ebu_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf(dir) end)
     doc = Path.join(dir, "doc.txt")
@@ -101,7 +101,7 @@ defmodule Geex.EditedByYouTest do
     assert Geex.Loop.author_label([{{:agent, who}, 1}], 0) ==
              "✎ claude-code/7ccbf3d1 · turn b60e…"
 
-    name = :"edits_#{System.unique_integer([:positive])}"
+    name = :"edits_#{Geex.Fixtures.uniq()}"
     start_supervised!({Edits, name: name})
     Edits.attested(attestation("a", "b", %{path: "/r/f.ex", user_modified: true}), name)
     [entry] = EditsPane.entries([], Edits.rows(name), "/r")

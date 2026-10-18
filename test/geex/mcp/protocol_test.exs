@@ -18,7 +18,7 @@ defmodule Geex.MCP.ProtocolTest do
 
   # A unique tmp path per test (counter, not randomness — no Date/rand).
   defp tmp_path do
-    name = "geex_op_#{System.unique_integer([:positive])}.txt"
+    name = "geex_op_#{Geex.Fixtures.uniq()}.txt"
     path = Path.join(System.tmp_dir!(), name)
     on_exit(fn -> File.rm(path) end)
     path

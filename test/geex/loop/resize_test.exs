@@ -15,7 +15,7 @@ defmodule Geex.Loop.ResizeTest do
   defp at(rows, y, x, width \\ 1), do: rows |> Enum.at(y) |> String.slice(x, width)
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_resize_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_resize_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     for f <- ["a.txt", "b.txt"], do: File.write!(Path.join(dir, f), "#{f}\nline 2\n")
     Session.set_start(dir)

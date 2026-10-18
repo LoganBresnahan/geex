@@ -11,7 +11,7 @@ defmodule Geex.HoldTest do
   alias Geex.Ledger.{Restore, Spool}
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_hold_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_hold_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf(dir) end)
     %{dir: dir, ledger: Path.join(dir, "ledger"), doc: Path.join(dir, "doc.txt")}

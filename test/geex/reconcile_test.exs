@@ -9,7 +9,7 @@ defmodule Geex.ReconcileTest do
   alias Geex.Commands.Insert
 
   defp tmp_path do
-    name = "geex_recon_#{System.unique_integer([:positive])}.txt"
+    name = "geex_recon_#{Geex.Fixtures.uniq()}.txt"
     path = Path.join(System.tmp_dir!(), name)
     on_exit(fn -> File.rm(path) end)
     path

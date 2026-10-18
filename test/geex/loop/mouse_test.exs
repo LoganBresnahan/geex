@@ -10,7 +10,7 @@ defmodule Geex.Loop.MouseTest do
   alias Geex.Loop.{Mouse, Panes}
 
   setup do
-    dir = Path.join(System.tmp_dir!(), "geex_mouse_#{System.unique_integer([:positive])}")
+    dir = Path.join(System.tmp_dir!(), "geex_mouse_#{Geex.Fixtures.uniq()}")
     File.mkdir_p!(dir)
     File.write!(Path.join(dir, "a.txt"), "ab字字cd\nfoo_bar baz\n")
     File.write!(Path.join(dir, "long.txt"), Enum.map_join(1..100, "\n", &"line #{&1}"))
