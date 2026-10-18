@@ -36,6 +36,7 @@ defmodule Geex.Install do
 
   @max_download 32 * 1024 * 1024
   @max_unpacked 64 * 1024 * 1024
+  @max_manifest 64 * 1024
   @max_redirects 5
   @timeout_ms 120_000
 
@@ -50,7 +51,10 @@ defmodule Geex.Install do
   def install(name) do
     case catalog_entry(name) do
       {kind, entry} ->
-        with {:ok, zip} <- fetch(url(entry)),
+        # No more than the catalog says it is, and a little slack.
+        cap = min(entry["size"] + 4096, @max_download)
+
+        with {:ok, zip} <- fetch(url(entry), cap),
              :ok <- verify(zip, entry["sha256"]),
              {:ok, files} <- unpack(zip, kind, name),
              {:ok, manifest} <- validate(kind, name, files) do
@@ -71,6 +75,7 @@ defmodule Geex.Install do
     with {:ok, zip} <- local_zip(path),
          {:ok, %{"kind" => kind_s, "name" => name}} <- peek_manifest(zip),
          {:ok, kind} <- kind(kind_s),
+         :ok <- valid_name(name, kind),
          {:ok, files} <- unpack(zip, kind, name),
          {:ok, manifest} <- validate(kind, name, files) do
       put(kind, manifest, files, %{
@@ -108,24 +113,36 @@ defmodule Geex.Install do
   ## Fetching
 
   @doc false
-  @spec fetch(String.t()) :: {:ok, binary()} | {:error, term()}
-  def fetch("file://" <> path), do: read_capped(path)
-  def fetch("https://" <> _ = url), do: http_get(url, @max_redirects)
-  def fetch("http://" <> _ = url), do: http_get(url, @max_redirects)
-  def fetch(url), do: {:error, {:bad_url, url}}
+  @spec fetch(String.t(), pos_integer()) :: {:ok, binary()} | {:error, term()}
+  def fetch(url, cap \\ @max_download)
+  def fetch("file://" <> path, cap), do: read_capped(path, cap)
+  def fetch("https://" <> _ = url, cap), do: http_get(url, cap, @max_redirects)
+  def fetch("http://" <> _ = url, cap), do: http_get(url, cap, @max_redirects)
+  def fetch(url, _cap), do: {:error, {:bad_url, url}}
 
-  defp read_capped(path) do
-    case File.stat(path) do
-      {:ok, %{type: :regular, size: size}} when size <= @max_download -> File.read(path)
-      {:ok, %{type: :regular}} -> {:error, :too_large}
-      {:ok, _} -> {:error, {:not_a_file, path}}
-      {:error, reason} -> {:error, {:read, reason}}
+  # A plain file (not a link to one) of at most `cap` bytes.
+  defp read_capped(path, cap) do
+    case File.lstat(path) do
+      {:ok, %{type: :regular, size: size}} when size <= cap ->
+        case File.read(path) do
+          {:ok, bytes} -> {:ok, bytes}
+          {:error, reason} -> {:error, {:read, reason}}
+        end
+
+      {:ok, %{type: :regular}} ->
+        {:error, :too_large}
+
+      {:ok, _} ->
+        {:error, {:not_a_file, path}}
+
+      {:error, reason} ->
+        {:error, {:read, reason}}
     end
   end
 
-  defp http_get(_url, -1), do: {:error, :too_many_redirects}
+  defp http_get(_url, _cap, -1), do: {:error, :too_many_redirects}
 
-  defp http_get(url, redirects_left) do
+  defp http_get(url, cap, redirects_left) do
     with :ok <- start_http() do
       uri = URI.parse(url)
       headers = [{~c"user-agent", ~c"geex"}]
@@ -142,9 +159,25 @@ defmodule Geex.Install do
              stream: :self,
              body_format: :binary
            ) do
-        {:ok, ref} -> receive_body(ref, url, redirects_left, [], 0)
-        {:error, reason} -> {:error, {:http, reason}}
+        {:ok, ref} ->
+          result = receive_body(ref, url, cap, redirects_left, [], 0)
+          drain(ref)
+          result
+
+        {:error, reason} ->
+          {:error, {:http, reason}}
       end
+    end
+  end
+
+  # After a cut-off request, its last messages are dropped: the caller may be a long-lived
+  # process (the editor's settings view).
+  defp drain(ref) do
+    receive do
+      {:http, {^ref, _}} -> drain(ref)
+      {:http, {^ref, _, _}} -> drain(ref)
+    after
+      0 -> :ok
     end
   end
 
@@ -169,19 +202,22 @@ defmodule Geex.Install do
     ]
   end
 
-  defp receive_body(ref, url, redirects_left, acc, size) do
+  # `:httpc` streams only a 200 (or 206) body; this caps it at `cap`. Another status's body comes
+  # whole, and isn't capped: a redirect's or an error's body from a hostile host can cost
+  # memory, never correctness (the sha256 still decides).
+  defp receive_body(ref, url, cap, redirects_left, acc, size) do
     receive do
       {:http, {^ref, :stream_start, _headers}} ->
-        receive_body(ref, url, redirects_left, acc, size)
+        receive_body(ref, url, cap, redirects_left, acc, size)
 
       {:http, {^ref, :stream, part}} ->
         size = size + byte_size(part)
 
-        if size > @max_download do
+        if size > cap do
           :httpc.cancel_request(ref)
           {:error, :too_large}
         else
-          receive_body(ref, url, redirects_left, [acc | part], size)
+          receive_body(ref, url, cap, redirects_left, [acc | part], size)
         end
 
       {:http, {^ref, :stream_end, _headers}} ->
@@ -189,7 +225,7 @@ defmodule Geex.Install do
 
       # A response that isn't streamed: a redirect, an error, or a small 200.
       {:http, {^ref, {{_version, status, _reason}, headers, body}}} ->
-        response(status, headers, body, url, redirects_left)
+        response(status, headers, body, url, cap, redirects_left)
 
       {:http, {^ref, {:error, reason}}} ->
         {:error, {:http, reason}}
@@ -200,22 +236,24 @@ defmodule Geex.Install do
     end
   end
 
-  defp response(200, _headers, body, _url, _left) when byte_size(body) <= @max_download,
+  defp response(200, _headers, body, _url, cap, _left) when byte_size(body) <= cap,
     do: {:ok, body}
 
-  defp response(200, _headers, _body, _url, _left), do: {:error, :too_large}
+  defp response(200, _headers, _body, _url, _cap, _left), do: {:error, :too_large}
 
-  defp response(status, headers, _body, url, left) when status in [301, 302, 303, 307, 308] do
+  defp response(status, headers, _body, url, cap, left)
+       when status in [301, 302, 303, 307, 308] do
     case List.keyfind(headers, ~c"location", 0) do
       {_, location} ->
-        with {:ok, next} <- redirect(url, List.to_string(location)), do: http_get(next, left - 1)
+        with {:ok, next} <- redirect(url, List.to_string(location)),
+             do: http_get(next, cap, left - 1)
 
       nil ->
         {:error, {:http_status, status}}
     end
   end
 
-  defp response(status, _headers, _body, _url, _left), do: {:error, {:http_status, status}}
+  defp response(status, _headers, _body, _url, _cap, _left), do: {:error, {:http_status, status}}
 
   @doc """
   Where a redirect from `url` to `location` goes, if it may be followed: never from https to
@@ -255,18 +293,26 @@ defmodule Geex.Install do
   """
   @spec unpack(binary(), kind(), String.t()) :: {:ok, [{String.t(), binary()}]} | {:error, term()}
   def unpack(zip, kind, name) do
-    with :ok <- valid_name(name),
+    with :ok <- valid_name(name, kind),
          {:ok, entries} <- list(zip),
          :ok <- check_entries(entries, kind, name) do
       extract(zip, Enum.map(entries, & &1.name))
     end
   end
 
-  defp valid_name(name) do
-    if Regex.match?(~r/\A[a-z0-9][a-z0-9_-]{0,63}\z/, name),
-      do: :ok,
-      else: {:error, {:bad_name, name}}
+  # A package's name: it becomes a directory and, for a theme, a file name. Not `installed` or
+  # `manifest` (a theme's `<name>.json` would be the record or the manifest), nor a theme named
+  # `terminal` (the built-in one).
+  defp valid_name(name, kind) when is_binary(name) do
+    cond do
+      not Regex.match?(~r/\A[a-z0-9][a-z0-9_-]{0,63}\z/, name) -> {:error, {:bad_name, name}}
+      name in ["installed", "manifest"] -> {:error, {:bad_name, name}}
+      kind == :theme and name == Geex.Theme.Terminal.name() -> {:error, {:bad_name, name}}
+      true -> :ok
+    end
   end
+
+  defp valid_name(name, _kind), do: {:error, {:bad_name, name}}
 
   defp list(zip) do
     case :zip.list_dir(zip) do
@@ -346,49 +392,78 @@ defmodule Geex.Install do
       {:DOWN, ^ref, :process, ^pid, {:unzipped, {:error, reason}}} ->
         {:error, {:bad_zip, reason}}
 
-      {:DOWN, ^ref, :process, ^pid, _killed} ->
+      # The heap cap: what it unpacked was far larger than its entries said.
+      {:DOWN, ^ref, :process, ^pid, :killed} ->
         {:error, :too_large}
+
+      {:DOWN, ^ref, :process, ^pid, reason} ->
+        {:error, {:bad_zip, reason}}
     after
       @timeout_ms ->
         Process.exit(pid, :kill)
+
+        receive do
+          {:DOWN, ^ref, :process, ^pid, _} -> :ok
+        end
+
         {:error, :timeout}
     end
   end
 
+  # A local package: a plain `.zip` file, or a directory of its files. Never through a link.
   defp local_zip(path) do
-    case File.stat(path) do
+    case File.lstat(path) do
       {:ok, %{type: :directory}} -> zip_dir(path)
-      {:ok, %{type: :regular}} -> read_capped(path)
+      {:ok, %{type: :regular}} -> read_capped(path, @max_download)
       {:ok, _} -> {:error, {:not_a_file, path}}
       {:error, reason} -> {:error, {:read, reason}}
     end
   end
 
-  # A directory's package files, zipped the catalog's way, so its hash is the zip's.
+  # A directory's package files, zipped the catalog's way, so its hash is the zip's. Only the
+  # names a package of its kind may have are read (the rest of a grammar's checkout is left
+  # alone), each a plain file, not a link, under the size caps.
   defp zip_dir(dir) do
-    with {:ok, names} <- File.ls(dir) do
-      files =
-        for n <- Enum.sort(names),
-            n != "installed.json",
-            path = Path.join(dir, n),
-            File.regular?(path),
-            do: {n, File.read!(path)}
-
-      {:ok, Package.zip(files)}
+    with {:ok, json} <- read_capped(Path.join(dir, "manifest.json"), @max_manifest),
+         {:ok, %{"kind" => kind_s, "name" => name}} <- decode_manifest(json),
+         {:ok, kind} <- kind(kind_s),
+         :ok <- valid_name(name, kind),
+         {:ok, names} <- File.ls(dir) do
+      names
+      |> Enum.sort()
+      |> Enum.filter(&(&1 != "manifest.json" and expected?(&1, kind, name)))
+      |> Enum.reduce_while({:ok, [{"manifest.json", json}], byte_size(json)}, fn n,
+                                                                                 {:ok, acc, total} ->
+        case read_capped(Path.join(dir, n), @max_unpacked - total) do
+          {:ok, bytes} -> {:cont, {:ok, [{n, bytes} | acc], total + byte_size(bytes)}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+      |> case do
+        {:ok, files, _total} -> {:ok, Package.zip(files)}
+        {:error, _} = error -> error
+      end
+    else
+      {:ok, _not_a_manifest} -> {:error, {:bad_manifest, :no_kind_or_name}}
+      {:error, _} = error -> error
     end
   end
 
-  # The manifest, read before unpacking, to learn the kind and name it checks the rest against.
+  # The manifest, read before unpacking, to learn the kind and name it checks the rest against:
+  # listed small enough first, then unpacked in the capped process like the rest.
   defp peek_manifest(zip) do
-    with {:ok, [{_, json}]} <- :zip.unzip(zip, [:memory, file_list: [~c"manifest.json"]]),
-         true <- byte_size(json) <= 64 * 1024,
-         {:ok, %{} = manifest} <- JSON.decode(json) do
+    with {:ok, entries} <- list(zip),
+         %{size: size} when size <= @max_manifest <-
+           Enum.find(entries, &(&1.name == "manifest.json")) ||
+             {:error, {:missing, "manifest.json"}},
+         {:ok, [{_, json}]} <- extract(zip, ["manifest.json"]),
+         {:ok, %{} = manifest} <- decode_manifest(json) do
       {:ok, manifest}
     else
+      {:error, _} = error -> error
+      %{} -> {:error, {:bad_manifest, :too_large}}
       _ -> {:error, {:bad_manifest, :unreadable}}
     end
-  rescue
-    _ -> {:error, {:bad_manifest, :unreadable}}
   end
 
   ## Validating
@@ -409,21 +484,31 @@ defmodule Geex.Install do
     end
   end
 
-  defp same(%{"kind" => k, "name" => n}, kind, name) do
-    if k == Atom.to_string(kind) and n == name,
-      do: :ok,
-      else: {:error, {:bad_manifest, {:names, k, n}}}
+  # The manifest names what it was fetched as, and its display name, if any, is a string.
+  defp same(%{"kind" => k, "name" => n} = manifest, kind, name) do
+    cond do
+      k != Atom.to_string(kind) or n != name -> {:error, {:bad_manifest, {:names, k, n}}}
+      not is_binary(Map.get(manifest, "display", "")) -> {:error, {:bad_manifest, :display}}
+      true -> :ok
+    end
   end
 
   defp same(_manifest, _kind, _name), do: {:error, {:bad_manifest, :no_kind_or_name}}
 
+  # Absent, or a list of non-empty strings (not null): an ending of "" would claim every file.
+  defp names?(manifest, key) do
+    case Map.fetch(manifest, key) do
+      :error -> true
+      {:ok, list} when is_list(list) -> Enum.all?(list, &(is_binary(&1) and &1 != ""))
+      {:ok, _other} -> false
+    end
+  end
+
   defp check_package(:grammar, name, manifest, files) do
     abi = manifest["abi"]
-    endings = manifest["extensions"] || []
-    names = manifest["filenames"] || []
 
     cond do
-      not (is_list(endings) and is_list(names) and Enum.all?(endings ++ names, &is_binary/1)) ->
+      not (names?(manifest, "extensions") and names?(manifest, "filenames")) ->
         {:error, {:bad_manifest, :file_names}}
 
       not (is_integer(abi) and abi in Grammars.abi()) ->
@@ -460,40 +545,112 @@ defmodule Geex.Install do
 
   ## Writing
 
+  # Write the package beside its place and rename it in, under a lock on the name, so two geex
+  # processes installing it at once take turns. The temporary names carry the OS pid and random
+  # bytes: they can't clash across processes either. A failure leaves what was there.
   defp put(kind, manifest, files, record) do
     name = manifest["name"]
     target = Installed.dir(kind, name)
     parent = Path.dirname(target)
-    tag = System.unique_integer([:positive])
+    tag = "#{System.pid()}-#{Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)}"
     tmp = Path.join(parent, ".#{name}.new-#{tag}")
     old = Path.join(parent, ".#{name}.old-#{tag}")
     record = Map.put(record, "installed_at", DateTime.utc_now() |> DateTime.to_iso8601())
+    display = manifest["display"] || name
 
-    try do
-      File.mkdir_p!(tmp)
-      for {n, bytes} <- files, do: File.write!(Path.join(tmp, n), bytes)
-      File.write!(Path.join(tmp, "installed.json"), JSON.encode!(record))
-      if File.exists?(target), do: File.rename!(target, old)
-      File.rename!(tmp, target)
-      File.rm_rf(old)
-      installed(kind, name)
-
-      {:ok,
-       %{kind: kind, name: name, display: manifest["display"] || name, sha256: record["sha256"]}}
-    rescue
-      e in File.Error ->
-        File.rm_rf(tmp)
-        if File.exists?(old) and not File.exists?(target), do: File.rename(old, target)
-        {:error, {:write, e.reason, e.path}}
+    with :ok <- mkdir_p(parent),
+         {:ok, lock} <- lock(parent, name) do
+      try do
+        with :ok <- File.mkdir(tmp) |> written(tmp),
+             :ok <- write_all(tmp, files ++ [{"installed.json", JSON.encode!(record)}]),
+             :ok <- swap(target, tmp, old) do
+          File.rm_rf(old)
+          installed(kind, name, record["sha256"])
+          {:ok, %{kind: kind, name: name, display: display, sha256: record["sha256"]}}
+        else
+          {:error, _} = error ->
+            File.rm_rf(tmp)
+            error
+        end
+      after
+        File.rm(lock)
+      end
     end
   end
 
+  defp mkdir_p(dir), do: File.mkdir_p(dir) |> written(dir)
+
+  # Plain files, mode 0644 whatever the umask or the source said.
+  defp write_all(dir, files) do
+    Enum.reduce_while(files, :ok, fn {n, bytes}, :ok ->
+      path = Path.join(dir, n)
+
+      with :ok <- File.write(path, bytes) |> written(path),
+           :ok <- File.chmod(path, 0o644) |> written(path) do
+        {:cont, :ok}
+      else
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  # Move what's there aside, the new one in; if the second rename fails, put the first back.
+  defp swap(target, tmp, old) do
+    with :ok <-
+           if(File.exists?(target), do: File.rename(target, old) |> written(target), else: :ok) do
+      case File.rename(tmp, target) |> written(target) do
+        :ok ->
+          :ok
+
+        error ->
+          if File.exists?(old), do: File.rename(old, target)
+          error
+      end
+    end
+  end
+
+  defp written(:ok, _path), do: :ok
+  defp written({:error, reason}, path), do: {:error, {:write, reason, path}}
+
+  # `.<name>.lock`, made exclusively. One left by a process that's gone is taken over.
+  defp lock(parent, name) do
+    path = Path.join(parent, ".#{name}.lock")
+
+    case File.open(path, [:write, :exclusive]) do
+      {:ok, io} ->
+        IO.write(io, System.pid())
+        File.close(io)
+        {:ok, path}
+
+      {:error, :eexist} ->
+        holder = File.read(path)
+
+        if match?({:ok, pid} when pid != "", holder) and alive?(elem(holder, 1)) do
+          {:error, :busy}
+        else
+          File.rm(path)
+
+          case File.open(path, [:write, :exclusive]) do
+            {:ok, io} -> IO.write(io, System.pid()) && File.close(io) && {:ok, path}
+            {:error, _} -> {:error, :busy}
+          end
+        end
+
+      {:error, reason} ->
+        {:error, {:write, reason, path}}
+    end
+  end
+
+  defp alive?(os_pid), do: File.exists?("/proc/#{String.trim(os_pid)}")
+
   # Tell this VM: read the directories again, drop the replaced grammar's compiled handle, and
-  # let the editor (if one runs) highlight what it now can.
-  defp installed(kind, name) do
+  # let the editor (if one runs) highlight what it now can. The install directories' watcher is
+  # told too, so it doesn't report this one again.
+  defp installed(kind, name, sha256) do
     Installed.refresh()
     if kind == :grammar, do: Grammars.forget(name)
     Logger.info("geex install: #{kind} #{name} installed")
+    Geex.Installed.Watcher.seen(kind, name, sha256)
 
     case Process.whereis(Geex.Loop) do
       nil -> :ok
@@ -524,5 +681,7 @@ defmodule Geex.Install do
   def describe({:bad_name, name}), do: "not a package name: #{inspect(name)}"
   def describe({:read, reason}), do: "can't read it: #{:file.format_error(reason)}"
   def describe({:write, reason, path}), do: "can't write #{path}: #{:file.format_error(reason)}"
+  def describe(:busy), do: "another geex is installing it; try again"
+  def describe({:bad_manifest, why}), do: "its manifest.json isn't right (#{inspect(why)})"
   def describe(other), do: inspect(other)
 end

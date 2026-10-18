@@ -61,14 +61,22 @@ defmodule Geex.Catalog do
   """
   @spec match([entry()], String.t()) :: entry() | nil
   def match(entries, basename) do
-    Enum.find(entries, &(basename in Map.get(&1, "filenames", []))) ||
+    Enum.find(entries, &(basename in names(&1, "filenames"))) ||
       entries
       |> Enum.flat_map(fn e ->
-        for ext <- Map.get(e, "extensions", []),
-            String.ends_with?(basename, ext) and basename != ext,
+        for ext <- names(e, "extensions"),
+            ext != "" and String.ends_with?(basename, ext) and basename != ext,
             do: {byte_size(ext), e}
       end)
       |> Enum.max_by(&elem(&1, 0), fn -> {0, nil} end)
       |> elem(1)
+  end
+
+  # A manifest's list of names, or none if it isn't a list of strings (a hand-made package).
+  defp names(entry, key) do
+    case Map.get(entry, key) do
+      list when is_list(list) -> Enum.filter(list, &is_binary/1)
+      _ -> []
+    end
   end
 end

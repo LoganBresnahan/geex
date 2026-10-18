@@ -194,6 +194,35 @@ the NIF pins (0.26.9), so a catalog install never hits this; a hand-installed or
   - A test reads every geex module's import table: only `Geex.Install` calls `:httpc` or
     `:inets`, or connects with `:gen_tcp` or `:ssl`. (`Geex.MCP.Port` listens on loopback to find
     a free port.)
+- **The step 5 review** (an adversarial subagent, with probes) found these, all fixed and
+  tested:
+  - **Two installs of one name at once could lose the package.** A failed rename skipped the
+    rollback, and the temporary names could clash across VMs. Now a `.<name>.lock` is made
+    exclusively for the swap; one left by a dead process is taken over, and a live one answers
+    `:busy`. The temporary names carry the OS pid and random bytes. Every write and rename is
+    checked, and a failed second rename puts the first back.
+  - **A zip bomb in `manifest.json`** was unpacked before any check, outside the heap cap. Now
+    its listed size must be at most 64 KB, and it is unpacked in the capped process.
+  - **`"filenames": null`** installed and then crashed every file open. Now file names must be
+    absent or lists of non-empty strings, and `Catalog.match/2` ignores anything else.
+  - **A local package directory followed links.** It copied a 0600 file into a 0644 package.
+    Now it reads only the names a package may have, each a plain file (`lstat`) under the caps.
+    The rest of a grammar's checkout is left alone. Installed files are 0644.
+  - **Names and types:** a theme named `installed`, `manifest` or `terminal` is refused; a
+    non-string name or display is refused.
+  - **A compile racing an update could cache the old grammar.** The cached handle now carries
+    its build (the install's sha256), so a stale one is compiled again.
+  - **Smaller ones:**
+    - A catalog download is capped at the catalog's size plus 4 KB.
+    - A heap-cap kill is told apart from a bad zip.
+    - A cut-off request's messages are drained.
+    - The watcher isn't told twice about an install in its own VM (`Watcher.seen/3`).
+    - The theme in use is reloaded when it's updated.
+    - `--list` keys by kind and name.
+    - The CLI prints what failed.
+  - **Left as is:** the body of a non-200 response isn't capped (`:httpc` streams only 200 and
+    206). A hostile host can cost memory, never correctness, since the sha256 decides. Installs
+    aren't fsynced before the rename.
 - **The binary must exit:** `geex install --list | head -1` hung the binary. A write to the
   closed pipe raised inside the application's start, where the binary does its work. The install
   branch now always reaches its halt.

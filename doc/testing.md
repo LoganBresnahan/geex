@@ -2883,3 +2883,37 @@ tests + 63 doctests green). It installed `0.1.0+7b5a2931.89a87236` and removed t
 **Not tested:** the installed binary's own download (next, with the deploy: the release must
 carry `:inets` and `:ssl`); a zip whose headers lie about sizes (the heap cap is there, not
 exercised).
+
+### 2026-10-18 — Step 5 in the binary; the step 5 review's fixes; a flaky-test fix
+
+**In the binary** (`0.1.0+743a7fc7.89a87236`, then the `.dirty` builds of the halt fix):
+- **The release:** `geex.rel` lists `{inets, "9.4.2", load}`. The first try failed to build:
+  Mix refuses `:load` for a dependency of a permanent app, and `:ssl` is ThousandIsland's.
+- **Installing:** `geex install go nope` installed Go from the real `v0.1.0` release in 1.06 s.
+  It said "nope isn't in this geex's catalog" and exited 1. `--list` then showed go installed.
+- **Pipes:** `geex install --list | head -1` hung (exit 124 under a 15 s timeout). The fix is
+  one write for the table, and a halt with `flush_timeout: 2_000`, since the default halt waits
+  to flush a closed pipe. After it: exit 0.
+- **The TUI:** `geex m.go r.rs` (Rust not installed), then `geex install rust` in another
+  terminal, then `r.rs`: `fn` turned keyword-orange with "Rust highlighting installed". The same
+  held installing first and then `open r2.rs` at once. Python and Go files highlighted from
+  their installs.
+
+**The review** (an adversarial subagent over `73b3120`, with probes): its findings are in
+ADR-0040's step 5 notes, each fixed. They have tests in `install_test.exs` "review fixes":
+- a live lock means busy, and a dead one's lock is taken over, leaving nothing beside the
+  package;
+- a manifest listed over 64 KB is refused;
+- null, empty or non-string file names are refused, and `match/2` ignores them;
+- a package directory ignores other files, refuses a link, and writes 0644;
+- reserved names and wrong types are refused;
+- a stale cached grammar is compiled again.
+
+**Flaky tests:** a full-suite run failed in `tree/watcher_test.exs` twice, in different tests,
+seed 291424 the second time. Both were an `assert_receive` with ExUnit's default 100 ms, which
+the watcher's restart (a `git check-ignore`, a new worker) can exceed under the full suite's
+load; 30 runs of the file alone passed. `test_helper.exs` now sets `assert_receive_timeout:
+1_000`, and 10 full runs in a row passed. This is likely also the earlier failure whose name
+wasn't captured.
+
+**1057 tests + 66 doctests**, green 10 times in a row.

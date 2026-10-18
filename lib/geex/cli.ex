@@ -127,16 +127,24 @@ defmodule Geex.CLI do
 
       {:install, args} ->
         Geex.redirect_logs_to_file()
-        # Always halt: a write to a closed stdout (`geex install --list | head`) raises here,
-        # inside the application's start, and the VM would otherwise hang.
+        # Always halt, and don't wait long on stdout: after `geex install --list | head -1` the
+        # pipe is closed, a write to it can raise, and a halt's flush would wait forever.
         code =
           try do
             install(args)
           catch
-            _kind, _reason -> 1
+            kind, reason ->
+              # Best-effort: stderr may be closed too.
+              try do
+                IO.puts(:stderr, "geex install: " <> Exception.format_banner(kind, reason))
+              catch
+                _, _ -> :ok
+              end
+
+              1
           end
 
-        System.halt(code)
+        :erlang.halt(code, flush_timeout: 2_000)
 
       {:open, paths} ->
         Geex.redirect_logs_to_file()
@@ -168,7 +176,12 @@ defmodule Geex.CLI do
   @spec install([String.t()]) :: 0 | 1
   def install(args) when args in [[], ["--list"]] do
     Geex.Installed.refresh()
-    installed = Map.new(Geex.Installed.grammars() ++ Geex.Installed.themes(), &{&1["name"], &1})
+
+    installed =
+      Map.new(
+        Enum.map(Geex.Installed.grammars(), &{{"grammar", &1["name"]}, &1}) ++
+          Enum.map(Geex.Installed.themes(), &{{"theme", &1["name"]}, &1})
+      )
 
     rows =
       for {kind, entries} <- [
@@ -177,7 +190,7 @@ defmodule Geex.CLI do
           ],
           e <- entries do
         status =
-          case installed[e["name"]] do
+          case installed[{kind, e["name"]}] do
             nil ->
               "available"
 
@@ -193,13 +206,13 @@ defmodule Geex.CLI do
 
     widths = for i <- 0..3, do: rows |> Enum.map(&String.length(Enum.at(&1, i))) |> Enum.max()
 
-    for row <- rows do
-      IO.puts(
-        Enum.zip_with(row, widths ++ [0], &String.pad_trailing/2)
-        |> Enum.join("  ")
-        |> String.trim_trailing()
-      )
-    end
+    # One write: a reader that stops early (`| head`) then closes the pipe after it.
+    IO.write(
+      Enum.map(rows, fn row ->
+        line = Enum.zip_with(row, widths ++ [0], &String.pad_trailing/2) |> Enum.join("  ")
+        String.trim_trailing(line) <> "\n"
+      end)
+    )
 
     0
   end

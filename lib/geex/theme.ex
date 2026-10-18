@@ -93,7 +93,9 @@ defmodule Geex.Theme do
       |> Enum.map(&Path.basename(&1, ".json"))
 
     installed = Enum.map(Geex.Installed.themes(), & &1["name"])
-    [Geex.Theme.Terminal.name() | Enum.sort(Enum.uniq(installed ++ bundled))]
+    terminal = Geex.Theme.Terminal.name()
+    # The built-in name always means the built-in theme.
+    [terminal | Enum.sort(Enum.uniq(installed ++ bundled) -- [terminal])]
   end
 
   @doc """

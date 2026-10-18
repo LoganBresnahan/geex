@@ -44,19 +44,28 @@ defmodule Geex.Highlight.Grammars do
   """
   @spec handle(String.t()) :: {:ok, TreeSitterWasm.grammar()} | {:error, term()}
   def handle(language) when is_binary(language) do
+    # The handle is cached with the build it came from (an install's sha256), so one compiled
+    # from a package since replaced is never used, even if its compile finished after the
+    # replacement's `forget/1`.
+    build = build(Installed.grammar(language))
+
     case :persistent_term.get({__MODULE__, language}, :miss) do
-      :miss ->
+      {^build, grammar} ->
+        {:ok, grammar}
+
+      _miss_or_stale ->
         with {:ok, grammar} <- compile(language) do
           # Idempotent: a concurrent first-call may compile twice; last write
           # wins and the extra handle is GC'd. Errors are never cached.
-          :persistent_term.put({__MODULE__, language}, grammar)
+          :persistent_term.put({__MODULE__, language}, {build, grammar})
           {:ok, grammar}
         end
-
-      grammar ->
-        {:ok, grammar}
     end
   end
+
+  defp build(%{"installed" => %{"sha256" => sha}}), do: sha
+  defp build(%{"dir" => dir}), do: dir
+  defp build(nil), do: nil
 
   @doc "Drop `language`'s cached handle, so the next use compiles the package now installed."
   @spec forget(String.t()) :: :ok
@@ -66,7 +75,8 @@ defmodule Geex.Highlight.Grammars do
   end
 
   defp compile(language) do
-    with %{"dir" => dir} = manifest <- Installed.grammar(language) || {:error, {:unknown_language, language}},
+    with %{"dir" => dir} = manifest <-
+           Installed.grammar(language) || {:error, {:unknown_language, language}},
          :ok <- check_abi(manifest),
          {:ok, wasm} <- File.read(Path.join(dir, "parser.wasm")),
          {:ok, scm} <- File.read(Path.join(dir, "highlights.scm")) do

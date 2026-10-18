@@ -22,6 +22,16 @@ defmodule Geex.Installed.Watcher do
   def start_link(opts \\ []),
     do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
 
+  @doc """
+  This VM installed `kind` `name` at `sha256` and has told the editor itself: don't report it
+  again when its files show up. A no-op when the watcher isn't running.
+  """
+  @spec seen(:grammar | :theme, String.t(), String.t(), GenServer.server()) :: :ok
+  def seen(kind, name, sha256, server \\ __MODULE__) do
+    if GenServer.whereis(server), do: GenServer.cast(server, {:seen, {kind, name}, sha256})
+    :ok
+  end
+
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
@@ -49,6 +59,10 @@ defmodule Geex.Installed.Watcher do
        notify: Keyword.get(opts, :notify, Geex.Loop)
      }}
   end
+
+  @impl true
+  def handle_cast({:seen, key, sha256}, state),
+    do: {:noreply, %{state | known: Map.put(state.known, key, sha256)}}
 
   @impl true
   def handle_info({:file_event, worker, {_path, _events}}, %{worker: worker, timer: nil} = state),

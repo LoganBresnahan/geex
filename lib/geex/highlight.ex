@@ -79,7 +79,9 @@ defmodule Geex.Highlight do
 
         if is_integer(abi) and abi in Grammars.abi(),
           do: {:ok, lang},
-          else: {:needs_update, manifest["display"] || lang}
+          else:
+            {:needs_update,
+             if(is_binary(manifest["display"]), do: manifest["display"], else: lang)}
 
       nil ->
         case Geex.Catalog.for_path(path) do

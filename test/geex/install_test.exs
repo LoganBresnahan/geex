@@ -280,6 +280,100 @@ defmodule Geex.InstallTest do
     end
   end
 
+  # The step 5 review's findings.
+  describe "review fixes" do
+    test "another geex installing the same name: busy; a lock left by a dead process is taken",
+         ctx do
+      parent = Path.dirname(Installed.dir(:grammar, "json"))
+      File.mkdir_p!(parent)
+      lock = Path.join(parent, ".json.lock")
+      zip = write_zip(ctx, "json.zip", json_files())
+
+      File.write!(lock, System.pid())
+      assert Install.install_path(zip) == {:error, :busy}
+      refute File.exists?(Installed.dir(:grammar, "json"))
+
+      # No such process: the lock is stale.
+      File.write!(lock, "999999999")
+      assert {:ok, _} = Install.install_path(zip)
+      refute File.exists?(lock)
+      assert Enum.sort(File.ls!(parent)) == ["json"]
+    end
+
+    test "a manifest listed over 64 KB is refused before anything is unpacked", ctx do
+      man = manifest(%{"pad" => String.duplicate(" ", 70_000)})
+      zip = write_zip(ctx, "m.zip", json_files(%{"manifest.json" => man}))
+      assert {:error, {:bad_manifest, :too_large}} = Install.install_path(zip)
+    end
+
+    test "file names that are null, not strings, or empty are refused; match ignores them", ctx do
+      for bad <- [
+            %{"filenames" => nil},
+            %{"extensions" => nil},
+            %{"extensions" => [""]},
+            %{"extensions" => [1]}
+          ] do
+        zip = write_zip(ctx, "n.zip", json_files(%{"manifest.json" => manifest(bad)}))
+        assert {:error, {:bad_manifest, :file_names}} = Install.install_path(zip), inspect(bad)
+      end
+
+      entries = [%{"name" => "x", "filenames" => nil, "extensions" => ["", nil, ".x"]}]
+      assert Geex.Catalog.match(entries, "a.txt") == nil
+      assert Geex.Catalog.match(entries, "a.x")["name"] == "x"
+    end
+
+    test "a package directory: other files are left alone, a link is refused, modes are 0644",
+         ctx do
+      pkg = Path.join(ctx.dir, "checkout")
+      File.mkdir_p!(pkg)
+      for {n, b} <- json_files(), do: File.write!(Path.join(pkg, n), b)
+      File.write!(Path.join(pkg, "README.md"), "a grammar's checkout has other files\n")
+      File.chmod!(Path.join(pkg, "LICENSE"), 0o600)
+
+      assert {:ok, _} = Install.install_path(pkg)
+      license = Path.join(Installed.dir(:grammar, "json"), "LICENSE")
+      assert File.stat!(license).mode |> Bitwise.band(0o777) == 0o644
+      refute File.exists?(Path.join(Installed.dir(:grammar, "json"), "README.md"))
+
+      secret = Path.join(ctx.dir, "secret")
+      File.write!(secret, "not for a package\n")
+      File.rm!(Path.join(pkg, "LICENSE"))
+      File.ln_s!(secret, Path.join(pkg, "LICENSE"))
+      assert {:error, {:not_a_file, _}} = Install.install_path(pkg)
+    end
+
+    test "names a package can't have, and a manifest's wrong types, are refused", ctx do
+      theme = File.read!(Application.app_dir(:geex, "priv/themes/birds-of-paradise.json"))
+
+      for name <- ["installed", "terminal"] do
+        man = JSON.encode!(%{"kind" => "theme", "name" => name, "license" => "MIT"})
+        zip = write_zip(ctx, "t.zip", [{name <> ".json", theme}, {"manifest.json", man}])
+        assert {:error, {:bad_name, ^name}} = Install.install_path(zip)
+      end
+
+      # A theme named `manifest`: its file would be a second manifest.json.
+      man = JSON.encode!(%{"kind" => "theme", "name" => "manifest", "license" => "MIT"})
+      zip = write_zip(ctx, "m.zip", [{"manifest.json", theme}, {"manifest.json", man}])
+      assert {:error, _} = Install.install_path(zip)
+      refute File.exists?(Installed.dir(:theme, "manifest"))
+
+      zip = write_zip(ctx, "n.zip", json_files(%{"manifest.json" => manifest(%{"name" => 5})}))
+      assert {:error, {:bad_name, 5}} = Install.install_path(zip)
+
+      zip =
+        write_zip(ctx, "d.zip", json_files(%{"manifest.json" => manifest(%{"display" => %{}})}))
+
+      assert {:error, {:bad_manifest, :display}} = Install.install_path(zip)
+    end
+
+    test "a cached grammar from a build since replaced is compiled again" do
+      :persistent_term.put({Grammars, "json"}, {"a build since replaced", :not_a_grammar})
+      assert {:ok, grammar} = Grammars.handle("json")
+      assert grammar != :not_a_grammar
+      assert {:ok, ^grammar} = Grammars.handle("json")
+    end
+  end
+
   test "a catalog download that doesn't match its sha256 is refused", ctx do
     entry = Geex.Catalog.grammar("rust")
     File.write!(Path.join(ctx.dir, entry["asset"]), "not the package")

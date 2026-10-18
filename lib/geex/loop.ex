@@ -455,9 +455,18 @@ defmodule Geex.Loop do
         end
       end)
 
-    display = (Geex.Installed.grammar(name) || %{})["display"] || name
+    display =
+      case Geex.Installed.grammar(name) do
+        %{"display" => display} when is_binary(display) -> display
+        _ -> name
+      end
+
     {:noreply, schedule_repaint(%{state | notice: "#{display} highlighting installed"})}
   end
+
+  # A theme: the one in use is loaded again (an update); another is announced.
+  def handle_info({:geex_installed, :theme, name}, %{theme_id: name} = state),
+    do: {:noreply, schedule_repaint(%{retheme(state) | notice: "theme #{name} updated"})}
 
   def handle_info({:geex_installed, :theme, name}, state),
     do:
