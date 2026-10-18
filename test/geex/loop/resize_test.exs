@@ -5,7 +5,14 @@ defmodule Geex.Loop.ResizeTest do
   use ExUnit.Case, async: false
 
   alias Geex.{Layout, Loop, Screen, Session}
-  alias Geex.Loop.Panes
+  alias Geex.Loop.{Panes, TabBar}
+
+  # The handles: an edge dragged left and right, one dragged up and down (two columns).
+  @cols TabBar.handle(:cols)
+  @rows TabBar.handle(:rows)
+
+  # The `width` columns of a frame row from `x`.
+  defp at(rows, y, x, width \\ 1), do: rows |> Enum.at(y) |> String.slice(x, width)
 
   setup do
     dir = Path.join(System.tmp_dir!(), "geex_resize_#{System.unique_integer([:positive])}")
@@ -128,9 +135,11 @@ defmodule Geex.Loop.ResizeTest do
   test "the handles are drawn", %{dir: dir} do
     state = start(dir) |> send_io({:alt, ?=}) |> send_io({:alt, ?-})
     {_state, rows} = frame(state)
-    # The divider's middle, and on the stacked split's row, the blank cell nearest its middle.
-    assert String.at(Enum.at(rows, 14), 59) == "⠿"
-    assert String.at(Enum.at(rows, 14), 60 + 55) == "⠿"
+    # The divider's middle, and on the stacked split's bar, the two columns before its `×`: each
+    # the glyph of the way its edge moves.
+    assert at(rows, 14, 59) == @cols
+    assert at(rows, 14, 60 + 55, 2) == @rows
+    assert @cols != @rows
   end
 
   describe "the tree and the edits pane" do
@@ -177,24 +186,25 @@ defmodule Geex.Loop.ResizeTest do
     test "both handles are drawn", %{dir: dir} do
       state = start_panels(dir)
       {_state, rows} = frame(state)
-      # The tree's edge, half way down its 29 rows; the edits pane's centre (columns 30–119).
-      assert String.at(Enum.at(rows, 14), 29) == "⠿"
-      assert String.at(Enum.at(rows, 20), 74) == "⠿"
+      # The tree's edge (moved left and right), half way down its 29 rows; the edits pane's
+      # title (moved up and down), at its centre (columns 30–119).
+      assert at(rows, 14, 29) == @cols
+      assert at(rows, 20, 74, 2) == @rows
 
       # Focused, its longer hint doesn't move the handle.
       {_state, rows} = frame(%{state | focus: :edits})
-      assert String.at(Enum.at(rows, 20), 74) == "⠿"
+      assert at(rows, 20, 74, 2) == @rows
     end
 
     test "a click on the edits title focuses it and leaves the handle under the pointer",
          %{dir: dir} do
       state = start_panels(dir)
       {state, before} = frame(state)
-      assert String.at(Enum.at(before, 20), 74) == "⠿"
+      assert at(before, 20, 74, 2) == @rows
       state = state |> send_io(mouse(:press, 74, 20)) |> send_io(mouse(:release, 74, 20))
       assert state.focus == :edits
       {_state, rows} = frame(state)
-      assert String.at(Enum.at(rows, 20), 74) == "⠿"
+      assert at(rows, 20, 74, 2) == @rows
       assert Enum.at(rows, 20) =~ "Enter opens"
     end
 
@@ -202,9 +212,10 @@ defmodule Geex.Loop.ResizeTest do
       state = %{Loop.new_state(60, 30) | tree_shown: true, edits_shown: true, focus: :edits}
       {_state, rows} = frame(state)
       title = Enum.at(rows, Layout.resolve(60, 30, %{tree: true, edits: true}).edits.y)
-      [before, _after] = String.split(title, "⠿")
+      [before, rest] = String.split(title, @rows)
       assert before =~ "── edits "
       refute before =~ "Enter"
+      assert rest =~ "Enter"
     end
   end
 
@@ -265,7 +276,7 @@ defmodule Geex.Loop.ResizeTest do
       state = send_io(state, {:alt, ?1})
       {state, rows} = frame(state)
       # Pane 2's bar is row 14; its handle is at 120 - 3 - 2.
-      assert String.at(Enum.at(rows, 14), 115) == "⠿"
+      assert at(rows, 14, 115, 2) == @rows
       state = drag(state, {115, 14}, {115, 20})
       assert panes(state) == [{1, {120, 20}}, {2, {120, 9}}]
     end

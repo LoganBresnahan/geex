@@ -39,7 +39,9 @@ defmodule Geex.Loop.KeyHelp do
     {"Mouse", "Shift+click  Alt+click", "extend the selection"},
     {"Mouse", "double-click", "select a word"},
     {"Mouse", "wheel", "scroll what's under the pointer"},
-    {"Mouse", "drag ⠿", "resize a split, the tree, the edits pane; double-click evens"},
+    {"Mouse", "drag #{Geex.Loop.TabBar.handle(:cols)}  #{Geex.Loop.TabBar.handle(:rows)}",
+     "resize a split, the tree, the edits pane; double-click evens"},
+    {"Mouse", "scroll bar", "a click jumps there; drag the thumb to scroll"},
     {"Mouse", "click ×", "close a tab, or a pane"}
   ]
 

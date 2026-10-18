@@ -2,7 +2,8 @@
 
 - **Status:** Accepted 2026-10-17 (the defaults the maintainer accepted, relayed by the
   coordinator session; built autonomously at the maintainer's word). **Amended 2026-10-17:**
-  splits keep a ratio, and the mouse resizes them (§6). **Builds** what
+  splits keep a ratio, and the mouse resizes them (§6). **Amended 2026-10-18:** an edge dragged
+  up and down shows `⠛⠛` (§6). **Builds** what
   [ADR-0034](0034-panes-tree-edits-hold.md) deferred ("splits and tabs") and
   [ADR-0028](0028-editor-shell-and-minibuffer.md) put "behind the pane system".
 - **Date:** 2026-10-17
@@ -116,7 +117,13 @@ Built with the mouse's step 3 ([ADR-0039](0039-mouse.md)):
   (`Layout.min_pane/0`); short of room for both, the least sizes shrink in proportion, so
   neither half collapses before the other. The ratio stays as it was, so a terminal resize keeps
   the proportions.
-- **Handles**, drawn `⠿` (one column in any font; not East Asian ambiguous width):
+- **Handles**, drawn `⠿` at first (one column in any font; not East Asian ambiguous width). **Amended
+  2026-10-18** (the maintainer's choice, relayed by the coordinator session): the same grip
+  turned, 4 dots along the edge and 2 across. An edge dragged left and right (a divider, the
+  tree's edge) shows `⣿` (U+28FF); one dragged up and down (a stacked split's bar, the edits
+  pane's title) shows `⠛⠛` (U+281B twice), two columns, the same as the bar's hit area. Each is
+  one constant (`Geex.Loop.TabBar.handle/1`), so swapping a glyph is a one-line change. The
+  edits pane's title centres its two columns, as it centred one:
   - a side-by-side split: its divider column, the glyph in the middle;
   - a stacked split: the top row of its lower half, where the tab bars have no tab and no `×`.
     Each of those bars keeps the glyph and a space just before its pane's `×`

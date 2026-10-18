@@ -7,7 +7,7 @@ defmodule Geex.Loop.TabBar do
   A tab reads ` N name × `: its number (`Alt+N`), its file name (with ` [+]` for unsaved edits),
   and a `×` that closes it. When the pane can close (it isn't the only one), the bar's last three
   columns are ` × `, which closes the pane. When the bar is the top of a stacked split's lower
-  half, it keeps a `⠿` handle and a space after it, just before the pane's `×` ([ADR-0038](../../../doc/adr/0038-split-panes-and-tabs.md)
+  half, it keeps two columns for the split's handle (`handle(:rows)`), just before the pane's `×` ([ADR-0038](../../../doc/adr/0038-split-panes-and-tabs.md)
   §6), so the split can be dragged however many tabs there are. Tabs that don't fit are cut from
   the left so the shown one stays visible.
   """
@@ -15,6 +15,12 @@ defmodule Geex.Loop.TabBar do
   alias Geex.Width
 
   @pane_close " × "
+
+  # The handles' glyphs (ADR-0038 §6): one per direction an edge moves, the same grip turned, 4
+  # dots along the edge and 2 across. Each braille cell is one column in any font (not East
+  # Asian ambiguous width). Swap them here.
+  @handle_cols "⣿"
+  @handle_rows "⠛⠛"
 
   @type t :: %{
           tabs: [%{i: non_neg_integer(), x: non_neg_integer(), label: String.t()}],
@@ -91,9 +97,18 @@ defmodule Geex.Loop.TabBar do
 
   def hit(_bar, _x), do: nil
 
-  @doc "A split's handle, as drawn on its boundaries."
-  @spec handle() :: String.t()
-  def handle, do: "⠿"
+  @doc """
+  A handle's glyph, by the way its edge moves: `:cols` for an edge dragged left and right (a
+  side-by-side divider, the tree's edge), `:rows` for one dragged up and down (a stacked split's
+  bar, the edits pane's title). The `:rows` glyph is two columns: the handle and the space after
+  it, the hit area a bar keeps.
+
+      iex> {Geex.Loop.TabBar.handle(:cols), Geex.Loop.TabBar.handle(:rows)}
+      {"⣿", "⠛⠛"}
+  """
+  @spec handle(:cols | :rows) :: String.t()
+  def handle(:cols), do: @handle_cols
+  def handle(:rows), do: @handle_rows
 
   @doc "The pane's `×`, as drawn in the bar's last three columns."
   @spec pane_close() :: String.t()

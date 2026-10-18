@@ -3322,3 +3322,28 @@ launch was timed in tmux to the first frame.
 - the discovery file was there while geex ran and gone after `Ctrl-X`;
 - `Ctrl-X` gave the shell back;
 - the log had no `terminating`, `undef` or `nofile` lines.
+
+### 2026-10-18 — the handles show which way they move: `⣿` and `⠛⠛` (ADR-0038 §6)
+
+**What changed:**
+- The maintainer's choice, relayed by the coordinator session: the same grip turned.
+- An edge dragged left and right shows `⣿`: a side-by-side divider, the tree's edge.
+- An edge dragged up and down shows `⠛⠛`: a stacked split's bar, the edits pane's title. It
+  fills the two columns the bar's hit area already had.
+- Each glyph is one constant in `Geex.Loop.TabBar` (`handle/1`).
+- The edits title centres the two columns, clamped into its rule.
+- The Keys tab names both glyphs, and now also the scroll bar (a click jumps; drag the thumb).
+
+**Automated:** in `resize_test.exs`:
+- each orientation draws its own glyph: the divider and the tree's edge `⣿`, a stacked split's
+  bar and the edits title `⠛⠛`, and the two differ;
+- the edits handle stays put when a click focuses the pane;
+- a narrow pane keeps it between the name and the hint;
+- a doctest pins the two glyphs.
+
+**Live, dev build in tmux** (120 × 30, a side-by-side split): `⣿` mid-divider (column 75) and
+at the tree's edge (column 30), and `⠛⠛` at the edits title's centre.
+
+**Not checked live:** a stacked split's bar (the tests cover it).
+
+**1093 tests + 76 doctests**, green twice.

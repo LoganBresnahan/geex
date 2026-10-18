@@ -1206,10 +1206,12 @@ defmodule Geex.Loop do
 
   ## Resizing (ADR-0039 step 3, ADR-0038's amendment). The handles: each split's boundary (a
   ## side-by-side split's divider column; a stacked split's second half's top row, where the tab
-  ## bars have nothing), the tree's right edge and the edits pane's title row. Each shows `⠿`.
+  ## bars have nothing), the tree's right edge and the edits pane's title row. An edge dragged
+  ## left and right shows `TabBar.handle(:cols)`, one dragged up and down `TabBar.handle(:rows)`.
   ## Dragging one resizes; a double-click on one puts it back (an even split, the default size).
 
-  @handle TabBar.handle()
+  @handle_cols TabBar.handle(:cols)
+  @handle_rows TabBar.handle(:rows)
 
   # The handle under `{x, y}`, or `nil`: `:tree`, `:edits`, or `{:split, path}`.
   defp handle_at(state, x, y) do
@@ -1774,7 +1776,7 @@ defmodule Geex.Loop do
           screen
 
         x ->
-          Screen.draw_text(screen, rect.x + x, rect.y, @handle, %Cell{
+          Screen.draw_text(screen, rect.x + x, rect.y, @handle_rows, %Cell{
             fg: pal.active_line_number,
             bg: pal.bg
           })
@@ -1814,7 +1816,7 @@ defmodule Geex.Loop do
       Screen.set_cell(acc, x, row, %Cell{char: "│", fg: pal.line_number, bg: pal.bg})
     end)
     |> Screen.set_cell(x, y + div(h, 2), %Cell{
-      char: @handle,
+      char: @handle_cols,
       fg: pal.active_line_number,
       bg: pal.bg
     })
@@ -1923,12 +1925,16 @@ defmodule Geex.Loop do
     # the pane (a click on the title does) and its longer hint don't move it from under the
     # pointer; kept within the rule, between the name and the hint, when the pane is too narrow.
     rule = max(w - 9 - String.length(hint), 0)
-    mid = (x + div(w - 1, 2)) |> max(x + 9) |> min(x + 9 + rule - 1)
+    glyph_w = Geex.Width.string(@handle_rows)
+    mid = (x + div(w - glyph_w, 2)) |> max(x + 9) |> min(x + 9 + rule - glyph_w)
 
     screen =
-      if rule > 0,
+      if rule >= glyph_w,
         do:
-          Screen.draw_text(screen, mid, y, @handle, %Cell{fg: pal.active_line_number, bg: pal.bg}),
+          Screen.draw_text(screen, mid, y, @handle_rows, %Cell{
+            fg: pal.active_line_number,
+            bg: pal.bg
+          }),
         else: screen
 
     if entries == [] do
@@ -1974,7 +1980,10 @@ defmodule Geex.Loop do
         Screen.draw_text(acc, inner, row, "│", %Cell{fg: pal.line_number, bg: pal.bg})
       end)
       # Its handle (ADR-0039 step 3): drag the edge to resize.
-      |> Screen.draw_text(inner, div(h, 2), @handle, %Cell{fg: pal.active_line_number, bg: pal.bg})
+      |> Screen.draw_text(inner, div(h, 2), @handle_cols, %Cell{
+        fg: pal.active_line_number,
+        bg: pal.bg
+      })
 
     rows = state.tree.rows
     n = max(h - 1, 0)
