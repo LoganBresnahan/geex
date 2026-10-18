@@ -191,6 +191,10 @@ The ledger track, in order (each builds on the one before):
    (3) `Geex.Layout`, panes and `Alt+O` (moved here from step 2: their first consumer) with the
    edits pane — **built 2026-10-15**; (4) the file tree — **built 2026-10-15**; (5)
    `user_modified` ("edited by you") — **built 2026-10-15**. All of ADR-0034 is built. The follow pane in the first draft was dropped.
+   **The edits list kept across restarts** — **built 2026-10-18** (ADR-0034's amendment, the
+   maintainer's yes to the coordinator session's proposal): `~/.local/state/geex/edits.jsonl`,
+   earlier rows under a divider. Later, maybe: a backfill from captAInHook's log for edits made
+   while no geex ran.
 
 Exit criteria: with captAInHook installed and the payload registered, an agent session
 (Claude Code first) edits a file open in geex with its **native** tools; each change appears

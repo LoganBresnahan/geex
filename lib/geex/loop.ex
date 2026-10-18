@@ -1463,6 +1463,7 @@ defmodule Geex.Loop do
     state = %{state | focus: :edits}
 
     case m.y > rect.y && Enum.at(state.edits_view.entries, i) do
+      %{kind: :earlier} -> state
       entry when is_map(entry) -> open_entry(entry, %{state | focus: :editor, edits_sel: i})
       _ -> state
     end
@@ -2330,10 +2331,13 @@ defmodule Geex.Loop do
     end
   end
 
-  # The edits pane starts at its newest entry; the tree re-reads the files; a file pane becomes
-  # current, and its tab Session's active buffer.
-  defp enter_pane(:edits, state),
-    do: %{state | focus: :edits, edits_sel: 0, edits_view: %{state.edits_view | hold: nil}}
+  # The edits pane starts at its newest entry (past the "earlier" divider, when this run has
+  # none); the tree re-reads the files; a file pane becomes current, and its tab Session's
+  # active buffer.
+  defp enter_pane(:edits, state) do
+    sel = past_divider(edits_entries(), 0, +1)
+    %{state | focus: :edits, edits_sel: sel, edits_view: %{state.edits_view | hold: nil}}
+  end
 
   defp enter_pane(:tree, state) do
     state = reload_tree(state)
@@ -2426,14 +2430,17 @@ defmodule Geex.Loop do
   # aren't looking at).
   defp apply_edits_key(event, state) do
     state = put_in(state.edits_view.hold, nil)
-    count = length(edits_entries())
+    entries = edits_entries()
+    count = length(entries)
 
     case event do
       e when e in [{:key, :up}, {:alt, ?w}, {:alt, ?W}] ->
-        schedule_repaint(%{state | edits_sel: max(min(state.edits_sel, count - 1) - 1, 0)})
+        sel = max(min(state.edits_sel, count - 1) - 1, 0)
+        schedule_repaint(%{state | edits_sel: past_divider(entries, sel, -1)})
 
       e when e in [{:key, :down}, {:alt, ?s}, {:alt, ?S}] ->
-        schedule_repaint(%{state | edits_sel: min(state.edits_sel + 1, max(count - 1, 0))})
+        sel = min(state.edits_sel + 1, max(count - 1, 0))
+        schedule_repaint(%{state | edits_sel: past_divider(entries, sel, +1)})
 
       {:key, :enter} ->
         case Enum.at(edits_entries(), min(state.edits_sel, count - 1)) do
@@ -2449,8 +2456,24 @@ defmodule Geex.Loop do
     end
   end
 
+  # The "earlier" divider is never highlighted: a step onto it goes one further, unless there is
+  # no further (the divider first or last), when it stays where it was.
+  defp past_divider(entries, sel, step) do
+    case Enum.at(entries, sel) do
+      %{kind: :earlier} ->
+        next = sel + step
+        if next >= 0 and next < length(entries), do: next, else: sel - step
+
+      _ ->
+        sel
+    end
+  end
+
   # Enter on an entry: a "disk is newer" row opens the file and fast-forwards it; any other row
-  # opens the file, at the first line that write changed when its group is in the history.
+  # opens the file as it is now, at the first line that write changed when its group is still in
+  # the history. A file gone since (and not open) says so: opening it would start an empty one.
+  defp open_entry(%{kind: :earlier}, state), do: state
+
   defp open_entry(%{kind: :behind, path: path}, state) do
     case open_tab(path, state) do
       {:ok, _pid, state} -> do_fast_forward(state)
@@ -2459,7 +2482,12 @@ defmodule Geex.Loop do
   end
 
   defp open_entry(%{kind: :edit, path: path, row: row}, state) do
-    case open_tab(path, state) do
+    there? = File.exists?(path) or Geex.BufferSupervisor.whereis(path) != :error
+
+    case if(there?, do: open_tab(path, state), else: {:gone, state}) do
+      {:gone, state} ->
+        %{state | notice: "#{EditsPane.relative(path, safe_start().root)} no longer exists"}
+
       {:ok, pid, state} ->
         if line = row.tool_use && first_line_of(pid, row.tool_use), do: set_cursor({line, 0})
         state

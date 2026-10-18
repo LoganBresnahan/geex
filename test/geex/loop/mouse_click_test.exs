@@ -191,6 +191,65 @@ defmodule Geex.Loop.MouseClickTest do
       assert Path.basename(Buffer.status(active()).path) == "c.txt"
       assert state.focus == :editor
     end
+
+    # Earlier runs' rows (ADR-0034 §6, amended 2026-10-18). The global list's earlier rows come
+    # from its file, which tests don't keep; they are put in its state here, and put back after.
+    test "earlier rows sit under a divider the keys step over; a file gone since says so",
+         %{dir: dir} do
+      {state, a} = start_panels(dir)
+      was = :sys.get_state(Edits).earlier
+      on_exit(fn -> :sys.replace_state(Edits, &%{&1 | earlier: was}) end)
+
+      earlier =
+        for f <- ["b.txt", "gone.txt"],
+            do: %{
+              path: Path.join(dir, f),
+              who: :you,
+              at: ~N[2026-10-14 09:05:00],
+              sha256: nil,
+              tool_use: nil,
+              earlier: true
+            }
+
+      :sys.replace_state(Edits, &%{&1 | earlier: earlier})
+      Edits.saved(Path.join(dir, "c.txt"))
+      _ = Edits.rows()
+      state = repaint(state)
+
+      # Rows 21–24: this run's c.txt, the divider, then the earlier rows, dated.
+      screen = Geex.Renderer.current()
+      text = fn y -> Enum.map_join(30..119, &Geex.Screen.get_cell(screen, &1, y).char) end
+      assert text.(21) =~ ~r/c\.txt +you +\d\d:\d\d/
+      assert text.(22) =~ "── earlier ──"
+      assert text.(23) =~ ~r/b\.txt +you +Oct 14 09:05/
+
+      # Down from c.txt steps over the divider to b.txt, Up back again.
+      state = %{state | focus: :edits, edits_sel: 0}
+      state = send_io(state, {:key, :down})
+      assert state.edits_sel == 2
+      state = send_io(state, {:key, :up})
+      assert state.edits_sel == 0
+
+      # A click on the divider does nothing.
+      state = click(state, 40, 22) |> repaint()
+      assert {state.edits_sel, active()} == {0, a}
+
+      # Enter on gone.txt: it isn't there to open.
+      state = %{state | focus: :edits, edits_sel: 3} |> send_io({:key, :enter})
+      assert state.notice == "gone.txt no longer exists"
+      assert active() == a
+
+      # With no rows of this run's, focusing the pane starts past the divider.
+      :sys.replace_state(Edits, &%{&1 | rows: []})
+
+      state =
+        Enum.reduce_while(1..4, %{state | focus: :editor}, fn _, acc ->
+          acc = send_io(acc, {:alt, ?p})
+          if acc.focus == :edits, do: {:halt, acc}, else: {:cont, acc}
+        end)
+
+      assert {state.focus, state.edits_sel} == {:edits, 1}
+    end
   end
 
   test "a click on the status line's \"behind disk\" fast-forwards", %{dir: dir} do

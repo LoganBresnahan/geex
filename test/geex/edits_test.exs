@@ -117,6 +117,146 @@ defmodule Geex.EditsTest do
     end
   end
 
+  describe "kept across restarts (ADR-0034 §6, amended 2026-10-18)" do
+    alias Geex.Edits.Log
+
+    setup do
+      dir = Path.join(System.tmp_dir!(), "geex_edits_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+      %{tmp_dir: dir}
+    end
+
+    doctest Geex.Edits
+    doctest Geex.Edits.Log
+
+    defp kept_row(path, who, sha256 \\ nil),
+      do: %{path: path, who: who, at: ~N[2026-10-17 09:00:00], sha256: sha256, tool_use: nil}
+
+    defp start_kept(file) do
+      name = :"kept_#{System.unique_integer([:positive])}"
+      pid = start_supervised!({Edits, name: name, file: file}, id: name)
+      {name, pid}
+    end
+
+    test "the rows come back as earlier ones, in order, an upgrade as one row",
+         %{tmp_dir: dir} do
+      file = Path.join([dir, "state", "geex", "edits.jsonl"])
+      {e, pid} = start_kept(file)
+      Edits.disk_changed("/r/a.ex", "h1", e)
+      Edits.attested(attestation("/r/a.ex", "h1"), e)
+      Edits.saved("/r/b.ex", e)
+      Edits.disk_changed("/r/c.ex", "h3", e)
+      before = Edits.rows(e)
+      stop_supervised!(e)
+      refute Process.alive?(pid)
+
+      # Three lines for a.ex's row and its upgrade, b.ex and c.ex: four in all.
+      assert file |> File.read!() |> String.split("\n", trim: true) |> length() == 4
+      assert File.stat!(file).mode |> Bitwise.band(0o777) == 0o600
+      assert File.stat!(Path.dirname(file)).mode |> Bitwise.band(0o777) == 0o700
+
+      {e2, _} = start_kept(file)
+      rows = Edits.rows(e2)
+      assert Enum.map(rows, &Map.delete(&1, :earlier)) == before
+      assert Enum.all?(rows, & &1.earlier)
+      assert [{"/r/c.ex", :outside}, {"/r/b.ex", :you}, {"/r/a.ex", {:agent, _}}] = whos(e2)
+
+      # This run's rows come first, the earlier ones after.
+      Edits.saved("/r/d.ex", e2)
+      assert [%{path: "/r/d.ex"} = d | _] = Edits.rows(e2)
+      refute Map.has_key?(d, :earlier)
+      assert length(Edits.rows(e2)) == 4
+    end
+
+    @tag :capture_log
+    test "a torn last line and lines that aren't rows are skipped; geex carries on",
+         %{tmp_dir: dir} do
+      file = Path.join(dir, "edits.jsonl")
+      good = Log.encode(kept_row("/r/a.ex", :you))
+
+      File.write!(file, [
+        good,
+        "not json\n",
+        ~s|{"v":2,"path":"/r/x"}\n|,
+        <<0xFF, 0xFE, ?\n>>,
+        String.trim_trailing(good)
+      ])
+
+      {e, _} = start_kept(file)
+      assert [{"/r/a.ex", :you}] = whos(e)
+
+      # A file of garbage throughout: no rows, and the list still works.
+      File.write!(file, :crypto.strong_rand_bytes(4096))
+      {e, _} = start_kept(file)
+      assert Edits.rows(e) == []
+      Edits.saved("/r/b.ex", e)
+      assert [{"/r/b.ex", :you}] = whos(e)
+    end
+
+    @tag :capture_log
+    test "a file that can't be written stops the writing, not the list", %{tmp_dir: dir} do
+      # Its directory would have to be a file.
+      File.write!(Path.join(dir, "blocker"), "")
+      {e, _} = start_kept(Path.join([dir, "blocker", "edits.jsonl"]))
+      Edits.saved("/r/a.ex", e)
+      Edits.saved("/r/b.ex", e)
+      assert [{"/r/b.ex", :you}, {"/r/a.ex", :you}] = whos(e)
+      assert :sys.get_state(e).file == nil
+    end
+
+    test "fold/1 leaves the rows as adding them one by one does" do
+      :rand.seed(:exsss, {7, 7, 7})
+      agent = {:agent, %{harness: "claude-code", session: "s"}}
+
+      for _ <- 1..50 do
+        loaded =
+          for _ <- 1..60 do
+            who = Enum.random([:you, :outside, :outside, agent])
+            sha = if who == :you, do: nil, else: "h#{:rand.uniform(8)}"
+            %{kept_row("/r/f#{:rand.uniform(4)}", who, sha) | tool_use: "t#{:rand.uniform(99)}"}
+          end
+
+        added =
+          Enum.reduce(loaded, [], fn row, rows ->
+            case Edits.add(rows, row) do
+              {_how, rows, _row} -> rows
+              :same -> rows
+            end
+          end)
+
+        assert Edits.fold(loaded) == added
+      end
+    end
+
+    test "past the bound the file rotates; loading reads both generations", %{tmp_dir: dir} do
+      file = Path.join(dir, "edits.jsonl")
+      line = byte_size(Log.encode(kept_row("/r/f10", :you)))
+
+      # Rotate past three lines' worth: f10–f13 move to edits.1.jsonl, f14–f17 the next.
+      for i <- 10..17, do: :ok = Log.append(file, kept_row("/r/f#{i}", :you), 3 * line)
+      assert File.exists?(Log.previous(file))
+      {rows, 0} = Log.load(file)
+      assert Enum.map(rows, & &1.path) == Enum.map(14..17, &"/r/f#{&1}")
+      assert {[], 0} == Log.load(Path.join(dir, "none.jsonl"))
+    end
+
+    test "two writers at once: every line lands whole", %{tmp_dir: dir} do
+      file = Path.join(dir, "edits.jsonl")
+
+      for w <- 1..2 do
+        Task.async(fn ->
+          for i <- 1..300,
+              do: :ok = Log.append(file, kept_row("/r/w#{w}/#{i}", :outside, "h#{i}"))
+        end)
+      end
+      |> Task.await_many(30_000)
+
+      assert {rows, 0} = Log.load(file)
+      assert length(rows) == 600
+    end
+  end
+
   test "the layout drops the edits band in a short terminal" do
     assert %{edits: nil, editor: %{h: 10}, status: 10} = Layout.resolve(80, 11, %{edits: true})
     assert %{edits: %{y: 20, h: 9}, editor: %{h: 20}} = Layout.resolve(80, 30, %{edits: true})

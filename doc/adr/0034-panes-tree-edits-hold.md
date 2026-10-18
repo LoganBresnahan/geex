@@ -9,6 +9,7 @@
   2026-10-17 by [ADR-0038](0038-split-panes-and-tabs.md). **Amended** 2026-10-18: the tree
   follows files coming and going (`Geex.Tree.Watcher`), and reconcile's watch isn't recursive.
   Rewritten the same day after the maintainer's redirect: the first draft's follow pane is dropped.
+  **Amended** 2026-10-18 again: the edits list is kept across restarts (`edits.jsonl`).
 - **Date:** 2026-10-15
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell; it deferred tabs and
   the file tree "behind the pane system"), [ADR-0014](0014-editor-state-and-dispatch-ownership.md)
@@ -172,7 +173,8 @@ the hold.
 ### 6. The edits pane
 
 - **`Geex.Edits`** keeps a bounded in-memory list (500 rows) and broadcasts each change to
-  subscribers. It is not persisted, because the ledgers are the durable record.
+  subscribers. It is not persisted, because the ledgers are the durable record. (Amended
+  2026-10-18: it is, in `edits.jsonl`; see the amendment below.)
 - **A row** is file · who · when, newest first. "Who" is `claude-code/7ccbf3d1` (the status-line
   author's form), `you`, or `outside`.
 - **Sources:**
@@ -376,6 +378,58 @@ session.
   version found the gap this closes: `mkdir -p e1/e2`, then a file in `e1/e2` a second later,
   never showed, because a read lists no file in an empty directory, so `e1/e2` was never
   watched. Agents do exactly this (`mkdir -p` in a shell, a `Write` later).
+
+### Amended 2026-10-18: the edits list is kept across restarts
+
+§6 kept the list in memory only, "because the ledgers are the durable record". But a ledger is
+per file and holds contents. Nothing answered "what changed in this project while I was away,
+and who did it" once geex restarted. The maintainer asked for the list to survive a restart; the
+coordinator session proposed the design.
+
+- **The file** (`Geex.Edits.Log`): `$XDG_STATE_HOME/geex/edits.jsonl` (default
+  `~/.local/state/geex/`), `0600` in a `0700` directory, beside `ledger/`.
+  - One JSON line per row: `path`, `who` (`"you"`, `"outside"`, or `{"agent": {harness,
+    session, turn, tool_use}}`), `at` (local time), `sha256`, `tool_use`.
+  - No file contents.
+  - The `edits_log` gate (off under test) and `edits_file` choose it.
+- **Written as it happens.** Each row added, and each upgrade (`outside` becoming an agent's
+  when its attestation arrives), is one line: open in append mode, one `write`, close.
+  - Several geex instances share the file. Each line is a single short append-mode write, so it
+    lands whole, and no instance holds the file open between writes.
+  - A test runs two writers of 300 lines each, and all 600 come back whole.
+  - A write that fails (a full disk, a directory that can't be made) is logged once; the list
+    carries on in memory.
+- **On start** the file is read in `Geex.Edits`' own process, not the loop's.
+  - Its rows are folded as they were first added (`Edits.fold/1`, which equals adding each with
+    `add/2`, keyed rather than scanned: 1,579 rows load in 12 ms), so an upgrade line joins its
+    row.
+  - Those rows are the earlier ones. The pane lists them after this run's, under an `── earlier
+    ──` divider, the newest 500 under the current root, each dated (`Oct 17 14:46`).
+- **Robust.** A last line with no newline (a torn write, or another instance's write in
+  progress) is skipped, not cut, and so is any line that isn't a row. A file of garbage loads
+  as no rows. The count skipped is logged.
+- **Bounded by rotation, not compaction.** Past 512 KB (about 2,500 rows) the file is renamed
+  `edits.1.jsonl`, replacing the one before. Loading reads both generations.
+  - Rewriting the file in place to keep the newest rows per root would lose a line another
+    instance appended during the rewrite. A rename can't: a write already under way lands in
+    the renamed file, which is still read.
+  - The size is read again just before the rename, so two instances crossing the bound
+    together rename once.
+  - The cost of rotation: rows go by age across all roots, not per root. A quiet project's rows
+    can age out behind a busy one's after a few thousand edits.
+- **What a kept row's actions do.**
+  - **The divider** takes no selection. The keys step over it, a click on it does nothing, and
+    focusing the pane starts past it.
+  - **Enter on a kept row** opens the file as it is now, at the write's first changed line only
+    while the buffer's history still credits that tool call (the ledger restores it). Otherwise
+    it opens at the top.
+  - **A file gone since, and not open,** says "<file> no longer exists" instead of opening an
+    empty new buffer. This applies to this run's rows too.
+  - A file that changed since opens as it is; the row keeps its hash, so a later diff view
+    could show what that write was.
+- **The gap.** Edits made while no geex runs aren't in the list: captAInHook's POSTs have
+  nowhere to go. (The payload spools attestations for the ledgers, ADR-0033, but not rows for
+  this list.) A backfill from captAInHook's own log could come later; it is out of scope here.
 
 ## Consequences
 

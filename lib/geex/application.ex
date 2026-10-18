@@ -37,8 +37,9 @@ defmodule Geex.Application do
           # this supervisor; cheap when empty, always present.
           Geex.Highlight.ReactorSupervisor,
           Geex.Session,
-          # The edits list behind the edits pane (ADR-0034 §6): in memory, bounded, always on.
-          Geex.Edits
+          # The edits list behind the edits pane (ADR-0034 §6): bounded, always on, and kept in
+          # its file across restarts unless the `edits_log` gate is off.
+          {Geex.Edits, file: edits_file()}
         ] ++
         loop_child() ++
         reconcile_child() ++
@@ -46,6 +47,11 @@ defmodule Geex.Application do
 
     opts = [strategy: :one_for_one, name: Geex.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  defp edits_file do
+    if Application.get_env(:geex, :edits_log, true),
+      do: Application.get_env(:geex, :edits_file) || Geex.Edits.Log.default_file()
   end
 
   defp terminal_io_child do

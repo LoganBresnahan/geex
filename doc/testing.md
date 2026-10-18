@@ -3351,3 +3351,50 @@ at the tree's edge (column 30), and `⠛⠛` at the edits title's centre.
 **Deployed** as `0.1.0+3852ff83.89a87236`. In the installed binary (tmux, scratch state),
 `geex .` then `Alt+=` showed the same three handles. `Ctrl-X` gave the shell back, and the log
 had no `terminating` or `undef` lines.
+
+### 2026-10-18 — the edits list is kept across restarts (ADR-0034 amendment)
+
+**What changed:**
+- `Geex.Edits.Log` appends each row added or upgraded to `$XDG_STATE_HOME/geex/edits.jsonl`
+  (`0600` in `0700`): one open-append-write-close per line, no contents. It rotates to
+  `edits.1.jsonl` past 512 KB, and loads both, skipping torn and unusable lines.
+- `Geex.Edits` reads the file in its own process on start and folds it (`fold/1`, keyed) into
+  the earlier rows.
+- The pane lists those after this run's, under an `── earlier ──` divider, dated, the newest 500
+  under the root.
+- The divider takes no selection.
+- Enter on a row whose file is gone and not open says so.
+
+**Automated:**
+- `edits_test.exs` (6 new tests, 3 new doctest blocks):
+  - rows come back as earlier ones, in order, with an upgrade as one row and the modes
+    0600/0700;
+  - a torn line, non-JSON, a wrong version and bad bytes are skipped, a file of random bytes
+    loads as none, and the list still works;
+  - an unwritable file stops only the writing;
+  - rotation at three lines' worth keeps the newest generation pair;
+  - two concurrent writers of 300 lines each give 600 whole rows;
+  - `fold/1` equals adding row by row, over 50 random 60-row sequences.
+- `mouse_click_test.exs`: the divider and the dated rows on screen; Down and Up step over the
+  divider; a click on it does nothing; Enter on a gone file gives the notice; focusing the pane
+  with no rows of this run's starts past the divider.
+
+**Measured:** 6,000 agent rows written rotate to a 512 KB and a 37 KB generation. Loading those
+1,578 rows takes 5 ms to read. Starting `Geex.Edits` and its first `rows/1` took 43 ms with
+`add/2`'s scan, and 12 ms with the keyed `fold/1`.
+
+**Live, dev build in tmux** (scratch `XDG_STATE_HOME`, a scratch repository):
+- an attest POST for a.txt and a save of notes.txt each wrote one line, with the file `600` and
+  the directory `700`;
+- after a restart both came back under `── earlier ──`, dated `Oct 18 15:2…`, beside a
+  hand-added `doomed.txt` row whose file I had deleted;
+- `Alt+P` into the pane selected `doomed.txt`, past the divider;
+- Enter on `doomed.txt` said "doomed.txt no longer exists";
+- Enter on a.txt's agent row opened it at the top: its write isn't in this buffer's history;
+- the log had no errors or warnings.
+
+**1100 tests + 79 doctests**, green twice.
+
+**Not checked:**
+- two live geex instances sharing the file (the concurrent-writer test covers the appends);
+- a rotation in a running geex.
