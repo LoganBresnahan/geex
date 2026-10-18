@@ -2528,3 +2528,34 @@ for its tree-sitter-json test fixtures (the same build, MIT), and the licence in
 
 **Not tested:** nothing runs differently; the clone-and-build steps in README.md were not run on
 a fresh machine.
+
+### 2026-10-18 — A deploy keeps the unpack a running geex uses (BUG-4); `geex 0.1.0+5b995d0f` deployed
+
+Three deploys:
+- **`dcce38b`** installed a binary that printed `0.1.0+839c64cb`: the commit changed no module,
+  so Mix kept the old `geex.app` (the release directory said `+dcce38ba`). Its prune also
+  removed `+839c64cb`'s unpack under the maintainer's open geex, which crashed (BUG-4; the
+  coordinator session stopped it with SIGTERM, cleanly).
+- **`9a366ef`** removes `geex.app` before building. It installed `0.1.0+9a366eff` and was
+  checked live (`--version`, `--frob` exit 2, `geex a.txt notes.txt` with the discovery file,
+  typing + Ctrl-O wrote `a.txt`, `notes.txt`'s `IO.puts` not run, Ctrl-X left the alternate
+  screen and the mouse modes off, the discovery file gone, no `terminating` lines). No geex was
+  running.
+- **`5b995d0`** is the BUG-4 fix. Live, with scratch state in tmux (`-L deploy`): one geex
+  from `geex.prev` (unpack `+dcce38ba`, which the deploy would not keep as prev) and one from
+  `~/.local/bin/geex` (`+9a366eff`, about to become prev), both running through the deploy. It
+  printed `kept geex_erts-16.1_0.1.0+dcce38ba, in use by pid …` and installed `0.1.0+5b995d0f`;
+  all three unpacks stayed. Afterwards both geex opened `notes.txt` with `Alt+O`, toggled the
+  tree, and quit with Ctrl-X: exit 0, alternate screen and mouse off, no `terminating`, `undef`
+  or crash lines in either log, both discovery files gone.
+
+One of the two, started in the same second as the other, printed Burrito's "Failed to load the
+metadata file" for `+dcce38ba` before taking the screen: its start-up cleanup
+(`do_clean_old_versions`) read that directory while the other was still unpacking it. It skips
+such a directory. It never removes a geex unpack itself (semver ignores `+<sha>`).
+
+**Automated:** `test/geex/deploy_test.exs` runs a process from a fake unpack and reads it back
+from `/proc`; the `stale_unpacks/3` doctest. **1004 tests + 52 doctests**, green twice.
+
+**Not tested:** a dirty deploy over a running geex of the same dirty version (it stops, by
+reading the code); `--rollback` to the kept `geex.prev` unpack.
