@@ -2917,3 +2917,16 @@ load; 30 runs of the file alone passed. `test_helper.exs` now sets `assert_recei
 wasn't captured.
 
 **1057 tests + 66 doctests**, green 10 times in a row.
+
+### 2026-10-18 — `geex 0.1.0+2ec264e7.89a87236` deployed (step 5 and its review's fixes)
+
+`mix geex.deploy` from the clean trees at `2ec264e` and `tree_sitter_wasm` `89a8723`. Live with
+`geex` from the PATH, scratch `XDG_DATA_HOME`, `XDG_CACHE_HOME` and state:
+- `--version` printed it; `--frob` exited 2.
+- `geex install --list | head -1` exited 0.
+- `geex install typescript birds-of-paradise` installed both from the real release, exit 0.
+- `geex a.ts notes.txt` highlighted `const` and `x` from the installed TypeScript grammar, with
+  the discovery file present.
+- Ctrl-X was clean: no discovery file left, no `terminating` lines.
+
+**Not tested:** Windows Terminal with the new binary.
