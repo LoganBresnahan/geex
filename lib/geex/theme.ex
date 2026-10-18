@@ -91,9 +91,21 @@ defmodule Geex.Theme do
       |> Path.join("*.json")
       |> Path.wildcard()
       |> Enum.map(&Path.basename(&1, ".json"))
-      |> Enum.sort()
 
-    [Geex.Theme.Terminal.name() | bundled]
+    installed = Enum.map(Geex.Installed.themes(), & &1["name"])
+    [Geex.Theme.Terminal.name() | Enum.sort(Enum.uniq(installed ++ bundled))]
+  end
+
+  @doc """
+  Load the theme named `name`: an installed one (ADR-0040 §4), else a bundled one. The built-in
+  `"terminal"` theme isn't a file; see `Geex.Theme.Terminal`.
+  """
+  @spec named(String.t()) :: {:ok, t()} | {:error, term()}
+  def named(name) when is_binary(name) do
+    case Geex.Installed.theme(name) do
+      %{"dir" => dir} -> load(Path.join(dir, name <> ".json"))
+      nil -> bundled(name)
+    end
   end
 
   @doc "Load a bundled theme by name from `priv/themes/<name>.json`."

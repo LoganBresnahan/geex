@@ -60,8 +60,8 @@ defmodule Mix.Tasks.Geex.Highlight do
 
       :error ->
         Mix.raise(
-          "no bundled grammar for #{inspect(Path.extname(path))} " <>
-            "(have: #{Enum.join(Geex.Highlight.Grammars.bundled(), ", ")})"
+          "no grammar for #{inspect(Path.basename(path))} " <>
+            "(have: #{Enum.join(Geex.Highlight.Grammars.available(), ", ")})"
         )
     end
   end

@@ -46,6 +46,7 @@ defmodule Geex.Loop do
     Edits,
     Finder,
     Fuzzy,
+    Highlight,
     Layout,
     Tree,
     Minibuffer,
@@ -425,6 +426,43 @@ defmodule Geex.Loop do
   def handle_info({:geex_drag_scroll, ref}, %{drag: %{timer: ref}} = state),
     do: {:noreply, drag_to(put_in(state.drag.timer, nil), :scroll)}
 
+  # A grammar was installed (`Geex.Install`, ADR-0040 §4): every open file it covers starts
+  # highlighting (or starts again with the new build), and the loop follows its new reactor.
+  def handle_info({:geex_installed, :grammar, name}, state) do
+    paths = Map.new(safe_buffers(), &{&1.pid, &1.path})
+
+    state =
+      Enum.reduce(state.watched, state, fn {pid, entry}, acc ->
+        path = paths[pid]
+
+        if is_binary(path) and Highlight.language_for_path(path) == {:ok, name} do
+          if is_pid(entry.reactor), do: Reactor.unsubscribe(entry.reactor, self())
+          Reactor.rewatch(pid, path)
+
+          reactor =
+            case Reactor.for_buffer(pid) do
+              {:ok, r} ->
+                Reactor.subscribe(r)
+                r
+
+              :error ->
+                nil
+            end
+
+          put_in(acc.watched[pid].reactor, reactor)
+        else
+          acc
+        end
+      end)
+
+    display = (Geex.Installed.grammar(name) || %{})["display"] || name
+    {:noreply, schedule_repaint(%{state | notice: "#{display} highlighting installed"})}
+  end
+
+  def handle_info({:geex_installed, :theme, name}, state),
+    do:
+      {:noreply, schedule_repaint(%{state | notice: "theme #{name} installed (`theme #{name}`)"})}
+
   # The terminal's background (its answer to OSC 11, ADR-0040 §1). The terminal theme tints
   # its active line and selection from it. Not a key: nothing else about the state changes.
   def handle_info({:geex_io, {:osc, "11", spec}}, state) do
@@ -621,7 +659,20 @@ defmodule Geex.Loop do
         {panes, kind} = Panes.show(state.panes, pid, cursor)
         # A tab this pane already had keeps the cursor it had here.
         if kind == :existing, do: set_cursor(Panes.current(panes).cursor)
-        put_panes(%{state | selection: nil, goal: 0, drag: nil}, panes)
+        state = put_panes(%{state | selection: nil, goal: 0, drag: nil}, panes)
+        if kind == :existing, do: state, else: grammar_notice(state, pid)
+    end
+  end
+
+  # A newly shown file whose grammar here is built for a tree-sitter ABI this geex doesn't load
+  # shows as plain text, and says why (ADR-0040 §5).
+  defp grammar_notice(state, pid) do
+    with %{path: path} when is_binary(path) <- Enum.find(safe_buffers(), &(&1.pid == pid)),
+         {:needs_update, display} <- Highlight.grammar_status(path),
+         %{"name" => lang} <- Geex.Installed.for_path(path) do
+      %{state | notice: "#{display} highlighting needs an update: geex install #{lang}"}
+    else
+      _ -> state
     end
   end
 
@@ -1834,7 +1885,7 @@ defmodule Geex.Loop do
     do: schedule_repaint(%{state | theme_id: id, theme: Theme.Terminal.theme(state.terminal_bg)})
 
   defp retheme(state, id) do
-    case Theme.bundled(id) do
+    case Theme.named(id) do
       {:ok, theme} ->
         schedule_repaint(%{state | theme_id: id, theme: theme})
 

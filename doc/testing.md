@@ -2826,3 +2826,60 @@ tests + 63 doctests green). It installed `0.1.0+7b5a2931.89a87236` and removed t
 - Ctrl-X was clean: no discovery file left, no `terminating` lines.
 
 **Not tested:** installing a package (step 5; the catalog is embedded, nothing reads it yet).
+
+### 2026-10-18 — Installing grammars and themes, and loading what's installed (ADR-0040 step 5)
+
+**Live, against the real release** (`v0.1.0`, created by the coordinator session), with scratch
+`XDG_DATA_HOME` and `XDG_CACHE_HOME`:
+- **`Install.install/1`:**
+  - `rust` installed; the download went through GitHub's 302 to the asset CDN, with full TLS
+    verification.
+  - `birds-of-paradise` installed in 147 ms.
+  - `nope` was `{:not_in_catalog, "nope"}`.
+- **Afterwards:**
+  - `rust`'s directory held `parser.wasm`, `highlights.scm`, `manifest.json`, `LICENSE` and
+    `installed.json` (sha256, `source: catalog`, time).
+  - `language_for_path("a.rs")` was `{:ok, "rust"}`, and Rust highlighted.
+  - `grammar_status("a.py")` was `{:available, "Python"}`.
+- **`Install.fetch/1` against badssl.com:**
+  - `wrong.host`, `self-signed` and `expired` were each refused at the TLS handshake
+    (`handshake_failure`, `bad_certificate`, `certificate_expired`);
+  - `badssl.com` itself fetched;
+  - a missing GitHub asset was `{:http_status, 404}`.
+- **`geex install --list`** (as `Geex.CLI.install(["--list"])`) printed the 17 packages with
+  kind, size and status: available, installed, or bundled for elixir and json.
+- **The TUI, without a restart:**
+  - `a.py` was open as plain text in a `mix run` geex.
+  - `geex install python` ran in a second process with the same data directory.
+  - About 2 s later the open file showed Python's colours, and the status line said "Python
+    highlighting installed".
+  - The first try didn't colour: the loop subscribed to the new reactor with
+    `Reactor.subscribe(r) && r`, and `subscribe` answers the overlay, `nil` before the first
+    pass, so the loop kept `nil`. Fixed, with a test.
+
+**Automated:**
+- `install_test.exs` (15 tests and a doctest):
+  - a local grammar directory installs, is used and is recorded as local, then is replaced in
+    place by a zip;
+  - a local theme zip installs, and `theme` lists and loads it;
+  - entries are refused: `../evil`, `sub/…`, `run.sh`, `/abs`;
+  - a "symlink" entry lands as a plain file;
+  - more than 64 MB unpacked is refused;
+  - a manifest naming another kind or a bad name is refused;
+  - a grammar of ABI 16 is refused;
+  - an installed one of ABI 16 is `needs_update`, with no language and `{:abi, 16}`;
+  - opening such a file shows the hint, and a later install gives it a reactor the loop
+    follows;
+  - a catalog download whose sha256 differs is refused (`GEEX_CATALOG_URL=file://`);
+  - `update?/1`;
+  - over loopback HTTP (Bandit): a redirect, a redirect loop, a 404, a 40 MB body cut off;
+  - the `redirect/2` doctests (no https→http);
+  - another geex's install is noticed once per burst, and not again for the same sha256, with
+    a stub and with inotify;
+  - only `Geex.Install` reaches the network (the import tables).
+- `catalog_test.exs`, the CLI doctests (`install`, `-- install`).
+- **1051 tests + 66 doctests**, green twice.
+
+**Not tested:** the installed binary's own download (next, with the deploy: the release must
+carry `:inets` and `:ssl`); a zip whose headers lie about sizes (the heap cap is there, not
+exercised).

@@ -53,8 +53,10 @@ One Mix app, `:geex`, under `lib/geex/`:
   and each one's tabs, ADR-0038), `Loop.Mouse` (pure: where a mouse event lands, ADR-0039), `Geex.Finder` (`Alt+O`'s fuzzy file ranking, run off the loop), `Geex.Tree` (the tree's files, from `git
   ls-files`; `Tree.Watcher` re-reads them as files come and go), and `Geex.Edits` (the in-memory edits list behind the edits pane, ADR-0034).
 - **Capabilities** — `Geex.Highlight.*` (reactor + tree-sitter-on-wasm via the
-  sibling path dep `../tree_sitter_wasm`), `Geex.Theme`, `priv/grammars`,
-  `priv/themes`.
+  sibling path dep `../tree_sitter_wasm`), `Geex.Theme` (+ `Theme.Terminal`, the terminal's own
+  colours), `Geex.Catalog` (the embedded `catalog/catalog.json`), `Geex.Install` /
+  `Geex.Installed` (installing and listing grammars and themes, ADR-0040), `priv/grammars`,
+  `priv/themes` (until geex ships bare).
 
 ## Sacred invariants — breaking one breaks the project
 
@@ -72,7 +74,7 @@ One Mix app, `:geex`, under `lib/geex/`:
    `Geex.TerminalIO` writes the tty; `Logger` is redirected to
    `<tmp>/geex.log` before the app boots (`Geex.run/1`, hence `--no-start`).
    No `IO.puts`/`IO.write` in `lib/` outside `terminal_io.ex`, the
-   `lib/mix/tasks/` CLI tasks, and `cli.ex`'s `--version`/`--help`/usage
+   `lib/mix/tasks/` CLI tasks, and `cli.ex`'s `--version`/`--help`/usage/`install`
    (printed before the terminal is taken, then the VM halts). Anything that
    stops the VM goes through `Geex.stop/0`, never `System.stop/0`: the
    installed binary's application never finishes starting, so only an
@@ -179,6 +181,12 @@ session's `Co-Authored-By` trailer.
 - attestation payload (ADR-0032 step d): `integrations/captainhook/geex-attest.sh`, which the
   user registers in `~/.captainHook/handlers.json` (never edit that file without asking);
   tested against `test/fixtures/claude-code/` (verbatim captAInHook captures)
+- installed grammars and themes (ADR-0040): `$XDG_DATA_HOME/geex/{grammars,themes}/<name>/`
+  (default `~/.local/share/geex/`), each with `installed.json` written last; `geex install NAME |
+  --list | ./pkg`; `GEEX_CATALOG_URL` (a `file://` dir or `http(s)://` base) replaces the release
+  host. Tests get their own `data_dir`. Only `Geex.Install` touches the network, and only on
+  the user's word (a test reads the import tables). Compiled grammars cache in
+  `$XDG_CACHE_HOME/geex/wasm` (off under test: `wasm_cache`)
 - durable ledger (ADR-0033): `$XDG_STATE_HOME/geex/ledger/<key>.jsonl` (default
   `~/.local/state/geex/ledger/`; `<key>` = 16 hex of the sha256 of the absolute path),
   `0600` in `0700`, plus `<key>.lock` while a buffer has it open and `<key>.spool.jsonl` (the

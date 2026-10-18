@@ -63,6 +63,8 @@ defmodule Geex.MixProject do
     [
       geex: [
         steps: [:assemble, &Burrito.wrap/1],
+        # Carried, loaded, not started at boot (ADR-0040 §3).
+        applications: [inets: :load, ssl: :load],
         burrito: [
           targets: [linux: [os: :linux, cpu: :x86_64]],
           phases: [
@@ -76,7 +78,10 @@ defmodule Geex.MixProject do
 
   def application do
     [
-      extra_applications: [:logger, :crypto],
+      # :inets (`:httpc`) and :ssl download a grammar or theme the user asked for (ADR-0040 §3).
+      # Optional, and loaded but not started in the release: `Geex.Install` starts them when a
+      # download begins, so a geex that installs nothing never starts an HTTP client.
+      extra_applications: [:logger, :crypto, inets: :optional, ssl: :optional],
       mod: {Geex.Application, []}
     ]
   end

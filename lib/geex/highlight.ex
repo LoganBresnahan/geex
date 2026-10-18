@@ -25,12 +25,13 @@ defmodule Geex.Highlight do
   @default_timeout_ms 5_000
 
   @doc """
-  Capture spans for `text` in `language` (a bundled grammar name, e.g. `"elixir"`),
+  Capture spans for `text` in `language` (a grammar's name, e.g. `"elixir"`),
   bounding the parse to `timeout_ms` (default #{@default_timeout_ms} ms).
 
   Returns `{:ok, [Span.t()]}` or `{:error, reason}`:
 
-    * `{:unknown_language, name}` — no bundled grammar
+    * `{:unknown_language, name}` — no grammar for it
+    * `{:abi, version}` — its grammar is built for an ABI this geex doesn't load
     * `{:grammar_read, posix}` — grammar files unreadable
     * `:timeout` — the parse exceeded the deadline
     * `{:engine, message}` — the engine rejected the grammar/query (never a crash)
@@ -41,21 +42,50 @@ defmodule Geex.Highlight do
       when is_binary(text) and is_binary(language) and is_integer(timeout_ms) and timeout_ms >= 0 do
     with {:ok, grammar} <- Grammars.handle(language),
          {:ok, raw} <- engine_highlight(grammar, text, timeout_ms) do
-      {:ok, Enum.map(raw, fn {s, e, capture} -> %Span{start_byte: s, end_byte: e, capture: capture} end)}
+      {:ok,
+       Enum.map(raw, fn {s, e, capture} -> %Span{start_byte: s, end_byte: e, capture: capture} end)}
     end
   end
 
   @doc """
-  The bundled grammar name for a file path, by extension, or `:error` if geex has
-  no grammar for it. The reactor uses this to pick a language; the
+  The language for a file path, from the grammars there are (`Geex.Installed`: their manifests'
+  file names and endings, ADR-0040 §4), or `:error` if geex has no grammar for it, or has one
+  built for an ABI it doesn't load. The reactor uses this to pick a language; the
   `mix geex.highlight` task uses it too.
   """
   @spec language_for_path(String.t()) :: {:ok, String.t()} | :error
   def language_for_path(path) when is_binary(path) do
-    case Path.extname(path) do
-      ext when ext in [".ex", ".exs"] -> {:ok, "elixir"}
-      ".json" -> {:ok, "json"}
+    case grammar_status(path) do
+      {:ok, lang} -> {:ok, lang}
       _ -> :error
+    end
+  end
+
+  @doc """
+  What geex can do for a file's highlighting:
+
+    * `{:ok, lang}` — a grammar is here and loads;
+    * `{:needs_update, display}` — the grammar here is built for a tree-sitter ABI this geex
+      doesn't load: plain text, and the catalog's build is the fix (ADR-0040 §5);
+    * `{:available, display}` — none here, but the catalog has one;
+    * `:none`.
+  """
+  @spec grammar_status(String.t()) ::
+          {:ok, String.t()} | {:needs_update, String.t()} | {:available, String.t()} | :none
+  def grammar_status(path) when is_binary(path) do
+    case Geex.Installed.for_path(path) do
+      %{"name" => lang} = manifest ->
+        abi = manifest["abi"]
+
+        if is_integer(abi) and abi in Grammars.abi(),
+          do: {:ok, lang},
+          else: {:needs_update, manifest["display"] || lang}
+
+      nil ->
+        case Geex.Catalog.for_path(path) do
+          %{"display" => display} -> {:available, display}
+          nil -> :none
+        end
     end
   end
 

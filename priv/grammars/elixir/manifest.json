@@ -1,0 +1,1 @@
+{"abi":14,"display":"Elixir","extensions":[".ex",".exs"],"filenames":[],"kind":"grammar","license":"Apache-2.0 AND MIT","name":"elixir","tree_sitter_cli":"0.26.9","upstream":{"commit":"7937d3b4d65fa574163cfa59394515d3c1cf16f4","repo":"https://github.com/elixir-lang/tree-sitter-elixir"}}

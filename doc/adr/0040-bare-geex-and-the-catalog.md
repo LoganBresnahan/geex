@@ -152,6 +152,70 @@ status line says "<Language> highlighting needs an update (Alt+Y)". A grammar th
 for any other reason is treated the same way. The catalog's own packages are built with the CLI
 the NIF pins (0.26.9), so a catalog install never hits this; a hand-installed or stale package can.
 
+### Built 2026-10-18 (step 5): installing, and loading what's installed
+
+**`Geex.Install`** is the one install path, for the catalog and for local packages:
+
+- **The download** (the coordinator session's review notes, folded in):
+  - It uses `:httpc` with `:ssl` in `verify_peer` mode, against
+    `:public_key.cacerts_get/0`. It sends SNI for each host, and checks host names with
+    `pkix_verify_hostname_match_fun(:https)`, so the wildcard certificate of the CDN that a
+    GitHub release asset redirects to verifies.
+  - Redirects are followed by hand (at most 5) and never from https to anything else
+    (`Install.redirect/2`).
+  - The body is streamed with a 32 MB cap and cut off past it, before anything is written or
+    hashed.
+  - Checked live: a wrong host, a self-signed and an expired certificate (badssl.com) are each
+    refused at the handshake. A real GitHub asset installs, through its 302 to the CDN.
+- **The checks:**
+  - The sha256 must be the catalog's. A local package's own hash is recorded.
+  - Every zip entry must be a file with a flat name from the package's expected set, with no
+    repeats, at most 64 MB unpacked in all, and checked before unpacking. A name is
+    `[a-z0-9][a-z0-9_-]*`.
+  - The package is unpacked in memory, in a process whose heap is capped (shared binaries
+    included), so a zip whose headers lie is killed, not the editor.
+  - A symlink can't get through. Erlang's `:zip` reports one as a regular file (its mode masked
+    to 0o777), and geex writes every entry itself as a plain file, so a "link" lands as a file
+    holding its target's name. The review asked for links to be refused, but they can't even be
+    seen; a test checks the outcome instead.
+- **Validation:** the manifest must name the expected kind and name. A grammar's ABI must be in
+  13–15 and the NIF must load its wasm and query, which also warms the compile cache. A theme
+  must pass `Theme.from_json/1`.
+- **Writing:** `.<name>.new-N` beside its place, with `installed.json` (sha256, source, time)
+  written last, then renamed in. Anything already there is renamed aside, then removed.
+- **The network:** `:inets` and `:ssl` are optional extra applications. Mix's code-path pruning
+  hides any OTP app a project doesn't declare, even `:http_util`. In the release they're `:load`
+  only: carried, not started at boot. A test reads every geex module's import table: only
+  `Geex.Install` calls `:httpc` or `:inets`, or connects with `:gen_tcp`/`:ssl`.
+  (`Geex.MCP.Port` listens on loopback to find a free port.)
+
+**`Geex.Installed`** lists what's installed:
+- It reads `$XDG_DATA_HOME/geex/{grammars,themes}/*`, ignoring a directory with no
+  `installed.json`, and caches the result in `:persistent_term` (`refresh/0`).
+- The bundled `priv/grammars` now carry a `manifest.json` each and are read the same way, until
+  step 7.
+- `update?/1` compares an install's recorded sha256 with this geex's catalog, with no request.
+
+**What highlights a file** is decided from the installed manifests:
+- **The extension map:** `Highlight.language_for_path/1`'s hardcoded map is gone; the manifests'
+  `filenames`, then their longest ending, decide.
+- **The status:** `Highlight.grammar_status/1` says `{:ok, lang}`, `{:needs_update, display}`
+  (an ABI outside 13–15) or `{:available, display}` (the catalog has one).
+- **Version skew:** `Grammars.handle/1` refuses a grammar of another ABI, as
+  `{:error, {:abi, n}}`, without loading it. Opening such a file says "<Display> highlighting
+  needs an update: geex install <lang>", which step 6 changes to Alt+Y.
+- **Themes:** `theme NAME` finds installed themes too (`Theme.named/1`).
+
+**Without a restart:**
+- An install in this VM tells the loop, `{:geex_installed, kind, name}`. Every open file the
+  grammar covers starts its reactor again, and the loop subscribes to the new one.
+- `Geex.Installed.Watcher`, started with the loop, watches the two install directories without
+  recursion. An install by *another* geex, `geex install` in a second terminal, is read about
+  300 ms later. A package that is new, or whose sha256 changed, has its compiled grammar
+  dropped, and the loop is told the same way.
+- Checked live: a Python file open as plain text took Python's colours about 2 s after
+  `geex install python` ran in another process.
+
 ### 6. `geex install`
 
 `geex install <lang|theme>` installs from the embedded catalog; `geex install --list` prints the

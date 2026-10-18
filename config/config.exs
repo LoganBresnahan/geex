@@ -26,4 +26,10 @@ config :geex,
   ledger: config_env() != :test,
   # Compiled grammars kept in $XDG_CACHE_HOME/geex/wasm (ADR-0040 §8). Tests leave the user's
   # cache alone.
-  wasm_cache: config_env() != :test
+  wasm_cache: config_env() != :test,
+  # Installed grammars and themes (ADR-0040 §4): $XDG_DATA_HOME/geex, unless this is set. Tests
+  # get an empty directory of their own, never the user's; a test that installs sets its own.
+  data_dir:
+    if(config_env() == :test,
+      do: Path.join(System.tmp_dir!(), "geex-test-data-#{System.get_env("USER", "user")}")
+    )
