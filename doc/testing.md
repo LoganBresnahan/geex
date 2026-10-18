@@ -2930,3 +2930,41 @@ wasn't captured.
 - Ctrl-X was clean: no discovery file left, no `terminating` lines.
 
 **Not tested:** Windows Terminal with the new binary.
+
+### 2026-10-18 — `Alt+Y`, the settings view (ADR-0040 step 6)
+
+**Live** (`mix run` in tmux, 110×26, scratch `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and
+`XDG_CACHE_HOME`, `a.js` holding a template string):
+- **The hint:** opening `a.js` said "JavaScript highlighting available: Alt+Y".
+- **Languages:** `Alt+Y` showed the four tabs and the 16 languages (sizes; elixir and json
+  "bundled"), with JavaScript already highlighted.
+- **Installing:** Enter installed it from the real release; the row turned "installed", and the
+  message line said "installed JavaScript". After Esc, `export` and `function` were in keyword
+  colour.
+- **Themes:** a click on "Themes" (SGR press at column 16, row 1) switched tabs. ↑ previewed
+  `terminal`, its row in reverse video (tmux doesn't answer OSC 11). Esc put Birds of Paradise
+  back.
+- **Keys:** typing `split` listed `Alt+-  Alt+=` and the ⠿ handle.
+- **Nothing kept:** nothing had been chosen, so no `settings.json` was written. The log had no
+  errors.
+- **A wrong label, fixed:** the bundled Birds of Paradise showed "available"; it says "bundled"
+  now.
+
+**Automated:**
+- `loop/settings_test.exs` (10 tests and the `KeyHelp` doctest):
+  - Languages rows and statuses, and Enter installing only what's available;
+  - tabs, moving, closing and quitting, and Keys' search with Backspace;
+  - Themes: the preview on moving, choosing on Enter, "in use";
+  - the mouse on a tab, a row (acting as Enter), the wheel;
+  - in the editor: `Alt+Y` full screen (the reversed tab, the rows), keys not reaching the
+    buffer, Esc and `Alt+Y` closing;
+  - a previewed theme put back on Esc, a chosen one kept in `settings.json` and applied at the
+    next start;
+  - the mouse and tree toggles kept and applied, a malformed value ignored;
+  - an install from the view running off the loop, its "installing…" status and its error
+    message (a `file://` catalog with wrong bytes);
+  - the hint once, and `Alt+Y` opening on that language;
+  - an up-to-date install fetching nothing, while `force: true` does fetch.
+- **1067 tests + 67 doctests**, green twice.
+
+**Not tested:** Windows Terminal; the view at very small sizes (under ~40×10).

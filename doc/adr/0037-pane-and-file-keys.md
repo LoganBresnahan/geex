@@ -4,6 +4,7 @@
   built autonomously at the maintainer's word). **Amends** the keys of
   [ADR-0028](0028-editor-shell-and-minibuffer.md) §3 (the palette moves off `Alt+P`) and
   [ADR-0034](0034-panes-tree-edits-hold.md) §7 (`Alt+O` and `Alt+L` change meaning).
+  **Amended 2026-10-18:** `Alt+Y` opens the settings view (ADR-0040 §7).
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0026](0026-terminal-input-model.md) (Alt is a secondary, remappable
   namespace; every Alt key has a typed twin), [ADR-0028](0028-editor-shell-and-minibuffer.md)
@@ -50,6 +51,14 @@ and tabs after that.
 - The remaining free Alt letters are `Y` and the ones with terminal meaning (`[`, `\`, `]`); the
   next step's keys (`Alt+-`, `Alt+=`, `Alt+,`, `Alt+.`, `Alt+1..9`) are punctuation and digits.
 - Nothing here changes the frozen MCP surface (ADR-0032): these are the human's keys.
+
+## Amendment — 2026-10-18: `Alt+Y`, the settings view
+
+[ADR-0040](0040-bare-geex-and-the-catalog.md) §7 takes `Y`, the last free Alt letter (`E`, `F`,
+`Q` and `R` are motion), for the settings view: languages to install, themes, the keys, and the
+general settings. `Alt+Y` opens it from the editor, the tree or the edits pane, though not from
+the minibuffer, where keys are typed. `Alt+Y` or Esc closes it. Its typed twins are the verbs it
+stands over (`theme`, `mouse`, `tree`, `edits`) and `geex install` in the terminal.
 
 ## See
 

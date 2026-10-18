@@ -475,17 +475,17 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    — the maintainer's 2026-10-18 decisions, relayed by the coordinator session, after the
    relicense to Apache-2.0 (step 0, done 2026-10-18):
    1. **The decision** — **ADR-0040, 2026-10-18.**
-   2. **A disk cache for compiled wasm**, in `tree_sitter_wasm` (wasmtime's cache; a warm load in
-      a few ms instead of ~160 ms for Elixir).
-   3. **The built-in palette and the "terminal" syntax theme** (the terminal's own colours; OSC
-      11 for tints, checked on Windows Terminal).
-   4. **The catalog builder** — `catalog/` recipes, a mix task that builds each package with the
-      pinned tree-sitter CLI and writes `catalog.json`; the first 16 grammars and Birds of
-      Paradise.
-   5. **Install and load at runtime** — `:httpc` + sha256, `$XDG_DATA_HOME/geex/{grammars,themes}`,
-      the extension map from the manifests, `geex install`, no request at startup.
-   6. **`Alt+Y`, the settings view** — Languages, Themes, Keys, General; the "highlighting
-      available" hint (ADR-0037 amended).
+   2. **A disk cache for compiled wasm** — **built 2026-10-18**, in `tree_sitter_wasm` (wasmtime's
+      cache: Elixir's wasm loads in 5 ms instead of ~145; its query still takes ~67 ms).
+   3. **The built-in palette and the "terminal" syntax theme** — **built 2026-10-18** (the
+      terminal's own colours; OSC 11 for tints; Windows Terminal answers, hand-verified).
+   4. **The catalog builder** — **built 2026-10-18**: `catalog/` recipes, `mix geex.catalog`
+      (deterministic), the first 16 grammars and Birds of Paradise, released as `v0.1.0`.
+   5. **Install and load at runtime** — **built 2026-10-18**: `:httpc` + sha256,
+      `$XDG_DATA_HOME/geex/{grammars,themes}`, the extension map from the manifests,
+      `geex install`, no request at startup, installs noticed without a restart.
+   6. **`Alt+Y`, the settings view** — **built 2026-10-18**: Languages, Themes, Keys, General;
+      the "highlighting available" hint; `settings.json` (ADR-0037 amended).
    7. **Go bare** — `priv/grammars` and `priv/themes` removed; tests on fixtures.
    - **Not covered: injections** (HEEx inside `~H`, JavaScript inside `<script>`). The NIF runs one
      grammar per file; embedded languages stay the host's colour. Needs the NIF to run

@@ -1,0 +1,246 @@
+defmodule Geex.Loop.SettingsTest do
+  # The settings view, Alt+Y (ADR-0040 §7): the view itself (pure), and the loop's side (the
+  # theme, the mouse, installs, what's kept in settings.json, the hint on opening a file).
+  # Uses the global Session and Renderer, and its own data and settings files: not async.
+  use ExUnit.Case, async: false
+  @moduletag :capture_log
+
+  alias Geex.{Installed, Loop, Screen, Session}
+  alias Geex.Loop.{KeyHelp, Settings}
+
+  doctest KeyHelp
+
+  setup do
+    dir = Path.join(System.tmp_dir!(), "geex_settings_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    old = {Application.get_env(:geex, :data_dir), Application.get_env(:geex, :settings_path)}
+    Application.put_env(:geex, :data_dir, Path.join(dir, "data"))
+    Application.put_env(:geex, :settings_path, Path.join(dir, "settings.json"))
+    Installed.refresh()
+    for f <- ["a.txt", "b.js"], do: File.write!(Path.join(dir, f), "x\n")
+    Session.set_start(dir)
+
+    on_exit(fn ->
+      Application.put_env(:geex, :data_dir, elem(old, 0))
+      Application.put_env(:geex, :settings_path, elem(old, 1))
+      Installed.refresh()
+      System.delete_env("GEEX_CATALOG_URL")
+
+      for %{pid: pid} <- Session.buffers(),
+          do: DynamicSupervisor.terminate_child(Geex.BufferSupervisor, pid)
+
+      Session.set_active_buffer(nil)
+      File.rm_rf(dir)
+    end)
+
+    {:ok, pid} = Session.open_file(Path.join(dir, "a.txt"))
+    {:noreply, state} = Loop.handle_info({:geex_active_buffer, pid}, Loop.new_state(120, 30))
+    %{dir: dir, state: state}
+  end
+
+  defp send_io(state, event) do
+    {:noreply, state} = Loop.handle_info({:geex_io, event}, state)
+    state
+  end
+
+  defp click(state, x, y),
+    do: send_io(state, {:mouse, %{action: :press, button: :left, x: x, y: y, mods: []}})
+
+  defp frame(state) do
+    {:noreply, state} = Loop.handle_info(:repaint, state)
+    {state, Geex.Renderer.current()}
+  end
+
+  defp row_text(screen, y),
+    do: Enum.map_join(0..(screen.w - 1), &Screen.get_cell(screen, &1, y).char) |> String.trim()
+
+  describe "the view" do
+    test "Languages lists the catalog with sizes and status; Enter installs what's available" do
+      view = Settings.open()
+      rows = Settings.rows(view, %{})
+      assert length(rows) == length(Geex.Catalog.grammars())
+
+      assert %{name: "rust", cells: ["Rust", _kb, "available"]} =
+               Enum.find(rows, &(&1.name == "rust"))
+
+      assert %{cells: [_, _, "bundled"]} = Enum.find(rows, &(&1.name == "elixir"))
+
+      rust = Enum.find_index(rows, &(&1.name == "rust"))
+      assert {_, {:install, "rust"}} = Settings.key(%{view | sel: rust}, {:key, :enter}, rows, 30)
+      elixir = Enum.find_index(rows, &(&1.name == "elixir"))
+      assert {_, :none} = Settings.key(%{view | sel: elixir}, {:key, :enter}, rows, 30)
+    end
+
+    test "tabs, moving, closing; Keys filters as you type" do
+      view = Settings.open()
+      {view, :none} = Settings.key(view, {:key, :tab}, [], 30)
+      assert view.tab == :themes
+      {view, :none} = Settings.key(view, {:key, :left}, [], 30)
+      {view, :none} = Settings.key(view, {:key, :left}, [], 30)
+      assert view.tab == :general
+      {view, :none} = Settings.key(view, {:key, :left}, [], 30)
+      assert view.tab == :keys
+
+      view =
+        Enum.reduce(String.graphemes("redo"), view, fn g, v ->
+          elem(Settings.key(v, {:char, g}, [], 30), 0)
+        end)
+
+      assert [%{cells: ["Alt+Z  Alt+Shift+Z", _, _]}] = Settings.rows(view, %{})
+      {view, :none} = Settings.key(view, {:key, :backspace}, [], 30)
+      assert view.query == "red"
+
+      for key <- [{:key, :esc}, {:alt, ?y}],
+          do: assert({_, :close} = Settings.key(view, key, [], 30))
+
+      assert {_, :quit} = Settings.key(view, {:ctrl, ?x}, [], 30)
+    end
+
+    test "Themes previews as you move and chooses on Enter; the one in use is marked" do
+      view = Settings.open(:themes, %{theme_id: "birds-of-paradise"})
+      rows = Settings.rows(view, %{theme_id: "birds-of-paradise"})
+
+      assert %{name: "terminal", cells: ["terminal", "built in: your terminal's colours", ""]} =
+               hd(rows)
+
+      assert Enum.at(rows, view.sel).name == "birds-of-paradise"
+
+      {view, action} = Settings.key(%{view | sel: 1}, {:key, :up}, rows, 30)
+      assert {view.sel, action} == {0, {:preview_theme, "terminal"}}
+      assert {_, {:choose_theme, "terminal"}} = Settings.key(view, {:key, :enter}, rows, 30)
+    end
+
+    test "the mouse: a tab, a row (acting as Enter), the wheel" do
+      view = Settings.open()
+      rows = Settings.rows(view, %{})
+      # " Languages " is columns 1-11, " Themes " 13-20.
+      {view, :none} =
+        Settings.mouse(view, %{action: :press, button: :left, x: 15, y: 0}, rows, {120, 30})
+
+      assert view.tab == :themes
+
+      view = Settings.open()
+      rust = Enum.find_index(rows, &(&1.name == "rust"))
+      press = %{action: :press, button: :left, x: 5, y: 2 + rust}
+      assert {%{sel: ^rust}, {:install, "rust"}} = Settings.mouse(view, press, rows, {120, 30})
+
+      {view, _} =
+        Settings.mouse(view, %{action: :wheel, button: :down, x: 5, y: 5}, rows, {120, 30})
+
+      assert view.sel == 3
+    end
+  end
+
+  describe "in the editor" do
+    test "Alt+Y opens it full screen and Esc or Alt+Y closes it", %{state: state} do
+      state = send_io(state, {:alt, ?y})
+      assert %Settings{tab: :languages} = state.settings
+      {state, screen} = frame(state)
+      assert row_text(screen, 0) =~ "Languages   Themes   Keys   General"
+      assert :reverse in Screen.get_cell(screen, 2, 0).attrs
+      assert row_text(screen, 2) =~ "Bash"
+
+      # Keys go to the view, not the buffer.
+      state = send_io(state, {:char, "z"})
+      assert {:ok, %{text: "x\n"}} = Session.snapshot()
+
+      assert send_io(state, {:key, :esc}).settings == nil
+      assert send_io(state, {:alt, ?Y}).settings == nil
+    end
+
+    test "a previewed theme is put back on Esc; a chosen one is kept, and loads next start",
+         %{state: state, dir: dir} do
+      state = state |> send_io({:alt, ?y}) |> send_io({:key, :tab})
+      state = send_io(state, {:key, :up})
+      assert state.theme_id == "terminal"
+      state = send_io(state, {:key, :esc})
+      assert state.theme_id == "birds-of-paradise"
+
+      state = state |> send_io({:alt, ?y}) |> send_io({:key, :tab}) |> send_io({:key, :up})
+      state = send_io(state, {:key, :enter})
+      assert state.settings.message == "theme terminal kept"
+      state = send_io(state, {:key, :esc})
+      assert state.theme_id == "terminal"
+      assert JSON.decode!(File.read!(Path.join(dir, "settings.json"))) == %{"theme" => "terminal"}
+
+      fresh = Loop.apply_settings(Loop.new_state(80, 24), Geex.Settings.load())
+      assert {fresh.theme_id, fresh.theme.name} == {"terminal", "terminal"}
+    end
+
+    test "General: the mouse and the panes at start are kept", %{state: state, dir: dir} do
+      state = state |> send_io({:alt, ?y}) |> send_io({:key, :left})
+      assert state.settings.tab == :general
+      state = send_io(state, {:key, :enter})
+      assert state.mouse == false
+      state = state |> send_io({:key, :down}) |> send_io({:key, :enter})
+      assert state.tree_shown == false
+
+      assert JSON.decode!(File.read!(Path.join(dir, "settings.json"))) ==
+               %{"mouse" => false, "tree" => false}
+
+      fresh = Loop.apply_settings(Loop.new_state(120, 30), Geex.Settings.load())
+      assert {fresh.mouse, fresh.tree_shown} == {false, false}
+      assert Loop.apply_settings(Loop.new_state(120, 30), %{"mouse" => "nonsense"}).mouse == true
+    end
+
+    test "an install from the view runs off the loop and says how it went", %{
+      state: state,
+      dir: dir
+    } do
+      # The catalog's rust asset, served from a directory holding the wrong bytes.
+      entry = Geex.Catalog.grammar("rust")
+      File.write!(Path.join(dir, entry["asset"]), "not it")
+      System.put_env("GEEX_CATALOG_URL", "file://" <> dir)
+
+      state = send_io(state, {:alt, ?y})
+      rows = Settings.rows(state.settings, %{})
+      rust = Enum.find_index(rows, &(&1.name == "rust"))
+      state = click(state, 5, 2 + rust)
+      assert Map.has_key?(state.installing, "rust")
+      assert state.settings.message == "installing rust…"
+
+      assert Enum.at(Settings.rows(state.settings, %{installing: MapSet.new(["rust"])}), rust).status ==
+               "installing…"
+
+      assert_receive {:geex_install_done, _pid, "rust", {:error, {:sha256_mismatch, _}}} = done,
+                     5_000
+
+      {:noreply, state} = Loop.handle_info(done, state)
+      assert state.installing == %{}
+      assert state.settings.message =~ "rust: the download doesn't match"
+    end
+
+    test "opening a file the catalog can highlight says so once; Alt+Y opens on its language",
+         %{state: state, dir: dir} do
+      {:ok, js} = Session.open_file(Path.join(dir, "b.js"))
+      {:noreply, state} = Loop.handle_info({:geex_active_buffer, js}, state)
+      assert state.notice == "JavaScript highlighting available: Alt+Y"
+
+      state = send_io(state, {:alt, ?y})
+      rows = Settings.rows(state.settings, %{})
+      assert Enum.at(rows, state.settings.sel).name == "javascript"
+    end
+  end
+
+  test "a catalog install already up to date fetches nothing; --force would" do
+    entry = Geex.Catalog.grammar("rust")
+    dir = Installed.dir(:grammar, "rust")
+    File.mkdir_p!(dir)
+
+    File.write!(
+      Path.join(dir, "manifest.json"),
+      JSON.encode!(%{"kind" => "grammar", "name" => "rust", "display" => "Rust", "abi" => 15})
+    )
+
+    File.write!(
+      Path.join(dir, "installed.json"),
+      JSON.encode!(%{"source" => "catalog", "sha256" => entry["sha256"]})
+    )
+
+    Installed.refresh()
+    System.put_env("GEEX_CATALOG_URL", "file:///nonexistent")
+
+    assert {:ok, %{unchanged: true, display: "Rust"}} = Geex.Install.install("rust")
+    assert {:error, {:read, :enoent}} = Geex.Install.install("rust", force: true)
+  end
+end

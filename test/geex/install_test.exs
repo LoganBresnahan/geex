@@ -211,7 +211,8 @@ defmodule Geex.InstallTest do
     {:noreply, state} =
       Geex.Loop.handle_info({:geex_active_buffer, pid}, Geex.Loop.new_state(120, 30))
 
-    assert state.notice == "JSON highlighting needs an update: geex install json"
+    assert state.notice == "JSON highlighting needs an update: Alt+Y"
+    assert state.hinted == ["json"]
     assert state.watched[pid].reactor == nil
 
     # A build it can load arrives: the open file gets a reactor, and the loop follows it.

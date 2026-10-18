@@ -32,4 +32,11 @@ config :geex,
   data_dir:
     if(config_env() == :test,
       do: Path.join(System.tmp_dir!(), "geex-test-data-#{System.get_env("USER", "user")}")
+    ),
+  # What the settings view keeps (ADR-0040 §7): $XDG_CONFIG_HOME/geex/settings.json, unless this
+  # is set. Tests never read or write the user's.
+  settings_path:
+    if(config_env() == :test,
+      do:
+        Path.join(System.tmp_dir!(), "geex-test-settings-#{System.get_env("USER", "user")}.json")
     )

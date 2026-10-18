@@ -65,7 +65,7 @@ defmodule Geex.Loop do
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
-  alias Geex.Loop.{EditsPane, Keymap, Mouse, Panes, TabBar, Verbs}
+  alias Geex.Loop.{EditsPane, Keymap, Mouse, Panes, Settings, TabBar, Verbs}
   alias Geex.MCP.ViewActions
 
   # Rows of context kept between the cursor and the top/bottom of the viewport
@@ -235,13 +235,37 @@ defmodule Geex.Loop do
   @impl true
   def init(_opts) do
     TerminalIO.subscribe()
-    # The mouse starts on (`mouse` in `new_state/2`); say so, in case this loop restarted after
-    # the `mouse` verb turned it off.
-    TerminalIO.set_mouse(true)
     active = Session.subscribe()
     safe_subscribe_edits()
     {w, h} = safe_window_size()
-    {:ok, schedule_repaint(new_state(w, h) |> adopt_active(active))}
+    state = new_state(w, h) |> apply_settings(Geex.Settings.load())
+    # Say whether the mouse is on, in case this loop restarted after the `mouse` verb turned it
+    # off, or the settings start it off.
+    TerminalIO.set_mouse(state.mouse)
+    {:ok, schedule_repaint(adopt_active(state, active))}
+  end
+
+  @doc false
+  # What the settings view kept (`Geex.Settings`, ADR-0040 §7), over the defaults: the theme,
+  # the mouse, and whether the tree and the edits pane start shown. Anything malformed is
+  # ignored.
+  def apply_settings(state, settings) do
+    state =
+      case settings["theme"] do
+        name when is_binary(name) ->
+          if name in Theme.names(), do: retheme(state, name), else: state
+
+        _ ->
+          state
+      end
+
+    Enum.reduce([{"mouse", :mouse}, {"tree", :tree_shown}, {"edits", :edits_shown}], state, fn
+      {key, field}, acc ->
+        case settings[key] do
+          on? when is_boolean(on?) -> Map.put(acc, field, on?)
+          _ -> acc
+        end
+    end)
   end
 
   @doc false
@@ -259,6 +283,14 @@ defmodule Geex.Loop do
       # (ADR-0040 §1).
       theme_id: "birds-of-paradise",
       terminal_bg: nil,
+      # The settings view (`Alt+Y`, ADR-0040 §7): `Geex.Loop.Settings` while it is open, else
+      # nil; the theme to put back if it closes without one being chosen; the installs it
+      # started, `%{name => %{pid, ref, then}}`; and the languages a file's opening has already
+      # hinted at (once each), the last of them first in the view.
+      settings: nil,
+      settings_theme: nil,
+      installing: %{},
+      hinted: [],
       # The file panes and their tabs (ADR-0038); `watched` every buffer in a tab: its monitor
       # and its highlight reactor, `%{pid => %{ref, reactor}}`.
       panes: Panes.new(),
@@ -411,6 +443,12 @@ defmodule Geex.Loop do
     {:noreply, state}
   end
 
+  # The settings view (`Alt+Y`) takes the mouse while it is open (ADR-0040 §7, ADR-0039).
+  def handle_info({:geex_io, {:mouse, m}}, %{settings: %Settings{} = view} = state) do
+    {view, action} = Settings.mouse(view, m, settings_rows(view, state), {state.w, state.h})
+    {:noreply, schedule_repaint(settings_action(action, %{state | settings: view}))}
+  end
+
   # The mouse (ADR-0039). A release ends a drag wherever it is; while the minibuffer is open, only
   # its pickers take the mouse.
   def handle_info({:geex_io, {:mouse, %{action: :release}}}, state),
@@ -464,6 +502,32 @@ defmodule Geex.Loop do
     {:noreply, schedule_repaint(%{state | notice: "#{display} highlighting installed"})}
   end
 
+  # An install the settings view started has finished: say how it went there, and do what was
+  # waiting on it (choosing the theme just installed).
+  def handle_info({:geex_install_done, pid, name, result}, %{installing: installing} = state)
+      when is_map_key(installing, name) do
+    %{pid: ^pid, ref: ref, then: then} = installing[name]
+    Process.demonitor(ref, [:flush])
+    state = %{state | installing: Map.delete(installing, name)}
+
+    message =
+      case result do
+        {:ok, %{unchanged: true, display: display}} -> "#{display} is up to date"
+        {:ok, %{display: display}} -> "installed #{display}"
+        {:error, reason} -> "#{name}: #{Geex.Install.describe(reason)}"
+      end
+
+    state = say(state, message)
+
+    state =
+      case {result, then} do
+        {{:ok, _}, {:choose_theme, theme}} -> settings_action({:choose_theme, theme}, state)
+        _ -> state
+      end
+
+    {:noreply, schedule_repaint(state)}
+  end
+
   # A theme: the one in use is loaded again (an update); another is announced.
   def handle_info({:geex_installed, :theme, name}, %{theme_id: name} = state),
     do: {:noreply, schedule_repaint(%{retheme(state) | notice: "theme #{name} updated"})}
@@ -500,6 +564,16 @@ defmodule Geex.Loop do
     state = %{state | save_armed: state.save_armed and event in [{:ctrl, ?o}, {:ctrl, ?O}]}
 
     cond do
+      # The settings view, while it is open, takes every key (ADR-0040 §7).
+      state.settings != nil ->
+        {view, action} =
+          Settings.key(state.settings, event, settings_rows(state.settings, state), state.h)
+
+        {:noreply, schedule_repaint(settings_action(action, %{state | settings: view}))}
+
+      event in [{:alt, ?y}, {:alt, ?Y}] and not Minibuffer.active?(state.minibuffer) ->
+        {:noreply, schedule_repaint(open_settings(state))}
+
       Minibuffer.active?(state.minibuffer) ->
         {:noreply, apply_minibuffer_key(event, state)}
 
@@ -603,7 +677,19 @@ defmodule Geex.Loop do
     {:noreply, schedule_repaint(%{state | finder: finder, notice: notice})}
   end
 
-  def handle_info({:DOWN, _ref, :process, _pid, _reason}, state), do: {:noreply, state}
+  # An install the settings view started died without answering; any other `:DOWN` is nothing.
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+    case Enum.find(state.installing, fn {_name, i} -> i.ref == ref end) do
+      {name, _} ->
+        state = %{state | installing: Map.delete(state.installing, name)}
+
+        {:noreply,
+         schedule_repaint(say(state, "#{name}: the install stopped (#{inspect(reason)})"))}
+
+      nil ->
+        {:noreply, state}
+    end
+  end
 
   # Coalesced repaint — one per burst.
   def handle_info(:repaint, state), do: {:noreply, repaint(%{state | repaint?: false})}
@@ -673,13 +759,21 @@ defmodule Geex.Loop do
     end
   end
 
-  # A newly shown file whose grammar here is built for a tree-sitter ABI this geex doesn't load
-  # shows as plain text, and says why (ADR-0040 §5).
+  # A newly shown file geex could highlight says how, once per language a session: its grammar
+  # is in the catalog but not installed, or the one here is built for a tree-sitter ABI this
+  # geex doesn't load (ADR-0040 §4, §5). `Alt+Y` then opens on that language.
   defp grammar_notice(state, pid) do
     with %{path: path} when is_binary(path) <- Enum.find(safe_buffers(), &(&1.pid == pid)),
-         {:needs_update, display} <- Highlight.grammar_status(path),
-         %{"name" => lang} <- Geex.Installed.for_path(path) do
-      %{state | notice: "#{display} highlighting needs an update: geex install #{lang}"}
+         {status, display} when status in [:available, :needs_update] <-
+           Highlight.grammar_status(path),
+         %{"name" => lang} <- Geex.Catalog.for_path(path) || Geex.Installed.for_path(path),
+         false <- lang in state.hinted do
+      notice =
+        if status == :available,
+          do: "#{display} highlighting available: Alt+Y",
+          else: "#{display} highlighting needs an update: Alt+Y"
+
+      %{state | notice: notice, hinted: [lang | state.hinted]}
     else
       _ -> state
     end
@@ -1378,6 +1472,15 @@ defmodule Geex.Loop do
   # One frame: each file pane (its tab bar, then the text), the dividers between side-by-side
   # panes, the tree and the edits pane, then the status line (the current tab's) or the
   # minibuffer, and the palette's popup on top.
+  # The settings view covers the whole screen while it is open (ADR-0040 §7).
+  defp repaint(%{settings: %Settings{} = view} = state) do
+    screen =
+      Settings.draw(view, settings_rows(view, state), state.theme.palette, {state.w, state.h})
+
+    Renderer.flush(screen, :hidden)
+    state
+  end
+
   defp repaint(state) do
     state = ensure_tree(state)
     layout = layout(state)
@@ -1880,6 +1983,126 @@ defmodule Geex.Loop do
       :edits when layout.edits != nil -> :edits
       :tree when layout.tree != nil -> :tree
       _ -> :editor
+    end
+  end
+
+  ## The settings view (`Alt+Y`, ADR-0040 §7). `Geex.Loop.Settings` is the view; here is what its
+  ## actions do to the editor.
+
+  defp open_settings(state) do
+    view =
+      case state.hinted do
+        [lang | _] -> Settings.open(:languages, settings_ctx(state), lang)
+        [] -> Settings.open(:languages, settings_ctx(state))
+      end
+
+    # Another geex may have installed something since: read the directories again.
+    Geex.Installed.refresh()
+    %{state | settings: view, settings_theme: state.theme_id}
+  end
+
+  defp settings_ctx(state) do
+    %{
+      theme_id: state.theme_id,
+      mouse: state.mouse,
+      tree_shown: state.tree_shown,
+      edits_shown: state.edits_shown,
+      installing: MapSet.new(Map.keys(state.installing))
+    }
+  end
+
+  defp settings_rows(view, state), do: Settings.rows(view, settings_ctx(state))
+
+  defp say(%{settings: %Settings{} = view} = state, message),
+    do: %{state | settings: Settings.say(view, message)}
+
+  defp say(state, message), do: %{state | notice: message}
+
+  defp settings_action(:none, state), do: state
+  defp settings_action(:quit, state), do: apply_action(:quit, {0, 0}, "", state)
+
+  # Closing without choosing a theme puts back the one in use when the view opened.
+  defp settings_action(:close, state) do
+    state = %{state | settings: nil}
+
+    if state.theme_id != state.settings_theme and is_binary(state.settings_theme),
+      do: retheme(state, state.settings_theme),
+      else: state
+  end
+
+  defp settings_action({:install, name}, state), do: start_install(state, name, nil)
+
+  defp settings_action({:preview_theme, name}, state), do: retheme(state, name)
+
+  defp settings_action({:choose_theme, name}, state) do
+    if name in Theme.names() do
+      state = retheme(state, name)
+
+      if state.theme_id == name do
+        keep(%{state | settings_theme: name}, "theme", name, "theme #{name} kept")
+      else
+        state
+      end
+    else
+      start_install(state, name, {:choose_theme, name})
+    end
+  end
+
+  defp settings_action({:toggle, :mouse}, state) do
+    on? = not state.mouse
+    TerminalIO.set_mouse(on?)
+    keep(%{state | mouse: on?, drag: nil}, "mouse", on?, "mouse #{if on?, do: "on", else: "off"}")
+  end
+
+  defp settings_action({:toggle, :tree}, state) do
+    shown = not state.tree_shown
+    state = %{state | tree_shown: shown, focus: if(shown, do: state.focus, else: :editor)}
+    state = if shown, do: reload_tree(state), else: state
+    keep(state, "tree", shown, "the tree #{if shown, do: "shows", else: "stays hidden"} at start")
+  end
+
+  defp settings_action({:toggle, :edits}, state) do
+    shown = not state.edits_shown
+    state = %{state | edits_shown: shown, focus: if(shown, do: state.focus, else: :editor)}
+
+    keep(
+      state,
+      "edits",
+      shown,
+      "the edits pane #{if shown, do: "shows", else: "stays hidden"} at start"
+    )
+  end
+
+  # Keep a setting across starts (`Geex.Settings`), and say so, or that it couldn't be written.
+  defp keep(state, key, value, message) do
+    case Geex.Settings.put(key, value) do
+      :ok ->
+        say(state, message)
+
+      {:error, reason} ->
+        say(state, "#{message}, for now: #{Geex.Settings.path()}: #{inspect(reason)}")
+    end
+  end
+
+  # An install runs in a process of its own (ADR-0035: a download is slow work), which answers
+  # `{:geex_install_done, …}`. `then` is what to do when it succeeds.
+  defp start_install(state, name, then) do
+    if Map.has_key?(state.installing, name) do
+      state
+    else
+      loop = self()
+
+      {pid, ref} =
+        spawn_monitor(fn ->
+          send(loop, {:geex_install_done, self(), name, Geex.Install.install(name)})
+        end)
+
+      state = %{
+        state
+        | installing: Map.put(state.installing, name, %{pid: pid, ref: ref, then: then})
+      }
+
+      say(state, "installing #{name}…")
     end
   end
 

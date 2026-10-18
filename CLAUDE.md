@@ -50,7 +50,7 @@ One Mix app, `:geex`, under `lib/geex/`:
   `Grid`) — **frozen by ADR-0032**: keep it green, add no tools; and the TUI: `Geex.Loop` (+ `loop/`), `Screen`/`Cell`/`Renderer`,
   `TerminalIO` (`:prim_tty`, no NIF), `Input.Parser`, `Minibuffer`, `Layout` (pure: where
   the tree, the file panes and the edits pane go), `Loop.Panes` (pure: the split file panes
-  and each one's tabs, ADR-0038), `Loop.Mouse` (pure: where a mouse event lands, ADR-0039), `Geex.Finder` (`Alt+O`'s fuzzy file ranking, run off the loop), `Geex.Tree` (the tree's files, from `git
+  and each one's tabs, ADR-0038), `Loop.Mouse` (pure: where a mouse event lands, ADR-0039), `Loop.Settings` (pure: the `Alt+Y` view, ADR-0040), `Geex.Finder` (`Alt+O`'s fuzzy file ranking, run off the loop), `Geex.Tree` (the tree's files, from `git
   ls-files`; `Tree.Watcher` re-reads them as files come and go), and `Geex.Edits` (the in-memory edits list behind the edits pane, ADR-0034).
 - **Capabilities** — `Geex.Highlight.*` (reactor + tree-sitter-on-wasm via the
   sibling path dep `../tree_sitter_wasm`), `Geex.Theme` (+ `Theme.Terminal`, the terminal's own
@@ -181,6 +181,8 @@ session's `Co-Authored-By` trailer.
 - attestation payload (ADR-0032 step d): `integrations/captainhook/geex-attest.sh`, which the
   user registers in `~/.captainHook/handlers.json` (never edit that file without asking);
   tested against `test/fixtures/claude-code/` (verbatim captAInHook captures)
+- settings the `Alt+Y` view keeps (ADR-0040 §7): `$XDG_CONFIG_HOME/geex/settings.json` (default
+  `~/.config/geex/`), written by geex (`Geex.Settings`); tests get their own `settings_path`
 - installed grammars and themes (ADR-0040): `$XDG_DATA_HOME/geex/{grammars,themes}/<name>/`
   (default `~/.local/share/geex/`), each with `installed.json` written last; `geex install NAME |
   --list | ./pkg`; `GEEX_CATALOG_URL` (a `file://` dir or `http(s)://` base) replaces the release

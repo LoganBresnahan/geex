@@ -270,6 +270,36 @@ works throughout (ADR-0039). A chosen theme, and any other setting the view chan
 `$XDG_CONFIG_HOME/geex/settings.json`, which geex writes itself; the hand-edited `config.toml`
 (ADR-0025), when it exists, is read over it.
 
+**Built 2026-10-18 (step 6).** `Geex.Loop.Settings` is the view: its state, keys, clicks, rows and
+drawing, all pure. The loop carries out what it asks for. `Alt+Y` amends ADR-0037. The view:
+
+- **Languages** lists the catalog's 16 grammars with their size and one of: available,
+  installed, update available, bundled (until step 7), installing…. Enter or a click on an
+  available or updatable one installs it in a process of its own (ADR-0035). The view says
+  "installing rust…", then "installed Rust" or what went wrong. An open file of that language
+  highlights when the install lands (step 5's message).
+- **Themes** lists the built-in terminal theme, then the bundled, installed and catalog ones,
+  with "✓ in use". Moving the highlight previews a theme that's here. Enter, or a click,
+  chooses: one not yet installed is installed first, then chosen. The choice is kept in
+  `settings.json`. Leaving with Esc or `Alt+Y` without choosing puts back the theme that was in
+  use.
+- **Keys** is `Geex.Loop.KeyHelp`, every key grouped, filtered by what you type (each word
+  must match).
+- **General:** the mouse; the file tree and the edits pane shown at start (each toggled now and
+  kept); where the settings, the packages and the compiled grammars live.
+- **Moving around:** Tab, ←, → change tabs; ↑ ↓ (or `Alt+W`/`Alt+S`) move the highlight; the
+  wheel moves it three rows; a click on a tab switches to it. The quit keys still quit.
+- **Settings** (`Geex.Settings`) are `theme`, `mouse`, `tree` and `edits` in `settings.json`,
+  written to a temporary file and renamed in. They're applied at start, and anything malformed
+  is ignored. Tests use their own `settings_path`.
+- **The hint:** opening a file the catalog can highlight, but that isn't installed (or is
+  installed for another ABI), says "JavaScript highlighting available: Alt+Y" (or "… needs an
+  update: Alt+Y"), once per language a session. `Alt+Y` then opens with that language
+  highlighted.
+- **Up to date** (the coordinator's note on step 5): installing a package whose installed
+  record is already this catalog's sha256 fetches nothing ("rust is already installed (up to
+  date; --force installs it again)"). `geex install --force` reinstalls a damaged one.
+
 ### 8. Compiling a grammar is cached on disk (step 2)
 
 Loading a grammar compiles its `.wasm` with wasmtime: measured on the prod build, 152–173 ms for

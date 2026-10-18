@@ -21,6 +21,7 @@ defmodule Geex.CLI do
       geex --help          print usage
       geex install rust    install a grammar or theme from the catalog (ADR-0040)
       geex install --list  the catalog, and what's installed or has an update
+      geex install --force rust  install it again though it's up to date
       geex install ./pkg   install a local package (a directory or a .zip)
 
   `geex -- install` opens a file named `install`.
@@ -30,7 +31,7 @@ defmodule Geex.CLI do
 
   @usage """
   usage: geex [PATH ...]
-         geex install NAME ... | --list | ./PACKAGE
+         geex install [--force] NAME ... | --list | ./PACKAGE
 
   Opens each PATH (a file, or a directory for its file tree) and shows the first.
   With no PATH, opens the current directory. Paths after `--` are never options.
@@ -218,12 +219,22 @@ defmodule Geex.CLI do
   end
 
   def install(args) do
+    {force, args} = Enum.split_with(args, &(&1 == "--force"))
+
     results =
       for arg <- args do
         local? = String.contains?(arg, "/") or String.ends_with?(arg, ".zip")
-        result = if local?, do: Geex.Install.install_path(arg), else: Geex.Install.install(arg)
+
+        result =
+          if local?,
+            do: Geex.Install.install_path(arg),
+            else: Geex.Install.install(arg, force: force != [])
 
         case result do
+          {:ok, %{unchanged: true, name: name}} ->
+            IO.puts("#{name} is already installed (up to date; --force installs it again)")
+            :ok
+
           {:ok, %{kind: kind, name: name, display: display}} ->
             IO.puts("installed #{kind} #{name} (#{display})")
             :ok

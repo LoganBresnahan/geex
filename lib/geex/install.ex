@@ -46,23 +46,54 @@ defmodule Geex.Install do
   @doc """
   Install the catalog's package named `name` (a grammar's or a theme's name). Returns what was
   installed, or `{:error, reason}`, with what was there before left in place.
+
+  When the package installed from the catalog is already this catalog's build (the same sha256),
+  nothing is fetched: the result has `unchanged: true`. `force: true` installs it again (a
+  damaged install).
   """
-  @spec install(String.t()) :: {:ok, result()} | {:error, term()}
-  def install(name) do
+  @spec install(String.t(), keyword()) :: {:ok, result()} | {:error, term()}
+  def install(name, opts \\ []) do
     case catalog_entry(name) do
       {kind, entry} ->
-        # No more than the catalog says it is, and a little slack.
-        cap = min(entry["size"] + 4096, @max_download)
-
-        with {:ok, zip} <- fetch(url(entry), cap),
-             :ok <- verify(zip, entry["sha256"]),
-             {:ok, files} <- unpack(zip, kind, name),
-             {:ok, manifest} <- validate(kind, name, files) do
-          put(kind, manifest, files, %{"source" => "catalog", "sha256" => entry["sha256"]})
+        case {up_to_date(kind, entry), Keyword.get(opts, :force, false)} do
+          {%{} = pkg, false} -> {:ok, unchanged(kind, name, pkg, entry)}
+          _ -> fetch_install(kind, name, entry)
         end
 
       nil ->
         {:error, {:not_in_catalog, name}}
+    end
+  end
+
+  # The installed package, if it's this catalog's build.
+  defp up_to_date(kind, entry) do
+    pkg =
+      if kind == :grammar,
+        do: Installed.grammar(entry["name"]),
+        else: Installed.theme(entry["name"])
+
+    sha = entry["sha256"]
+
+    case pkg do
+      %{"installed" => %{"source" => "catalog", "sha256" => ^sha}} -> pkg
+      _ -> nil
+    end
+  end
+
+  defp unchanged(kind, name, pkg, entry) do
+    display = if is_binary(pkg["display"]), do: pkg["display"], else: name
+    %{kind: kind, name: name, display: display, sha256: entry["sha256"], unchanged: true}
+  end
+
+  defp fetch_install(kind, name, entry) do
+    # No more than the catalog says it is, and a little slack.
+    cap = min(entry["size"] + 4096, @max_download)
+
+    with {:ok, zip} <- fetch(url(entry), cap),
+         :ok <- verify(zip, entry["sha256"]),
+         {:ok, files} <- unpack(zip, kind, name),
+         {:ok, manifest} <- validate(kind, name, files) do
+      put(kind, manifest, files, %{"source" => "catalog", "sha256" => entry["sha256"]})
     end
   end
 
