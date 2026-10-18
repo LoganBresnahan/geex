@@ -3709,3 +3709,16 @@ Birds of Paradise (`038a23106e99…`) in use:
 - the log shows the install.
 
 **1107 tests + 80 doctests**, green twice.
+
+**Deployed** as `0.2.0+af7a4c59.89a87236`. The geex running from `0.2.0+e4582ae8` kept its
+unpack: the version is the same, so Burrito deletes nothing, and the deploy keeps unpacks in
+use.
+
+**Checked in the installed binary** (tmux, scratch XDG directories, a copy of the maintainer's
+`038a23106e99…` Birds of Paradise in use):
+- Enter on "update available" made the row "installed", drawn in `38;2;134;180;187`;
+- the notice read "updated Birds of Paradise", and `installed.json` holds `200e35e52d56…`;
+- `Ctrl-X` gave the shell back, and the log was clean.
+
+The maintainer's own Birds of Paradise updates the same way, with Alt+Y, then Themes, then
+Enter on it.
