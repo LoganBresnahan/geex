@@ -3045,3 +3045,26 @@ rest green.
 (or `Alt+Y`). The coordinator session told them beforehand.
 
 **Not tested:** Windows Terminal with the bare binary.
+
+### 2026-10-18 — BUG-6: one release in the binary; `geex 0.1.0+bf7ccc25.89a87236` deployed
+
+The coordinator session found 23 geex releases in the bare binary's unpack, some carrying the old
+`priv/grammars` and `priv/themes` (BUG-6). After `bf7ccc2`'s deploy:
+- **The unpack:** `lib/` holds one `geex-*` directory, and
+  `find <unpack> -name '*.wasm' -o -name 'birds*'` finds nothing.
+- **Sizes:**
+
+  | | Before (`1cbe3f34`) | After (`bf7ccc25`) |
+  |---|---|---|
+  | Unpack | ~114 MB | 86 MB |
+  | Binary | 22,334,760 bytes | 21,938,408 bytes |
+
+  The old releases compressed well, so the binary shrinks less than the unpack.
+- **Burrito:** no `/tmp/burrito_build_*` was left after the build. 15 from earlier deploys,
+  about 1.8 GB, were removed by hand; each held a geex release.
+- **Live** (`geex` from the PATH, scratch XDG directories):
+  - `--version`; `--frob` (2);
+  - `geex install elixir`, then `geex a.ex notes.txt`, with `defmodule` magenta (35);
+  - Ctrl-X clean: no discovery file left, no `terminating` lines.
+
+**1075 tests + 67 doctests**, green twice.
