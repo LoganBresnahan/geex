@@ -2625,3 +2625,19 @@ Two follow-ups:
 
 **Not tested:** a real Claude Code `Write` creating a file through captAInHook (the envelope is
 the captured fixture); the flaky failure above.
+
+### 2026-10-18 — `geex 0.1.0+658e67d5` deployed (the tree watcher, created files)
+
+`mix geex.deploy` from the clean tree at `658e67d` (1017 tests + 54 doctests green). It installed
+`0.1.0+658e67d5`, removed the `+9a366eff` and `+dcce38ba` unpacks (none in use) and kept
+`geex.prev`'s `+5b995d0f`. Live with `geex` from the PATH in tmux (`-L deploy`, scratch state):
+- `--version` printed `geex 0.1.0+658e67d5`; `--frob` exited 2.
+- `geex a.txt notes.txt` opened both, with the discovery file present. `notes.txt` holds
+  `IO.puts("x")`; nothing was printed.
+- `NOTICE` created from outside, and `d1/` (`mkdir -p d1/d2`, then a file in `d1/d2` 1.5 s later),
+  showed in the tree.
+- Typing and Ctrl-O wrote `a.txt`.
+- Ctrl-X: alternate screen and mouse off, discovery file gone, no `terminating` lines, no
+  `inotifywait` left.
+
+**Not tested:** Windows Terminal.
