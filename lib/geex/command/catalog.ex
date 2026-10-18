@@ -104,6 +104,16 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, :toggle_mouse}
     },
     %Entry{
+      name: "theme terminal",
+      description: "Use the terminal's own colours, for this session (`theme` lists the rest).",
+      invoke: {:action, {:theme, "terminal"}}
+    },
+    %Entry{
+      name: "theme birds-of-paradise",
+      description: "Use the Birds of Paradise theme, for this session.",
+      invoke: {:action, {:theme, "birds-of-paradise"}}
+    },
+    %Entry{
       name: "fast-forward",
       description: "Take in the file's change on disk, merging your unsaved edits (Alt+J).",
       invoke: {:action, :fast_forward}

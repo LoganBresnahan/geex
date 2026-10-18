@@ -253,6 +253,11 @@ defmodule Geex.Loop do
       goal: 0,
       selection: nil,
       theme: Theme.default(),
+      # The theme's name, as `theme NAME` takes it, and the terminal's background once it has
+      # answered OSC 11 (`{:rgb, r, g, b}`), which the built-in terminal theme tints from
+      # (ADR-0040 §1).
+      theme_id: "birds-of-paradise",
+      terminal_bg: nil,
       # The file panes and their tabs (ADR-0038); `watched` every buffer in a tab: its monitor
       # and its highlight reactor, `%{pid => %{ref, reactor}}`.
       panes: Panes.new(),
@@ -419,6 +424,23 @@ defmodule Geex.Loop do
   # A drag held past the edge of the text scrolls a line (or a column) at a time.
   def handle_info({:geex_drag_scroll, ref}, %{drag: %{timer: ref}} = state),
     do: {:noreply, drag_to(put_in(state.drag.timer, nil), :scroll)}
+
+  # The terminal's background (its answer to OSC 11, ADR-0040 §1). The terminal theme tints
+  # its active line and selection from it. Not a key: nothing else about the state changes.
+  def handle_info({:geex_io, {:osc, "11", spec}}, state) do
+    case Theme.Terminal.parse_rgb(spec) do
+      {:ok, bg} when state.theme_id == "terminal" ->
+        {:noreply, retheme(%{state | terminal_bg: bg})}
+
+      {:ok, bg} ->
+        {:noreply, %{state | terminal_bg: bg}}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:geex_io, {:osc, _ps, _pt}}, state), do: {:noreply, state}
 
   # A key. When the minibuffer is open it captures input; otherwise resolve the key against
   # the current text + cursor (read fresh from Session) and apply via the one shared path
@@ -1494,7 +1516,9 @@ defmodule Geex.Loop do
       Enum.reduce(bar.tabs, screen, fn %{i: i, x: x, label: label}, acc ->
         style =
           cond do
-            i == pane.at and focused? -> %Cell{fg: pal.bg, bg: pal.fg}
+            i == pane.at and focused? -> %Cell{fg: pal.fg, bg: pal.bg, attrs: [:reverse]}
+            # With no tint (the terminal palette, unanswered), underlined instead.
+            i == pane.at and pal.mark != [] -> %Cell{fg: pal.fg, bg: pal.bg, attrs: [:underline]}
             i == pane.at -> %Cell{fg: pal.fg, bg: pal.active_line_bg}
             true -> %Cell{fg: pal.line_number, bg: pal.bg}
           end
@@ -1577,8 +1601,13 @@ defmodule Geex.Loop do
     line = Minibuffer.prompt(mb) <> Minibuffer.value(mb)
 
     screen
-    |> Screen.fill_rect(0, h - 1, w, 1, %Cell{char: " ", fg: pal.fg, bg: pal.active_line_bg})
-    |> Screen.draw_text(0, h - 1, line, %Cell{fg: pal.fg, bg: pal.active_line_bg})
+    |> Screen.fill_rect(0, h - 1, w, 1, %Cell{
+      char: " ",
+      fg: pal.fg,
+      bg: pal.active_line_bg,
+      attrs: pal.mark
+    })
+    |> Screen.draw_text(0, h - 1, line, %Cell{fg: pal.fg, bg: pal.active_line_bg, attrs: pal.mark})
   end
 
   # The hardware cursor position within the minibuffer: after the prompt, at the input cursor
@@ -1671,12 +1700,14 @@ defmodule Geex.Loop do
       |> EditsPane.lines(safe_start().root, w, h - 1, sel, focused?, state.edits_view.top)
       |> Enum.with_index(y + 1)
       |> Enum.reduce(screen, fn {{text, entry, selected?}, row}, acc ->
-        bg = if selected? and focused?, do: pal.active_line_bg, else: pal.bg
+        {bg, attrs} =
+          if selected? and focused?, do: {pal.active_line_bg, pal.mark}, else: {pal.bg, []}
+
         fg = if entry.kind == :behind, do: pal.cursor, else: pal.fg
 
         acc
-        |> Screen.fill_rect(x, row, w, 1, %Cell{char: " ", fg: fg, bg: bg})
-        |> Screen.draw_text(x, row, palette_clip(text, w), %Cell{fg: fg, bg: bg})
+        |> Screen.fill_rect(x, row, w, 1, %Cell{char: " ", fg: fg, bg: bg, attrs: attrs})
+        |> Screen.draw_text(x, row, palette_clip(text, w), %Cell{fg: fg, bg: bg, attrs: attrs})
       end)
     end
   end
@@ -1721,7 +1752,9 @@ defmodule Geex.Loop do
       |> Enum.slice(start, n)
       |> Enum.with_index(1)
       |> Enum.reduce(screen, fn {{row, i}, y}, acc ->
-        bg = if i == sel and focused?, do: pal.active_line_bg, else: pal.bg
+        {bg, attrs} =
+          if i == sel and focused?, do: {pal.active_line_bg, pal.mark}, else: {pal.bg, []}
+
         fg = if row.dir?, do: pal.line_number, else: pal.fg
         mark = if row.dir?, do: if(row.open?, do: "▾ ", else: "▸ "), else: "  "
 
@@ -1729,8 +1762,8 @@ defmodule Geex.Loop do
           String.duplicate("  ", row.depth) <> mark <> row.name <> if(row.dir?, do: "/", else: "")
 
         acc
-        |> Screen.fill_rect(0, y, inner, 1, %Cell{char: " ", fg: fg, bg: bg})
-        |> Screen.draw_text(0, y, palette_clip(text, inner), %Cell{fg: fg, bg: bg})
+        |> Screen.fill_rect(0, y, inner, 1, %Cell{char: " ", fg: fg, bg: bg, attrs: attrs})
+        |> Screen.draw_text(0, y, palette_clip(text, inner), %Cell{fg: fg, bg: bg, attrs: attrs})
       end)
     end
   end
@@ -1787,6 +1820,21 @@ defmodule Geex.Loop do
       :edits when layout.edits != nil -> :edits
       :tree when layout.tree != nil -> :tree
       _ -> :editor
+    end
+  end
+
+  # The theme named by `theme_id`, built again: the terminal theme from the terminal's background
+  # as known now, a bundled one from its file. A file that won't load keeps the theme shown.
+  defp retheme(%{theme_id: "terminal"} = state),
+    do: schedule_repaint(%{state | theme: Theme.Terminal.theme(state.terminal_bg)})
+
+  defp retheme(%{theme_id: id} = state) do
+    case Theme.bundled(id) do
+      {:ok, theme} ->
+        schedule_repaint(%{state | theme: theme})
+
+      {:error, reason} ->
+        schedule_repaint(%{state | notice: "theme #{id} didn't load: #{inspect(reason)}"})
     end
   end
 
@@ -2118,15 +2166,16 @@ defmodule Geex.Loop do
   # One candidate row: `name` padded to a column, then its description, on the theme bg —
   # or the active-line tint when highlighted (the Enter target).
   defp draw_palette_row(screen, entry, y, selected?, %{w: w, theme: %Theme{palette: pal}}, col) do
-    bg = if selected?, do: pal.active_line_bg, else: pal.bg
+    {bg, attrs} = if selected?, do: {pal.active_line_bg, pal.mark}, else: {pal.bg, []}
     name_fg = if selected?, do: pal.fg, else: pal.active_line_number
     label = String.pad_trailing(entry.name, col)
 
     screen
-    |> Screen.fill_rect(0, y, w, 1, %Cell{char: " ", fg: pal.fg, bg: bg})
+    |> Screen.fill_rect(0, y, w, 1, %Cell{char: " ", fg: pal.fg, bg: bg, attrs: attrs})
     |> Screen.draw_text(0, y, palette_clip(label <> entry.description, w), %Cell{
       fg: name_fg,
-      bg: bg
+      bg: bg,
+      attrs: attrs
     })
     # Re-tint the description (past the name column) in the dimmer fg so the name stands out.
     |> Screen.draw_text(
@@ -2135,7 +2184,8 @@ defmodule Geex.Loop do
       palette_clip(entry.description, w - col),
       %Cell{
         fg: pal.line_number,
-        bg: bg
+        bg: bg,
+        attrs: attrs
       }
     )
   end
@@ -2589,6 +2639,18 @@ defmodule Geex.Loop do
               "mouse off: the terminal selects and copies text again (`mouse` turns it back on)"
 
         schedule_repaint(%{state | mouse: on?, drag: nil, notice: notice})
+
+      # `theme` and `theme NAME` (ADR-0040): this session only, until the settings view keeps one.
+      {:theme, nil} ->
+        names =
+          Enum.map_join(Theme.names(), ", ", &if(&1 == state.theme_id, do: "#{&1} *", else: &1))
+
+        schedule_repaint(%{state | notice: "themes: #{names}"})
+
+      {:theme, name} ->
+        if name in Theme.names(),
+          do: retheme(%{state | theme_id: name}),
+          else: schedule_repaint(%{state | notice: "no theme #{name} (`theme` lists them)"})
 
       :quit ->
         Geex.stop()
@@ -3198,7 +3260,7 @@ defmodule Geex.Loop do
        when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane, :find_file] or
               action == :toggle_mouse or
               action in [:split_rows, :split_cols, :tab_next, :tab_prev] or
-              (is_tuple(action) and elem(action, 0) == :tab),
+              (is_tuple(action) and elem(action, 0) in [:tab, :theme]),
        do: apply_action(action, {0, 0}, "", state)
 
   defp apply_verb(action, state) do

@@ -79,6 +79,11 @@ defmodule Geex.TerminalIO do
   @mouse_on ["\e[?1005l", "\e[?1015l", "\e[?1000h", "\e[?1002h", "\e[?1006h"]
   @mouse_off ["\e[?1006l", "\e[?1002l", "\e[?1000l"]
 
+  # The query for the terminal's background (OSC 11), ended by ST, and how long after it a
+  # bare `ESC ]` counts as the start of its answer rather than Alt+].
+  @ask_bg "\e]11;?\e\\"
+  @bg_wait_ms 1_000
+
   # The most text sent to the system clipboard at once. A terminal caps what it takes (xterm a
   # few hundred kilobytes by default) and can stall on more; past this, only geex's own clipboard
   # has the text.
@@ -118,12 +123,17 @@ defmodule Geex.TerminalIO do
     %{read: reader_ref} = :prim_tty.handles(tty)
     {tty_dev, tty_modes} = take_keys()
 
+    # Ask the terminal for its background (OSC 11) for the built-in terminal theme's tints
+    # (ADR-0040 §1), only when both ends are a terminal. The answer arrives as input, maybe never.
+    ask_bg? = :prim_tty.isatty(:stdin) == true and :prim_tty.isatty(:stdout) == true
+
     :prim_tty.write(tty, [
       "\e[?1049h",
       "\e[?25l",
       "\e[2J",
       "\e[H",
-      @mouse_on
+      @mouse_on,
+      if(ask_bg?, do: @ask_bg, else: [])
     ])
 
     # Arm the first read. `:prim_tty` sends `{ReaderRef, {data, bytes}}`
@@ -141,6 +151,10 @@ defmodule Geex.TerminalIO do
       esc_buf: <<>>,
       # The pending flush of `esc_buf` (a ref), stale once more bytes arrive.
       esc_flush: nil,
+      # Until when (monotonic ms) the start of an OSC 11 answer is waited for, not flushed as
+      # Alt+] (`Parser.osc_reply?/2`); and the answer once it came, for later subscribers.
+      bg_asked_until: if(ask_bg?, do: now_ms() + @bg_wait_ms, else: 0),
+      bg_answer: nil,
       subscribers: MapSet.new(),
       monitors: %{}
     }
@@ -161,6 +175,8 @@ defmodule Geex.TerminalIO do
           monitors: Map.put(state.monitors, ref, pid)
       }
 
+      # The background may have answered before this subscriber came.
+      if state.bg_answer, do: send(pid, {:geex_io, state.bg_answer})
       {:noreply, state}
     end
   end
@@ -203,7 +219,17 @@ defmodule Geex.TerminalIO do
     {events, leftover} = Parser.parse(state.esc_buf <> bytes)
     Enum.each(events, fn ev -> publish({:geex_io, ev}, state) end)
     :prim_tty.read(state.tty, 1024)
-    {:noreply, %{state | esc_buf: leftover, esc_flush: schedule_flush(leftover)}}
+
+    bg_answer =
+      Enum.find(Enum.reverse(events), state.bg_answer, &match?({:osc, "11", _}, &1))
+
+    {:noreply,
+     %{
+       state
+       | esc_buf: leftover,
+         esc_flush: schedule_flush(leftover, state.bg_asked_until),
+         bg_answer: bg_answer
+     }}
   end
 
   # Nothing followed the leftover within @esc_timeout_ms: it was typed, not sent as one
@@ -319,15 +345,25 @@ defmodule Geex.TerminalIO do
   # typed by a person. 25–50 ms is the usual range in terminal editors.
   @esc_timeout_ms 40
 
-  defp schedule_flush(<<>>), do: nil
+  defp schedule_flush(<<>>, _asked_until), do: nil
 
-  defp schedule_flush(leftover) do
-    if Parser.mouse_report?(leftover), do: nil, else: flush_later()
+  defp schedule_flush(leftover, asked_until) do
+    wait = asked_until - now_ms()
+
+    cond do
+      Parser.mouse_report?(leftover) -> nil
+      Parser.osc_reply?(leftover, false) -> nil
+      # Maybe the answer's start: wait out the query's window, then it was typed.
+      wait > 0 and Parser.osc_reply?(leftover, true) -> flush_later(wait + @esc_timeout_ms)
+      true -> flush_later(@esc_timeout_ms)
+    end
   end
 
-  defp flush_later do
+  defp flush_later(ms) do
     ref = make_ref()
-    Process.send_after(self(), {:flush_esc, ref}, @esc_timeout_ms)
+    Process.send_after(self(), {:flush_esc, ref}, ms)
     ref
   end
+
+  defp now_ms, do: System.monotonic_time(:millisecond)
 end

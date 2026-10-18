@@ -42,12 +42,22 @@ defmodule Geex.Input.Parser do
                          | :none | pos_integer(),
                  x: col, y: row,        # 0-based, from the terminal's top-left
                  mods: [:shift | :alt | :ctrl]}}
+      {:osc, ps, pt}             # a terminal's OSC answer, e.g. {"11", "rgb:1e1e/1e1e/2e2e"}
+
+  ## Answers to queries ([ADR-0040](../../../doc/adr/0040-bare-geex-and-the-catalog.md) §1)
+
+  `Geex.TerminalIO` asks the terminal for its background (`ESC ] 11 ; ? ESC \\`). The answer
+  comes back on the same input as the keys: `ESC ] 11 ; rgb:RRRR/GGGG/BBBB`, ended by BEL or
+  `ESC \\`. It is read whole into `{:osc, "11", spec}`, never as keys, including when it comes
+  split across reads (`osc_reply?/2`) or late.
   """
 
   import Bitwise
 
   # The longest incomplete control sequence held as leftover.
   @max_sequence 32
+  # The longest incomplete OSC answer held; an OSC 11 answer is about 30 bytes.
+  @max_osc 256
 
   @type event ::
           {:key, atom()}
@@ -55,6 +65,7 @@ defmodule Geex.Input.Parser do
           | {:ctrl, byte()}
           | {:alt, byte()}
           | {:mouse, mouse()}
+          | {:osc, binary(), binary()}
 
   @type mouse :: %{
           action: :press | :release | :drag | :wheel | :move,
@@ -128,6 +139,26 @@ defmodule Geex.Input.Parser do
   def mouse_report?(<<"\e[M", _::binary>>), do: true
   def mouse_report?(_leftover), do: false
 
+  @doc """
+  Whether a `leftover` is the start of the terminal's answer to an OSC 11 query (ADR-0040), and
+  so is waited for rather than flushed as typed keys. `ESC ] 11 ;` is never typed, so it is
+  always an answer; a shorter start (`ESC ]`, `ESC ] 1`, `ESC ] 11`) is one only while
+  `asked?`, the query having just gone out. Otherwise it is Alt+] and what followed.
+
+      iex> Geex.Input.Parser.osc_reply?("\\e]11;rgb:00", false)
+      true
+      iex> Geex.Input.Parser.osc_reply?("\\e]1", true)
+      true
+      iex> Geex.Input.Parser.osc_reply?("\\e]", false)
+      false
+      iex> Geex.Input.Parser.osc_reply?("\\e]x", true)
+      false
+  """
+  @spec osc_reply?(binary(), boolean()) :: boolean()
+  def osc_reply?(<<"\e]11;", _::binary>>, _asked?), do: true
+  def osc_reply?(leftover, true) when leftover in ["\e]", "\e]1", "\e]11"], do: true
+  def osc_reply?(_leftover, _asked?), do: false
+
   defp do_parse(<<>>, acc), do: {Enum.reverse(acc), <<>>}
 
   # CSI: ESC [ params* intermediates* final, read whole. A known one becomes a key; an unknown
@@ -148,6 +179,26 @@ defmodule Geex.Input.Parser do
         do_parse(after_seq, push(csi_key(params, final), acc))
 
       :partial when byte_size(seq) <= @max_sequence ->
+        {Enum.reverse(acc), seq}
+
+      :partial ->
+        {Enum.reverse(acc), <<>>}
+
+      :invalid ->
+        do_parse(rest, acc)
+    end
+  end
+
+  # OSC: ESC ] Ps ; Pt, ended by BEL or ST (ESC \), read whole: a terminal's answer to a query,
+  # like OSC 11's background colour (ADR-0040). Incomplete → leftover (up to @max_osc bytes, then
+  # dropped). An ESC inside that isn't ST means it wasn't one: drop the ESC ] and re-scan.
+  defp do_parse(<<"\e]", rest::binary>> = seq, acc) do
+    case osc_end(rest, 0) do
+      {:end, n, len} ->
+        <<body::binary-size(n), _terminator::binary-size(len), after_seq::binary>> = rest
+        do_parse(after_seq, push(osc(body), acc))
+
+      :partial when byte_size(seq) <= @max_osc ->
         {Enum.reverse(acc), seq}
 
       :partial ->
@@ -281,6 +332,20 @@ defmodule Geex.Input.Parser do
 
   defp press_or(_b, true), do: :release
   defp press_or(b, false), do: if((b &&& 32) != 0, do: :drag, else: :press)
+
+  defp osc_end(<<7, _::binary>>, n), do: {:end, n, 1}
+  defp osc_end(<<"\e\\", _::binary>>, n), do: {:end, n, 2}
+  defp osc_end(<<"\e">>, _n), do: :partial
+  defp osc_end(<<"\e", _::binary>>, _n), do: :invalid
+  defp osc_end(<<_, rest::binary>>, n), do: osc_end(rest, n + 1)
+  defp osc_end(<<>>, _n), do: :partial
+
+  defp osc(body) do
+    case :binary.split(body, ";") do
+      [ps, pt] -> {:osc, ps, pt}
+      [ps] -> {:osc, ps, ""}
+    end
+  end
 
   defp ss3_key(?A), do: {:key, :up}
   defp ss3_key(?B), do: {:key, :down}

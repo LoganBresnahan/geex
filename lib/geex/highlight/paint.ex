@@ -87,6 +87,8 @@ defmodule Geex.Highlight.Paint do
     fg = theme.palette.fg
     bg = theme.palette.bg
     sel_bg = theme.palette.selection
+    # Reverse video for the selection when the palette has no colour for it (ADR-0040 §1).
+    sel_attrs = theme.palette.mark
 
     # Paint the whole pane with the theme's editor background first, then overlay
     # the glyphs — so blank lines, the gaps after short lines, and the area below
@@ -110,7 +112,12 @@ defmodule Geex.Highlight.Paint do
           |> Enum.reduce({screen, byte0, x0, 0}, fn g, {screen, byte, vcol, col} ->
             wd = Width.cells(g)
             cell = cell_for(g, style_at(by_byte, byte, byte_size(g)), fg, bg)
-            cell = if selected?(selection, row, col), do: %{cell | bg: sel_bg}, else: cell
+
+            cell =
+              if selected?(selection, row, col),
+                do: %{cell | bg: sel_bg, attrs: cell.attrs ++ sel_attrs},
+                else: cell
+
             screen = place(screen, vcol - hscroll, sy, cell, wd, x0)
             {screen, byte + byte_size(g), vcol + wd, col + 1}
           end)
@@ -124,7 +131,8 @@ defmodule Geex.Highlight.Paint do
             fill_eol(screen, sy, max(end_vcol - hscroll, x0), w, %Cell{
               char: " ",
               fg: fg,
-              bg: sel_bg
+              bg: sel_bg,
+              attrs: sel_attrs
             })
           else
             screen

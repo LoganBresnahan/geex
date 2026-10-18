@@ -80,6 +80,22 @@ defmodule Geex.Theme do
   @spec default() :: t()
   def default, do: bundled!(@default_theme)
 
+  @doc """
+  The themes there are by name: the built-in `"terminal"` (`Geex.Theme.Terminal`, the terminal's
+  own colours, ADR-0040) and each bundled file.
+  """
+  @spec names() :: [String.t()]
+  def names do
+    bundled =
+      Application.app_dir(:geex, "priv/themes")
+      |> Path.join("*.json")
+      |> Path.wildcard()
+      |> Enum.map(&Path.basename(&1, ".json"))
+      |> Enum.sort()
+
+    [Geex.Theme.Terminal.name() | bundled]
+  end
+
   @doc "Load a bundled theme by name from `priv/themes/<name>.json`."
   @spec bundled(String.t()) :: {:ok, t()} | {:error, term()}
   def bundled(name) when is_binary(name) do
@@ -90,8 +106,11 @@ defmodule Geex.Theme do
   @spec bundled!(String.t()) :: t()
   def bundled!(name) do
     case bundled(name) do
-      {:ok, theme} -> theme
-      {:error, reason} -> raise "geex: cannot load bundled theme #{inspect(name)}: #{inspect(reason)}"
+      {:ok, theme} ->
+        theme
+
+      {:error, reason} ->
+        raise "geex: cannot load bundled theme #{inspect(name)}: #{inspect(reason)}"
     end
   end
 
@@ -200,7 +219,13 @@ defmodule Geex.Theme do
   defp style(other, _bg, capture), do: {:error, {:bad_style, capture, other}}
 
   defp attrs(obj) do
-    for {key, attr} <- [{"bold", :bold}, {"italic", :italic}, {"underline", :underline}, {"dim", :dim}, {"reverse", :reverse}],
+    for {key, attr} <- [
+          {"bold", :bold},
+          {"italic", :italic},
+          {"underline", :underline},
+          {"dim", :dim},
+          {"reverse", :reverse}
+        ],
         Map.get(obj, key) == true,
         do: attr
   end

@@ -29,6 +29,8 @@ defmodule Geex.Loop.Verbs do
       `Alt+N`). ADR-0038.
     * `mouse` — turn the mouse off, so the terminal selects and copies text itself, or back on
       (ADR-0039).
+    * `theme` — list the themes; `theme NAME` — switch to one for this session, e.g. `theme
+      terminal`, the terminal's own colours (ADR-0040).
     * `quit` / `exit` — leave the editor (= `Ctrl-X`).
     * `no` — the typed twin of `Alt+N`: clears a live selection (a plain cancel when
       nothing is selected). An empty line just cancels.
@@ -139,6 +141,9 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("open"), do: {:action, :find_file}
   defp do_parse("find"), do: {:action, :find_file}
   defp do_parse("mouse"), do: {:action, :toggle_mouse}
+  # `theme` lists the themes; `theme NAME` switches to one for this session (ADR-0040).
+  defp do_parse("theme"), do: {:action, {:theme, nil}}
+  defp do_parse("theme " <> name), do: {:action, {:theme, String.trim(name)}}
   defp do_parse("quit"), do: {:action, :quit}
   defp do_parse("exit"), do: {:action, :quit}
 

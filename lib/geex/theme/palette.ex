@@ -3,11 +3,26 @@ defmodule Geex.Theme.Palette do
   The editor-chrome colours of a theme — everything that is *not* a syntax
   capture ([ADR-0023](../../../doc/adr/0023-theming-and-extension-loading.md)):
   the editor background/foreground, line numbers, the active line, the cursor,
-  and the selection. Colours are opaque `{:rgb, …}` (alpha already flattened).
+  and the selection. Colours are opaque `{:rgb, …}` (alpha already flattened), or for the
+  built-in terminal palette (`Geex.Theme.Terminal`) `:default` and `{:ansi, n}`.
+
+  `mark` is the attrs added to whatever is drawn on `active_line_bg` or `selection` (a picked
+  row, the selection, the minibuffer line): `[]` for a theme with real colours there, and
+  `[:reverse]` for the terminal palette when it doesn't know the terminal's background, so the
+  pick still shows.
   """
 
   @enforce_keys [:bg, :fg]
-  defstruct [:bg, :fg, :line_number, :active_line_number, :active_line_bg, :cursor, :selection]
+  defstruct [
+    :bg,
+    :fg,
+    :line_number,
+    :active_line_number,
+    :active_line_bg,
+    :cursor,
+    :selection,
+    mark: []
+  ]
 
   @type t :: %__MODULE__{
           bg: Geex.Cell.colour(),
@@ -16,6 +31,7 @@ defmodule Geex.Theme.Palette do
           active_line_number: Geex.Cell.colour(),
           active_line_bg: Geex.Cell.colour(),
           cursor: Geex.Cell.colour(),
-          selection: Geex.Cell.colour()
+          selection: Geex.Cell.colour(),
+          mark: [Geex.Cell.attr()]
         }
 end

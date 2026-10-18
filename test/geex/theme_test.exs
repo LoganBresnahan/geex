@@ -6,6 +6,40 @@ defmodule Geex.ThemeTest do
 
   defp theme, do: Geex.Theme.default()
 
+  doctest Geex.Theme.Terminal
+
+  # ADR-0040 §1: the built-in theme that is the terminal's own colours.
+  describe "Geex.Theme.Terminal" do
+    test "styles every capture the reference theme does, in default or the 16 ANSI colours" do
+      {:ok, json} = File.read(Application.app_dir(:geex, "priv/themes/birds-of-paradise.json"))
+      captures = Map.keys(JSON.decode!(json)["syntax"])
+      t = Theme.Terminal.theme(nil)
+
+      for capture <- captures do
+        assert %Theme.Style{fg: fg} = Theme.style_for(t, capture), capture
+        assert fg == :default or match?({:ansi, n} when n in 0..15, fg), capture
+      end
+    end
+
+    test "draws in SGR 30-37/90-97 and the terminal's default, never truecolor" do
+      t = Theme.Terminal.theme(nil)
+      assert Ansi.sgr(Theme.style_for(t, "keyword")) == "\e[35m"
+      assert Ansi.sgr(Theme.style_for(t, "comment")) == "\e[3;90m"
+      assert Ansi.sgr(Theme.style_for(t, "variable")) == ""
+    end
+
+    test "light or dark from the background, and the tint follows" do
+      assert Theme.Terminal.theme({:rgb, 250, 250, 245}).appearance == :light
+      assert Theme.Terminal.theme({:rgb, 30, 30, 46}).appearance == :dark
+      assert Theme.Terminal.theme({:rgb, 30, 30, 46}).palette.selection == {:rgb, 80, 80, 92}
+    end
+
+    test "names/0 starts with the built-in one" do
+      assert ["terminal" | bundled] = Theme.names()
+      assert "birds-of-paradise" in bundled
+    end
+  end
+
   describe "Geex.Color" do
     test "parses #RRGGBB to truecolor rgb" do
       assert Color.from_hex("#EF5D32") == {:rgb, 239, 93, 50}

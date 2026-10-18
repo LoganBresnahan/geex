@@ -2701,3 +2701,46 @@ version doesn't name a changed sibling dependency.
 
 **Not tested:** how much sooner the first frame is highlighted with a warm cache; the
 measurement is the step's NIF and `Grammars` numbers above.
+
+### 2026-10-18 — The built-in terminal theme, and the terminal's background (ADR-0040 step 3)
+
+`Geex.Theme.Terminal` (the terminal's own colours), the OSC 11 query and the parsing of its
+answer, the palette's `mark` fallback, and the `theme` verb.
+
+**Live** (`mix run` in tmux, 120×30, `a.ex`):
+- `theme terminal` drew in 16-colour SGR only: `defmodule`/`do`/`def` in 35, `A` in 36, `f` in
+  34, the string in 32, the comment in `3;90`. The divider and the line numbers were in 90.
+- tmux with no client attached doesn't answer OSC 11, so this was the fallback: select-all
+  showed `ESC [7m` on the text.
+- Sending `ESC ] 11 ; rgb:1e1e/1e1e/2e2e ESC \` into the pane, as a late answer would come:
+  the selection turned `48;2;80;80;92`. Sent again with BEL: the cursor's line took
+  `48;2;46;46;61`.
+- No character of either answer reached the buffer.
+- Birds of Paradise, the default, still shows its active line (`48;2;49;35;33`).
+- Ctrl-X was clean, and the log had no errors.
+
+**Automated:**
+- `parser_test.exs` "OSC answers":
+  - BEL and ST endings, with keys around;
+  - an answer split at every byte, held and read whole;
+  - a late answer after a key, and another OSC;
+  - Alt+] held, then flushed as keys;
+  - an ESC inside that isn't ST;
+  - an endless OSC dropped past its cap;
+  - the `osc_reply?/2` doctests.
+- `theme_test.exs`:
+  - every capture Birds of Paradise styles has a 16-colour or default style;
+  - the SGR it draws in;
+  - light and dark, and the tint;
+  - `Theme.names/0`;
+  - the `Theme.Terminal` doctests (the tint numbers, `parse_rgb/1`).
+- `loop/theme_test.exs`:
+  - `theme`, `theme terminal` and an unknown name;
+  - an answer tints the terminal theme and is only kept under another;
+  - a bad answer or OSC 10 changes nothing and types nothing;
+  - with no answer, the picked tree row and the selection are reversed in the Screen;
+  - Birds of Paradise has no mark.
+- **1031 tests + 58 doctests**, green twice.
+
+**Not tested:** Windows Terminal's answer to OSC 11 (the maintainer's terminal; the ADR's
+"verify" item); a light terminal live.

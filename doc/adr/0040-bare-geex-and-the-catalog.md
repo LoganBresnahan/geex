@@ -42,6 +42,43 @@ geex release itself pins.
   wait gets the plain fallback (reverse video for the selection, nothing for the active line).
   Windows Terminal (the maintainer's) is checked live in step 3.
 
+**Built 2026-10-18 (step 3):**
+- **The theme** is `Geex.Theme.Terminal`, named `terminal`. Its palette is the terminal's
+  default foreground and background, line numbers in bright black (ANSI 8), and the cursor's
+  accent in yellow (ANSI 3).
+- **Syntax** captures map to ANSI colours: keywords magenta, strings green, escapes, types and
+  atoms cyan, numbers and constants yellow, functions blue, comments bright black and italic.
+  Every capture Birds of Paradise styles has one.
+- **With the background known,** the active line moves 7% and the selection 22% from it,
+  toward white on a dark background and black on a light one (luminance under half is dark).
+  Those two are truecolor; the rest is 16-colour.
+- **With no answer,** there is no active-line shade, and the palette's new `mark` field is
+  `[:reverse]`. The selection, a picked tree, edits or picker row, and the minibuffer line are
+  drawn in reverse video. The shown tab of an unfocused pane is underlined. A theme file's
+  palette has `mark: []`, so Birds of Paradise draws as before.
+- **The query** is `ESC ] 11 ; ? ESC \`. `Geex.TerminalIO` sends it at start, only when stdin and
+  stdout are both terminals (`:prim_tty.isatty/1`). It doesn't wait: the first frame uses the
+  fallback, and an answer re-tints. `TerminalIO` keeps the answer for a subscriber that comes
+  after it.
+- **The answer** arrives on the same input as the keys, and the coordinator session's review
+  asked that it never be read as keys:
+  - `Geex.Input.Parser` reads `ESC ] Ps ; Pt`, ended by BEL or ST, whole, into
+    `{:osc, ps, pt}`; any OSC, not only 11.
+  - A partial one is held as leftover, up to 256 bytes, then dropped. `ESC ] 11 ;` is always
+    held: nobody types it. A shorter start (`ESC ]`, `ESC ] 1`, `ESC ] 11`) is held only for the
+    query's first second (`Parser.osc_reply?/2`); after that it is Alt+] and what followed,
+    flushed as keys.
+  - An answer that comes late, after the first frame or after a key, is still read as one.
+  - An ESC inside that isn't ST means it wasn't an OSC: the rest is read again.
+- **Choosing it:** `theme terminal`, `theme birds-of-paradise` and `theme` (which lists them)
+  switch for the session, and the palette has both. The default stays Birds of Paradise until
+  geex goes bare (step 7), and `Alt+Y` keeps the choice (step 6).
+- **Checked live** in tmux, which doesn't answer OSC 11 with no client attached, so that was the
+  fallback: the selection was reversed. Then the answer's bytes were sent into the pane, as a
+  late answer would arrive. The active line took `rgb(46,46,61)` from `rgb:1e1e/1e1e/2e2e`, the
+  selection `rgb(80,80,92)`, and nothing was typed into the buffer. **Windows Terminal is not
+  checked yet**: it needs the maintainer's terminal.
+
 ### 2. The catalog is fixed per release
 
 - **Each geex build embeds `catalog.json`** at compile time: every package it can install, its

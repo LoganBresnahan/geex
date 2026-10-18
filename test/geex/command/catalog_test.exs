@@ -18,6 +18,7 @@ defmodule Geex.Command.CatalogTest do
     test "every entry carries a dispatchable invoke" do
       for %Entry{invoke: invoke} <- Catalog.all() do
         assert match?({:action, a} when is_atom(a), invoke) or
+                 match?({:action, {:theme, name}} when is_binary(name), invoke) or
                  match?({:typed, p} when is_binary(p), invoke)
       end
     end

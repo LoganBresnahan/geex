@@ -265,4 +265,44 @@ defmodule Geex.Input.ParserTest do
       assert Parser.parse("\e[M " <> "!!x") == {[m(:press, :left, 0, 0), {:char, "x"}], ""}
     end
   end
+
+  # ADR-0040 §1: the terminal's answer to OSC 11, read as one event, never as keys.
+  describe "OSC answers" do
+    @answer "11;rgb:1e1e/1e1e/2e2e"
+
+    test "ended by BEL or by ST, with keys around it" do
+      assert Parser.parse("\e]" <> @answer <> "\a") == {[{:osc, "11", "rgb:1e1e/1e1e/2e2e"}], ""}
+
+      assert Parser.parse("a\e]" <> @answer <> "\e\\b") ==
+               {[{:char, "a"}, {:osc, "11", "rgb:1e1e/1e1e/2e2e"}, {:char, "b"}], ""}
+    end
+
+    test "split across reads anywhere, it is held and then read whole" do
+      whole = "\e]" <> @answer <> "\e\\"
+
+      for at <- 1..(byte_size(whole) - 1) do
+        <<first::binary-size(at), second::binary>> = whole
+        {[], leftover} = Parser.parse(first)
+        assert Parser.parse(leftover <> second) == {[{:osc, "11", "rgb:1e1e/1e1e/2e2e"}], ""}
+      end
+    end
+
+    test "an answer that comes late is still an answer; another OSC is read too" do
+      assert {[{:key, :down}, {:osc, "11", _}], ""} =
+               Parser.parse("\e[B\e]" <> @answer <> "\a")
+
+      assert Parser.parse("\e]10;rgb:ff/ff/ff\a") == {[{:osc, "10", "rgb:ff/ff/ff"}], ""}
+    end
+
+    test "typed Alt+] stays keys: held only until the caller flushes it" do
+      assert Parser.parse("\e]") == {[], "\e]"}
+      assert Parser.flush("\e]") == [{:key, :esc}, {:char, "]"}]
+      # An ESC that isn't ST inside: not an OSC; the rest is read again.
+      assert Parser.parse("\e]x\e[A") == {[{:char, "x"}, {:key, :up}], ""}
+    end
+
+    test "an endless OSC is dropped past its cap rather than held" do
+      assert Parser.parse("\e]11;" <> String.duplicate("x", 300)) == {[], ""}
+    end
+  end
 end
