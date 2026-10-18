@@ -4,14 +4,14 @@ defmodule Geex.ThemeTest do
   alias Geex.{Ansi, Color, Highlight, Theme}
   alias Geex.Highlight.Span
 
-  defp theme, do: Geex.Theme.default()
+  defp theme, do: Geex.Fixtures.birds()
 
   doctest Geex.Theme.Terminal
 
   # ADR-0040 §1: the built-in theme that is the terminal's own colours.
   describe "Geex.Theme.Terminal" do
     test "styles every capture the reference theme does, in default or the 16 ANSI colours" do
-      {:ok, json} = File.read(Application.app_dir(:geex, "priv/themes/birds-of-paradise.json"))
+      {:ok, json} = File.read(Geex.Fixtures.birds_path())
       captures = Map.keys(JSON.decode!(json)["syntax"])
       t = Theme.Terminal.theme(nil)
 
@@ -35,8 +35,8 @@ defmodule Geex.ThemeTest do
     end
 
     test "names/0 starts with the built-in one" do
-      assert ["terminal" | bundled] = Theme.names()
-      assert "birds-of-paradise" in bundled
+      assert ["terminal" | installed] = Theme.names()
+      assert "birds-of-paradise" in installed
     end
   end
 

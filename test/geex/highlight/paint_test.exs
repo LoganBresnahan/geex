@@ -6,7 +6,7 @@ defmodule Geex.Highlight.PaintTest do
 
   @keyword_red {:rgb, 239, 93, 50}
 
-  defp theme, do: Geex.Theme.default()
+  defp theme, do: Geex.Fixtures.birds()
 
   describe "to_screen/6 — project spans onto a styled cell grid" do
     test "styled bytes get the token colour; unstyled bytes get the palette fg" do

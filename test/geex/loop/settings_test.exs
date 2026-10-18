@@ -16,6 +16,8 @@ defmodule Geex.Loop.SettingsTest do
     old = {Application.get_env(:geex, :data_dir), Application.get_env(:geex, :settings_path)}
     Application.put_env(:geex, :data_dir, Path.join(dir, "data"))
     Application.put_env(:geex, :settings_path, Path.join(dir, "settings.json"))
+    # Elixir, JSON and Birds of Paradise installed locally, as the suite has them.
+    Geex.Fixtures.install(Path.join(dir, "data"))
     Installed.refresh()
     for f <- ["a.txt", "b.js"], do: File.write!(Path.join(dir, f), "x\n")
     Session.set_start(dir)
@@ -63,7 +65,7 @@ defmodule Geex.Loop.SettingsTest do
       assert %{name: "rust", cells: ["Rust", _kb, "available"]} =
                Enum.find(rows, &(&1.name == "rust"))
 
-      assert %{cells: [_, _, "bundled"]} = Enum.find(rows, &(&1.name == "elixir"))
+      assert %{cells: [_, _, "installed"]} = Enum.find(rows, &(&1.name == "elixir"))
 
       rust = Enum.find_index(rows, &(&1.name == "rust"))
       assert {_, {:install, "rust"}} = Settings.key(%{view | sel: rust}, {:key, :enter}, rows, 30)
@@ -150,21 +152,24 @@ defmodule Geex.Loop.SettingsTest do
 
     test "a previewed theme is put back on Esc; a chosen one is kept, and loads next start",
          %{state: state, dir: dir} do
+      # The terminal theme is in use (the default); Birds of Paradise is the next row.
       state = state |> send_io({:alt, ?y}) |> send_io({:key, :tab})
-      state = send_io(state, {:key, :up})
+      state = send_io(state, {:key, :down})
+      assert state.theme_id == "birds-of-paradise"
+      state = send_io(state, {:key, :esc})
       assert state.theme_id == "terminal"
+
+      state = state |> send_io({:alt, ?y}) |> send_io({:key, :tab}) |> send_io({:key, :down})
+      state = send_io(state, {:key, :enter})
+      assert state.settings.message == "theme birds-of-paradise kept"
       state = send_io(state, {:key, :esc})
       assert state.theme_id == "birds-of-paradise"
 
-      state = state |> send_io({:alt, ?y}) |> send_io({:key, :tab}) |> send_io({:key, :up})
-      state = send_io(state, {:key, :enter})
-      assert state.settings.message == "theme terminal kept"
-      state = send_io(state, {:key, :esc})
-      assert state.theme_id == "terminal"
-      assert JSON.decode!(File.read!(Path.join(dir, "settings.json"))) == %{"theme" => "terminal"}
+      assert JSON.decode!(File.read!(Path.join(dir, "settings.json"))) ==
+               %{"theme" => "birds-of-paradise"}
 
       fresh = Loop.apply_settings(Loop.new_state(80, 24), Geex.Settings.load())
-      assert {fresh.theme_id, fresh.theme.name} == {"terminal", "terminal"}
+      assert {fresh.theme_id, fresh.theme.name} == {"birds-of-paradise", "Birds of Paradise"}
     end
 
     test "General: the mouse and the panes at start are kept", %{state: state, dir: dir} do

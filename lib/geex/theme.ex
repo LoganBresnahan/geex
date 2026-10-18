@@ -11,9 +11,10 @@ defmodule Geex.Theme do
   that import is near-lossless (`Geex.Theme.Import.Zed`).
 
   A theme is **loaded from a JSON data file**, not written in code — `load/1`
-  reads + validates one, `bundled/1` loads a default from `priv/themes/<name>.json`,
-  and `default/0` is Birds of Paradise (`priv/themes/birds-of-paradise.json`, the
-  author's Zed port and the reference others copy). The native shape:
+  reads + validates one, and `named/1` loads an installed one ([ADR-0040](../../doc/adr/0040-bare-geex-and-the-catalog.md):
+  geex ships none; Birds of Paradise, the author's Zed port, is in the catalog). `default/0` is
+  the built-in terminal theme (`Geex.Theme.Terminal`), code rather than a file. The native
+  shape:
 
       {
         "name": "Birds of Paradise",
@@ -74,57 +75,34 @@ defmodule Geex.Theme do
 
   ## Loading (themes are data — ADR-0023)
 
-  @default_theme "birds-of-paradise"
-
-  @doc "geex's default theme — Birds of Paradise, the bundled reference."
+  @doc """
+  geex's default theme: the built-in terminal theme, the user's own terminal colours, before
+  it knows the terminal's background (ADR-0040 §1). geex ships no theme file.
+  """
   @spec default() :: t()
-  def default, do: bundled!(@default_theme)
+  def default, do: Geex.Theme.Terminal.theme(nil)
 
   @doc """
   The themes there are by name: the built-in `"terminal"` (`Geex.Theme.Terminal`, the terminal's
-  own colours, ADR-0040) and each bundled file.
+  own colours, ADR-0040) and each installed one.
   """
   @spec names() :: [String.t()]
   def names do
-    bundled =
-      Application.app_dir(:geex, "priv/themes")
-      |> Path.join("*.json")
-      |> Path.wildcard()
-      |> Enum.map(&Path.basename(&1, ".json"))
-
     installed = Enum.map(Geex.Installed.themes(), & &1["name"])
     terminal = Geex.Theme.Terminal.name()
     # The built-in name always means the built-in theme.
-    [terminal | Enum.sort(Enum.uniq(installed ++ bundled) -- [terminal])]
+    [terminal | Enum.sort(Enum.uniq(installed) -- [terminal])]
   end
 
   @doc """
-  Load the theme named `name`: an installed one (ADR-0040 §4), else a bundled one. The built-in
-  `"terminal"` theme isn't a file; see `Geex.Theme.Terminal`.
+  Load the installed theme named `name` (ADR-0040 §4). The built-in `"terminal"` theme isn't a
+  file; see `Geex.Theme.Terminal`.
   """
   @spec named(String.t()) :: {:ok, t()} | {:error, term()}
   def named(name) when is_binary(name) do
     case Geex.Installed.theme(name) do
       %{"dir" => dir} -> load(Path.join(dir, name <> ".json"))
-      nil -> bundled(name)
-    end
-  end
-
-  @doc "Load a bundled theme by name from `priv/themes/<name>.json`."
-  @spec bundled(String.t()) :: {:ok, t()} | {:error, term()}
-  def bundled(name) when is_binary(name) do
-    load(Application.app_dir(:geex, Path.join(["priv", "themes", name <> ".json"])))
-  end
-
-  @doc "Like `bundled/1` but raises — for the known-good bundled set."
-  @spec bundled!(String.t()) :: t()
-  def bundled!(name) do
-    case bundled(name) do
-      {:ok, theme} ->
-        theme
-
-      {:error, reason} ->
-        raise "geex: cannot load bundled theme #{inspect(name)}: #{inspect(reason)}"
+      nil -> {:error, {:not_installed, name}}
     end
   end
 

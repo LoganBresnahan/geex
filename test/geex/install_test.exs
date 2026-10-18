@@ -11,7 +11,7 @@ defmodule Geex.InstallTest do
 
   doctest Install
 
-  @json_dir Application.app_dir(:geex, "priv/grammars/json")
+  @json_dir Geex.Fixtures.grammar_dir("json")
 
   setup do
     dir = Path.join(System.tmp_dir!(), "geex_install_#{System.unique_integer([:positive])}")
@@ -77,7 +77,7 @@ defmodule Geex.InstallTest do
     end
 
     test "a theme zip installs and `theme` can use it", ctx do
-      json = File.read!(Application.app_dir(:geex, "priv/themes/birds-of-paradise.json"))
+      json = File.read!(Geex.Fixtures.birds_path())
       theme = JSON.decode!(json) |> Map.put("name", "Mine") |> JSON.encode!()
 
       man =
@@ -344,7 +344,7 @@ defmodule Geex.InstallTest do
     end
 
     test "names a package can't have, and a manifest's wrong types, are refused", ctx do
-      theme = File.read!(Application.app_dir(:geex, "priv/themes/birds-of-paradise.json"))
+      theme = File.read!(Geex.Fixtures.birds_path())
 
       for name <- ["installed", "terminal"] do
         man = JSON.encode!(%{"kind" => "theme", "name" => name, "license" => "MIT"})
@@ -368,6 +368,8 @@ defmodule Geex.InstallTest do
     end
 
     test "a cached grammar from a build since replaced is compiled again" do
+      Geex.Fixtures.install(Application.get_env(:geex, :data_dir))
+      Installed.refresh()
       :persistent_term.put({Grammars, "json"}, {"a build since replaced", :not_a_grammar})
       assert {:ok, grammar} = Grammars.handle("json")
       assert grammar != :not_a_grammar

@@ -192,14 +192,8 @@ defmodule Geex.CLI do
           e <- entries do
         status =
           case installed[{kind, e["name"]}] do
-            nil ->
-              "available"
-
-            %{"installed" => _} = pkg ->
-              if Geex.Installed.update?(pkg), do: "update", else: "installed"
-
-            _bundled ->
-              "bundled"
+            nil -> "available"
+            pkg -> if Geex.Installed.update?(pkg), do: "update", else: "installed"
           end
 
         [e["name"], kind, e["display"], "#{div(e["size"] + 1023, 1024)} KB", status]

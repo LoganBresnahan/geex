@@ -6,8 +6,9 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 It includes third-party material under its own licence, listed below.
 
 -------------------------------------------------------------------------------
-priv/themes/birds-of-paradise.json, catalog/themes/birds-of-paradise.json
-(its licence also as catalog/themes/birds-of-paradise.LICENSE)
+catalog/themes/birds-of-paradise.json (its licence also as
+catalog/themes/birds-of-paradise.LICENSE, and in the catalog's package) and the test fixture
+test/fixtures/themes/birds-of-paradise.json
 
 A port of Joe Bergantine's Birds of Paradise colour scheme, by way of
 https://github.com/LoganBresnahan/birds-of-paradise-zed.
@@ -43,7 +44,8 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 -------------------------------------------------------------------------------
-priv/grammars/elixir/parser.wasm, priv/grammars/elixir/highlights.scm
+test/fixtures/grammars/elixir/parser.wasm, test/fixtures/grammars/elixir/highlights.scm
+(test fixtures; geex ships no grammar, and the catalog's elixir package carries its own licence)
 
 Built with the tree-sitter CLI 0.26.9 (`tree-sitter build --wasm`) from
 tree-sitter-elixir, https://github.com/elixir-lang/tree-sitter-elixir, commit
@@ -90,7 +92,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 -------------------------------------------------------------------------------
-priv/grammars/json/parser.wasm, priv/grammars/json/highlights.scm
+test/fixtures/grammars/json/parser.wasm, test/fixtures/grammars/json/highlights.scm
+(test fixtures, as above)
 
 Built with the tree-sitter CLI 0.26.9 (`tree-sitter build --wasm`) from
 tree-sitter-json, https://github.com/tree-sitter/tree-sitter-json, commit

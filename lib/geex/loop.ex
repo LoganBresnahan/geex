@@ -281,7 +281,7 @@ defmodule Geex.Loop do
       # The theme's name, as `theme NAME` takes it, and the terminal's background once it has
       # answered OSC 11 (`{:rgb, r, g, b}`), which the built-in terminal theme tints from
       # (ADR-0040 §1).
-      theme_id: "birds-of-paradise",
+      theme_id: "terminal",
       terminal_bg: nil,
       # The settings view (`Alt+Y`, ADR-0040 §7): `Geex.Loop.Settings` while it is open, else
       # nil; the theme to put back if it closes without one being chosen; the installs it
@@ -2107,7 +2107,7 @@ defmodule Geex.Loop do
   end
 
   # Show the theme named `id`, built again: the terminal theme from the terminal's background as
-  # known now, a bundled one from its file. A file that won't load keeps the theme shown, and
+  # known now, an installed one from its file. A file that won't load keeps the theme shown, and
   # its name.
   defp retheme(state, id \\ nil)
 

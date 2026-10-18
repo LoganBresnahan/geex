@@ -43,6 +43,9 @@ defmodule Geex.Loop.ThemeTest do
   end
 
   test "`theme terminal` switches; `theme` lists; an unknown name says so", %{state: state} do
+    # The default, geex shipping no theme (ADR-0040); the fixture Birds of Paradise is installed.
+    assert {state.theme_id, state.theme.name} == {"terminal", "terminal"}
+    state = type(state, "theme birds-of-paradise")
     assert state.theme.name == "Birds of Paradise"
     state = type(state, "theme terminal")
     assert {state.theme_id, state.theme.name} == {"terminal", "terminal"}
@@ -63,6 +66,7 @@ defmodule Geex.Loop.ThemeTest do
   test "the terminal's background tints the terminal theme; another theme only keeps it",
        %{state: state} do
     answer = {:osc, "11", "rgb:0000/0000/0000"}
+    state = type(state, "theme birds-of-paradise")
     state = send_io(state, answer)
     assert state.terminal_bg == {:rgb, 0, 0, 0}
     assert state.theme.name == "Birds of Paradise"
@@ -109,6 +113,7 @@ defmodule Geex.Loop.ThemeTest do
   end
 
   test "Birds of Paradise draws exactly as before: no mark" do
-    assert Theme.default().palette.mark == []
+    assert Geex.Fixtures.birds().palette.mark == []
+    assert Theme.default().palette.mark == [:reverse]
   end
 end

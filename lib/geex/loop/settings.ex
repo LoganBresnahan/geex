@@ -4,7 +4,7 @@ defmodule Geex.Loop.Settings do
   a full-screen view with four tabs.
 
     * **Languages** — the catalog's grammars: name, size, and installed, available, an update,
-      bundled, or installing. Enter (or a click) installs or updates one.
+      or installing. Enter (or a click) installs or updates one.
     * **Themes** — the built-in terminal theme, the catalog's and the installed ones. Moving
       the highlight previews a theme live; Enter (or a click) chooses it, installing it first
       if it isn't yet, and geex keeps the choice (`Geex.Settings`). Leaving without choosing
@@ -90,8 +90,7 @@ defmodule Geex.Loop.Settings do
     current = Map.get(ctx, :theme_id)
     catalog = Map.new(Catalog.themes(), &{&1["name"], &1})
     installed = Map.new(Installed.themes(), &{&1["name"], &1})
-    here = Geex.Theme.names()
-    names = here |> Enum.concat(Map.keys(catalog)) |> Enum.uniq()
+    names = Geex.Theme.names() |> Enum.concat(Map.keys(catalog)) |> Enum.uniq()
 
     for name <- names do
       status =
@@ -99,8 +98,6 @@ defmodule Geex.Loop.Settings do
           name == Geex.Theme.Terminal.name() -> "built in: your terminal's colours"
           name in installing -> "installing…"
           pkg = installed[name] -> package_status(pkg)
-          # In geex's own files (until it ships bare), so there's nothing to install.
-          name in here -> "bundled"
           true -> "available"
         end
 
@@ -136,10 +133,8 @@ defmodule Geex.Loop.Settings do
     ]
   end
 
-  defp package_status(%{"installed" => _} = pkg),
+  defp package_status(pkg),
     do: if(Installed.update?(pkg), do: "update available", else: "installed")
-
-  defp package_status(_bundled), do: "bundled"
 
   defp kb(size) when is_integer(size), do: "#{div(size + 1023, 1024)} KB"
   defp kb(_), do: ""

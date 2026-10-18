@@ -55,8 +55,9 @@ One Mix app, `:geex`, under `lib/geex/`:
 - **Capabilities** — `Geex.Highlight.*` (reactor + tree-sitter-on-wasm via the
   sibling path dep `../tree_sitter_wasm`), `Geex.Theme` (+ `Theme.Terminal`, the terminal's own
   colours), `Geex.Catalog` (the embedded `catalog/catalog.json`), `Geex.Install` /
-  `Geex.Installed` (installing and listing grammars and themes, ADR-0040), `priv/grammars`,
-  `priv/themes` (until geex ships bare).
+  `Geex.Installed` (installing and listing grammars and themes, ADR-0040). geex ships **no**
+  grammar or theme: tests install `test/fixtures/{grammars,themes}` (`Geex.Fixtures`, from
+  `test_helper.exs`), and Birds of Paradise lives in `catalog/themes`.
 
 ## Sacred invariants — breaking one breaks the project
 

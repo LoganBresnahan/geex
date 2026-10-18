@@ -327,6 +327,26 @@ means no cache, never an error, and a wasmtime upgrade must not load stale code 
 - **geex** caches in `$XDG_CACHE_HOME/geex/wasm` (`~/.cache/geex/wasm` by default,
   `Grammars.cache_dir/0`). It is off under test (`wasm_cache`).
 
+### Built 2026-10-18 (step 7): geex is bare
+
+- **No `priv/` at all.** The Elixir and JSON grammars and Birds of Paradise moved to
+  `test/fixtures/{grammars,themes}`, and NOTICE follows them. The bundled-grammar path in
+  `Geex.Installed` is gone, along with `Theme.bundled/1` and the "bundled" status.
+- **The default theme** is the built-in terminal theme (`Theme.default/0`, `theme_id
+  "terminal"`). A kept choice in `settings.json` still wins at start, if that theme is
+  installed. The palette's "theme birds-of-paradise" entry became "theme", which prefills the
+  verb.
+- **Tests:** `Geex.Fixtures` (`test/support`, compiled under test only) installs the fixture
+  grammars and theme into the test data directory from `test_helper.exs`, as a user's local
+  installs, afresh each run. A test that needs another data directory installs them there.
+  The rendering tests that check Birds of Paradise's colours load it with
+  `Geex.Fixtures.birds/0`.
+- **For a user:** after this deploy, a file shows plain text in the terminal's colours until its
+  language is installed. The first Elixir file says "Elixir highlighting available: Alt+Y", or
+  run `geex install elixir`. An already-installed package is untouched. The coordinator session
+  tells the maintainer before it lands, and installs nothing for them (§3).
+- `mix geex.highlight` uses the kept theme, else the terminal theme, and the installed grammars.
+
 ### 9. Not covered: injections
 
 The NIF highlights one grammar per file. A language embedded in another (HEEx inside `~H`,

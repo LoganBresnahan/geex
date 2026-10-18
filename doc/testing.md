@@ -2980,3 +2980,23 @@ Live with `geex` from the PATH, scratch XDG directories:
 - Ctrl-X was clean, with no `terminating` lines.
 
 **Not tested:** Windows Terminal.
+
+### 2026-10-18 — geex is bare (ADR-0040 step 7)
+
+`priv/` is gone. The Elixir and JSON grammars and Birds of Paradise are test fixtures, installed
+into the test data directory by `test_helper.exs`.
+
+**Live** (`mix run` in tmux, scratch XDG directories, so nothing installed and no settings):
+- `a.ex` drew in the terminal's own colours (39/90, no truecolor), as plain text. The status
+  line said "Elixir highlighting available: Alt+Y".
+- `geex install elixir` from another process: about 2 s later `defmodule`/`do` were magenta
+  (35) and `A` cyan (36), in the terminal theme.
+- The log had no errors.
+
+**Automated:** every test that used the bundled grammars or theme now uses the fixtures (as
+installed packages, or via `Geex.Fixtures.birds/0` for the colour checks). New: `default/0` is
+the terminal theme; `named/1` loads an installed theme and refuses one that isn't. **1067 tests
++ 67 doctests**, green twice.
+
+**Not deployed yet:** held, at the coordinator session's request, until the step 6 review's fixes
+are in. After it lands, the maintainer's geex shows plain text until `geex install elixir`.

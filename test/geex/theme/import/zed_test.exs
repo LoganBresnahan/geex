@@ -26,7 +26,7 @@ defmodule Geex.Theme.Import.ZedTest do
 
     test "the import matches the bundled native port for shared captures" do
       {:ok, imported} = Zed.import_file(@fixture)
-      native = Theme.default()
+      native = Geex.Fixtures.birds()
 
       for capture <- ~w(keyword comment string number function operator string.escape) do
         assert Theme.style_for(imported, capture) == Theme.style_for(native, capture),

@@ -5,12 +5,12 @@ defmodule Geex.Installed do
   `~/.local/share/geex/`), each a package's files plus `installed.json`, which `Geex.Install`
   writes last. A directory without it is an install that didn't finish, and is ignored.
 
-  The bundled grammars in `priv/grammars` are read the same way (each has a `manifest.json`)
-  until geex ships bare (step 7); an installed one of the same name wins.
+  geex ships with none (ADR-0040 §1): these directories are every grammar and theme it has, the
+  built-in terminal theme aside.
 
   Reading the directories is cached (`:persistent_term`): `refresh/0` reads them again, which
   an install does, and so does opening the settings view. Every entry is its manifest (string
-  keys, as in the JSON) plus `"dir"`, and `"installed"` (the record) for a real install.
+  keys, as in the JSON) plus `"dir"` and `"installed"` (the record).
   """
 
   @key {__MODULE__, :packages}
@@ -33,7 +33,7 @@ defmodule Geex.Installed do
   def dir(:grammar, name), do: Path.join([root(), "grammars", name])
   def dir(:theme, name), do: Path.join([root(), "themes", name])
 
-  @doc "The grammars there are, by name: installed, then bundled ones not installed."
+  @doc "The installed grammars, by name."
   @spec grammars() :: [map()]
   def grammars, do: packages().grammars
 
@@ -86,46 +86,31 @@ defmodule Geex.Installed do
   end
 
   defp read do
-    installed = read_kind(Path.join(root(), "grammars"), true)
-    names = MapSet.new(installed, & &1["name"])
-
-    bundled =
-      read_kind(bundled_dir(), false)
-      |> Enum.reject(&(&1["name"] in names))
-
     %{
-      grammars: Enum.sort_by(installed ++ bundled, & &1["name"]),
-      themes: read_kind(Path.join(root(), "themes"), true)
+      grammars: read_kind(Path.join(root(), "grammars")),
+      themes: read_kind(Path.join(root(), "themes"))
     }
   end
 
-  defp bundled_dir do
-    Application.app_dir(:geex, Path.join("priv", "grammars"))
-  rescue
-    ArgumentError -> "/nonexistent"
-  end
-
-  # Each directory with a readable manifest (and, for an install, its record).
-  defp read_kind(parent, record?) do
+  # Each directory with a readable manifest and its record, by name.
+  defp read_kind(parent) do
     case File.ls(parent) do
       {:ok, names} ->
         names
         |> Enum.reject(&String.starts_with?(&1, "."))
         |> Enum.sort()
-        |> Enum.flat_map(&read_package(Path.join(parent, &1), record?))
+        |> Enum.flat_map(&read_package(Path.join(parent, &1)))
 
       {:error, _} ->
         []
     end
   end
 
-  defp read_package(dir, record?) do
+  defp read_package(dir) do
     with {:ok, manifest} <- read_json(Path.join(dir, "manifest.json")),
-         {:ok, record} <-
-           if(record?, do: read_json(Path.join(dir, "installed.json")), else: {:ok, nil}),
+         {:ok, record} <- read_json(Path.join(dir, "installed.json")),
          true <- manifest["name"] == Path.basename(dir) do
-      entry = Map.put(manifest, "dir", dir)
-      [if(record, do: Map.put(entry, "installed", record), else: entry)]
+      [manifest |> Map.put("dir", dir) |> Map.put("installed", record)]
     else
       _ -> []
     end

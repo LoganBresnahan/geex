@@ -14,6 +14,8 @@ defmodule Geex.MixProject do
       # Keep OTP's applications on the code path under mix: :inets and :ssl aren't dependencies
       # (they're loaded only in the release, ADR-0040 §3), and Mix hides undeclared ones.
       prune_code_paths: false,
+      # Test fixtures as packages (geex ships none, ADR-0040): test/support, under test only.
+      elixirc_paths: if(Mix.env() == :test, do: ["lib", "test/support"], else: ["lib"]),
       deps: deps(),
       releases: releases()
     ]

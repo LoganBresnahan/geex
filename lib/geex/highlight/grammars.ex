@@ -3,8 +3,8 @@ defmodule Geex.Highlight.Grammars do
   Resolves a language name to a **compiled, cached** tree-sitter grammar handle.
 
   The grammars are what `Geex.Installed` lists ([ADR-0040](../../../doc/adr/0040-bare-geex-and-the-catalog.md)
-  §4): the ones installed from the catalog or a local package, and, until geex ships bare, the
-  ones bundled under `priv/grammars/<lang>/`. Each is a directory with `parser.wasm`,
+  §4): the ones installed from the catalog or a local package; geex ships none (§1). Each is a
+  directory with `parser.wasm`,
   `highlights.scm` and `manifest.json`. Compiling a grammar (wasm + query) is the expensive
   step, so the resulting `TreeSitterWasm` handle is compiled **once per language** and memoized
   in `:persistent_term`, a process-independent, read-many cache for an immutable handle;
@@ -27,7 +27,7 @@ defmodule Geex.Highlight.Grammars do
   @spec abi() :: Range.t()
   def abi, do: @abi
 
-  @doc "The languages there are grammars for: installed, and bundled until geex ships bare."
+  @doc "The languages there are grammars for: the installed ones."
   @spec available() :: [String.t()]
   def available, do: Enum.map(Installed.grammars(), & &1["name"])
 

@@ -486,7 +486,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       `geex install`, no request at startup, installs noticed without a restart.
    6. **`Alt+Y`, the settings view** — **built 2026-10-18**: Languages, Themes, Keys, General;
       the "highlighting available" hint; `settings.json` (ADR-0037 amended).
-   7. **Go bare** — `priv/grammars` and `priv/themes` removed; tests on fixtures.
+   7. **Go bare** — **built 2026-10-18**: no `priv/`; the terminal theme is the default; tests
+      install `test/fixtures` grammars and the theme (`Geex.Fixtures`).
    - **Not covered: injections** (HEEx inside `~H`, JavaScript inside `<script>`). The NIF runs one
      grammar per file; embedded languages stay the host's colour. Needs the NIF to run
      `injections.scm` and combine the layers.

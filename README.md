@@ -22,7 +22,7 @@ mix deps.get
 mix test
 ```
 
-You need Elixir 1.18+ on OTP 26+, a Rust toolchain (the first build compiles wasmtime and
+You need Elixir 1.18+ on OTP 27+, a Rust toolchain (the first build compiles wasmtime and
 takes minutes), `git`, and on Linux `inotify-tools` to notice files changed on disk.
 
 ```sh
@@ -32,7 +32,23 @@ elixir --erl "-noshell -noinput +Bd" -S mix run --no-start -e 'Geex.run("path")'
 mix geex.deploy
 ```
 
+## Languages and themes
+
+geex ships with no grammar and no theme: out of the box it draws in your terminal's own colours
+and highlights nothing. Each release pins a catalog of tree-sitter grammars and themes, each
+package checked by its sha256. Install what you use, from the editor (`Alt+Y`) or the shell:
+
+```sh
+geex install elixir json      # or javascript, typescript, python, rust, go, …
+geex install --list           # what the catalog has, and what's installed
+geex install ./my-grammar     # a package of your own
+```
+
+geex goes to the network only for an install you ask for; installed packages work offline
+([ADR-0040](doc/adr/0040-bare-geex-and-the-catalog.md)).
+
 ## License
 
-[Apache-2.0](LICENSE). Third-party material in the tree (a theme, two grammars) keeps its own
-licence; see [NOTICE](NOTICE).
+[Apache-2.0](LICENSE). Third-party material in the tree (the catalog's theme, and the test
+fixtures: a theme and two grammars) keeps its own licence, as does each catalog package; see
+[NOTICE](NOTICE).

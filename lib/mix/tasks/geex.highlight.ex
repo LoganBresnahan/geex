@@ -1,22 +1,22 @@
 defmodule Mix.Tasks.Geex.Highlight do
   @shortdoc "Preview a file syntax-highlighted with a geex theme (truecolor ANSI)"
   @moduledoc """
-  Render a source file with the Birds of Paradise theme to stdout as 24-bit
-  truecolor ANSI — a preview of the highlight pipeline (ADR-0021/0023):
+  Render a source file to stdout as ANSI with the theme the settings view keeps (else the
+  built-in terminal theme) — a preview of the highlight pipeline (ADR-0021/0023):
 
       tree-sitter (wasm) → capture spans → theme → ANSI
 
       mix geex.highlight lib/geex/ansi.ex      # highlight a file
       mix geex.highlight                        # built-in elixir sample
 
-  Language comes from the extension (`.ex`/`.exs` → elixir, `.json` → json);
-  geex's bundled grammars only. Loads the app without starting the TUI.
+  The language comes from the installed grammars' file names (ADR-0040: geex ships none;
+  `geex install elixir`). Loads the app without starting the TUI.
   """
   use Mix.Task
 
   @sample """
   defmodule Demo do
-    @moduledoc "Birds of Paradise preview."
+    @moduledoc "A highlight preview."
 
     def greet(name) when is_binary(name) do
       # a friendly hello
@@ -28,8 +28,8 @@ defmodule Mix.Tasks.Geex.Highlight do
 
   @impl true
   def run(args) do
-    # Load + configure the app (priv grammars, the NIF) WITHOUT starting the
-    # supervision tree — no terminal grab.
+    # Load + configure the app (the NIF) WITHOUT starting the supervision tree — no terminal
+    # grab.
     Mix.Task.run("app.config")
 
     {text, lang} =
@@ -46,10 +46,19 @@ defmodule Mix.Tasks.Geex.Highlight do
 
     case Geex.Highlight.spans(text, lang) do
       {:ok, spans} ->
-        IO.write(Geex.Ansi.highlight(Geex.Theme.default(), text, spans))
+        IO.write(Geex.Ansi.highlight(theme(), text, spans))
 
       {:error, reason} ->
         Mix.raise("highlight failed: #{inspect(reason)}")
+    end
+  end
+
+  defp theme do
+    with name when is_binary(name) <- Geex.Settings.load()["theme"],
+         {:ok, theme} <- Geex.Theme.named(name) do
+      theme
+    else
+      _ -> Geex.Theme.default()
     end
   end
 

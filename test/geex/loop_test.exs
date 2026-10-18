@@ -43,7 +43,7 @@ defmodule Geex.LoopTest do
   end
 
   describe "frame/8 — screen + cursor (with the line-number gutter)" do
-    setup do: %{theme: Geex.Theme.default()}
+    setup do: %{theme: Geex.Fixtures.birds()}
 
     test "paints the text inset past the gutter and offsets the cursor", %{theme: theme} do
       # "def\nend": 2 lines → gutter_width 4, so text starts at column 4.
@@ -79,7 +79,7 @@ defmodule Geex.LoopTest do
   end
 
   describe "frame/8 — horizontal scroll" do
-    setup do: %{theme: Geex.Theme.default()}
+    setup do: %{theme: Geex.Fixtures.birds()}
 
     test "a line that fits leaves hscroll at 0", %{theme: theme} do
       {_screen, {cx, _cy}, hscroll} = Loop.frame("abc", [], theme, {0, 3}, 20, 3, 0, 0)
@@ -107,7 +107,7 @@ defmodule Geex.LoopTest do
   end
 
   describe "frame/8 — current-line highlight" do
-    setup do: %{theme: Geex.Theme.default()}
+    setup do: %{theme: Geex.Fixtures.birds()}
 
     test "tints the cursor's whole row (gutter + text) with active_line_bg", %{theme: theme} do
       pal = theme.palette
@@ -251,7 +251,7 @@ defmodule Geex.LoopTest do
     end
 
     test "agent_marks/5: ▌ in the gutter's margin on agent rows only, bg kept" do
-      theme = Geex.Theme.default()
+      theme = Geex.Fixtures.birds()
       text = "alpha\nBETA-sed\nGAMMA-agent\ndelta"
       blame = [nil, {:external, 1}, {@agent, 2}, nil]
       {screen, _cursor, _h} = Loop.frame(text, [], theme, {2, 0}, 30, 4, 0)
@@ -268,7 +268,7 @@ defmodule Geex.LoopTest do
     end
 
     test "agent_marks/5: follows the scroll; rows past the blame are untouched" do
-      theme = Geex.Theme.default()
+      theme = Geex.Fixtures.birds()
       blame = [nil, nil, {@agent, 2}]
       {screen, _cursor, _h} = Loop.frame("a\nb\nc", [], theme, {2, 0}, 20, 4, 2)
 

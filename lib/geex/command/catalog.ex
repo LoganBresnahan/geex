@@ -109,9 +109,9 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, {:theme, "terminal"}}
     },
     %Entry{
-      name: "theme birds-of-paradise",
-      description: "Use the Birds of Paradise theme, for this session.",
-      invoke: {:action, {:theme, "birds-of-paradise"}}
+      name: "theme",
+      description: "Use an installed theme, for this session (Alt+Y installs and keeps one).",
+      invoke: {:typed, "theme"}
     },
     %Entry{
       name: "fast-forward",
