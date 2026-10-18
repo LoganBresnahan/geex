@@ -207,6 +207,37 @@ Grammars: elixir, json, javascript, typescript, tsx, python, rust, go, bash, mar
 toml, yaml, erlang, heex. Themes: birds-of-paradise. Each recipe pins an upstream commit and
 records its licence; each package carries that licence.
 
+**Built 2026-10-18 (step 4):** `mix geex.catalog`.
+- **The recipes** are Elixir data: `catalog/grammars.exs` and `catalog/themes.exs`, read only
+  by the task, with Birds of Paradise and its licence in `catalog/themes/`. A recipe pins a tag
+  *and* its commit. The task clones the tag and stops if it no longer names that commit, so a
+  moved tag can't change a package quietly.
+- **Each grammar** is the latest release tag of its upstream, all of them `tree-sitter/…`,
+  `tree-sitter-grammars/…`, `elixir-lang/`, `WhatsApp/` or `phoenixframework/`. Three grammars
+  have special handling:
+  - **Markdown** is the block grammar only; inline markup is a second grammar reached by
+    injection.
+  - **TypeScript** merges its own queries with JavaScript's, the files its
+    `tree-sitter.json` names under `node_modules/tree-sitter-javascript`.
+  - **TSX** also takes JavaScript's JSX queries.
+
+  Each merged query file is headed by its source and commit.
+- **The ABI** is read from the generated `parser.c` (`LANGUAGE_VERSION`). It is 14 for elixir,
+  json, html, toml, typescript, tsx and yaml, and 15 for the rest, all in the NIF's 13–15.
+- **Every package is checked** by loading it in `TreeSitterWasm.load_grammar/3`, so a query
+  naming a node the grammar lacks stops the build.
+- **The zip is deterministic** (`Geex.Catalog.Package.zip/1`: sorted entries, a fixed time), and
+  so is the wasm build: two full builds wrote byte-identical `catalog.json` and assets. A
+  rebuild names the same assets, and nothing new needs uploading.
+- **The first catalog** comes to 1.4 MB: the largest packages are bash (229 KB), elixir
+  (194 KB) and tsx (192 KB), the smallest json (4 KB).
+- **`catalog.json`** puts one package per line, for one-line diffs. Its `base` is
+  `https://github.com/LoganBresnahan/geex/releases/download/v0.1.0/`; the release itself is
+  the coordinator session's to create.
+- **`Geex.Catalog`** embeds it at compile time (`@external_resource`). It answers which grammar a
+  file name belongs to: a whole name first (`rebar.config`), then the longest ending
+  (`.app.src`). `Geex.Catalog.match/2` does the same over installed manifests in step 5.
+
 ### Out of scope
 
 - A marketplace: listing, searching or hosting anything outside the release's own catalog.

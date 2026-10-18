@@ -108,6 +108,8 @@ mix geex.ledger list               # the durable ledgers (ADR-0033); also forget
 elixir --erl "-noshell -noinput +Bd" -S mix run --no-start -e 'Geex.run("path")'
 mix geex.deploy                    # build the Burrito binary, install ~/.local/bin/geex (ADR-0036)
 mix geex.deploy --rollback         # put the previous binary back
+mix geex.catalog                   # build the grammar/theme packages from catalog/*.exs into
+                                   # _build/catalog/dist, write catalog/catalog.json (ADR-0040)
 ```
 
 Feature gates live in `config/config.exs` (`start_terminal` / `start_reconcile`

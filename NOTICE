@@ -6,7 +6,8 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 It includes third-party material under its own licence, listed below.
 
 -------------------------------------------------------------------------------
-priv/themes/birds-of-paradise.json
+priv/themes/birds-of-paradise.json, catalog/themes/birds-of-paradise.json
+(its licence also as catalog/themes/birds-of-paradise.LICENSE)
 
 A port of Joe Bergantine's Birds of Paradise colour scheme, by way of
 https://github.com/LoganBresnahan/birds-of-paradise-zed.

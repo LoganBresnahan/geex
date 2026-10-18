@@ -2760,3 +2760,44 @@ answer, the palette's `mark` fallback, and the `theme` verb.
   - Ctrl-X: alternate screen and mouse off, the discovery file gone, no `terminating` lines.
 
 **Not tested:** Windows Terminal.
+
+### 2026-10-18 — The step 3 review's fixes, and the catalog builder (ADR-0040 step 4)
+
+**The review's fixes (`da47ac9`):** an adversarial review of `60dadc9..4a5b726` (a subagent; it
+ran parser probes, and `isatty` under a pty) found these, each fixed and, where it can be
+tested, tested:
+- the status line drew no bar under the terminal theme;
+- with stdout not a terminal, Alt+] was held about 18 years;
+- a held `ESC ] 11 ;` had no timeout;
+- "not an OSC after all" lost the `]` or a paste;
+- `build_id` read the shell's directory and lost geex's sha without a git sibling;
+- a failed theme took the theme's name;
+- ANSI 8 comments vanish in Solarized Dark.
+
+**The builder:** `mix geex.catalog`, from scratch, with an empty `_build/catalog/src`.
+- It cloned the 15 repositories (TypeScript and TSX share one), checked each tag's commit, built
+  16 grammars with the tree-sitter CLI 0.26.9, and loaded each in the NIF. It packed them and
+  Birds of Paradise and wrote `catalog/catalog.json`, in 40 s.
+- A second run wrote a byte-identical `catalog.json`, so the wasm build and the zips are
+  deterministic.
+- Seven packages, unzipped and loaded, highlighted a sample with the expected captures:
+  - TypeScript got JavaScript's `function` and `keyword` from the merged queries;
+  - TSX got `tag` and `attribute`;
+  - HEEx, Erlang, YAML, Python and Markdown each got theirs.
+- Each grammar package holds `parser.wasm`, `highlights.scm`, `manifest.json` and its licence
+  files (Elixir's NOTICE too).
+
+**Automated:** `catalog_test.exs`:
+- every recipe is in the catalog, and nothing else;
+- each entry has a 64-hex sha256, an asset named by it, an https URL ending in it, a size and a
+  licence;
+- each grammar has endings or file names, an ABI in 13–15 and a 40-hex commit;
+- no ending is claimed twice;
+- file names map to the right grammar (`.ts` and `.tsx`, `rebar.config`, `.bashrc`,
+  `index.html.heex`; a bare `.md` is none);
+- the `Package` doctests: a deterministic zip, sha256, the asset name, the ABI.
+
+**1036 tests + 63 doctests**, green twice.
+
+**Not tested:** the packages from the release host (it doesn't exist yet); installing them
+(step 5).
