@@ -2508,3 +2508,23 @@ installed `0.1.0+839c64cb`; no other geex was running. Live with `geex` from the
   file was gone, and the log had no `terminating` lines.
 
 **Not tested:** Windows Terminal; a real mouse.
+
+### 2026-10-18 — Apache-2.0: LICENSE, NOTICE and a README
+
+geex had no licence; it is now Apache-2.0 (`LICENSE`, the standard text, byte-identical to
+captAInHook's), with a `NOTICE` for the third-party material in the tree. Checked by hand:
+- `priv/grammars/{elixir,json}/parser.wasm` are byte-identical to the `.wasm` built in
+  `~/tree-sitter-elixir` (commit 7937d3b, Apache-2.0 with MIT generated parser, per its own
+  NOTICE) and `~/tree-sitter-json` (001c28d, MIT), and each `highlights.scm` to that commit's
+  `queries/highlights.scm`. NOTICE names the commits and carries their licences.
+- `priv/themes/birds-of-paradise.json` is the Zed port's palette; NOTICE carries the BSD
+  3-Clause text from `~/birds-of-paradise-zed/LICENSE` (Joe Bergantine 2010, and the port).
+- `mix.exs` has no package block, so there is no `licenses` field to set.
+- The new top-level `README.md` says to clone `tree_sitter_wasm` beside geex (the path dep).
+
+`~/tree_sitter_wasm` moved from MIT to Apache-2.0 in its own commit (0bcc4ac): LICENSE, a NOTICE
+for its tree-sitter-json test fixtures (the same build, MIT), and the licence in `mix.exs` and
+`Cargo.toml`; its 8 tests green. geex: **1003 tests + 51 doctests**, green twice.
+
+**Not tested:** nothing runs differently; the clone-and-build steps in README.md were not run on
+a fresh machine.
