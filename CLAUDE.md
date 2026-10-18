@@ -196,6 +196,9 @@ session's `Co-Authored-By` trailer.
   payload's attestations for the file while no geex had it open); app gates `ledger` (off under
   test; tests pass `:ledger_dir`) and `ledger_dir`. Dogfood with `XDG_STATE_HOME` pointed at a
   scratch dir to keep the real one clean
+- edits list kept across restarts (ADR-0034's 2026-10-18 amendment): `$XDG_STATE_HOME/geex/edits.jsonl`
+  (+ `edits.1.jsonl`, the previous generation), `0600`; app gate `edits_log` (off under test;
+  tests pass `:file`), `edits_file` overrides
 - TUI log: `<tmp>/geex.log` (`System.tmp_dir!/0`)
 - installed binary (ADR-0036): built to `burrito_out/geex_linux` (gitignored), installed at
   `$XDG_DATA_HOME/geex/bin/geex` (default `~/.local/share/geex/bin`) with `geex.prev` beside it,
