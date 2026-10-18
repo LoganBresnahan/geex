@@ -182,6 +182,8 @@ defmodule Mix.Tasks.Geex.Deploy do
   defp install(built, bin_dir, link) do
     unless File.regular?(built), do: Mix.raise("geex deploy: no build at #{built}")
 
+    # Before the new binary first runs (`unpack_dir/1` runs it).
+    guard_older_in_use(built_version())
     dir = unpack_dir(built)
     fresh_unpack(dir)
     version = check(built)
@@ -215,6 +217,80 @@ defmodule Mix.Tasks.Geex.Deploy do
               "which this dirty build would replace; quit it first"
           )
         end
+    end
+  end
+
+  # Burrito, on every run, deletes the unpack of each older version of geex: older by semver,
+  # which ignores `+<sha>`, so builds of one version never did this, and a new version does. A
+  # geex still running from such an unpack loads modules from it as it needs them, and crashes
+  # (BUG-4's kind). So a new version's binary doesn't run while an older one is in use.
+  defp guard_older_in_use(nil),
+    do: Mix.shell().info("geex deploy: the build's version is unknown; not checking older ones")
+
+  defp guard_older_in_use(version) do
+    dirs = Path.wildcard(Path.join(burrito_dir(), "geex_erts-*"))
+
+    case older_in_use(dirs, version, in_use()) do
+      [] ->
+        :ok
+
+      busy ->
+        Mix.raise(
+          "geex deploy: #{version}'s first run deletes older versions' unpacks, and a running " <>
+            "geex uses " <>
+            Enum.map_join(busy, "; ", fn {dir, pids} ->
+              "#{Path.basename(dir)} (pid #{Enum.join(pids, ", ")})"
+            end) <> "; quit it first"
+        )
+    end
+  end
+
+  @doc """
+  The unpacks in `dirs` of a geex older than `version` that a process in `procs` runs from, as
+  `[{dir, pids}]`: Burrito deletes those when `version` first runs. Versions compare by semver,
+  without their `+<sha>`.
+
+      iex> procs = [{7, ["/b/geex_erts-1_0.1.0+aa.bb/erts/bin/beam.smp"]}, {8, ["/b/geex_erts-1_0.2.0+cc.dd"]}]
+      iex> dirs = ["/b/geex_erts-1_0.1.0+aa.bb", "/b/geex_erts-1_0.2.0+cc.dd", "/b/geex_erts-1_0.1.0+ee.ff"]
+      iex> Mix.Tasks.Geex.Deploy.older_in_use(dirs, "0.2.0+gg.hh", procs)
+      [{"/b/geex_erts-1_0.1.0+aa.bb", [7]}]
+      iex> Mix.Tasks.Geex.Deploy.older_in_use(dirs, "0.1.0+gg.hh.dirty", procs)
+      []
+  """
+  @spec older_in_use([Path.t()], String.t(), [{pos_integer(), [String.t()]}]) ::
+          [{Path.t(), [pos_integer()]}]
+  def older_in_use(dirs, version, procs) do
+    for dir <- dirs,
+        older?(dir, version),
+        pids = users(dir, procs),
+        pids != [],
+        do: {dir, pids}
+  end
+
+  defp older?(dir, version) do
+    with [_, old] <- Regex.run(~r/^geex_erts-[^_]+_(.+)$/, Path.basename(dir)),
+         {:ok, old} <- Version.parse(old),
+         {:ok, new} <- Version.parse(version) do
+      Version.compare(new, old) == :gt
+    else
+      _ -> false
+    end
+  end
+
+  # The version of the release the last build assembled, which the Burrito binary wraps.
+  defp built_version do
+    case File.read("_build/prod/rel/geex/releases/start_erl.data") do
+      {:ok, data} -> data |> String.split() |> Enum.at(1)
+      {:error, _} -> nil
+    end
+  end
+
+  # Where Burrito unpacks: `$GEEX_INSTALL_DIR/.burrito`, else `$XDG_DATA_HOME/.burrito`
+  # (default `~/.local/share/.burrito`).
+  defp burrito_dir do
+    case System.get_env("GEEX_INSTALL_DIR") do
+      empty when empty in [nil, ""] -> Path.join(data_home(), ".burrito")
+      dir -> Path.join(dir, ".burrito")
     end
   end
 
@@ -309,13 +385,15 @@ defmodule Mix.Tasks.Geex.Deploy do
     end
   end
 
+  # The `geex <version>` line. Burrito may print lines of its own first (an older version it
+  # removed, on a new version's first run).
   defp check(built) do
-    case System.cmd(built, ["--version"], stderr_to_stdout: true) do
-      {"geex " <> version, 0} ->
-        String.trim(version)
+    {out, status} = System.cmd(built, ["--version"], stderr_to_stdout: true)
+    line = out |> String.split("\n") |> Enum.find(&String.starts_with?(&1, "geex "))
 
-      {out, status} ->
-        Mix.raise("geex deploy: `#{built} --version` failed (exit #{status}): #{out}")
+    case {line, status} do
+      {"geex " <> version, 0} -> String.trim(version)
+      _ -> Mix.raise("geex deploy: `#{built} --version` failed (exit #{status}): #{out}")
     end
   end
 
@@ -349,13 +427,12 @@ defmodule Mix.Tasks.Geex.Deploy do
     end
   end
 
-  defp bin_dir do
-    data =
-      case System.get_env("XDG_DATA_HOME") do
-        empty when empty in [nil, ""] -> Path.expand("~/.local/share")
-        dir -> dir
-      end
+  defp bin_dir, do: Path.join([data_home(), "geex", "bin"])
 
-    Path.join([data, "geex", "bin"])
+  defp data_home do
+    case System.get_env("XDG_DATA_HOME") do
+      empty when empty in [nil, ""] -> Path.expand("~/.local/share")
+      dir -> dir
+    end
   end
 end

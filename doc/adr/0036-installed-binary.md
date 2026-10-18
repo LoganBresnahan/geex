@@ -196,6 +196,21 @@ Of the 38.8 MB unpacked, the tree_sitter_wasm NIF (wasmtime) is 14.5 MB, already
   running VM loads modules from its unpack as it needs them; removing it under the
   maintainer's open geex crashed it (undefined `sys` and `io_lib_pretty`, garbage on the
   terminal). A running geex no longer needs a restart after a deploy.
+  **Amended 2026-10-18 again: across versions it does.** Burrito removes, on every run, the
+  unpack of each older version, by semver, which ignores `+<sha>`, and it doesn't look at what
+  is running.
+  - Within one version (`0.1.0+…`) every build compares equal, so this never happened.
+  - At 0.2.0 it did: the deploy's first run of the new binary printed "Uninstalled older
+    version (v0.1.0+573091e7…)" and "(…c1a9cb7e…)", which also broke the deploy's `--version`
+    check.
+  - Nothing was running from them then. A geex that is would have crashed, as in BUG-4.
+  - **Now `mix geex.deploy` refuses to run a new version's binary while a geex runs from an
+    older version's unpack** (`older_in_use/3`). It says which, and to quit it first; checked
+    live against a running 0.1.0 geex, whose unpack stayed. The `--version` check now finds
+    its line among Burrito's.
+  - **Not covered:** launching the new `geex` later while an older one is still open deletes
+    the older one's unpack the same way, and only Burrito could check that. So after a deploy
+    that changes the version, restart every open geex before starting the new one.
 - Under the binary the app never reaches "started" (its `start/2` doesn't return). Nothing in
   geex asks. `Application.ensure_all_started(:geex)` is only `Geex.run/1`'s, which the binary
   doesn't use. Anything that stops the VM must go through `Geex.stop/0`, never `System.stop/0`

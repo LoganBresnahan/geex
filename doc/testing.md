@@ -3625,3 +3625,33 @@ maintainer's real v0.1.0 installs: Elixir, JSON, and Birds of Paradise `038a2310
   - Alt+Y draws its row in the new accent, `38;2;134;180;187`.
 
 **1106 tests + 79 doctests**; `deploy_test.exs` green on the new expected list.
+
+### 2026-10-18 — a new version's first run deletes older unpacks (found at deploy, guarded)
+
+**Found:** the first `mix geex.deploy` of 0.2.0 stopped. Its `--version` check got
+"[l] Uninstalled older version (v0.1.0+573091e7.89a87236)" and "(v0.1.0+c1a9cb7e…)" before
+`geex 0.2.0+db1e67f2.89a87236`.
+
+**The verified cause,** in Burrito 1.5's `src/wrapper.zig` and `maintenance.zig`:
+- every run calls `do_clean_old_versions`, which deletes each `geex_erts-*` whose version is
+  semver-older than its own, whatever is running from it;
+- within 0.1.0 every build compared equal (semver ignores `+<sha>`), so this never happened.
+
+No geex was running then (checked from `/proc`). An open one would have crashed, as BUG-4's
+did.
+
+**Fixed in `mix geex.deploy`:**
+- before the new binary first runs, it lists the unpacks of older versions that a running
+  process uses (`older_in_use/3`, doctested) and refuses, naming them;
+- `check/1` finds the `geex …` line among Burrito's.
+
+**Checked live:**
+- with the installed 0.1.0 geex running in tmux, `mix geex.deploy --no-build` refused:
+  "…a running geex uses geex_erts-16.1_0.1.0+573091e7.89a87236 (pid 591045, 591051); quit it
+  first";
+- the 0.1.0 unpack stayed, and that geex kept running.
+
+**Not covered** (ADR-0036's amendment): starting the new `geex` later while an older one is
+open. Restart open editors after a version change.
+
+**1106 tests + 80 doctests**, green twice.
