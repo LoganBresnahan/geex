@@ -96,6 +96,29 @@ defmodule Geex.Highlight.ReactorTest do
     assert Reactor.highlights(reactor).version == 0
   end
 
+  test "render/3 is render/1 with only the spans over the window, exact or shifted", %{
+    buf: buf,
+    reactor: reactor
+  } do
+    {:ok, _exact} = Reactor.await(reactor, 0)
+
+    over = fn %{version: v, spans: spans}, from, to ->
+      %{version: v, spans: Enum.filter(spans, &(&1.end_byte > from and &1.start_byte < to))}
+    end
+
+    for {from, to} <- [{0, 9}, {10, 15}, {15, 19}, {100, 200}] do
+      assert Map.take(Reactor.render(reactor, from, to), [:version, :spans]) ==
+               over.(Reactor.render(reactor), from, to)
+    end
+
+    # Across an edit the window comes from the shifted overlay, not the stale exact one.
+    send(reactor, {:geex_buffer_change, buf, 1, %{at: 0, removed: 0, added: 2}})
+    assert %{version: 1} = Reactor.render(reactor, 0, 11)
+
+    assert Map.take(Reactor.render(reactor, 0, 11), [:version, :spans]) ==
+             over.(Reactor.render(reactor), 0, 11)
+  end
+
   test "an :unknown-footprint edit keeps the prior optimistic overlay (no version regression)", %{
     buf: buf,
     reactor: reactor

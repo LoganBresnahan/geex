@@ -19,15 +19,23 @@ defmodule Geex.Highlight.Paint do
   simply absent (the caller uses the theme's default foreground there).
   """
   @spec styles(Theme.t(), [Geex.Highlight.Span.t()]) :: %{non_neg_integer() => Style.t()}
-  def styles(%Theme{} = theme, spans) do
+  def styles(%Theme{} = theme, spans), do: styles(theme, spans, 0, :infinity)
+
+  # The same, for the bytes in `[from, to)` only: a frame needs the visible lines' bytes, not
+  # the whole file's (ADR-0035). Precedence is decided by each span's whole width, so a span
+  # clamped to the window still loses to a narrower one, as it does unclamped.
+  defp styles(theme, spans, from, to) do
     spans
+    |> Enum.filter(&(&1.end_byte > from and (to == :infinity or &1.start_byte < to)))
     |> Enum.map(fn span -> {span, Theme.style_for(theme, span.capture)} end)
     |> Enum.reject(fn {_span, style} -> is_nil(style) end)
     |> Enum.sort_by(fn {span, _style} ->
       {-(span.end_byte - span.start_byte), dot_count(span.capture)}
     end)
     |> Enum.reduce(%{}, fn {span, style}, acc ->
-      Enum.reduce(span.start_byte..(span.end_byte - 1)//1, acc, &Map.put(&2, &1, style))
+      first = max(span.start_byte, from)
+      last = if to == :infinity, do: span.end_byte, else: min(span.end_byte, to)
+      Enum.reduce(first..(last - 1)//1, acc, &Map.put(&2, &1, style))
     end)
   end
 
@@ -83,7 +91,11 @@ defmodule Geex.Highlight.Paint do
         selection \\ nil
       )
       when is_binary(text) and w >= 0 and h >= 0 and scroll >= 0 and x0 >= 0 and hscroll >= 0 do
-    by_byte = styles(theme, spans)
+    # Only the rows on screen are walked, sliced out of the text by their byte offsets (one
+    # native scan for the newlines), and only the spans over those bytes are resolved: a frame
+    # costs what the screen shows, not what the file holds (ADR-0035).
+    {lines, first_byte, last_byte} = visible_lines(text, scroll, h)
+    by_byte = styles(theme, spans, first_byte, last_byte)
     fg = theme.palette.fg
     bg = theme.palette.bg
     sel_bg = theme.palette.selection
@@ -100,10 +112,8 @@ defmodule Geex.Highlight.Paint do
     # (aligned with the original text: +1 per "\n" between lines); the inner walk tracks
     # `col` (grapheme index) so a `Geex.Selection` (caret coordinates) tints the right cells.
     {screen, _byte} =
-      text
-      |> String.split("\n")
-      |> Enum.with_index()
-      |> Enum.reduce({base, 0}, fn {line, row}, {screen, byte0} ->
+      lines
+      |> Enum.reduce({base, first_byte}, fn {line, row}, {screen, byte0} ->
         sy = row - scroll
 
         {screen, byte_end, end_vcol, len} =
@@ -142,6 +152,40 @@ defmodule Geex.Highlight.Paint do
       end)
 
     screen
+  end
+
+  @doc """
+  The lines from row `scroll` on, at most `h` of them, as `{line, row}`, with the byte range
+  they cover in `text`: `{lines, first_byte, end_byte}`, where `end_byte` is past the last
+  shown line. Lines split on `\n` only, as `Geex.Buffer.Doc` splits them.
+
+      iex> Geex.Highlight.Paint.visible_lines("a\\nbb\\nccc\\nd", 1, 2)
+      {[{"bb", 1}, {"ccc", 2}], 2, 8}
+      iex> Geex.Highlight.Paint.visible_lines("a\\n", 1, 5)
+      {[{"", 1}], 2, 2}
+      iex> Geex.Highlight.Paint.visible_lines("a", 3, 5)
+      {[], 1, 1}
+  """
+  @spec visible_lines(String.t(), non_neg_integer(), non_neg_integer()) ::
+          {[{String.t(), non_neg_integer()}], non_neg_integer(), non_neg_integer()}
+  def visible_lines(text, scroll, h) do
+    # Every line's start: 0, then one past each newline.
+    starts = List.to_tuple([0 | for({at, 1} <- :binary.matches(text, "\n"), do: at + 1)])
+    count = tuple_size(starts)
+    size = byte_size(text)
+    rows = Enum.to_list(scroll..min(scroll + h - 1, count - 1)//1)
+    line_end = fn row -> if row + 1 < count, do: elem(starts, row + 1) - 1, else: size end
+
+    lines =
+      for row <- rows do
+        start = elem(starts, row)
+        {binary_part(text, start, line_end.(row) - start), row}
+      end
+
+    case rows do
+      [] -> {[], size, size}
+      [first | _] -> {lines, elem(starts, first), line_end.(List.last(rows))}
+    end
   end
 
   # Tint screen-row `sy` from column `sx` to the right edge `w` with `cell` — the selection

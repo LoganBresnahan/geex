@@ -187,7 +187,8 @@ defmodule Geex.Loop do
   def gutter_width(text), do: max(digits(line_count(text)), 2) + 2
 
   defp line_at(text, line), do: text |> String.split("\n") |> Enum.at(line, "")
-  defp line_count(text), do: text |> String.split("\n") |> length()
+  # One more than the newlines, found natively: no line is copied out (ADR-0035).
+  defp line_count(text), do: length(:binary.matches(text, "\n")) + 1
   defp digits(n), do: n |> Integer.to_string() |> String.length()
 
   @doc """
@@ -1619,10 +1620,14 @@ defmodule Geex.Loop do
     # painting assumes they are the same buffer version. A concurrent MCP/reconcile edit landing
     # between the two reads can briefly pair text@vN with spans@v(N+1); the overlay only ever
     # clips (Paint tolerates out-of-range spans) and the change's own repaint corrects it.
+    # Only the spans over the rows shown (`scroll` is final here: `frame/10` moves only the
+    # horizontal scroll), so the reactor copies a screen's spans, not the file's (ADR-0035).
+    {_lines, from, to} = Paint.visible_lines(text, scroll, h_text)
+
     {screen, {cx, cy}, hscroll} =
       frame(
         text,
-        overlay_spans(reactor_of(state, tab.buffer)),
+        overlay_spans(reactor_of(state, tab.buffer), from, to),
         state.theme,
         cursor,
         tw,
@@ -2691,11 +2696,24 @@ defmodule Geex.Loop do
   can scroll to. Used (not the visible-only width) so the horizontal bar's presence and thumb
   size stay stable as you scroll *vertically*; only the thumb position tracks `hscroll`.
   """
+  #
+  # A line's display width is at most its byte length, so lines are measured longest (in
+  # bytes) first, stopping at the first one shorter than the widest found: one line for ASCII
+  # text, not every line each frame (ADR-0035).
   @spec max_line_width(String.t()) :: non_neg_integer()
   def max_line_width(text) do
-    text
-    |> String.split("\n")
-    |> Enum.reduce(0, fn line, acc -> max(acc, Width.string(line)) end)
+    size = byte_size(text)
+    ends = for({at, 1} <- :binary.matches(text, "\n"), do: at) ++ [size]
+
+    {spans, _} = Enum.map_reduce(ends, 0, fn stop, start -> {{start, stop - start}, stop + 1} end)
+
+    spans
+    |> Enum.sort_by(&elem(&1, 1), :desc)
+    |> Enum.reduce_while(0, fn {start, len}, best ->
+      if len <= best,
+        do: {:halt, best},
+        else: {:cont, max(best, Width.string(binary_part(text, start, len)))}
+    end)
   end
 
   # Draw the vertical scroll bar in column `x` over rows `0..h-1`: a dim track with a brighter
@@ -3614,10 +3632,10 @@ defmodule Geex.Loop do
     :exit, _ -> :ok
   end
 
-  defp overlay_spans(nil), do: []
+  defp overlay_spans(nil, _from, _to), do: []
 
-  defp overlay_spans(reactor) do
-    case safe_highlights(reactor) do
+  defp overlay_spans(reactor, from, to) do
+    case safe_highlights(reactor, from, to) do
       %{spans: spans} -> spans
       _ -> []
     end
@@ -3686,8 +3704,8 @@ defmodule Geex.Loop do
   # The overlay to paint: the optimistically-shifted overlay when a recent edit's
   # exact re-highlight is still in flight, else the exact result — so the edited
   # line's colours stay aligned across a keystroke (ADR-0022; no tail flicker).
-  defp safe_highlights(reactor) do
-    Reactor.render(reactor)
+  defp safe_highlights(reactor, from, to) do
+    Reactor.render(reactor, from, to)
   catch
     :exit, _ -> nil
   end

@@ -429,6 +429,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
 9. **Slow work still in the key loop** — *parked* ([adr/0035](adr/0035-the-loop-never-waits.md),
    accepted 2026-10-16: the loop never waits on slow work; the tree's reader, `6a6e3df`, is the
    first instance). Move each when a real file makes it measurably slow:
+   - **The frame** — **built 2026-10-18** (ADR-0035's amendment): every key cost the whole file
+     (323 ms a frame on loop.ex). Paint now walks only the visible rows, and the reactor sends
+     only their spans, so a frame is about 10 ms. `test/geex/loop/frame_cost_test.exs` guards
+     it.
    - **Save and fast-forward** (they read the file; a two-sided save runs `git merge-file`): a
      clean merge and save 93 ms at 1 MB, 759 ms at 10 MB; a fast-forward 29 ms and 445 ms. Needs a
      "saving…" status, with edits to that buffer queued meanwhile.

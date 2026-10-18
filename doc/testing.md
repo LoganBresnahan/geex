@@ -3126,3 +3126,54 @@ byte-for-byte.
 - under ×16 the full suite takes over 140 s, past what I ran it for: oversubscribed twice over.
 
 **1077 tests + 67 doctests.**
+
+### 2026-10-18 — a frame costs the screen, not the file (ADR-0035 amendment)
+
+Every key was slow in `lib/geex/loop.ex` (141 KB, 27,772 spans). `:eprof` showed the frame
+doing whole-file work:
+
+- `Paint.to_screen` walked all 686,000 graphemes, and its byte → style map covered every span;
+- `max_line_width/1` and `line_count/1` split the whole text;
+- `Reactor.render/1` copied every span to the loop.
+
+Now:
+
+- Paint slices out only the visible rows (`Paint.visible_lines/3`, one `:binary.matches/2`
+  scan) and resolves only the spans over their bytes.
+- The reactor indexes each overlay once (`Geex.Highlight.SpanIndex`), and `Reactor.render/3`
+  answers a byte window by binary search.
+- `line_count/1` counts newline offsets, and `max_line_width/1` stops at the first line too
+  short in bytes to be wider.
+
+**Measured** in-process: a scratch script started the app with highlighting on, opened loop.ex
+at 120 × 40, and took the median of 10 runs.
+
+| | Before | After |
+|---|---|---|
+| a frame | 323 ms | 9.8 ms |
+| Down and its frame | 1,388 ms | 10.6 ms |
+| a typed `x` and its frame | — | 13.8 ms |
+| `Alt+1` tab switch and its frame | — | 8.8 ms |
+| a typed `x` alone | — | 0.18 ms |
+| `render/3` alone | — | 0.012 ms |
+
+**Guard:** `test/geex/loop/frame_cost_test.exs`. It paints loop.ex three times over (~420 KB,
+over 50,000 spans) from line 5,568, through `Loop.handle_info/2`. The best of five runs for a
+frame, Down plus a frame, and `x` plus a frame must each be under 150 ms. With `lib/` stashed
+(the old code) it fails at 1,264 ms for a frame; with the new code it passes.
+
+**Also tested:**
+- `span_index_test.exs`: two doctests, plus 200 random windows over 2,000 random spans, each
+  equal to a walk over all of them;
+- `reactor_test.exs`: `render/3` equals `render/1` filtered to the window, exact and across an
+  optimistic shift;
+- `Paint.visible_lines/3` doctests, wired in through `doctest Paint`.
+
+**Folded in:** the coordinator session's follow-up to BUG-5. The inotify test of
+`tree/watcher_test.exs` asserts that `_build/dev` is not in the watcher's directories, and
+drains late events before writing there.
+
+**Not checked here:** the key-to-screen time in the installed binary, through a terminal. That
+goes in the deploy entry.
+
+**1081 tests + 70 doctests**, green twice.

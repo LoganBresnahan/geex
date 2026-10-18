@@ -1,7 +1,8 @@
 # ADR-0035: The key loop never waits on slow work
 
 - **Status:** Accepted 2026-10-16 (proposed by the coordinator session; the maintainer took
-  "adopt the rule, park the rest"). First instance built: the file tree's reader (`6a6e3df`,
+  "adopt the rule, park the rest"); amended 2026-10-18 (a frame costs the screen, not the
+  file). First instance built: the file tree's reader (`6a6e3df`,
   [ADR-0034](0034-panes-tree-edits-hold.md)'s 2026-10-16 amendment).
 - **Date:** 2026-10-16
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell and its loop),
@@ -93,3 +94,56 @@ Each is parked in the roadmap until a real case hits it:
   `DOWN` clauses; `test/geex/loop/panes_test.exs`.
 - [roadmap.md](../roadmap.md), command surface item 9 (the parked candidates).
 - [testing.md](../testing.md), 2026-10-16 entries (the measurements and the coordinator's live check).
+
+## Amendment (2026-10-18): a frame costs the screen, not the file
+
+**Context.** The maintainer found every key slow in `lib/geex/loop.ex` (141 KB, about 28,000
+highlight spans). The loop did work in proportion to the whole file on every frame, inline:
+
+- `Paint.to_screen` walked every grapheme of the file (686,000 of them) to reach the visible
+  rows;
+- it built a byte → style map over every span in the file, not just the visible ones;
+- `Loop.max_line_width/1` split the whole text and measured every line;
+- `Loop.line_count/1` split the whole text;
+- `Reactor.render/1` copied all 28,000 spans into the loop's mailbox.
+
+Measured in-process (no terminal), one frame took 323 ms, and Down plus its frame took 1,388 ms.
+
+**Decision.** This is the rule's other half. Work that grows with the file doesn't move to another
+process here: it stops happening. A frame does work in proportion to what the screen shows.
+
+- **Paint walks only the visible rows.** `Paint.visible_lines/3` takes their bytes out of the text
+  using the newline offsets from one native scan (`:binary.matches/2`). Styles are resolved only
+  for spans overlapping those bytes.
+- **The reactor sends only the visible spans.** `Reactor.render/3` takes a byte window. The
+  reactor indexes each overlay once, off the loop (`Geex.Highlight.SpanIndex`: spans sorted by
+  start, plus the longest span's length), and answers with a binary search. The loop asks for the
+  rows it shows, after it has decided where they scroll to.
+- **The loop's whole-text measures get cheaper.** `line_count/1` counts newline offsets.
+  `max_line_width/1` measures lines longest-in-bytes first and stops once no line left can be
+  wider (a line's width is at most its byte length: a two-column glyph takes three or four bytes).
+
+**Measured** on loop.ex, highlighted, at 120 × 40, in-process:
+
+| | Before | After |
+|---|---|---|
+| a frame | 323 ms | 9 ms |
+| Down and its frame | 1,388 ms | 10 ms |
+| a typed character and its frame | — | 14 ms |
+| a tab switch and its frame | — | 9 ms |
+
+A typed character alone costs 0.2 ms, and `render/3` 0.01 ms. What's left is the frame's own
+`Screen` building and diffing, in proportion to the screen.
+
+**The guard.** `test/geex/loop/frame_cost_test.exs` paints a highlighted ~420 KB file (loop.ex
+three times, about 84,000 spans) from its middle, through `Loop.handle_info/2`. It times a frame,
+Down plus a frame, and a typed character plus a frame. The best of five runs must be under 150 ms.
+The old code took 1,264 ms there, and the new code about 10 ms, so the bound has room for a loaded
+machine and still catches a regression.
+
+**Not done** (only if a real file needs it):
+
+- The `max_line_width/1` scan still runs over the whole text on every frame. It is native and
+  stops early, but a single very long line still makes it measure that line.
+- Tree-sitter reparses the whole file on each edit, off the loop. Incremental reparse and a
+  query restricted to a byte range would need changes to the NIF.

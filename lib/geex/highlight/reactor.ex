@@ -70,6 +70,15 @@ defmodule Geex.Highlight.Reactor do
   def render(reactor), do: GenServer.call(reactor, :render)
 
   @doc """
+  `render/1`'s overlay with only the spans that overlap bytes `[from, to)`: what a frame
+  paints. The reactor indexes each overlay once (`Geex.Highlight.SpanIndex`), so a frame gets
+  the window's spans by binary search, in this process, and copies only those (ADR-0035).
+  """
+  @spec render(GenServer.server(), non_neg_integer(), non_neg_integer()) ::
+          %{version: non_neg_integer(), spans: [map()]} | nil
+  def render(reactor, from, to), do: GenServer.call(reactor, {:render, from, to})
+
+  @doc """
   Subscribe `pid` (default: caller) to **overlay-ready** notifications. After each
   completed pass the reactor sends the subscriber:
 
@@ -197,7 +206,10 @@ defmodule Geex.Highlight.Reactor do
       in_flight: nil,
       # An initial pass over already-loaded content, before any edit.
       pending: true,
-      pass_counter: 0
+      pass_counter: 0,
+      # The overlay `render/3` last indexed: `{which, version, SpanIndex}`, `which` being
+      # `:optimistic` or `:result` (each overlay is one per version of its kind).
+      index: nil
     }
 
     {:ok, maybe_start(state)}
@@ -210,6 +222,26 @@ defmodule Geex.Highlight.Reactor do
   # it; ADR-0031 made undo/redo ordinary byte-footprint changes), else the exact result. The
   # buffer's monotonic `seq` keeps "optimistic is the freshest" true even across an undo.
   def handle_call(:render, _from, state), do: {:reply, state.optimistic || state.result, state}
+
+  def handle_call({:render, from, to}, _from, state) do
+    {which, overlay} =
+      if state.optimistic, do: {:optimistic, state.optimistic}, else: {:result, state.result}
+
+    case overlay do
+      nil ->
+        {:reply, nil, state}
+
+      %{version: version, spans: spans} ->
+        index =
+          case state.index do
+            {^which, ^version, index} -> index
+            _ -> Geex.Highlight.SpanIndex.build(spans)
+          end
+
+        window = Geex.Highlight.SpanIndex.window(index, from, to)
+        {:reply, %{overlay | spans: window}, %{state | index: {which, version, index}}}
+    end
+  end
 
   def handle_call({:subscribe, pid}, _from, state) do
     ref = Process.monitor(pid)

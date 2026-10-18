@@ -208,7 +208,11 @@ defmodule Geex.Tree.WatcherTest do
       File.write!(Path.join(root, "e1/e2/late.txt"), "hi\n")
       assert_receive {:geex_tree_changed, ^root}, 5_000
 
-      # Nothing under `_build/dev` is watched.
+      # Nothing under `_build/dev` is watched: it isn't in the set (the deterministic half),
+      # and, with the steps above drained (a late event once landed here), a file there says
+      # nothing.
+      refute Path.join(root, "_build/dev") in :sys.get_state(w).dirs
+      drain(root)
       File.write!(Path.join(root, "_build/dev/x.beam"), "")
       refute_receive {:geex_tree_changed, _}, 300
     end

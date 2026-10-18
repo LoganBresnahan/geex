@@ -4,6 +4,8 @@ defmodule Geex.Highlight.PaintTest do
   alias Geex.{Highlight, Renderer, Screen}
   alias Geex.Highlight.{Paint, Span}
 
+  doctest Paint
+
   @keyword_red {:rgb, 239, 93, 50}
 
   defp theme, do: Geex.Fixtures.birds()
