@@ -183,11 +183,20 @@ the NIF pins (0.26.9), so a catalog install never hits this; a hand-installed or
   must pass `Theme.from_json/1`.
 - **Writing:** `.<name>.new-N` beside its place, with `installed.json` (sha256, source, time)
   written last, then renamed in. Anything already there is renamed aside, then removed.
-- **The network:** `:inets` and `:ssl` are optional extra applications. Mix's code-path pruning
-  hides any OTP app a project doesn't declare, even `:http_util`. In the release they're `:load`
-  only: carried, not started at boot. A test reads every geex module's import table: only
-  `Geex.Install` calls `:httpc` or `:inets`, or connects with `:gen_tcp`/`:ssl`.
-  (`Geex.MCP.Port` listens on loopback to find a free port.)
+- **The network:**
+  - `:inets` is in the release as `applications: [inets: :load]`: carried and loaded, not
+    started at boot, and not a dependency of `:geex`. Mix won't let a permanent app depend on a
+    loaded one; `d2cc70e` fixed the first try, whose deploy failed.
+  - `:ssl` was already started at boot, a dependency of ThousandIsland (Bandit's socket layer)
+    for the loopback listener; starting it makes no request.
+  - Under mix, `prune_code_paths: false` keeps OTP's apps on the code path. Mix's pruning hides
+    an app a project doesn't declare, even `:http_util`.
+  - A test reads every geex module's import table: only `Geex.Install` calls `:httpc` or
+    `:inets`, or connects with `:gen_tcp` or `:ssl`. (`Geex.MCP.Port` listens on loopback to find
+    a free port.)
+- **The binary must exit:** `geex install --list | head -1` hung the binary. A write to the
+  closed pipe raised inside the application's start, where the binary does its work. The install
+  branch now always reaches its halt.
 
 **`Geex.Installed`** lists what's installed:
 - It reads `$XDG_DATA_HOME/geex/{grammars,themes}/*`, ignoring a directory with no
