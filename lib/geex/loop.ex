@@ -547,8 +547,15 @@ defmodule Geex.Loop do
 
     state =
       case {result, then} do
-        {{:ok, _}, {:choose_theme, theme}} -> settings_action({:choose_theme, theme}, state)
-        _ -> state
+        {{:ok, _}, {:choose_theme, theme}} ->
+          settings_action({:choose_theme, theme}, state)
+
+        # Chosen again, from its new files; the notice says it was updated, not "kept".
+        {{:ok, %{display: display}}, {:update_theme, theme}} ->
+          {:choose_theme, theme} |> settings_action(state) |> say("updated #{display}")
+
+        _ ->
+          state
       end
 
     {:noreply, schedule_repaint(state)}
@@ -2175,6 +2182,10 @@ defmodule Geex.Loop do
   end
 
   defp settings_action({:install, name}, state), do: start_install(state, name, nil)
+
+  # An installed theme's update, then the theme chosen, read again from the new files.
+  defp settings_action({:update_theme, name}, state),
+    do: start_install(drop_pending_choices(state), name, {:update_theme, name})
 
   defp settings_action({:preview_theme, name}, state), do: retheme(state, name)
 

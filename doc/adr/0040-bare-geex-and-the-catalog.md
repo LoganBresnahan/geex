@@ -325,6 +325,14 @@ drawing, all pure. The loop carries out what it asks for. `Alt+Y` amends ADR-003
     file itself never corrupts.
 - **The coordinator's note:** General's paths show `~` for the home directory, and one too long
   is cut from the left with "…", so its file name shows.
+- **Fixed 2026-10-18: Enter on a theme with an update updates it.** The maintainer reported it,
+  and the coordinator session found the cause. On Themes, Enter meant "choose" for every row,
+  and choosing a theme that is installed never installs, so an "update available" row only
+  chose the installed version again ("theme … kept").
+  - Now that row installs the catalog's package (`{:update_theme, name}`), then chooses the
+    theme from its new files, and says "updated <name>".
+  - Languages always did this. The footer already promised it ("Enter installs or updates").
+  - The v0.2.0 upgrade check had used `geex install`, not the view, which is why it missed this.
 - **Amended 2026-10-18: what is installed is light blue.** This was the maintainer's ask,
   relayed by the coordinator session. On Languages and Themes, an installed row's text is drawn
   in the palette's new `installed` slot:

@@ -188,6 +188,17 @@ defmodule Mix.Tasks.Geex.Catalog do
 
   defp theme(recipe, base) do
     Mix.shell().info("geex catalog: theme #{recipe.name}")
+    {manifest, zip} = theme_zip(recipe)
+    entry(:theme, manifest, zip, base)
+  end
+
+  @doc """
+  A theme recipe's package, `{manifest, zip}`: its JSON (checked with `Geex.Theme.load/1`), its
+  manifest and its licence, zipped deterministically. The same bytes every time, so a test can
+  rebuild what the catalog pins.
+  """
+  @spec theme_zip(map()) :: {map(), binary()}
+  def theme_zip(recipe) do
     path = Path.join("catalog", recipe.file)
 
     theme =
@@ -210,7 +221,7 @@ defmodule Mix.Tasks.Geex.Catalog do
       {"LICENSE", File.read!(Path.join("catalog", recipe.license_file))}
     ]
 
-    entry(:theme, manifest, Package.zip(files), base)
+    {manifest, Package.zip(files)}
   end
 
   ## The catalog

@@ -45,6 +45,7 @@ defmodule Geex.Loop.Settings do
           | {:install, String.t()}
           | {:preview_theme, String.t()}
           | {:choose_theme, String.t()}
+          | {:update_theme, String.t()}
           | {:toggle, :mouse | :tree | :edits}
 
   @doc """
@@ -282,6 +283,10 @@ defmodule Geex.Loop.Settings do
       {:languages, %{name: name, status: status}}
       when status in ["available", "update available"] ->
         {:install, name}
+
+      # An installed theme with an update: Enter updates it, then chooses it, as the footer says.
+      {:themes, %{name: name, status: "update available"}} ->
+        {:update_theme, name}
 
       {:themes, %{name: name}} ->
         {:choose_theme, name}

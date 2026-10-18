@@ -3671,3 +3671,41 @@ installed):
 
 **Also checked:** `--version`, `--frob` exits 2, `Ctrl-X` gives the shell back, the discovery
 file is removed, and the log has no `terminating` or `undef` lines.
+
+### 2026-10-18 — Enter on a theme with an update didn't update it (found by the maintainer, fixed)
+
+**Found:** Alt+Y → Themes, Enter on Birds of Paradise ("update available") said "theme
+birds-of-paradise kept". The maintainer's `installed.json` still held `038a23106e99…`, and the
+log had no install after the 0.2.0 deploy.
+
+**Cause,** as the coordinator session read it:
+- `Settings.act/2` mapped every Themes row to `{:choose_theme, name}`;
+- the loop installs on that only when the theme isn't installed at all.
+
+Languages maps "update available" to `{:install, …}`. My v0.2.0 upgrade check used
+`geex install` from the shell, not the view.
+
+**Fix:**
+- an "update available" Themes row is `{:update_theme, name}`;
+- the loop installs it off the loop, then chooses it again from the new files and says
+  "updated Birds of Paradise".
+- `mix geex.catalog`'s theme packing is public now (`theme_zip/1`), so a test can rebuild
+  exactly what the catalog pins.
+
+**Automated:** a new `settings_test.exs` test.
+- Setup: Birds of Paradise as a catalog install of an old package, and the catalog's own
+  package rebuilt by `theme_zip/1`, which matches the catalog's sha256 and is served through
+  `GEEX_CATALOG_URL`.
+- Enter on the row starts the install. When it is done, `installed.json` holds the new hash,
+  the notice says "updated Birds of Paradise", the row is "installed" and in use, and the
+  accent is `#86B4BB`, drawn on the row.
+- With the old `settings.ex` and `loop.ex` the test fails at the install.
+
+**Live,** the dev build in tmux with scratch XDG directories and a copy of the maintainer's
+Birds of Paradise (`038a23106e99…`) in use:
+- the row read "update available";
+- Enter downloaded the update from the real v0.2.0 release: `installed.json` went to
+  `200e35e52d56…` and the row to "installed";
+- the log shows the install.
+
+**1107 tests + 80 doctests**, green twice.

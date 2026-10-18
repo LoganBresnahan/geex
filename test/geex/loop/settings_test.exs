@@ -233,6 +233,47 @@ defmodule Geex.Loop.SettingsTest do
       assert Loop.apply_settings(Loop.new_state(120, 30), %{"mouse" => "nonsense"}).mouse == true
     end
 
+    # The maintainer's report: Enter on Themes' "update available" row only chose the theme
+    # again ("theme kept"), as if it were up to date. It updates now, then chooses it.
+    test "Enter on a theme with an update installs the update and shows it", %{
+      state: state,
+      dir: dir
+    } do
+      # Birds of Paradise as v0.1.0 installed it: a catalog install of the old package.
+      data = Path.join(dir, "data")
+      installed = Path.join([data, "themes", "birds-of-paradise", "installed.json"])
+      File.write!(installed, ~s({"source":"catalog","sha256":"#{String.duplicate("0", 64)}"}))
+      Installed.refresh()
+
+      # The catalog's package, rebuilt from the recipe: the bytes the catalog pins.
+      {themes, _} = Code.eval_file("catalog/themes.exs")
+      {_manifest, zip} = Mix.Tasks.Geex.Catalog.theme_zip(hd(themes))
+      entry = Geex.Catalog.theme("birds-of-paradise")
+      assert Base.encode16(:crypto.hash(:sha256, zip), case: :lower) == entry["sha256"]
+      File.write!(Path.join(dir, entry["asset"]), zip)
+      System.put_env("GEEX_CATALOG_URL", "file://" <> dir)
+
+      state = state |> send_io({:alt, ?y}) |> send_io({:alt, ?d})
+      rows = Settings.rows(state.settings, %{theme_id: state.theme_id})
+      birds = Enum.find_index(rows, &(&1.name == "birds-of-paradise"))
+      assert Enum.at(rows, birds).status == "update available"
+
+      state = send_io(%{state | settings: %{state.settings | sel: birds}}, {:key, :enter})
+      assert Map.has_key?(state.installing, "birds-of-paradise")
+      assert_receive {:geex_install_done, _pid, "birds-of-paradise", {:ok, _}} = done, 5_000
+      {:noreply, state} = Loop.handle_info(done, state)
+
+      assert File.read!(installed) =~ entry["sha256"]
+      assert state.settings.message == "updated Birds of Paradise"
+      rows = Settings.rows(state.settings, %{theme_id: state.theme_id})
+      assert %{status: "installed", current: true} = Enum.at(rows, birds)
+      assert state.theme.palette.accent == {:rgb, 0x86, 0xB4, 0xBB}
+
+      # The view draws it in the new accent.
+      {_state, screen} = frame(state)
+      assert Screen.get_cell(screen, 1, 2 + birds).fg == {:rgb, 0x86, 0xB4, 0xBB}
+    end
+
     test "an install from the view runs off the loop and says how it went", %{
       state: state,
       dir: dir
