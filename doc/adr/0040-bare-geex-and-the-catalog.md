@@ -341,6 +341,20 @@ drawing, all pure. The loop carries out what it asks for. `Alt+Y` amends ADR-003
     and a new `catalog.json` entry. As §2 has it, the old zip stays for the binaries that pin
     it. The new one must be uploaded before a binary pinning it is deployed. The test fixture
     keeps the old file, so the suite exercises the fallback.
+  - **Renamed the same day to `accent`** (the key `"accent"`), because the slot gained two more
+    uses, again the maintainer's asks relayed by the coordinator session. Nothing had been
+    uploaded, so no published theme names `"installed"`. Birds of Paradise's package is now
+    `theme-birds-of-paradise-200e35e52d56.zip`; the `aa8d2d44b5d2` one is never needed.
+    - **The tree** ([ADR-0034](0034-panes-tree-edits-hold.md) §5): a file open in a tab of
+      any pane is drawn in the accent, and the current tab's file in bold as well. The tree is
+      drawn each frame from the panes' tabs, so opening or closing a tab shows at once. While
+      the tree has focus, its highlighted row is in the accent on the bar, as the edits pane's
+      is (the maintainer's yes to the coordinator's suggestion).
+    - **The edits pane** (ADR-0034 §6): while it has focus, its highlighted entry is in the
+      accent on the active-line bar, a "disk is newer" entry too (unhighlighted, that keeps
+      the cursor colour). The palette's `mark` stays. The terminal theme, not knowing its
+      background, draws the bar in reverse video, so there the accent becomes the bar, which
+      still reads as one.
 
 ### 8. Compiling a grammar is cached on disk (step 2)
 

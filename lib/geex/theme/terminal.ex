@@ -111,8 +111,8 @@ defmodule Geex.Theme.Terminal do
       active_line_bg: :default,
       cursor: {:ansi, 3},
       selection: :default,
-      # What the Alt+Y view shows as installed: bright cyan, the terminal's light blue.
-      installed: {:ansi, 14},
+      # The accent (installed, open, focused): bright cyan, the terminal's light blue.
+      accent: {:ansi, 14},
       mark: [:reverse]
     }
   end
@@ -126,7 +126,7 @@ defmodule Geex.Theme.Terminal do
       | active_line_bg: mix(bg, toward, @active_line),
         selection: mix(bg, toward, @selection),
         # On a light background cyan washes out: blue.
-        installed: if(dark?, do: {:ansi, 14}, else: {:ansi, 4}),
+        accent: if(dark?, do: {:ansi, 14}, else: {:ansi, 4}),
         mark: []
     }
   end

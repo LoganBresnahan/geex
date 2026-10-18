@@ -68,7 +68,7 @@ defmodule Geex.Loop.Settings do
   The rows the view's tab shows, each a map with `:name` (what an action names, if anything),
   `:cells` (the columns drawn), on Themes `:current`, and on Languages and Themes `:installed`:
   a package that is installed (an update or not), or the theme in use, drawn in the palette's
-  `installed` colour. `ctx` is what the editor knows:
+  `accent` colour. `ctx` is what the editor knows:
   `:theme_id`, `:mouse`, `:tree_shown`, `:edits_shown`, `:installing` (a set of names).
   """
   @spec rows(t(), map()) :: [map()]
@@ -362,7 +362,7 @@ defmodule Geex.Loop.Settings do
   @doc """
   Draw the view over the whole `w` × `h` screen in `palette`'s colours. The highlighted row and
   the current tab use the palette's active-line colour (or its `mark`). An installed row's text
-  is in the palette's `installed` colour, highlighted or not: the highlight is its background
+  is in the palette's `accent` colour, highlighted or not: the highlight is its background
   (or reverse video), so both show.
   """
   @spec draw(t(), [map()], Geex.Theme.Palette.t(), {pos_integer(), pos_integer()}) :: Screen.t()
@@ -399,7 +399,7 @@ defmodule Geex.Loop.Settings do
       |> Enum.with_index(2)
       |> Enum.reduce(screen, fn {{row, i}, y}, acc ->
         style = if i == view.sel, do: picked, else: %Cell{fg: pal.fg, bg: pal.bg}
-        style = if row[:installed], do: %{style | fg: pal.installed}, else: style
+        style = if row[:installed], do: %{style | fg: pal.accent}, else: style
 
         line =
           row.cells

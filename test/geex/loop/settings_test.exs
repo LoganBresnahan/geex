@@ -112,8 +112,8 @@ defmodule Geex.Loop.SettingsTest do
       assert {_, :quit} = Settings.key(view, {:ctrl, ?x}, [], 30)
     end
 
-    test "installed rows draw in the palette's installed colour, highlighted or not" do
-      pal = %{Geex.Fixtures.birds().palette | installed: {:rgb, 1, 2, 3}}
+    test "installed rows draw in the palette's accent, highlighted or not" do
+      pal = %{Geex.Fixtures.birds().palette | accent: {:rgb, 1, 2, 3}}
       fg_at = fn screen, y -> Screen.get_cell(screen, 1, y).fg end
 
       # Languages: Elixir is installed, Rust isn't. Rows start at screen row 2.

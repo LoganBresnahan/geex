@@ -6,7 +6,7 @@ defmodule Geex.Loop.MouseClickTest do
 
   doctest Geex.Loop.TabBar
 
-  alias Geex.{Buffer, Edits, Loop, Selection, Session}
+  alias Geex.{Buffer, Edits, Loop, Renderer, Selection, Session}
   alias Geex.Loop.{Panes, TabBar}
 
   setup do
@@ -190,6 +190,52 @@ defmodule Geex.Loop.MouseClickTest do
       state = click(state, 40, 21)
       assert Path.basename(Buffer.status(active()).path) == "c.txt"
       assert state.focus == :editor
+    end
+
+    # The accent (ADR-0040 §7, amended 2026-10-18): the files open in a tab, in the tree; the
+    # focused edits pane's highlighted entry.
+    test "the tree shows open files in the accent, the current one bold; tabs closing follow",
+         %{dir: dir} do
+      {state, _a} = start_panels(dir)
+      pal = state.theme.palette
+      cell = fn y -> Geex.Screen.get_cell(Renderer.current(), 3, y) end
+
+      # Rows 1–4: sub/, a.txt, b.txt, c.txt. a.txt is open and current.
+      state = repaint(state)
+      assert %{fg: accent, attrs: [:bold]} = cell.(2)
+      assert accent == pal.accent
+      assert {cell.(3).fg, cell.(4).fg} == {pal.fg, pal.fg}
+
+      # b.txt opens as a tab: it is current; a.txt is open still, not bold.
+      {state, _b} = open(state, dir, "b.txt")
+      state = repaint(state)
+      assert %{fg: ^accent, attrs: [:bold]} = cell.(3)
+      assert %{fg: ^accent, attrs: []} = cell.(2)
+
+      # Closing b.txt's tab (Alt+K) takes it out.
+      state = send_io(%{state | focus: :editor}, {:alt, ?k}) |> repaint()
+      assert cell.(3).fg == pal.fg
+      assert %{fg: ^accent, attrs: [:bold]} = cell.(2)
+
+      # Focused, the highlighted row (c.txt, row 4) is in the accent on the bar.
+      _state = repaint(%{state | focus: :tree, tree: %{state.tree | sel: 3}})
+      assert {cell.(4).fg, cell.(4).bg} == {accent, pal.active_line_bg}
+      assert cell.(3).fg == pal.fg
+    end
+
+    test "the focused edits pane draws its highlighted entry in the accent", %{dir: dir} do
+      {state, _a} = start_panels(dir)
+      pal = state.theme.palette
+      Edits.saved(Path.join(dir, "c.txt"))
+      _ = Edits.rows()
+
+      state = repaint(%{state | focus: :edits, edits_sel: 0})
+      assert %{fg: fg, bg: bg} = Geex.Screen.get_cell(Renderer.current(), 32, 21)
+      assert {fg, bg} == {pal.accent, pal.active_line_bg}
+
+      # Not focused: the plain colour.
+      _state = repaint(%{state | focus: :editor})
+      assert Geex.Screen.get_cell(Renderer.current(), 32, 21).fg == pal.fg
     end
 
     # Earlier runs' rows (ADR-0034 §6, amended 2026-10-18). The global list's earlier rows come

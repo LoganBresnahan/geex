@@ -3489,3 +3489,36 @@ lightest blue (the `tag` colour). This was the maintainer's choice over the deep
 pinning it is deployed, so this commit isn't deployed.
 
 **1104 tests + 79 doctests** (unchanged: the test fixture keeps the old file).
+
+### 2026-10-18 — the accent: open files in the tree, the focused edits entry (ADR-0040 §7)
+
+**What changed:**
+- The slot is renamed `accent` (theme key `"accent"`), since it now has three uses. Birds of
+  Paradise's file follows, and its package is rebuilt: `theme-birds-of-paradise-200e35e52d56.zip`.
+- **The tree:** a file open in a tab of any pane is in the accent, and the current tab's file is
+  bold as well, read from the panes each frame.
+- **The edits pane:** focused, its highlighted entry is in the accent on the active-line bar (a
+  "disk is newer" one too). The palette's `mark` stays.
+- **The tree:** focused, its highlighted row is in the accent too (the maintainer's yes).
+
+**Automated:** `mouse_click_test.exs`:
+- in the tree, a.txt is in the accent and bold while current; after b.txt opens, b.txt is accent
+  and bold while a.txt is accent only; Alt+K on b.txt returns it to `fg` and a.txt to bold;
+  the focused tree's highlighted row is `accent` on `active_line_bg`;
+- the focused edits pane's highlighted entry is `accent` on `active_line_bg`, and `fg` when not
+  focused.
+- The renamed slot's tests are in `theme/load_test.exs`, `theme_test.exs` and
+  `settings_test.exs`.
+
+**Live, dev build in tmux** (the maintainer's Birds of Paradise, installed before the slot, so
+the fallback): a.txt open drew SGR 96, and notes.txt open and current drew bold SGR 96. Focused,
+the edits pane's `▸ notes.txt  you` was SGR 96 on Birds' active-line background.
+
+**Before this, a test run failed once and wasn't seen.** `4cd2fd3` was committed after the
+second of two full runs showed `1 failure`. My command piped `mix test` through `tail`, so its
+exit status was lost and the commit went ahead. 19 more full runs passed, and I couldn't find the
+failing test. Commits are now gated on `mix test`'s own exit status.
+
+**1106 tests + 79 doctests**, green twice.
+
+**Not checked:** a light theme live (the 14 themes, next, include six).

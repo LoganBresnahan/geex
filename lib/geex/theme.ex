@@ -170,7 +170,7 @@ defmodule Geex.Theme do
          {:ok, active_line_bg} <- opt_color(pal, "active_line_bg", bg, bg),
          {:ok, cursor} <- opt_color(pal, "cursor", bg, fg),
          {:ok, selection} <- opt_color(pal, "selection", bg, fg),
-         {:ok, installed} <- opt_color(pal, "installed", bg, installed_default(appearance)) do
+         {:ok, accent} <- opt_color(pal, "accent", bg, accent_default(appearance)) do
       {:ok,
        %Palette{
          bg: bg,
@@ -180,7 +180,7 @@ defmodule Geex.Theme do
          active_line_bg: active_line_bg,
          cursor: cursor,
          selection: selection,
-         installed: installed
+         accent: accent
        }}
     end
   end
@@ -189,8 +189,8 @@ defmodule Geex.Theme do
 
   # A theme that doesn't say: the terminal's light blue on a dark theme (bright cyan, which
   # Windows Terminal's Campbell draws #61D6D6), its blue on a light one, where cyan washes out.
-  defp installed_default(:dark), do: {:ansi, 14}
-  defp installed_default(:light), do: {:ansi, 4}
+  defp accent_default(:dark), do: {:ansi, 14}
+  defp accent_default(:light), do: {:ansi, 4}
 
   defp build_syntax(syntax, bg) when is_map(syntax) do
     Enum.reduce_while(syntax, {:ok, %{}}, fn {capture, spec}, {:ok, acc} ->

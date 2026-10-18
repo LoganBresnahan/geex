@@ -1953,7 +1953,15 @@ defmodule Geex.Loop do
         {bg, attrs} =
           if selected? and focused?, do: {pal.active_line_bg, pal.mark}, else: {pal.bg, []}
 
-        fg = if entry.kind == :behind, do: pal.cursor, else: pal.fg
+        # Focused, the highlighted entry is in the accent on the active-line bar, a "disk is
+        # newer" one too. With the terminal theme's reverse video (its background unknown) the
+        # accent becomes the bar itself, which still reads as one.
+        fg =
+          cond do
+            selected? and focused? -> pal.accent
+            entry.kind == :behind -> pal.cursor
+            true -> pal.fg
+          end
 
         acc
         |> Screen.fill_rect(x, row, w, 1, %Cell{char: " ", fg: fg, bg: bg, attrs: attrs})
@@ -1999,6 +2007,7 @@ defmodule Geex.Loop do
     else
       sel = min(state.tree.sel, length(rows) - 1)
       start = state.tree.top
+      {open, current} = tab_files(state)
 
       rows
       |> Enum.with_index()
@@ -2008,7 +2017,19 @@ defmodule Geex.Loop do
         {bg, attrs} =
           if i == sel and focused?, do: {pal.active_line_bg, pal.mark}, else: {pal.bg, []}
 
-        fg = if row.dir?, do: pal.line_number, else: pal.fg
+        # A file open in a tab is in the accent; the current tab's in bold as well. Focused, the
+        # highlighted row is in the accent too, as the edits pane's is.
+        bold = if row.path == current and not row.dir?, do: [:bold], else: []
+
+        {fg, attrs} =
+          cond do
+            i == sel and focused? -> {pal.accent, bold ++ attrs}
+            row.dir? -> {pal.line_number, attrs}
+            row.path == current -> {pal.accent, [:bold | attrs]}
+            MapSet.member?(open, row.path) -> {pal.accent, attrs}
+            true -> {pal.fg, attrs}
+          end
+
         mark = if row.dir?, do: if(row.open?, do: "▾ ", else: "▸ "), else: "  "
 
         text =
@@ -2019,6 +2040,35 @@ defmodule Geex.Loop do
         |> Screen.draw_text(0, y, palette_clip(text, inner), %Cell{fg: fg, bg: bg, attrs: attrs})
       end)
     end
+  end
+
+  # The files open in a tab of any pane, as the tree's rows name them (relative to its root), and
+  # the current tab's. Read each frame, so opening or closing a tab shows on the next one.
+  defp tab_files(state) do
+    root = safe_start().root
+    paths = Map.new(safe_buffers(), &{&1.pid, &1.path})
+
+    rel = fn pid ->
+      case paths[pid] do
+        path when is_binary(path) and is_binary(root) -> Path.relative_to(path, root)
+        _ -> nil
+      end
+    end
+
+    open =
+      for {_id, pane} <- state.panes.panes,
+          tab <- pane.tabs,
+          path = rel.(tab.buffer),
+          into: MapSet.new(),
+          do: path
+
+    current =
+      case Panes.current(state.panes) do
+        %{buffer: pid} -> rel.(pid)
+        _ -> nil
+      end
+
+    {open, current}
   end
 
   # The layout for this frame: the tree only once geex knows its root.
