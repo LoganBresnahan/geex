@@ -3824,3 +3824,8 @@ three rounds. Round one had 4 failures in one and 1 in the other:
 All 8 runs were green, and no `geex-test-data-*` directory was left behind.
 
 **1109 tests + 79 doctests**, green.
+
+**Deployed** as `0.2.0+f34b407c.89a87236`, for the `GitMerge` fix. Two geex were running from
+`0.2.0+08883564`, and the deploy kept that unpack, since it was in use. In tmux with scratch
+state, the log read "loading code in embedded mode", typing and `Ctrl-O` saved, `Ctrl-X` gave
+the shell back, and the log was clean.
