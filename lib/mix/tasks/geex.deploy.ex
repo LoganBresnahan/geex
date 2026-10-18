@@ -10,7 +10,8 @@ defmodule Mix.Tasks.Geex.Deploy do
 
   1. **Build:** `MIX_ENV=prod mix release --overwrite`. That assembles the release, and
      Burrito wraps it into `burrito_out/geex_linux`. The first prod build compiles the
-     tree_sitter_wasm NIF in release mode, which takes a few minutes.
+     tree_sitter_wasm NIF in release mode, which takes a few minutes. The old `geex.app` is
+     removed first, so the version is this commit's even when no module changed.
   2. **Fresh unpack:** Burrito runs the binary from a directory named after the version, and it
      skips unpacking when that directory already exists. A dirty tree's version (`+<sha>.dirty`)
      repeats across builds, so the new build's directory is removed first, and the first run
@@ -49,6 +50,9 @@ defmodule Mix.Tasks.Geex.Deploy do
 
   defp build do
     Mix.shell().info("geex deploy: building (MIX_ENV=prod mix release --overwrite)")
+    # The version names the commit, but Mix rewrites geex.app only when a module changed, so a
+    # docs-only commit would keep the previous commit's version. Removing it makes it fresh.
+    File.rm("_build/prod/lib/geex/ebin/geex.app")
 
     {_, status} =
       System.cmd("mix", ["release", "--overwrite"],
