@@ -13,7 +13,7 @@ defmodule Mix.Tasks.Geex.Deploy do
      tree_sitter_wasm NIF in release mode, which takes a few minutes. The old `geex.app` is
      removed first, so the version is this commit's even when no module changed.
   2. **Fresh unpack:** Burrito runs the binary from a directory named after the version, and it
-     skips unpacking when that directory already exists. A dirty tree's version (`+<sha>.dirty`)
+     skips unpacking when that directory already exists. A dirty build's version (`….dirty`)
      repeats across builds, so the new build's directory is removed first, and the first run
      unpacks this build. Not while a running geex uses it: a committed build's is the same code
      and stays; a dirty one stops the deploy.

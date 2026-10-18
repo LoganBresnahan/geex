@@ -12,8 +12,9 @@ something to copy to another machine.
 
 **Preconditions (stop if unmet):**
 
-1. The working tree is clean, or the user okayed deploying it dirty. A dirty build's version is
-   `0.1.0+<sha>.dirty`, so it doesn't name its code.
+1. The working tree is clean, and so is `../tree_sitter_wasm`'s, or the user okayed deploying it
+   dirty. The version is `0.1.0+<geex sha8>.<tree_sitter_wasm sha8>`; a dirty build's ends in
+   `.dirty`, so it doesn't name its code.
 2. The ship bar: `mix compile --warnings-as-errors`, then `mix test` green **twice**. Run them;
    don't go from memory.
 3. The toolchain: `zig version` is `0.15.2` (Burrito 1.5 needs 0.15; 1.6 needs 0.16), and `xz`
@@ -33,8 +34,8 @@ mix geex.deploy
 - If it stops because `~/.local/bin/geex` is something else, ask the user. Don't remove it.
 
 Check it by exit status and that last line, not by scrollback. Burrito prints a lot, and a
-stale binary looks the same in a listing. The version has to be the commit you meant:
-`git rev-parse --short=8 HEAD`.
+stale binary looks the same in a listing. The version has to name the commits you meant:
+`git rev-parse --short=8 HEAD`, then the same in `../tree_sitter_wasm`.
 
 ## 2. Check the installed binary live
 

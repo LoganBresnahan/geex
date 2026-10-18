@@ -45,6 +45,11 @@ Three things about Burrito decide the shape:
   what a local install needs, and it needs no download.
 - **A prod build's version carries the commit:** `0.1.0+<sha8>`, with `.dirty` added for an
   uncommitted tree, so each commit unpacks into its own directory. Dev and test keep `0.1.0`.
+  **Amended 2026-10-18:** `0.1.0+<geex sha8>.<tree_sitter_wasm sha8>`, with `.dirty` when either
+  tree is uncommitted. The NIF can change while geex doesn't (the stripped NIF was deployed under
+  the cache build's version), and a deploy keeps an in-use unpack on the grounds that a
+  committed version is the same code (BUG-4's fix). With only geex's commit in the name, a geex
+  running during that deploy would have left the new binary running the old NIF.
 - `rel/vm.args.eex` adds `-noinput` and `+Bd`, the flags `Geex.run/1` gets from `--erl`.
   Burrito's launcher already passes `-noshell`.
 

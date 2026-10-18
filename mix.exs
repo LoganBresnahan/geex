@@ -16,22 +16,39 @@ defmodule Geex.MixProject do
     ]
   end
 
-  # A prod build carries the commit in its version (`0.1.0+1a2b3c4d`, plus `.dirty` for an
-  # uncommitted tree). Burrito unpacks the binary into a directory named after the version and
-  # skips unpacking when that directory exists, so two builds sharing a version would run the
-  # first one's code (ADR-0036). Dev and test keep the plain version.
+  # A prod build carries its commits in its version: geex's and the tree_sitter_wasm NIF's
+  # (`0.1.0+1a2b3c4d.5e6f7a8b`), plus `.dirty` when either tree is uncommitted. Burrito unpacks
+  # the binary into a directory named after the version and skips unpacking when that directory
+  # exists, and a deploy keeps an unpack a running geex uses, so two builds sharing a version
+  # would run the first one's code (ADR-0036). The NIF changes without geex changing, so its
+  # commit is part of the name. Dev and test keep the plain version.
   defp version do
     if Mix.env() == :prod, do: "#{@version}+#{build_id()}", else: @version
   end
 
   defp build_id do
-    case System.cmd("git", ["rev-parse", "--short=8", "HEAD"], stderr_to_stdout: true) do
+    trees = [".", "../tree_sitter_wasm"]
+    commits = Enum.map(trees, &commit/1)
+
+    if Enum.any?(commits, &(&1 == :error)) do
+      "local"
+    else
+      shas = Enum.map_join(commits, ".", fn {:ok, sha, _dirty} -> sha end)
+      dirty? = Enum.any?(commits, fn {:ok, _sha, dirty} -> dirty end)
+      shas <> if(dirty?, do: ".dirty", else: "")
+    end
+  end
+
+  defp commit(dir) do
+    case System.cmd("git", ["-C", dir, "rev-parse", "--short=8", "HEAD"], stderr_to_stdout: true) do
       {sha, 0} ->
-        {status, _} = System.cmd("git", ["status", "--porcelain"], stderr_to_stdout: true)
-        String.trim(sha) <> if(String.trim(status) == "", do: "", else: ".dirty")
+        {status, _} =
+          System.cmd("git", ["-C", dir, "status", "--porcelain"], stderr_to_stdout: true)
+
+        {:ok, String.trim(sha), String.trim(status) != ""}
 
       _ ->
-        "local"
+        :error
     end
   end
 

@@ -188,7 +188,7 @@ session's `Co-Authored-By` trailer.
   `$XDG_DATA_HOME/geex/bin/geex` (default `~/.local/share/geex/bin`) with `geex.prev` beside it,
   linked from `~/.local/bin/geex`; Burrito unpacks it to
   `~/.local/share/.burrito/geex_erts-<erts>_<version>/`; a prod build's version is
-  `0.1.0+<sha8>` (`.dirty` added for an uncommitted tree)
+  `0.1.0+<geex sha8>.<tree_sitter_wasm sha8>` (`.dirty` added when either tree is uncommitted)
 - sibling path dep: `~/tree_sitter_wasm` (Rustler NIF; must exist to compile)
 - harness presets: `presets/<harness>/` — copy into a *target* project, never
   geex's own root (it would deny your editor's writers here).
