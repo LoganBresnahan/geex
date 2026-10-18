@@ -96,11 +96,13 @@ defmodule Geex.Highlight.Reactor do
   Block until the reactor has an overlay for buffer version `>= min_version` (or
   `timeout_ms` elapses). Polls `highlights/1` — for tests and callers that want to
   observe a specific edit's highlighting. Returns `{:ok, overlay}` or
-  `{:error, :timeout}`.
+  `{:error, :timeout}`. The default wait is long (10 s): it returns as soon as the overlay is
+  there, and a first pass compiles a grammar, which on a loaded machine took over the 1 s this
+  once allowed.
   """
   @spec await(GenServer.server(), non_neg_integer(), non_neg_integer()) ::
           {:ok, map()} | {:error, :timeout}
-  def await(reactor, min_version, timeout_ms \\ 1_000) do
+  def await(reactor, min_version, timeout_ms \\ 10_000) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
     do_await(reactor, min_version, deadline)
   end

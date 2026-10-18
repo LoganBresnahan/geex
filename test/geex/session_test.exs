@@ -357,8 +357,9 @@ defmodule Geex.SessionTest do
 
     test "a dirty buffer's rename is not reverted by the reconcile floor (echo-suppressed)" do
       # the global reconciler is gated off under mix test; bring it up for this one test so
-      # the rename actually seeds + the watcher glue runs (events injected, no real inotify).
-      start_supervised!(Geex.Reconcile)
+      # the rename actually seeds + the watcher glue runs (events injected, no real inotify:
+      # its backend is stubbed, or it would watch the shared temp directory for real).
+      start_supervised!({Geex.Reconcile, start_watcher: fn _dir -> :ignore end})
       from = tmp_path()
       to = tmp_path()
       File.write!(from, "orig\n")
@@ -383,7 +384,7 @@ defmodule Geex.SessionTest do
     end
 
     test "a genuine external write after a dirty rename is still caught (not over-suppressed)" do
-      start_supervised!(Geex.Reconcile)
+      start_supervised!({Geex.Reconcile, start_watcher: fn _dir -> :ignore end})
       from = tmp_path()
       to = tmp_path()
       File.write!(from, "orig\n")
@@ -410,7 +411,7 @@ defmodule Geex.SessionTest do
       # ("orig\n"); further edits don't change the baseline, so an event whose disk still equals
       # it is no external *change* and is ignored — the unsaved edits survive. Reconcile compares
       # disk to the baseline, never to the live text.
-      start_supervised!(Geex.Reconcile)
+      start_supervised!({Geex.Reconcile, start_watcher: fn _dir -> :ignore end})
       from = tmp_path()
       to = tmp_path()
       File.write!(from, "orig\n")

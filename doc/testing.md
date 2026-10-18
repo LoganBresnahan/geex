@@ -3079,3 +3079,50 @@ the search; KeyHelp lists them). **1076 tests + 67 doctests**, green twice.
 
 **Deployed** as `0.1.0+ce000aec.89a87236`. In the installed binary (tmux, scratch XDG directories)
 `Alt+Y` then `Alt+D` reversed "Themes", and Ctrl-X was clean.
+
+### 2026-10-18 — BUG-5: the quiet-period test assumed a deadline (fixed), and its kin
+
+**Reproduced.** The method, the coordinator session's:
+- CPU load: `yes > /dev/null` ×8, then ×16, on 8 cores;
+- `mix test test/geex/reconcile_test.exs --repeat-until-failure` alongside.
+
+It failed on the second pass. A temporary copy of the old test alone, repeated under ×16, failed
+again; this time the buffer was behind the sha256 of "v2 done\n".
+
+**The verified cause:** the test's own reconciler, doing what it should. The test writes "v2 half",
+sends an event, writes "v2 done\n", sends another, then checks it is "still quiet", assuming the
+150 ms quiet period outlasts all that. Under load the test process is descheduled past 150 ms:
+- **after both writes:** the reconciler reads the final bytes (the reproduction);
+- **mid-`File.write!`**, after the truncate and before the bytes: it reads `""` (the first
+  sighting).
+
+A temporary probe in `Buffer.disk_changed/2`, logging any call with `""` and its caller,
+recorded none in the reproduction, so no other process read the file. `lib/` was put back
+byte-for-byte.
+
+**The fix:** the test no longer races a clock.
+- Its reconciler's quiet period is an hour, and the test delivers the reconciler's own
+  `{:settled, path, ref}` timers itself. The superseded first one must read nothing, the last
+  must read the final bytes, once.
+- A new test checks that a real 20 ms quiet period runs out by itself, waiting up to 5 s for the
+  result instead of asserting a deadline.
+- `session_test.exs` started the global reconciler three times with the real `inotifywait`
+  backend on the shared temp directory, while saying "no real inotify". That was a hazard but
+  not the cause; they use the stub now.
+
+**Its kin, found by the same load:** at ×8 load, three more tests assumed an idle machine.
+- `tree/watcher_test.exs` slept 300 ms for `inotifywait` to set its watches. It now creates
+  probe files until one's event arrives.
+- It also waited 1 s for a restart that runs `git check-ignore` (now 10 s), and checked "no
+  restart" with a 50 ms `refute_receive` (now `:sys.get_state/1`, then `refute_received`).
+- `Reactor.await/3` (tests only) gave a first pass, which compiles a grammar, 1 s. It now
+  defaults to 10 s, returning as soon as it's there.
+- At ×16, `tree_test.exs`'s 10,000-file test passed ExUnit's 60 s per-test limit. It has 300 s.
+
+**Checked:**
+- under ×16, `reconcile_test.exs` repeated with no failure;
+- under ×8, four full suites (random seeds) green;
+- unloaded, green twice;
+- under ×16 the full suite takes over 140 s, past what I ran it for: oversubscribed twice over.
+
+**1077 tests + 67 doctests.**

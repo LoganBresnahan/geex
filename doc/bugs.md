@@ -30,28 +30,20 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-5 — Flaky: the reconcile quiet-period test finds the buffer behind an *empty* file  (OPEN, 2026-10-18)
+## BUG-5 — Flaky: the reconcile quiet-period test finds the buffer behind an *empty* file  ✅ FIXED (2026-10-18)
 
-- **Status:** open. Seen once in about 13 full-suite runs, while checking the step 6 review's
-  fixes (seed 125550). It didn't recur in 3 runs of that seed, so it depends on timing. No code
-  in this run touched reconcile, apart from its watch dropping `-r` (`31a56fa`).
-- **Symptom:** `test/geex/reconcile_test.exs:299` ("nothing is read until the path is quiet")
-  failed its first assertion: `Buffer.snapshot(buf).behind` was
-  `%{sha256: "e3b0c442…b855", …}` (the sha256 of `""`) right after the two injected events,
-  inside the test's own reconciler's 150 ms quiet period.
-- **What that means:** something called `Buffer.disk_changed/2` with `""` for this test's file.
-  Reading `""` fits a read between `File.write!`'s truncate and its write (the test writes
-  "v2 half", then "v2 done\n"). The test's own reconciler reads only after 150 ms of quiet, and
-  then the file holds "v2 done\n".
-- **Suspects, not confirmed:**
-  - Another reconciler with a real inotify watch on `System.tmp_dir!()`, where this test's
-    file lives. For example `session_test.exs` starts the global `Geex.Reconcile` with the real
-    backend; it says "no real inotify", but its default `start_watcher` is `FileSystem`. Since
-    `BufferSupervisor.whereis/1` is global, any such reconciler finds this test's buffer.
-  - Both modules are `async: false`, so one would have to outlive its test: an `inotifywait`
-    still delivering after its owner stopped.
-- **Next step:** give the reconcile tests their own temp directory (not `/tmp` itself), and make
-  `session_test`'s reconciler use a stub watcher. If the flake stops, that was it.
+- **Status:** **FIXED** 2026-10-18: a test timing assumption, not a product bug. The cause and
+  the verification are in the [testing.md](testing.md) 2026-10-18 entry "BUG-5: the
+  quiet-period test assumed a deadline". `reconcile_test.exs:299` once found the buffer behind
+  `""` inside its reconciler's 150 ms quiet period (seed 125550).
+- **Verified cause:** the test's own reconciler, its quiet period running out as designed while
+  the test process was descheduled past 150 ms. Reproduced under CPU load with the test alone.
+  - A stall mid-`File.write!`, after the truncate and before the bytes, reads `""`: the first
+    sighting.
+  - A stall after both writes reads the final bytes: the reproduction (sha of "v2 done\n").
+  - A probe in `Buffer.disk_changed/2` ruled out any other caller.
+  - The suspect noted here before, `session_test`'s reconciler with a real inotify backend, is
+    a hazard but not this cause. It is stubbed now too.
 
 ---
 

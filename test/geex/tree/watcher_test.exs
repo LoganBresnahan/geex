@@ -51,9 +51,10 @@ defmodule Geex.Tree.WatcherTest do
     # `_build` and `empty` are seen (a new file in them shows up), `_build/dev` and `.git` are not.
     assert dirs == [root | Enum.map(["_build", "empty", "lib", "lib/geex"], &Path.join(root, &1))]
 
-    # The same directories again: the same worker.
+    # The same directories again: the same worker (once the cast is handled, no restart came).
     Watcher.watch(w, root, ["lib/geex", "."], self())
-    refute_receive {:started, _, _}, 50
+    :sys.get_state(w)
+    refute_received {:started, _, _}
   end
 
   test "a burst of creates, deletes and moves is one message; a file's edits are none",
@@ -130,15 +131,17 @@ defmodule Geex.Tree.WatcherTest do
     Watcher.watch(w, root, ["."], self())
     assert_receive {:started, worker, _}
     send(w, {:file_event, worker, {Path.join(root, "new"), [:created, :isdir]}})
-    assert_receive {:started, _new_worker, dirs}
+    # The restart runs `git check-ignore`: slow on a loaded machine, so a long wait.
+    assert_receive {:started, _new_worker, dirs}, 10_000
     assert Path.join(root, "new/a/b") in dirs
     refute Path.join(root, "new/out") in dirs
     assert_receive {:geex_tree_changed, ^root}
 
-    # The next read lists no file under `new/`, and it stays watched.
+    # The next read lists no file under `new/`, and it stays watched. Once the watcher has
+    # handled the cast (get_state waits for that), a restart would already have said so.
     Watcher.watch(w, root, ["."], self())
-    refute_receive {:started, _, _}, 50
     assert Path.join(root, "new/a/b") in :sys.get_state(w).dirs
+    refute_received {:started, _, _}
   end
 
   test "watch/4 is a no-op when no watcher runs" do
@@ -151,33 +154,59 @@ defmodule Geex.Tree.WatcherTest do
       if System.find_executable("inotifywait"), do: :ok, else: {:skip, "no inotifywait"}
     end
 
+    # `inotifywait` sets its watches some time after it starts; on a loaded machine longer than
+    # any fixed sleep (300 ms wasn't). So: make a file in `dir` until its event arrives, then
+    # drop whatever else that brought. After this, `dir` is watched.
+    defp watching(root, dir) do
+      assert Enum.any?(1..100, fn i ->
+               File.write!(Path.join(dir, ".probe-#{i}"), "")
+
+               receive do
+                 {:geex_tree_changed, ^root} -> true
+               after
+                 100 -> false
+               end
+             end),
+             "#{dir} never watched"
+
+      drain(root)
+    end
+
+    defp drain(root) do
+      receive do
+        {:geex_tree_changed, ^root} -> drain(root)
+      after
+        200 -> :ok
+      end
+    end
+
     test "a new file, a file in a new directory, and a deleted file are each reported",
          %{root: root} do
       w = start(delay_ms: 20)
       Watcher.watch(w, root, Watcher.dirs_of(["README.md", "lib/geex/a.ex"]), self())
-      # inotifywait sets its watches after it starts.
-      Process.sleep(300)
+      watching(root, Path.join(root, "lib/geex"))
 
       File.write!(Path.join(root, "lib/geex/b.ex"), "")
-      assert_receive {:geex_tree_changed, ^root}, 2_000
+      assert_receive {:geex_tree_changed, ^root}, 5_000
 
       File.mkdir_p!(Path.join(root, "notes"))
-      assert_receive {:geex_tree_changed, ^root}, 2_000
+      assert_receive {:geex_tree_changed, ^root}, 5_000
       # The loop's next read hands over the new directory.
       Watcher.watch(w, root, Watcher.dirs_of(["README.md", "lib/geex/a.ex"]), self())
-      Process.sleep(300)
+      watching(root, Path.join(root, "notes"))
       File.write!(Path.join(root, "notes/today.md"), "")
-      assert_receive {:geex_tree_changed, ^root}, 2_000
+      assert_receive {:geex_tree_changed, ^root}, 5_000
 
       File.rm!(Path.join(root, "README.md"))
-      assert_receive {:geex_tree_changed, ^root}, 2_000
+      assert_receive {:geex_tree_changed, ^root}, 5_000
 
-      # The coordinator's case: empty nested directories, a file in the deepest one later.
+      # The coordinator's case: empty nested directories, a file in the deepest one later. The
+      # watch on e1/e2 comes from the creation event alone: no read hands it over.
       File.mkdir_p!(Path.join(root, "e1/e2"))
-      assert_receive {:geex_tree_changed, ^root}, 2_000
-      Process.sleep(300)
+      assert_receive {:geex_tree_changed, ^root}, 5_000
+      watching(root, Path.join(root, "e1/e2"))
       File.write!(Path.join(root, "e1/e2/late.txt"), "hi\n")
-      assert_receive {:geex_tree_changed, ^root}, 2_000
+      assert_receive {:geex_tree_changed, ^root}, 5_000
 
       # Nothing under `_build/dev` is watched.
       File.write!(Path.join(root, "_build/dev/x.beam"), "")

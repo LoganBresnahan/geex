@@ -283,9 +283,11 @@ defmodule Geex.ReconcileTest do
   end
 
   describe "write completion: the per-path quiet period (ADR-0032)" do
-    # Wide enough that the "still quiet" check below can't lose the race to the timer under a
-    # loaded full-suite run (40 ms once did).
-    @settle 150
+    # The quiet period never runs out by itself here: the test delivers the reconciler's own
+    # `{:settled, path, ref}` timers when it chooses. With a real one (150 ms, once 40 ms), a
+    # loaded machine could stall this process mid-`File.write!` (after the truncate, before the
+    # bytes) past the quiet period, and the read found "" (BUG-5).
+    @settle :timer.hours(1)
 
     setup do
       recon =
@@ -298,20 +300,28 @@ defmodule Geex.ReconcileTest do
 
     test "nothing is read until the path is quiet; a burst is read once, to the final bytes",
          %{recon: recon} do
-      path = tmp_path()
+      path = Path.expand(tmp_path())
       File.write!(path, "v1\n")
       buf = open_registered(path)
 
       File.write!(path, "v2 half")
       send(recon, {:file_event, self(), {path, [:modified]}})
+      %{^path => first} = :sys.get_state(recon).settling
       File.write!(path, "v2 done\n")
       send(recon, {:file_event, self(), {path, [:modified]}})
-      :sys.get_state(recon)
+      %{^path => last} = :sys.get_state(recon).settling
+      assert first != last
 
       # still inside the quiet period: the half-written state was never read
       assert Buffer.snapshot(buf).behind == nil
 
-      Process.sleep(@settle * 3)
+      # the first event's timer was superseded by the second's: it reads nothing
+      send(recon, {:settled, path, first})
+      :sys.get_state(recon)
+      assert Buffer.snapshot(buf).behind == nil
+
+      # the path went quiet: read once, now
+      send(recon, {:settled, path, last})
       :sys.get_state(recon)
 
       # the buffer holds (ADR-0034); it was told about the final bytes only
@@ -323,6 +333,28 @@ defmodule Geex.ReconcileTest do
       assert snap.text == "v2 done\n"
       groups = snap.history |> Enum.map(& &1.meta.reconcile.group) |> Enum.uniq()
       assert length(groups) == 1
+    end
+
+    test "a real quiet period runs out by itself, and the file is read then" do
+      recon =
+        start_supervised!(
+          {Reconcile, name: :"recon_#{System.unique_integer([:positive])}", settle_ms: 20},
+          id: :short_settle
+        )
+
+      path = tmp_path()
+      File.write!(path, "v1\n")
+      buf = open_registered(path)
+      File.write!(path, "v2\n")
+      send(recon, {:file_event, self(), {path, [:modified]}})
+
+      # However long the machine takes, not a deadline: wait for it, up to 5 s.
+      assert Enum.any?(1..250, fn _ ->
+               Process.sleep(20)
+               Buffer.snapshot(buf).behind != nil
+             end)
+
+      assert Buffer.snapshot(buf).behind.sha256 == hex("v2\n")
     end
   end
 

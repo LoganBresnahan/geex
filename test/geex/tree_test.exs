@@ -45,6 +45,9 @@ defmodule Geex.TreeTest do
     assert Tree.list(dir) == [".gitignore", "new.ex", "tracked.ex"]
   end
 
+  # Writes 10,000 files and runs git over them: on a heavily loaded machine that took past
+  # ExUnit's 60 s limit for a test.
+  @tag timeout: 300_000
   test "no cap: past 10,000 files, the walk and git list them all", %{dir: dir} do
     # Found live by the coordinator: the old cap cut the list without saying so (untracked files
     # first, since git lists them last). Logan's call (2026-10-16): no cap at all.
