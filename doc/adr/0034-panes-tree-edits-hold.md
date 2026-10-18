@@ -369,9 +369,13 @@ session.
   with `inotifywait -r`, so a file at the root put the whole tree, `_build/` and `.git/`
   included, under inotify. Each open file's directory has its own watch, so recursion added
   only noise.
-- **Not covered:** after `mkdir -p a/b`, `a` is watched once the read its creation caused
-  answers, and `a/b` only once `a/b` holds a listed file. A file written into the still-empty
-  `a/b` after that read shows on the next change elsewhere, or `Alt+O`.
+- **A directory made is watched at once, with what's under it.** On a create or move-in of a
+  directory, the watcher adds it and every directory below it that isn't a dot-directory or
+  ignored by git (`git check-ignore`, level by level, so an ignored subtree is never walked).
+  They stay watched while they exist, even empty. The coordinator's live check of the first
+  version found the gap this closes: `mkdir -p e1/e2`, then a file in `e1/e2` a second later,
+  never showed, because a read lists no file in an empty directory, so `e1/e2` was never
+  watched. Agents do exactly this (`mkdir -p` in a shell, a `Write` later).
 
 ## Consequences
 

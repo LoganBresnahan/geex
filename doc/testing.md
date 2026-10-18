@@ -2589,3 +2589,39 @@ during a read reads once more, and the highlight keeps its file when a row comes
 
 **Not tested:** a root past 4096 directories; reconcile's watch, now non-recursive, beyond the
 suite (each open file's directory still has its own watch).
+
+### 2026-10-18 — An agent's created file reaches the edits pane (ADR-0032); a new directory is watched at once
+
+Two follow-ups:
+- **Created files.** The payload now sends `created: true` for a `Write` that created its
+  file, and geex lists it as the agent's.
+- **Nested directories.** The coordinator's live check of `31a56fa` found that `mkdir -p e1/e2`,
+  then a file in `e1/e2` a second later, never showed. A directory made is now watched at once
+  with what's under it that git doesn't ignore.
+
+**Live** (`mix run` in tmux, 140×34, a scratch repository with `/_build/` ignored, scratch
+`XDG_RUNTIME_DIR` and state):
+- `geex-attest.sh` with the real `write-create.jsonl` envelope, aimed at a new
+  `made-by-agent.txt` (`GEEX_ATTEST_DIR` set to this geex's discovery directory), exited 0. The
+  tree showed the file, and the edits pane a row `made-by-agent.txt  claude-code/56544d6f`.
+- `mkdir -p e1/e2 _build/prod/x`, 1.5 s, `echo hi > e1/e2/late.txt`: `e1/` appeared. The watch
+  covered `e1` and `e1/e2`, not `_build/prod`.
+- After Ctrl-X: no `inotifywait` left, and no warnings in the log.
+
+**Automated:**
+- `attest_payload_test.exs`:
+  - `write-create.jsonl` sends `created`, `sha256` and the ids, with no `before`;
+  - a writer with null prior text that isn't a create sends nothing;
+  - through the real `POST /attest`, an unopened created file is an agent row;
+  - a fresh empty buffer credits the create on fast-forward;
+  - a buffer that held text keeps `:external`.
+- `ledger_test.exs`: a spooled `created` line starts from `""`.
+- `watcher_test.exs`:
+  - `new_dirs/2` skips dot-directories and git-ignored ones;
+  - a directory-create event restarts the watch over its subtree, which outlasts the next read;
+  - the real-inotify test now covers the late nested file.
+- **1017 tests + 54 doctests**: the new tests passed 30 repeats. Of 30 full-suite runs, one had a
+  failure whose test I didn't capture; 28 further runs were clean.
+
+**Not tested:** a real Claude Code `Write` creating a file through captAInHook (the envelope is
+the captured fixture); the flaky failure above.

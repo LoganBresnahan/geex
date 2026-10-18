@@ -8,10 +8,14 @@ defmodule Geex.Tree.Watcher do
   files it listed, with `watch/4`. This process watches those, the root, and each one's
   immediate subdirectories but dot-directories, **without** recursion: an ignored tree like
   `_build/`, `deps/` or `.git/` is never descended into, while a new directory beside the files
-  is seen as soon as it is made, and watched from the next read. A create, delete or move
-  there sends the loop `{:geex_tree_changed, root}` once, `delay_ms` after the first event of a
-  burst; the loop reads the files again, off the loop (ADR-0035), and that read hands over the
-  new directories. Changes to a file's content don't move the tree and are not reported.
+  is seen as soon as it is made. A create, delete or move there sends the loop
+  `{:geex_tree_changed, root}` once, `delay_ms` after the first event of a burst; the loop reads
+  the files again, off the loop (ADR-0035), and that read hands over the new directories.
+  Changes to a file's content don't move the tree and are not reported.
+
+  A directory made (or moved in) is watched at once with everything under it that git doesn't
+  ignore, and stays watched while it exists, even empty: `mkdir -p a/b`, then a file in `a/b`
+  later, is seen. Without that, `a/b` would wait for a read to list a file in it.
 
   The watch is one `:file_system` worker (`inotifywait`) over every directory. When the set
   changes, a new worker starts before the old one stops, so nothing falls in between. If the
@@ -63,6 +67,8 @@ defmodule Geex.Tree.Watcher do
        root: nil,
        notify: nil,
        dirs: nil,
+       # Directories made since the root was set, and what was under them (`new_dirs/2`).
+       made: [],
        worker: nil,
        timer: nil,
        failures: 0,
@@ -74,12 +80,13 @@ defmodule Geex.Tree.Watcher do
 
   @impl true
   def handle_cast({:watch, root, rel_dirs, notify}, state) do
-    state = %{state | notify: notify}
+    made = if state.root == root, do: Enum.filter(state.made, &File.dir?/1), else: []
+    state = %{state | notify: notify, made: made}
 
     dirs =
       case watch_dirs(root, rel_dirs) do
         {:ok, dirs} ->
-          dirs
+          Enum.sort(Enum.uniq(dirs ++ made))
 
         {:capped, n, dirs} ->
           if state.dirs != dirs,
@@ -94,8 +101,13 @@ defmodule Geex.Tree.Watcher do
   end
 
   @impl true
-  def handle_info({:file_event, worker, {_path, events}}, %{worker: worker} = state) do
+  def handle_info({:file_event, worker, {path, events}}, %{worker: worker} = state) do
     state = %{state | failures: 0}
+
+    state =
+      if :isdir in events and Enum.any?(events, &(&1 in [:created, :moved_to])),
+        do: made_dir(state, Path.expand(path)),
+        else: state
 
     if state.timer == nil and Enum.any?(events, &(&1 in @tree_events)) do
       {:noreply, %{state | timer: Process.send_after(self(), :changed, state.delay_ms)}}
@@ -131,6 +143,64 @@ defmodule Geex.Tree.Watcher do
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # A directory was made or moved in: watch it and what's under it now, so files written there
+  # later are seen whether or not a read has listed one yet. Its own subdirectories made later
+  # come here by their own events.
+  defp made_dir(%{dirs: dirs} = state, path) when is_list(dirs) do
+    case new_dirs(state.root, [path]) -- dirs do
+      [] ->
+        state
+
+      found ->
+        made = Enum.uniq(state.made ++ found)
+        restart(%{state | made: made}, Enum.sort(dirs ++ found))
+    end
+  end
+
+  defp made_dir(state, _path), do: state
+
+  @doc false
+  # `dirs` and every directory under them, level by level, but dot-directories and what git
+  # ignores under `root`; at most @max_dirs.
+  @spec new_dirs(String.t(), [String.t()]) :: [String.t()]
+  def new_dirs(root, dirs), do: new_dirs(root, dirs, [])
+
+  defp new_dirs(_root, [], acc), do: acc
+
+  defp new_dirs(root, level, acc) do
+    level =
+      level
+      |> Enum.reject(&String.starts_with?(Path.basename(&1), "."))
+      |> Enum.filter(&File.dir?/1)
+      |> not_ignored(root)
+
+    acc = acc ++ level
+
+    if length(acc) >= @max_dirs,
+      do: Enum.take(acc, @max_dirs),
+      else: new_dirs(root, Enum.flat_map(level, &subdirs/1), acc)
+  end
+
+  # Drop the paths git ignores under `root`. Outside a repository (or without git), none are.
+  defp not_ignored([], _root), do: []
+
+  defp not_ignored(paths, root) do
+    ignored =
+      paths
+      |> Enum.chunk_every(500)
+      |> Enum.flat_map(fn chunk ->
+        case System.cmd("git", ["-C", root, "check-ignore", "--" | chunk], stderr_to_stdout: true) do
+          {out, 0} -> String.split(out, "\n", trim: true)
+          _none_or_no_repo -> []
+        end
+      end)
+
+    paths -- ignored
+  rescue
+    # No git on the PATH.
+    ErlangError -> paths
+  end
 
   # Start the new worker, then stop the old one, so no event falls between them.
   defp restart(state, dirs) do

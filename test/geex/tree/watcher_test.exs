@@ -117,6 +117,30 @@ defmodule Geex.Tree.WatcherTest do
     assert %{worker: nil, warned: true} = :sys.get_state(w)
   end
 
+  test "a directory made is watched at once with what's under it, but not what git ignores",
+       %{root: root} do
+    {_, 0} = System.cmd("git", ["init", "-q", root])
+    File.write!(Path.join(root, ".gitignore"), "/new/out/\n")
+    for d <- ["new/a/b", "new/out/deep", "new/.hidden"], do: File.mkdir_p!(Path.join(root, d))
+
+    assert Watcher.new_dirs(root, [Path.join(root, "new")]) ==
+             Enum.map(["new", "new/a", "new/a/b"], &Path.join(root, &1))
+
+    w = start(start_worker: stub(self()), delay_ms: 20)
+    Watcher.watch(w, root, ["."], self())
+    assert_receive {:started, worker, _}
+    send(w, {:file_event, worker, {Path.join(root, "new"), [:created, :isdir]}})
+    assert_receive {:started, _new_worker, dirs}
+    assert Path.join(root, "new/a/b") in dirs
+    refute Path.join(root, "new/out") in dirs
+    assert_receive {:geex_tree_changed, ^root}
+
+    # The next read lists no file under `new/`, and it stays watched.
+    Watcher.watch(w, root, ["."], self())
+    refute_receive {:started, _, _}, 50
+    assert Path.join(root, "new/a/b") in :sys.get_state(w).dirs
+  end
+
   test "watch/4 is a no-op when no watcher runs" do
     assert Watcher.watch(:no_such_tree_watcher, "/x", ["."], self()) == :ok
   end
@@ -146,6 +170,13 @@ defmodule Geex.Tree.WatcherTest do
       assert_receive {:geex_tree_changed, ^root}, 2_000
 
       File.rm!(Path.join(root, "README.md"))
+      assert_receive {:geex_tree_changed, ^root}, 2_000
+
+      # The coordinator's case: empty nested directories, a file in the deepest one later.
+      File.mkdir_p!(Path.join(root, "e1/e2"))
+      assert_receive {:geex_tree_changed, ^root}, 2_000
+      Process.sleep(300)
+      File.write!(Path.join(root, "e1/e2/late.txt"), "hi\n")
       assert_receive {:geex_tree_changed, ^root}, 2_000
 
       # Nothing under `_build/dev` is watched.
