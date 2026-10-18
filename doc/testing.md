@@ -2559,3 +2559,33 @@ from `/proc`; the `stale_unpacks/3` doctest. **1004 tests + 52 doctests**, green
 
 **Not tested:** a dirty deploy over a running geex of the same dirty version (it stops, by
 reading the code); `--rollback` to the kept `geex.prev` unpack.
+
+### 2026-10-18 — The tree follows files coming and going (ADR-0034 amendment)
+
+The maintainer saw `NOTICE` and `README.md` never appear in an open `geex .`'s tree.
+`Geex.Tree.Watcher` now watches, without recursion, the root, the directories holding listed
+files and their immediate subdirectories, and the loop reads the files again on a create,
+delete or move.
+
+**Live** (`mix run` in tmux, `-L geexdf`, 120×30, a scratch repository with `lib/m.ex`, `a.txt`
+and an ignored `_build/dev`):
+- `inotifywait` ran with no `-r`, over the root, `_build` and `lib`.
+- `echo n > NOTICE` from outside: `NOTICE` showed within a second.
+- `mkdir notes`, then a file in it: `notes/` showed. The watch was restarted over the root,
+  `_build`, `lib` and `notes`, one `inotifywait` at a time. A second file in `notes/` raised no
+  error.
+- `rm a.txt`: gone from the tree. `mv lib/m.ex lib/n.ex`, and later (with `lib/` opened by a
+  click) `renamed.ex` to `again.ex`: the open folder showed the new name in place.
+- A `touch _build/dev/x.beam` changed nothing.
+- After Ctrl-X no `inotifywait` was left, and the log had no warnings or errors.
+
+**Automated:** `test/geex/tree/watcher_test.exs` (7 tests + a doctest): the directories it
+watches, a burst being one message and edits none, a new set starting a new worker before the
+old one stops, a stopped worker asking for a read and giving up after two, no backend, and,
+where `inotifywait` exists, a real watch (a new file, a file in a new directory after the next
+read, a deletion, nothing from `_build/dev`). `panes_test.exs`: a change reads again, a change
+during a read reads once more, and the highlight keeps its file when a row comes in above it.
+**1012 tests + 53 doctests**, green twice.
+
+**Not tested:** a root past 4096 directories; reconcile's watch, now non-recursive, beyond the
+suite (each open file's directory still has its own watch).

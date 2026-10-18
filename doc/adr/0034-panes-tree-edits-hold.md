@@ -6,7 +6,8 @@
   is read in a process of its own. **Keys amended** 2026-10-17 by
   [ADR-0037](0037-pane-and-file-keys.md): `Alt+P` is the next pane, `Alt+L` the edits pane,
   `Alt+J` fast-forward, `Alt+O` opens a file. **Splits and tabs** (deferred here) built
-  2026-10-17 by [ADR-0038](0038-split-panes-and-tabs.md).
+  2026-10-17 by [ADR-0038](0038-split-panes-and-tabs.md). **Amended** 2026-10-18: the tree
+  follows files coming and going (`Geex.Tree.Watcher`), and reconcile's watch isn't recursive.
   Rewritten the same day after the maintainer's redirect: the first draft's follow pane is dropped.
 - **Date:** 2026-10-15
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell; it deferred tabs and
@@ -165,7 +166,8 @@ the hold.
   aren't ignored). Outside a repository, it is a directory walk that skips dot-directories. (Capped
   at 10,000 entries until the 2026-10-16 amendment below: now no cap.)
 - **Plain:** names only. Directories start collapsed. Enter toggles a directory or opens a file.
-- **Re-read** whenever the tree is shown or takes focus. There is no directory watcher.
+- **Re-read** whenever the tree is shown or takes focus. There is no directory watcher. (Until
+  the 2026-10-18 amendment below: now it follows files coming and going by itself.)
 
 ### 6. The edits pane
 
@@ -337,6 +339,39 @@ directory open or close rebuilt the rows from every file (14 s).
   4.1 s (8.5 s in one process). Live, the editor took keys 0.8 s after launch and the tree filled at
   17 s; a directory opened or closed in about 60 ms; the VM held about 500 MB. The geex repository's
   tree still shows within a second of launch.
+
+### Amended 2026-10-18: the tree follows files coming and going
+
+The maintainer, watching an agent add `NOTICE` and `README.md` to geex with `geex .` open, saw
+neither appear: the tree was read again only on `Alt+O` or `Alt+T`. Relayed by the coordinator
+session.
+
+- **`Geex.Tree.Watcher`**, started with the loop, watches the directories each read found:
+  the root, each that holds a listed file, and each one's immediate subdirectories but
+  dot-directories. **Not recursive**, so an ignored tree (`_build/`, `deps/`, `.git/`,
+  `node_modules/`) is never descended into; its top directory is watched, so a new directory
+  beside the files is seen when it is made, and its files from the next read on. The reader
+  process hands the directories over (`Geex.Tree.Watcher.watch/4`), so the loop never touches
+  the file list.
+- **What counts:** a create, delete or move in those directories. A file's edits don't. The
+  first event of a burst sends the loop `{:geex_tree_changed, root}` 150 ms later, once. The loop
+  reads the files again in the background, as on `Alt+T`; a change during a read reads once more
+  after it. The highlight stays on its row's file when rows come or go above it.
+- **The watch** is one `:file_system` worker (`inotifywait`, no `-r`) over every directory.
+  When the set changes, a new worker starts before the old one stops. A worker that stops (a
+  directory gone before `inotifywait` started) asks for a read, which restarts it; after two
+  stops in a row with no event between, it waits for the next read. Without `inotify-tools`
+  it logs once and the tree is read on `Alt+O`/`Alt+T` as before.
+- **Big roots:** past 4096 directories, only the root and its own subdirectories are watched.
+  The home directory of the 2026-10-16 measurement stays usable; new files deeper down show on
+  `Alt+O`.
+- **Reconcile's watch is no longer recursive either.** It watched each open file's directory
+  with `inotifywait -r`, so a file at the root put the whole tree, `_build/` and `.git/`
+  included, under inotify. Each open file's directory has its own watch, so recursion added
+  only noise.
+- **Not covered:** after `mkdir -p a/b`, `a` is watched once the read its creation caused
+  answers, and `a/b` only once `a/b` holds a listed file. A file written into the still-empty
+  `a/b` after that read shows on the next change elsewhere, or `Alt+O`.
 
 ## Consequences
 

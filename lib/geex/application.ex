@@ -61,10 +61,11 @@ defmodule Geex.Application do
   # terminal: it drives Geex.TerminalIO (and would block on `window_size` without
   # it), so it is meaningless headless. Off under `mix test`, like the terminal.
   # Starts after Session / Renderer / ReactorSupervisor, which it subscribes to and
-  # renders through.
+  # renders through. The tree's watcher (ADR-0034 §5) goes with it: it tells the loop when
+  # files under the root come and go.
   defp loop_child do
     if Application.get_env(:geex, :start_terminal, true) do
-      [Geex.Loop]
+      [Geex.Tree.Watcher, Geex.Loop]
     else
       []
     end

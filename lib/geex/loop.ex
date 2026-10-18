@@ -279,10 +279,13 @@ defmodule Geex.Loop do
       # `files` is the same read's file list, packed for the finder (`Geex.Finder.pack/1`).
       # `top` is the first row shown and `hold` the `sel` the wheel last scrolled at
       # (`settle_lists/3`, ADR-0039).
+      # `again` when the files changed on disk while a read ran (`Geex.Tree.Watcher`), so it
+      # reads once more when that one answers.
       tree: %{
         index: nil,
         files: nil,
         reading: nil,
+        again: false,
         open: MapSet.new(),
         rows: [],
         sel: 0,
@@ -452,11 +455,21 @@ defmodule Geex.Loop do
       ) do
     Process.demonitor(ref, [:flush])
     rows = Tree.rows(index, tree.open)
-    sel = min(tree.sel, max(length(rows) - 1, 0))
-    tree = %{tree | index: index, files: files, reading: nil, rows: rows, sel: sel}
+    # The highlight stays on its row's path when rows come or go above it.
+    sel =
+      with %{path: path} <- Enum.at(tree.rows, tree.sel),
+           i when is_integer(i) <- Enum.find_index(rows, &(&1.path == path)) do
+        i
+      else
+        _ -> min(tree.sel, max(length(rows) - 1, 0))
+      end
+
+    again = tree.again
+    tree = %{tree | index: index, files: files, reading: nil, again: false, rows: rows, sel: sel}
     # An open finder searches the new list; if Enter is waiting and no search is needed (a blank
     # query), it opens the first file now.
     state = refresh_matches(%{state | tree: tree})
+    state = if again, do: reload_tree(state), else: state
 
     if state.finder.submit and state.finder.matching == nil and
          state.minibuffer.mode == :files,
@@ -493,12 +506,22 @@ defmodule Geex.Loop do
     {:noreply, schedule_repaint(state)}
   end
 
+  # Files under the root came or went (`Geex.Tree.Watcher`): read them again, once the tree has
+  # been read at all. A read under way reads once more when it answers.
+  def handle_info({:geex_tree_changed, _root}, %{tree: %{index: nil}} = state),
+    do: {:noreply, state}
+
+  def handle_info({:geex_tree_changed, _root}, %{tree: %{reading: {_, _}}} = state),
+    do: {:noreply, put_in(state.tree.again, true)}
+
+  def handle_info({:geex_tree_changed, _root}, state), do: {:noreply, reload_tree(state)}
+
   # The tree's reader died before answering. Say so, and keep what is shown: an empty index
   # rather than none, so the next frame doesn't start another read that dies the same way.
   # Showing or focusing the tree tries again.
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{tree: %{reading: {_, ref}}} = state) do
     Logger.warning("geex tree: reading the files failed: #{inspect(reason)}")
-    tree = %{state.tree | reading: nil, index: state.tree.index || %{}}
+    tree = %{state.tree | reading: nil, again: false, index: state.tree.index || %{}}
     notice = "the file tree couldn't be read (see #{Path.join(System.tmp_dir!(), "geex.log")})"
     {:noreply, schedule_repaint(%{state | tree: tree, notice: notice})}
   end
@@ -1783,13 +1806,15 @@ defmodule Geex.Loop do
 
       root ->
         loop = self()
-        reader = spawn_monitor(fn -> send(loop, {:geex_tree, self(), read_tree(root)}) end)
+        reader = spawn_monitor(fn -> send(loop, {:geex_tree, self(), read_tree(root, loop)}) end)
         put_in(state.tree.reading, reader)
     end
   end
 
-  defp read_tree(root) do
+  # The read also hands the watcher the directories it found, so new files there are seen.
+  defp read_tree(root, loop) do
     files = Tree.list(root)
+    Tree.Watcher.watch(root, Tree.Watcher.dirs_of(files), loop)
     {Finder.pack(files), Tree.index(files)}
   end
 

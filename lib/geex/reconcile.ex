@@ -38,8 +38,8 @@ defmodule Geex.Reconcile do
       writes disk, so it cannot echo or loop. It contains a `:exit` from a buffer that
       died under it, so one buffer's death never crashes the reconciler.
 
-    * **The watcher — the GenServer** watches the directory of each open buffer (via
-      the `:file_system` library) and turns a `{:file_event, _, {path, _}}` into a
+    * **The watcher — the GenServer** watches the directory of each open buffer, not its
+      subdirectories (via the `:file_system` library) and turns a `{:file_event, _, {path, _}}` into a
       `reconcile/2` call, resolving the buffer by path through `Geex.Registry`. Watch
       and resolution both key on the lexical (`Path.expand`-ed) path, matching the
       buffer-dedup identity (ADR-0019); symlinked aliases aren't canonicalized. A
@@ -512,8 +512,10 @@ defmodule Geex.Reconcile do
     end
   end
 
+  # Not recursive: each open file's own directory has its own watch, so a file at the root
+  # doesn't put the whole tree (`_build/`, `deps/`, `.git/`) under inotify.
   defp start_filesystem(dir) do
-    FileSystem.start_link(dirs: [dir])
+    FileSystem.start_link(dirs: [dir], recursive: false)
   rescue
     exception -> {:error, Exception.message(exception)}
   end

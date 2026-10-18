@@ -142,6 +142,36 @@ defmodule Geex.Loop.PanesTest do
     refute_received {:DOWN, _, :process, ^pid, _}
   end
 
+  test "files coming and going read the tree again, once more if a read was running; the highlight keeps its file",
+       %{dir: dir} do
+    # Not read yet: nothing to refresh.
+    fresh = Loop.new_state(120, 30)
+    assert Loop.handle_info({:geex_tree_changed, dir}, fresh) == {:noreply, fresh}
+
+    state = key(fresh, {:alt, ?p}) |> key({:alt, ?p}) |> tree_read()
+    state = %{state | tree: %{state.tree | open: MapSet.new(["lib"])}}
+    state = put_in(state.tree.rows, Geex.Tree.rows(state.tree.index, state.tree.open))
+    # The highlight on lib/a.ex, the second row.
+    state = put_in(state.tree.sel, 1)
+
+    File.write!(Path.join(dir, "lib/0.ex"), "")
+    {:noreply, state} = Loop.handle_info({:geex_tree_changed, dir}, state)
+    assert {_pid, _ref} = state.tree.reading
+
+    # Another change while it reads: one more read after it answers.
+    {:noreply, state} = Loop.handle_info({:geex_tree_changed, dir}, state)
+    assert state.tree.again
+    first = state.tree.reading
+    state = tree_read(state)
+    assert {_, _} = state.tree.reading
+    assert state.tree.reading != first
+    refute state.tree.again
+
+    state = tree_read(state)
+    assert Enum.map(state.tree.rows, & &1.path) == ["lib", "lib/0.ex", "lib/a.ex"]
+    assert Enum.at(state.tree.rows, state.tree.sel).path == "lib/a.ex"
+  end
+
   @tag :capture_log
   test "a reader that dies before answering: a notice, and no read again until asked" do
     {pid, ref} = spawn_monitor(fn -> exit(:boom) end)
