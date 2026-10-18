@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-18):** 1003 tests + 51 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
+**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -471,10 +471,32 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    - Later (the coordinator's note, 2026-10-17): an `outside` edits entry opens its file where the
      cursor was, as Enter does; only tool-call entries jump to their first changed line. Jumping
      to an outside change's first line would be a nicety.
+12. **geex ships bare; grammars and themes from a catalog** ([adr/0040](adr/0040-bare-geex-and-the-catalog.md))
+   — the maintainer's 2026-10-18 decisions, relayed by the coordinator session, after the
+   relicense to Apache-2.0 (step 0, done 2026-10-18):
+   1. **The decision** — **ADR-0040, 2026-10-18.**
+   2. **A disk cache for compiled wasm**, in `tree_sitter_wasm` (wasmtime's cache; a warm load in
+      a few ms instead of ~160 ms for Elixir).
+   3. **The built-in palette and the "terminal" syntax theme** (the terminal's own colours; OSC
+      11 for tints, checked on Windows Terminal).
+   4. **The catalog builder** — `catalog/` recipes, a mix task that builds each package with the
+      pinned tree-sitter CLI and writes `catalog.json`; the first 16 grammars and Birds of
+      Paradise.
+   5. **Install and load at runtime** — `:httpc` + sha256, `$XDG_DATA_HOME/geex/{grammars,themes}`,
+      the extension map from the manifests, `geex install`, no request at startup.
+   6. **`Alt+Y`, the settings view** — Languages, Themes, Keys, General; the "highlighting
+      available" hint (ADR-0037 amended).
+   7. **Go bare** — `priv/grammars` and `priv/themes` removed; tests on fixtures.
+   - **Not covered: injections** (HEEx inside `~H`, JavaScript inside `<script>`). The NIF runs one
+     grammar per file; embedded languages stay the host's colour. Needs the NIF to run
+     `injections.scm` and combine the layers.
+   - The user config (`config.toml`, [adr/0025](adr/0025-user-config-layer.md)) is still unbuilt;
+     ADR-0023's `[grammars]` path line waits for it. `geex install ./path` is the offline path
+     meanwhile.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the
-tty) is **FIXED** (2026-10-16); the shelf is currently clear.
+tty) is **FIXED** (2026-10-16), and BUG-4 (a deploy removed a running geex's unpack) is **FIXED** (2026-10-18); the shelf is currently clear.
 
 ---
 

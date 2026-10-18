@@ -1,6 +1,8 @@
 # ADR-0023: Theming & how themes / grammars / extensions are loaded
 
-- **Status:** Accepted
+- **Status:** Accepted. **§5 and §7 amended 2026-10-18 by
+  [ADR-0040](0040-bare-geex-and-the-catalog.md):** geex ships no grammar or theme, and installs
+  them, on the user's word only, from a catalog each release pins by sha256. §4 and §6 stand.
 - **Date:** 2026-06-07
 - **Refines:** [ADR-0021](0021-capability-connections.md), [ADR-0009](0009-three-tier-extension-model.md)
 
