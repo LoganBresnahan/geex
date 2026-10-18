@@ -3076,3 +3076,6 @@ Keys, with its search still empty. The footer read "← → or Alt+A Alt+D tabs"
 
 **Automated:** `settings_test.exs` (`Alt+D`/`Alt+A` in both cases, wrapping, never typed into
 the search; KeyHelp lists them). **1076 tests + 67 doctests**, green twice.
+
+**Deployed** as `0.1.0+ce000aec.89a87236`. In the installed binary (tmux, scratch XDG directories)
+`Alt+Y` then `Alt+D` reversed "Themes", and Ctrl-X was clean.
