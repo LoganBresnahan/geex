@@ -2673,3 +2673,31 @@ and highlights the same.
 
 **Not tested:** the installed binary's first start with an empty cache against a warm one (next,
 with the deploy); a wasmtime version bump for real.
+
+### 2026-10-18 — `geex 0.1.0+10439898` deployed (the wasm cache, a stripped NIF)
+
+**Two deploys from `1043989`**, both from a clean tree with 1018 tests + 54 doctests green:
+- The first had the cache, with the NIF unstripped.
+- The second followed `tree_sitter_wasm` 89a8723 (`strip = true`).
+
+Both are `0.1.0+10439898`, since the version names geex's commit only. So `geex.prev` is now the
+first of the two and shares the new one's unpack directory name: a `--rollback` to it would run
+from the stripped build's files. That is harmless here, since the code is the same, but a
+version doesn't name a changed sibling dependency.
+
+**Sizes:**
+- **The NIF:** 17.1 MB before (the coordinator's measurement), 18.7 MB with wasmtime's cache
+  feature, 14.5 MB stripped.
+- **The installed binary:** 22.6 MB, then 22.1 MB.
+
+**Live** (`geex` from the PATH in tmux, `-L deploy`, scratch state, `TMPDIR` and
+`XDG_CACHE_HOME`):
+- `--version` printed `geex 0.1.0+10439898`.
+- `geex a.ex b.json` highlighted `defmodule` in Birds of Paradise's keyword orange.
+- After the first run, the cache held three compiled modules (tree-sitter's stdlib, Elixir,
+  JSON). A second run added none.
+- Ctrl-X both times: alternate screen and mouse off, no `terminating` lines, the discovery file
+  gone.
+
+**Not tested:** how much sooner the first frame is highlighted with a warm cache; the
+measurement is the step's NIF and `Grammars` numbers above.
