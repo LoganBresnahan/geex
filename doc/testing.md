@@ -3436,3 +3436,36 @@ can clobber one generation) is now named in ADR-0034's amendment and in `log.ex`
 **Deployed** as `0.1.0+573091e7.89a87236`. I ran the coordinator's repro in the installed
 binary (tmux, scratch `XDG_STATE_HOME`): two saves, a torn fragment, a relaunch, two more saves.
 The next start showed all four rows under `── earlier ──`.
+
+### 2026-10-18 — installed rows in light blue in the Alt+Y view (ADR-0040 §7)
+
+**What changed:**
+- `Geex.Theme.Palette` has an `installed` slot: a theme's `"installed"`, else ANSI 14 when dark
+  and ANSI 4 when light. The terminal theme picks the same way by its background.
+- Languages and Themes rows carry `installed`: an installed package (an update or not), or the
+  theme in use.
+- `Settings.draw/4` draws such a row's text in the slot, highlighted or not.
+
+**Automated:**
+- `settings_test.exs`, through `Settings.draw/4` with a distinct slot colour:
+  - Elixir (installed) draws in the slot and Rust (available) in `fg`;
+  - highlighted, Elixir keeps the slot on the highlight's background;
+  - on Themes, the built-in theme counts only while in use.
+- `theme/load_test.exs`: a theme's `"installed"` is read; unset it gives 4 when light and 14
+  when dark; a bad value is an error.
+- `theme_test.exs`: the terminal palette gives 14 with no background or a dark one, and 4 on a
+  light one.
+
+**Live, dev build in tmux** (120 × 30, the maintainer's own data directory, Birds of Paradise
+in use):
+- On Languages, Bash, CSS, Elixir and HTML (installed) drew in SGR 96, bright cyan, and Erlang,
+  Go and HEEx (available) in Birds' `fg`.
+- The highlighted Bash row was cyan on Birds' active-line background.
+- On Themes, Birds of Paradise (installed, in use) was cyan, and the terminal theme plain.
+
+**1104 tests + 79 doctests**, green twice.
+
+**Not checked:**
+- a light theme live;
+- Birds of Paradise with its own slot colour (the catalog package isn't changed: that needs a
+  rebuild and an upload).

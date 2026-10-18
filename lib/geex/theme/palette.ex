@@ -10,6 +10,10 @@ defmodule Geex.Theme.Palette do
   row, the selection, the minibuffer line): `[]` for a theme with real colours there, and
   `[:reverse]` for the terminal palette when it doesn't know the terminal's background, so the
   pick still shows.
+
+  `installed` is the colour of what is installed in the `Alt+Y` view (a grammar, a theme, the
+  theme in use): a light blue (ADR-0040 §7). A theme file sets it as `"installed"`; one that
+  doesn't gets ANSI bright cyan when dark, blue when light.
   """
 
   @enforce_keys [:bg, :fg]
@@ -21,6 +25,7 @@ defmodule Geex.Theme.Palette do
     :active_line_bg,
     :cursor,
     :selection,
+    installed: {:ansi, 14},
     mark: []
   ]
 
@@ -32,6 +37,7 @@ defmodule Geex.Theme.Palette do
           active_line_bg: Geex.Cell.colour(),
           cursor: Geex.Cell.colour(),
           selection: Geex.Cell.colour(),
+          installed: Geex.Cell.colour(),
           mark: [Geex.Cell.attr()]
         }
 end

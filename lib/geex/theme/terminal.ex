@@ -111,17 +111,22 @@ defmodule Geex.Theme.Terminal do
       active_line_bg: :default,
       cursor: {:ansi, 3},
       selection: :default,
+      # What the Alt+Y view shows as installed: bright cyan, the terminal's light blue.
+      installed: {:ansi, 14},
       mark: [:reverse]
     }
   end
 
   defp palette({:rgb, _, _, _} = bg) do
-    toward = if appearance(bg) == :dark, do: {:rgb, 255, 255, 255}, else: {:rgb, 0, 0, 0}
+    dark? = appearance(bg) == :dark
+    toward = if dark?, do: {:rgb, 255, 255, 255}, else: {:rgb, 0, 0, 0}
 
     %{
       palette(nil)
       | active_line_bg: mix(bg, toward, @active_line),
         selection: mix(bg, toward, @selection),
+        # On a light background cyan washes out: blue.
+        installed: if(dark?, do: {:ansi, 14}, else: {:ansi, 4}),
         mark: []
     }
   end

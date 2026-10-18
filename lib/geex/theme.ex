@@ -124,7 +124,7 @@ defmodule Geex.Theme do
   def from_json(%{} = data) do
     with {:ok, name} <- req_string(data, "name"),
          {:ok, appearance} <- appearance(data),
-         {:ok, palette} <- build_palette(data),
+         {:ok, palette} <- build_palette(data, appearance),
          {:ok, syntax} <- build_syntax(Map.get(data, "syntax", %{}), palette.bg) do
       {:ok, %__MODULE__{name: name, appearance: appearance, palette: palette, styles: syntax}}
     end
@@ -162,14 +162,15 @@ defmodule Geex.Theme do
     end
   end
 
-  defp build_palette(%{"palette" => pal}) when is_map(pal) do
+  defp build_palette(%{"palette" => pal}, appearance) when is_map(pal) do
     with {:ok, bg} <- req_color(pal, "bg", nil),
          {:ok, fg} <- req_color(pal, "fg", bg),
          {:ok, line_number} <- opt_color(pal, "line_number", bg, bg),
          {:ok, active_line_number} <- opt_color(pal, "active_line_number", bg, fg),
          {:ok, active_line_bg} <- opt_color(pal, "active_line_bg", bg, bg),
          {:ok, cursor} <- opt_color(pal, "cursor", bg, fg),
-         {:ok, selection} <- opt_color(pal, "selection", bg, fg) do
+         {:ok, selection} <- opt_color(pal, "selection", bg, fg),
+         {:ok, installed} <- opt_color(pal, "installed", bg, installed_default(appearance)) do
       {:ok,
        %Palette{
          bg: bg,
@@ -178,12 +179,18 @@ defmodule Geex.Theme do
          active_line_number: active_line_number,
          active_line_bg: active_line_bg,
          cursor: cursor,
-         selection: selection
+         selection: selection,
+         installed: installed
        }}
     end
   end
 
-  defp build_palette(_), do: {:error, {:missing, "palette"}}
+  defp build_palette(_, _appearance), do: {:error, {:missing, "palette"}}
+
+  # A theme that doesn't say: the terminal's light blue on a dark theme (bright cyan, which
+  # Windows Terminal's Campbell draws #61D6D6), its blue on a light one, where cyan washes out.
+  defp installed_default(:dark), do: {:ansi, 14}
+  defp installed_default(:light), do: {:ansi, 4}
 
   defp build_syntax(syntax, bg) when is_map(syntax) do
     Enum.reduce_while(syntax, {:ok, %{}}, fn {capture, spec}, {:ok, acc} ->

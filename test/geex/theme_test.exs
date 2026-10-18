@@ -34,6 +34,12 @@ defmodule Geex.ThemeTest do
       assert Theme.Terminal.theme({:rgb, 30, 30, 46}).palette.selection == {:rgb, 80, 80, 92}
     end
 
+    test "installed: bright cyan, the terminal's light blue; blue on a light background" do
+      assert Theme.Terminal.theme(nil).palette.installed == {:ansi, 14}
+      assert Theme.Terminal.theme({:rgb, 30, 30, 46}).palette.installed == {:ansi, 14}
+      assert Theme.Terminal.theme({:rgb, 250, 250, 245}).palette.installed == {:ansi, 4}
+    end
+
     test "names/0 starts with the built-in one" do
       assert ["terminal" | installed] = Theme.names()
       assert "birds-of-paradise" in installed

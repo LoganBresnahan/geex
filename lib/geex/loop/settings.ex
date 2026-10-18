@@ -66,7 +66,9 @@ defmodule Geex.Loop.Settings do
 
   @doc """
   The rows the view's tab shows, each a map with `:name` (what an action names, if anything),
-  `:cells` (the columns drawn) and, on Themes, `:current`. `ctx` is what the editor knows:
+  `:cells` (the columns drawn), on Themes `:current`, and on Languages and Themes `:installed`:
+  a package that is installed (an update or not), or the theme in use, drawn in the palette's
+  `installed` colour. `ctx` is what the editor knows:
   `:theme_id`, `:mouse`, `:tree_shown`, `:edits_shown`, `:installing` (a set of names).
   """
   @spec rows(t(), map()) :: [map()]
@@ -81,7 +83,12 @@ defmodule Geex.Loop.Settings do
           true -> "available"
         end
 
-      %{name: e["name"], cells: [e["display"], kb(e["size"]), status], status: status}
+      %{
+        name: e["name"],
+        cells: [e["display"], kb(e["size"]), status],
+        status: status,
+        installed: status in ["installed", "update available"]
+      }
     end
   end
 
@@ -108,7 +115,8 @@ defmodule Geex.Loop.Settings do
         name: name,
         cells: [label, status, if(name == current, do: "✓ in use", else: "")],
         status: status,
-        current: name == current
+        current: name == current,
+        installed: name == current or status in ["installed", "update available"]
       }
     end
   end
@@ -353,7 +361,9 @@ defmodule Geex.Loop.Settings do
 
   @doc """
   Draw the view over the whole `w` × `h` screen in `palette`'s colours. The highlighted row and
-  the current tab use the palette's active-line colour (or its `mark`).
+  the current tab use the palette's active-line colour (or its `mark`). An installed row's text
+  is in the palette's `installed` colour, highlighted or not: the highlight is its background
+  (or reverse video), so both show.
   """
   @spec draw(t(), [map()], Geex.Theme.Palette.t(), {pos_integer(), pos_integer()}) :: Screen.t()
   def draw(view, rows, pal, {w, h}) do
@@ -389,6 +399,7 @@ defmodule Geex.Loop.Settings do
       |> Enum.with_index(2)
       |> Enum.reduce(screen, fn {{row, i}, y}, acc ->
         style = if i == view.sel, do: picked, else: %Cell{fg: pal.fg, bg: pal.bg}
+        style = if row[:installed], do: %{style | fg: pal.installed}, else: style
 
         line =
           row.cells

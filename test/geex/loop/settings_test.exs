@@ -112,6 +112,37 @@ defmodule Geex.Loop.SettingsTest do
       assert {_, :quit} = Settings.key(view, {:ctrl, ?x}, [], 30)
     end
 
+    test "installed rows draw in the palette's installed colour, highlighted or not" do
+      pal = %{Geex.Fixtures.birds().palette | installed: {:rgb, 1, 2, 3}}
+      fg_at = fn screen, y -> Screen.get_cell(screen, 1, y).fg end
+
+      # Languages: Elixir is installed, Rust isn't. Rows start at screen row 2.
+      view = Settings.open()
+      rows = Settings.rows(view, %{})
+      elixir = Enum.find_index(rows, &(&1.name == "elixir"))
+      rust = Enum.find_index(rows, &(&1.name == "rust"))
+      assert {Enum.at(rows, elixir).installed, Enum.at(rows, rust).installed} == {true, false}
+
+      screen = Settings.draw(%{view | sel: rust}, rows, pal, {120, 40})
+      assert fg_at.(screen, 2 + elixir) == {:rgb, 1, 2, 3}
+      assert fg_at.(screen, 2 + rust) == pal.fg
+
+      # Highlighted, it keeps the colour, on the highlight's background.
+      screen = Settings.draw(%{view | sel: elixir}, rows, pal, {120, 40})
+      assert %{fg: {:rgb, 1, 2, 3}, bg: bg} = Screen.get_cell(screen, 1, 2 + elixir)
+      assert bg == pal.active_line_bg
+
+      # Themes: an installed one, and the one in use even when it is built in.
+      view = Settings.open(:themes, %{theme_id: "terminal"})
+      rows = Settings.rows(view, %{theme_id: "terminal"})
+
+      assert Enum.map(rows, &{&1.name, &1.installed}) |> Enum.take(2) ==
+               [{"terminal", true}, {"birds-of-paradise", true}]
+
+      rows = Settings.rows(view, %{theme_id: "birds-of-paradise"})
+      assert %{installed: false} = Enum.find(rows, &(&1.name == "terminal"))
+    end
+
     test "Themes previews as you move and chooses on Enter; the one in use is marked" do
       view = Settings.open(:themes, %{theme_id: "birds-of-paradise"})
       rows = Settings.rows(view, %{theme_id: "birds-of-paradise"})

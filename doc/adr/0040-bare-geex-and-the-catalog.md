@@ -325,6 +325,20 @@ drawing, all pure. The loop carries out what it asks for. `Alt+Y` amends ADR-003
     file itself never corrupts.
 - **The coordinator's note:** General's paths show `~` for the home directory, and one too long
   is cut from the left with "…", so its file name shows.
+- **Amended 2026-10-18: what is installed is light blue.** This was the maintainer's ask,
+  relayed by the coordinator session. On Languages and Themes, an installed row's text is drawn
+  in the palette's new `installed` slot:
+  - which rows: an installed package, whether or not an update is available, and the theme in
+    use, the built-in one too;
+  - the whole row is tinted. Highlighted, the row keeps that colour, on the highlight's
+    background (or in reverse video), so both read.
+  - **The slot** is `"installed"` in a theme file's palette. A theme that doesn't set it gets
+    ANSI bright cyan (14) when dark, which Windows Terminal's Campbell draws #61D6D6, a light
+    blue. When light it gets blue (4), since cyan washes out on a light background.
+  - The built-in terminal theme uses the same pair, by the background OSC 11 reports.
+  - Birds of Paradise doesn't set the slot yet, so it shows the fallback. Changing the
+    catalog's copy means a new package zip, a new `catalog.json` entry and an upload to the
+    release (§2), which is the maintainer's to do.
 
 ### 8. Compiling a grammar is cached on disk (step 2)
 

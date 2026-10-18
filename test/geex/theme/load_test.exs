@@ -47,6 +47,19 @@ defmodule Geex.Theme.LoadTest do
       assert theme.palette.selection == {:rgb, 0, 0, 0}
     end
 
+    test "the installed colour: the theme's, else a blue by its appearance" do
+      data = put_in(@ok, ["palette", "installed"], "#86B4BB")
+      assert {:ok, %{palette: %{installed: {:rgb, 0x86, 0xB4, 0xBB}}}} = Theme.from_json(data)
+
+      # Unset: bright cyan on a dark theme, blue on a light one (@ok is light).
+      assert {:ok, %{palette: %{installed: {:ansi, 4}}}} = Theme.from_json(@ok)
+      dark = Map.put(@ok, "appearance", "dark")
+      assert {:ok, %{palette: %{installed: {:ansi, 14}}}} = Theme.from_json(dark)
+
+      bad = put_in(@ok, ["palette", "installed"], "blue")
+      assert {:error, _} = Theme.from_json(bad)
+    end
+
     test "missing name / palette / palette.bg are tagged errors" do
       assert {:error, {:missing, "name"}} = Theme.from_json(Map.delete(@ok, "name"))
       assert {:error, {:missing, "palette"}} = Theme.from_json(Map.delete(@ok, "palette"))
