@@ -93,6 +93,7 @@ defmodule Mix.Tasks.Geex.Deploy do
   @expected_unresolved %{
     Mix => "the mix tasks under lib/mix, compiled into geex but run only under mix",
     Mix.Task => "the same",
+    Mix.Project => "the same (mix geex.catalog reads catalog_release from it)",
     # A bare `:Dict`, not `Elixir.Dict`: Elixir's own Enum and URI name it, and no OTP or
     # Elixir release defines it.
     :Dict => "named in Elixir's Enum and URI; defined nowhere",

@@ -3601,3 +3601,27 @@ failed, so the checks discriminate. No run logged an error.
 - a human eye on each theme (the checks are numeric);
 - the themes in a 256- or 16-colour terminal (geex draws truecolor);
 - installing from the real v0.2.0 release, which doesn't exist yet.
+
+### 2026-10-18 — the v0.1.0 → v0.2.0 upgrade path, in the binary (ADR-0040)
+
+**The build first:** the first prod build after `1d24eaa` stopped at the release's closure
+check (ADR-0036 §5). `Mix.Tasks.Geex.Catalog` now calls `Mix.Project` (for `catalog_release`),
+which no release carries. It is a mix task's call, unreachable at runtime, so `Mix.Project`
+joins the expected list beside `Mix` and `Mix.Task`. The next build passed.
+
+**The check** was the coordinator session's list. I used the binary `0.2.0+1d24eaaa.…dirty`
+with a scratch `GEEX_INSTALL_DIR` and XDG directories. The data directory held copies of the
+maintainer's real v0.1.0 installs: Elixir, JSON, and Birds of Paradise `038a23106e99…`.
+- `install --list`: Elixir and JSON are `installed` (their bytes are unchanged), Birds of
+  Paradise shows `update`, and the new themes show `available`. No network is used: the list
+  is embedded.
+- The TUI with the old Birds of Paradise in use drew it (background `#372725`).
+  `GEEX_CATALOG_URL` pointed at a directory that doesn't exist, so any fetch would have failed
+  loudly. The log had no install or catalog line, and `installed.json` was unchanged: nothing
+  downloads by itself.
+- `install birds-of-paradise` from `_build/catalog/dist` replaced it in place:
+  - one directory, no leftovers, `installed.json` with sha256 `200e35e52d56…`;
+  - the list now says `installed`;
+  - Alt+Y draws its row in the new accent, `38;2;134;180;187`.
+
+**1106 tests + 79 doctests**; `deploy_test.exs` green on the new expected list.

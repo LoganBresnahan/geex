@@ -154,6 +154,10 @@ been in any release, and none is reachable from a running geex, so they are expe
 | `:erl_syntax`, `:erl_syntax_lib` | stdlib's `shell_docs_test` |
 | `:Dict` | named in Elixir's Enum and URI, and defined nowhere |
 
+Amended 2026-10-18: `Mix.Project` joins the first row. `mix geex.catalog` reads the
+`catalog_release` from it (ADR-0040's amendment). The check stopped the first build after that
+change, which is what the check is for.
+
 A call through a variable isn't in an import table, so the check is a floor, not a proof. The
 live smoke covers the paths the import tables can't see. `test/geex/deploy_test.exs` runs the
 same check against the last built release.
