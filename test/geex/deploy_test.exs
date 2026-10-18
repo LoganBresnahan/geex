@@ -36,4 +36,60 @@ defmodule Geex.DeployTest do
       System.cmd("kill", ["#{pid}"])
     end
   end
+
+  describe "trimming the release (ADR-0036's 2026-10-18 amendment)" do
+    test "erts/bin keeps what the binary runs and loses the rest", %{dir: dir} do
+      bin = Path.join(dir, "erts-1/bin")
+      File.mkdir_p!(bin)
+
+      for f <- ~w(beam.smp erlexec erl_child_setup inet_gethost epmd erlc dialyzer erl.src),
+          do: File.write!(Path.join(bin, f), "")
+
+      ExUnit.CaptureIO.capture_io(fn ->
+        assert Deploy.trim_erts(bin, nil) == ~w(dialyzer epmd erl.src erlc)
+      end)
+
+      assert Enum.sort(File.ls!(bin)) == ~w(beam.smp erl_child_setup erlexec inet_gethost)
+    end
+
+    test "unresolved/1 follows geex's calls through the release and names what isn't there",
+         %{dir: dir} do
+      n = System.unique_integer([:positive])
+      [a, b, c] = for x <- ~w(A B C), do: Module.concat(Geex.DeployFake, "#{x}#{n}")
+
+      beam = fn app, mod, body ->
+        # The calls to modules that don't exist warn, as they should.
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          send(self(), Code.compile_string("defmodule #{inspect(mod)} do #{body} end"))
+        end)
+
+        assert_received [{^mod, code}]
+        ebin = Path.join([dir, "lib", app, "ebin"])
+        File.mkdir_p!(ebin)
+        File.write!(Path.join(ebin, "#{mod}.beam"), code)
+      end
+
+      # geex calls a dependency and a module nobody ships; the dependency calls another such.
+      # A module no geex code reaches may call what it likes.
+      beam.("geex-0.1.0", a, "def f, do: {#{inspect(b)}.g(), :nowhere_#{n}.h()}")
+      beam.("dep-1.0", b, "def g, do: :lost_#{n}.i()")
+      beam.("dep-1.0", c, "def j, do: :unreached_#{n}.k()")
+
+      assert Deploy.unresolved(dir) == %{
+               :"nowhere_#{n}" => [a],
+               :"lost_#{n}" => [b]
+             }
+    end
+
+    # The safety net under the trim: on the release the last build assembled, geex's code reaches
+    # nothing missing but the known few.
+    test "the built release lacks nothing geex calls" do
+      rel = "_build/prod/rel/geex"
+
+      if File.dir?(Path.join(rel, "lib")) do
+        missing = Map.keys(Deploy.unresolved(rel)) -- Map.keys(Deploy.expected_unresolved())
+        assert missing == []
+      end
+    end
+  end
 end

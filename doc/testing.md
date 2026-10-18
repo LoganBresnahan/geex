@@ -3256,3 +3256,58 @@ lines grow to 300 columns. Raw SGR reports were sent by `send-keys -l`.
 - The log had no errors.
 
 The deploy entry above covers the rest of the binary's checks.
+
+### 2026-10-18 — the release trimmed: 21.9 → 9.6 MB (ADR-0036 §5)
+
+**What changed:** a release step (`trim_release/1`) between assembling and Burrito's wrap.
+- `erts-*/bin` keeps only `beam.smp`, `erlexec`, `erl_child_setup` and `inet_gethost`, each
+  stripped with `--strip-debug`.
+- The step stops the build if geex's code reaches a module the release lacks.
+- Every OTP application stays.
+
+**Measured.** I built the binary from the uncommitted tree and copied the installed
+`0.1.0+08c39067` for the "before". Both were unpacked into a scratch `GEEX_INSTALL_DIR`; the
+launch was timed in tmux to the first frame.
+
+| | Before | After |
+|---|---|---|
+| the binary | 21,949,432 B | 9,624,376 B |
+| unpacked | 86,816,974 B | 38,842,716 B |
+| first run (unpack and `--version`) | 1,519 ms | 808 ms |
+| warm `--version`, median of 7 | 228 ms | 225 ms |
+| warm launch to first frame, median of 5 | 363 ms | 360 ms |
+
+**The closure check:**
+- On the old release it found the six expected names: `Mix`, `Mix.Task`, `:dbg`, `:erl_syntax`,
+  `:erl_syntax_lib` and `:Dict`.
+- The trimmed build passed it.
+- `deploy_test.exs` checks it on fake beams (a call through a dependency to a missing module is
+  found; a module geex doesn't reach is ignored), and again on the last built release.
+
+**Live smoke of the trimmed binary.** Scratch XDG directories and a scratch repository.
+- `install --list` worked.
+- `install elixir` ran over the network (httpc, TLS, DNS through `inet_gethost`) in 0.77 s.
+- `install ./json.zip` installed a local package.
+- In the TUI on loop.ex:
+  - highlighting was on (the terminal theme's colours, comments dim italic);
+  - an attest POST returned `not_open` for an unopened file and `held` for the open one, and a
+    wrong token got 401;
+  - the buffer showed "behind disk", and `Alt+J` caught up, attributed to claude-code/smoke, with
+    both entries in the edits pane;
+  - typing and `Ctrl-O` saved;
+  - `Alt+O` found notes.txt;
+  - `Alt+Y` showed the tabs; `Alt+D` switched; Enter on Bash installed it;
+  - a click placed the cursor (4:14), a press at the scroll bar's bottom jumped to the end, and
+    the wheel scrolled;
+  - `Ctrl-X` gave the shell back, and the discovery file was removed;
+  - the log had no `undef`, `nofile`, `terminating` or crash lines.
+- **The crash path:** SIGUSR1 to the VM. The stripped `beam.smp` wrote `erl_crash.dump`
+  (5.3 MB, "Received SIGUSR1") and exited 1, and the shell came back. As with any signal that
+  skips `Geex.stop/0`, the alternate screen wasn't restored and the discovery file stayed; I
+  removed it.
+
+**1093 tests + 75 doctests**, green twice.
+
+**Not checked:**
+- a remote shell or distribution, now impossible (no `epmd`);
+- the release's own `bin/geex` script, broken by the missing `erl` and unused by Burrito.

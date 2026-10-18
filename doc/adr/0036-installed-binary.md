@@ -2,6 +2,7 @@
 
 - **Status:** Accepted 2026-10-16. The maintainer asked for it ("go ahead and implement the
   deploy with burrito so we can start building locally"). Built by the coordinator session.
+  Amended 2026-10-18: the release is trimmed (§5).
 - **Date:** 2026-10-16
 - **Relates to:** [ADR-0001](0001-build-on-the-beam.md) (the BEAM), the sacred invariant "the
   terminal belongs to the renderer", [ADR-0032](0032-listener-first-agent-integration.md) (the
@@ -105,6 +106,71 @@ returns.
 - `--no-build` installs the last build. `--rollback` swaps `geex` and `geex.prev`.
 - The `/deploy` skill wraps it with the ship bar (suite green twice) and a live check.
 
+### 5. The release is trimmed (amended 2026-10-18)
+
+The maintainer asked for a smaller binary; the coordinator session relayed it. Most of its bulk
+was the VM's debug information: `beam.smp` was 54 MB unstripped. The release now has a step
+between Mix's `:assemble` and Burrito's wrap (`Mix.Tasks.Geex.Deploy.trim_release/1`).
+
+**`erts-*/bin` keeps four programs:**
+- `erlexec`, which Burrito's launcher execs;
+- `beam.smp`, which `erlexec` starts;
+- `erl_child_setup`, which starts every port (`git`, `inotifywait`);
+- `inet_gethost`, which looks up host names for a download (ADR-0040 §3).
+
+`strip --strip-debug` runs over all four. That takes `beam.smp` to 11.0 MB. A full strip would
+save another 0.45 MB but lose the symbols a native backtrace names.
+
+**Removed from `erts-*/bin`:**
+- tooling: `erlc`, `yielding_c_fun`, `dialyzer`, `typer`, `ct_run`, `escript`, `erl_call`;
+- embedded-system helpers: `heart`, `run_erl`, `to_erl`, `dyn_erl`;
+- the `erl` and `start` scripts and their `.src` files;
+- `epmd`.
+
+**What that loses:**
+- distribution: a geex binary can't take `-sname` or a remote shell, since `epmd` is gone. It
+  never offered one; the cookie Burrito passes starts nothing.
+- the release's own `bin/geex` script, which runs `erts-*/bin/erl`. Burrito never uses it, and
+  nothing else runs the release directory.
+
+**Every OTP application stays:**
+- `compiler` is a dependency of `elixir`, and `eex` of plug and rustler;
+- `iex` is already in the release as `:none`, never loaded;
+- `sasl` is 0.2 MB;
+- `ssl`, `public_key`, `asn1`, `crypto` and `inets` are what a download and the listener use.
+
+The `.beam` files already carried no debug information or docs (`strip_beams`, Mix's default,
+now stated in `mix.exs`). The NIF was already stripped.
+
+**The safety net.** `trim_release/1` stops the build if a module that geex's code calls is
+missing from the release. Called means: from geex's own modules, transitively through every
+module their calls reach, by each `.beam`'s import table (`unresolved/1`). Six names have never
+been in any release, and none is reachable from a running geex, so they are expected:
+
+| Missing | Why it isn't reachable |
+|---|---|
+| `Mix`, `Mix.Task` | the mix tasks compiled into geex, which run only under mix |
+| `:dbg` | inets' tracing |
+| `:erl_syntax`, `:erl_syntax_lib` | stdlib's `shell_docs_test` |
+| `:Dict` | named in Elixir's Enum and URI, and defined nowhere |
+
+A call through a variable isn't in an import table, so the check is a floor, not a proof. The
+live smoke covers the paths the import tables can't see. `test/geex/deploy_test.exs` runs the
+same check against the last built release.
+
+**Measured** with the same machine and the same code, the unpack in a scratch
+`GEEX_INSTALL_DIR`:
+
+| | Before | After |
+|---|---|---|
+| the binary | 21.9 MB | 9.6 MB |
+| unpacked | 86.8 MB | 38.8 MB |
+| first run (unpack and `--version`) | 1.52 s | 0.81 s |
+| warm `--version` | 228 ms | 225 ms |
+| warm launch to the first frame | 363 ms | 360 ms |
+
+Of the 38.8 MB unpacked, the tree_sitter_wasm NIF (wasmtime) is 14.5 MB, already stripped.
+
 ## Consequences
 
 - `geex`, `geex PATH…` and `geex DIR` work from any directory, and the bashrc function goes
@@ -120,7 +186,7 @@ returns.
   commands. `geex -- maintenance` opens a file named `maintenance`.
 - **A deploy removes old unpacks, but never one in use.** Burrito removes only versions
   that sort older, and semver ignores the `+<sha>` part, so it never removes a geex build's
-  unpack (about 90 MB each). Checked: `0.1.0+797edb8a.dirty` stayed after `0.1.0+4c31f8cd`
+  unpack (about 90 MB each; 39 MB since §5). Checked: `0.1.0+797edb8a.dirty` stayed after `0.1.0+4c31f8cd`
   ran. `mix geex.deploy` removes every other `geex_erts-*`. **Amended 2026-10-18 (BUG-4):** it
   keeps `geex.prev`'s and any a running process uses (by `/proc/<pid>/exe` and `cmdline`). A
   running VM loads modules from its unpack as it needs them; removing it under the
@@ -137,6 +203,8 @@ returns.
 
 ## See
 
+- §5: `Mix.Tasks.Geex.Deploy.trim_release/1`, `trim_erts/2`, `unresolved/1`;
+  `test/geex/deploy_test.exs`.
 - `mix.exs` (`version/0`, `releases/0`), `rel/vm.args.eex`, `lib/geex/cli.ex`,
   `lib/geex/cli/signals.ex`, `lib/geex/application.ex` (`start/2`), `Geex.stop/0`,
   `Geex.TerminalIO.terminate/2`, `lib/mix/tasks/geex.deploy.ex`, `.claude/skills/deploy/SKILL.md`,

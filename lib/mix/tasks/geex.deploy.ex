@@ -12,8 +12,10 @@ defmodule Mix.Tasks.Geex.Deploy do
      Burrito wraps it into `burrito_out/geex_linux`. The first prod build compiles the
      tree_sitter_wasm NIF in release mode, which takes a few minutes. The old `geex.app` is
      removed first, so the version is this commit's even when no module changed, and so is
-     the old release directory, so the binary carries this release only (BUG-6). Burrito's
-     working copy in the temp directory is removed after.
+     the old release directory, so the binary carries this release only (BUG-6). Before the
+     wrap, `trim_release/1` drops the VM programs geex never runs and strips the rest, and
+     stops the build if a module geex calls is missing. Burrito's working copy in the temp
+     directory is removed after.
   2. **Fresh unpack:** Burrito runs the binary from a directory named after the version, and it
      skips unpacking when that directory already exists. A dirty build's version (`….dirty`)
      repeats across builds, so the new build's directory is removed first, and the first run
@@ -79,6 +81,103 @@ defmodule Mix.Tasks.Geex.Deploy do
 
   defp burrito_work_dirs, do: Path.wildcard(Path.join(System.tmp_dir!(), "burrito_build_*"))
 
+  # The VM's own programs the binary runs (ADR-0036's 2026-10-18 amendment): Burrito's launcher
+  # execs `erlexec`, which starts `beam.smp`; `erl_child_setup` starts every port (git,
+  # inotifywait); `inet_gethost` looks up a host name for a download (ADR-0040 §3). The rest of
+  # `erts-*/bin` is tooling (erlc, dialyzer, ct_run, escript…), embedded-system helpers (heart,
+  # run_erl, to_erl) and `epmd`, which only distribution starts.
+  @erts_keep ~w(beam.smp erlexec erl_child_setup inet_gethost)
+
+  # Modules geex's code names that no release has carried, each unreachable from a running
+  # geex. Anything else missing stops the build: a trim cut something geex calls.
+  @expected_unresolved %{
+    Mix => "the mix tasks under lib/mix, compiled into geex but run only under mix",
+    Mix.Task => "the same",
+    # A bare `:Dict`, not `Elixir.Dict`: Elixir's own Enum and URI name it, and no OTP or
+    # Elixir release defines it.
+    :Dict => "named in Elixir's Enum and URI; defined nowhere",
+    :dbg => "inets' tracing (runtime_tools), for debugging httpc",
+    :erl_syntax => "shell_docs_test (syntax_tools), stdlib's doc tests",
+    :erl_syntax_lib => "the same"
+  }
+
+  @doc """
+  A release step, between Mix's `:assemble` and Burrito's wrap: drop the VM programs geex never
+  runs, strip the debug information from the ones it does (`beam.smp` carries ~43 MB of it), and
+  check that every module geex's code reaches is still in the release (`unresolved/1`).
+  """
+  @spec trim_release(Mix.Release.t()) :: Mix.Release.t()
+  def trim_release(%Mix.Release{path: path} = release) do
+    [bin] = Path.wildcard(Path.join(path, "erts-*/bin"))
+    trim_erts(bin, System.find_executable("strip"))
+
+    case Map.drop(unresolved(path), Map.keys(@expected_unresolved)) do
+      none when none == %{} ->
+        release
+
+      missing ->
+        Mix.raise(
+          "geex deploy: the release lacks modules geex's code calls: " <>
+            Enum.map_join(missing, "; ", fn {m, from} ->
+              "#{inspect(m)} (from #{inspect(from)})"
+            end)
+        )
+    end
+  end
+
+  @doc false
+  @spec expected_unresolved() :: %{module() => String.t()}
+  def expected_unresolved, do: @expected_unresolved
+
+  @doc false
+  # Remove everything in an `erts-*/bin` directory but `@erts_keep`, and strip what's kept with
+  # `strip` (an executable's path), when there is one.
+  @spec trim_erts(Path.t(), Path.t() | nil) :: [String.t()]
+  def trim_erts(bin, strip) do
+    removed = for f <- File.ls!(bin), f not in @erts_keep, do: File.rm_rf!(Path.join(bin, f)) && f
+
+    if strip do
+      kept = for f <- @erts_keep, File.exists?(Path.join(bin, f)), do: Path.join(bin, f)
+      {_, 0} = System.cmd(strip, ["--strip-debug" | kept], stderr_to_stdout: true)
+    else
+      Mix.shell().info("geex deploy: no `strip` on the PATH; the VM keeps its debug information")
+    end
+
+    Enum.sort(removed)
+  end
+
+  @doc """
+  The modules called from code geex reaches that no `.beam` in the release at `rel` defines
+  (nor the VM preloads), each with the modules that call it. Reached means: geex's own modules,
+  and every module their calls lead to, transitively, by each `.beam`'s import table. A call
+  through a variable (`apply/3`, `mod.fun()`) isn't in the table, so this is a floor: a module
+  it misses can still be missing.
+  """
+  @spec unresolved(Path.t()) :: %{module() => [module()]}
+  def unresolved(rel) do
+    beams =
+      Map.new(Path.wildcard(Path.join(rel, "lib/*/ebin/*.beam")), fn path ->
+        {path |> Path.basename(".beam") |> String.to_atom(), path}
+      end)
+
+    roots = for {mod, path} <- beams, path =~ ~r|/lib/geex-[^/]+/ebin/|, do: mod
+    reach(roots, MapSet.new(roots), beams, MapSet.new(:erlang.pre_loaded()), %{})
+  end
+
+  defp reach([], _seen, _beams, _preloaded, missing),
+    do: Map.new(missing, fn {m, from} -> {m, from |> Enum.uniq() |> Enum.sort()} end)
+
+  defp reach([mod | rest], seen, beams, preloaded, missing) do
+    {:ok, {_, [imports: imports]}} =
+      :beam_lib.chunks(String.to_charlist(beams[mod]), [:imports])
+
+    called = imports |> Enum.map(&elem(&1, 0)) |> Enum.uniq()
+    new = Enum.reject(called, &(MapSet.member?(seen, &1) or MapSet.member?(preloaded, &1)))
+    {found, lost} = Enum.split_with(new, &Map.has_key?(beams, &1))
+    missing = Enum.reduce(lost, missing, &Map.update(&2, &1, [mod], fn from -> [mod | from] end))
+    reach(found ++ rest, Enum.into(found, seen), beams, preloaded, missing)
+  end
+
   defp install(built, bin_dir, link) do
     unless File.regular?(built), do: Mix.raise("geex deploy: no build at #{built}")
 
@@ -134,7 +233,7 @@ defmodule Mix.Tasks.Geex.Deploy do
   end
 
   # Burrito removes only versions that sort older, and semver ignores the `+<sha>` part, so it
-  # never removes a geex build's unpack: each would stay (~90 MB). Keep the new one, geex.prev's
+  # never removes a geex build's unpack: each would stay (~40 MB). Keep the new one, geex.prev's
   # (so `--rollback` starts at once), and any a running geex is using: a VM loads modules from
   # it as it needs them, so removing it under one crashes it.
   defp prune_unpacks([new | _] = keep) do

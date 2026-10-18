@@ -67,7 +67,11 @@ defmodule Geex.MixProject do
   defp releases do
     [
       geex: [
-        steps: [:assemble, &Burrito.wrap/1],
+        # Between assembling and wrapping, the VM programs geex never runs go, and the rest lose
+        # their debug information (ADR-0036's 2026-10-18 amendment).
+        steps: [:assemble, &Mix.Tasks.Geex.Deploy.trim_release/1, &Burrito.wrap/1],
+        # Mix's default, stated: no debug information or docs in the .beam files.
+        strip_beams: true,
         # :inets (`:httpc`) downloads a grammar or theme the user asked for (ADR-0040 §3).
         # Carried and loaded, not started at boot, and not a dependency of :geex (Mix won't let
         # a permanent app depend on a loaded one): `Geex.Install` starts it when a download
