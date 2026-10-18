@@ -3432,3 +3432,7 @@ counts the extra byte per row.
 can clobber one generation) is now named in ADR-0034's amendment and in `log.ex`, and accepted.
 
 **1101 tests + 79 doctests**, green twice.
+
+**Deployed** as `0.1.0+573091e7.89a87236`. I ran the coordinator's repro in the installed
+binary (tmux, scratch `XDG_STATE_HOME`): two saves, a torn fragment, a relaunch, two more saves.
+The next start showed all four rows under `── earlier ──`.
