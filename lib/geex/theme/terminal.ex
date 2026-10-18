@@ -5,8 +5,8 @@ defmodule Geex.Theme.Terminal do
   right in any terminal and any colour scheme with no theme installed. It is code, not a file:
   there is nothing to install or to fail to load.
 
-  Syntax captures map to ANSI colours (keywords magenta, strings green, comments bright black
-  and italic, and so on), resolved by longest prefix like any theme.
+  Syntax captures map to ANSI colours (keywords magenta, strings green, comments dim and italic,
+  and so on), resolved by longest prefix like any theme.
 
   To shade the active line and the selection, it needs the terminal's background, which
   `Geex.TerminalIO` asks for (OSC 11). Given one, `theme/1` blends a subtle tint from it,
@@ -27,7 +27,8 @@ defmodule Geex.Theme.Terminal do
   @syntax %{
     "attribute" => {3, []},
     "boolean" => {3, []},
-    "comment" => {8, [:italic]},
+    # Dim, not bright black: some schemes (Solarized Dark) make ANSI 8 the background itself.
+    "comment" => {:default, [:dim, :italic]},
     "constant" => {3, []},
     "constant.builtin" => {3, []},
     "constructor" => {6, []},
@@ -36,7 +37,7 @@ defmodule Geex.Theme.Terminal do
     "emphasis.strong" => {:default, [:bold]},
     "enum" => {6, []},
     "function" => {4, []},
-    "hint" => {8, []},
+    "hint" => {:default, [:dim]},
     "keyword" => {5, []},
     "label" => {5, []},
     "markup.bold" => {:default, [:bold]},

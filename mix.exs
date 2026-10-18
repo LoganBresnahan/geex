@@ -26,29 +26,26 @@ defmodule Geex.MixProject do
     if Mix.env() == :prod, do: "#{@version}+#{build_id()}", else: @version
   end
 
+  # A tree that isn't a git checkout names no code, so it reads `nogit` and the build is dirty:
+  # a deploy then won't keep an in-use unpack of that name, as it would a committed one's.
   defp build_id do
-    trees = [".", "../tree_sitter_wasm"]
-    commits = Enum.map(trees, &commit/1)
-
-    if Enum.any?(commits, &(&1 == :error)) do
-      "local"
-    else
-      shas = Enum.map_join(commits, ".", fn {:ok, sha, _dirty} -> sha end)
-      dirty? = Enum.any?(commits, fn {:ok, _sha, dirty} -> dirty end)
-      shas <> if(dirty?, do: ".dirty", else: "")
-    end
+    commits = Enum.map([__DIR__, Path.expand("../tree_sitter_wasm", __DIR__)], &commit/1)
+    shas = Enum.map_join(commits, ".", fn {sha, _dirty} -> sha end)
+    shas <> if(Enum.any?(commits, &elem(&1, 1)), do: ".dirty", else: "")
   end
 
+  # `{sha8, dirty?}` for the checkout at `dir`; a directory that isn't the top of one (a copied
+  # tree, or one inside another repository) is `{"nogit", true}`.
   defp commit(dir) do
-    case System.cmd("git", ["-C", dir, "rev-parse", "--short=8", "HEAD"], stderr_to_stdout: true) do
-      {sha, 0} ->
-        {status, _} =
-          System.cmd("git", ["-C", dir, "status", "--porcelain"], stderr_to_stdout: true)
+    git = fn args -> System.cmd("git", ["-C", dir | args], stderr_to_stdout: true) end
 
-        {:ok, String.trim(sha), String.trim(status) != ""}
-
-      _ ->
-        :error
+    with {top, 0} <- git.(["rev-parse", "--show-toplevel"]),
+         true <- Path.expand(String.trim(top)) == Path.expand(dir),
+         {sha, 0} <- git.(["rev-parse", "--short=8", "HEAD"]) do
+      {status, _} = git.(["status", "--porcelain"])
+      {String.trim(sha), String.trim(status) != ""}
+    else
+      _ -> {"nogit", true}
     end
   end
 

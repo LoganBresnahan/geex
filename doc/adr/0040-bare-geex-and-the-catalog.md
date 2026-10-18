@@ -47,8 +47,14 @@ geex release itself pins.
   default foreground and background, line numbers in bright black (ANSI 8), and the cursor's
   accent in yellow (ANSI 3).
 - **Syntax** captures map to ANSI colours: keywords magenta, strings green, escapes, types and
-  atoms cyan, numbers and constants yellow, functions blue, comments bright black and italic.
+  atoms cyan, numbers and constants yellow, functions blue, comments dim and italic.
   Every capture Birds of Paradise styles has one.
+- **Comments are dim, not bright black.** The review found that some schemes make ANSI 8 the
+  background itself (Solarized Dark's base03). The line numbers and dividers stay ANSI 8, so in
+  such a scheme they fade into the background. A wrong colour costs legibility, never
+  correctness. Telling would take another query (OSC 4 for colour 8), not built.
+- **The status line** is reverse video in every theme. Before, it swapped fg and bg, which drew
+  nothing with the terminal theme's two `:default`s.
 - **With the background known,** the active line moves 7% and the selection 22% from it,
   toward white on a dark background and black on a light one (luminance under half is dark).
   Those two are truecolor; the rest is 16-colour.

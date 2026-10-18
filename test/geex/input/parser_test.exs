@@ -297,12 +297,20 @@ defmodule Geex.Input.ParserTest do
     test "typed Alt+] stays keys: held only until the caller flushes it" do
       assert Parser.parse("\e]") == {[], "\e]"}
       assert Parser.flush("\e]") == [{:key, :esc}, {:char, "]"}]
-      # An ESC that isn't ST inside: not an OSC; the rest is read again.
-      assert Parser.parse("\e]x\e[A") == {[{:char, "x"}, {:key, :up}], ""}
+      # An ESC that isn't ST inside: not an OSC, so Esc, `]` and the rest, as typed.
+      assert Parser.parse("\e]x\e[A") ==
+               {[{:key, :esc}, {:char, "]"}, {:char, "x"}, {:key, :up}], ""}
+
+      assert Parser.parse("\e]\e[A") == {[{:key, :esc}, {:char, "]"}, {:key, :up}], ""}
+      # Alt+] then Ctrl-G (BEL), or then `ESC \`: no number, so not an OSC either.
+      assert Parser.parse("\e]\a") == {[{:key, :esc}, {:char, "]"}, {:ctrl, ?g}], ""}
     end
 
-    test "an endless OSC is dropped past its cap rather than held" do
-      assert Parser.parse("\e]11;" <> String.duplicate("x", 300)) == {[], ""}
+    test "past its cap it isn't held: it was typed (a paste after Alt+] keeps its text)" do
+      paste = String.duplicate("x", 300)
+      {events, ""} = Parser.parse("\e]" <> paste)
+      assert [{:key, :esc}, {:char, "]"} | chars] = events
+      assert Enum.map_join(chars, &elem(&1, 1)) == paste
     end
   end
 end

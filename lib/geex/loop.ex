@@ -1823,15 +1823,20 @@ defmodule Geex.Loop do
     end
   end
 
-  # The theme named by `theme_id`, built again: the terminal theme from the terminal's background
-  # as known now, a bundled one from its file. A file that won't load keeps the theme shown.
-  defp retheme(%{theme_id: "terminal"} = state),
-    do: schedule_repaint(%{state | theme: Theme.Terminal.theme(state.terminal_bg)})
+  # Show the theme named `id`, built again: the terminal theme from the terminal's background as
+  # known now, a bundled one from its file. A file that won't load keeps the theme shown, and
+  # its name.
+  defp retheme(state, id \\ nil)
 
-  defp retheme(%{theme_id: id} = state) do
+  defp retheme(state, nil), do: retheme(state, state.theme_id)
+
+  defp retheme(state, "terminal" = id),
+    do: schedule_repaint(%{state | theme_id: id, theme: Theme.Terminal.theme(state.terminal_bg)})
+
+  defp retheme(state, id) do
     case Theme.bundled(id) do
       {:ok, theme} ->
-        schedule_repaint(%{state | theme: theme})
+        schedule_repaint(%{state | theme_id: id, theme: theme})
 
       {:error, reason} ->
         schedule_repaint(%{state | notice: "theme #{id} didn't load: #{inspect(reason)}"})
@@ -2299,7 +2304,8 @@ defmodule Geex.Loop do
 
   defp position({line, col}), do: "#{line + 1}:#{col + 1}"
 
-  defp status_style(%Theme{palette: p}), do: %Cell{fg: p.bg, bg: p.fg}
+  # Reverse video, not fg and bg swapped: the terminal theme's are both `:default` (ADR-0040).
+  defp status_style(%Theme{palette: p}), do: %Cell{fg: p.fg, bg: p.bg, attrs: [:reverse]}
 
   # Draw the line-number gutter over the left `gw` columns: each visible text row gets
   # its 1-based logical line number, right-aligned, in the theme's line-number colour —
@@ -2649,7 +2655,7 @@ defmodule Geex.Loop do
 
       {:theme, name} ->
         if name in Theme.names(),
-          do: retheme(%{state | theme_id: name}),
+          do: retheme(state, name),
           else: schedule_repaint(%{state | notice: "no theme #{name} (`theme` lists them)"})
 
       :quit ->

@@ -190,22 +190,27 @@ defmodule Geex.Input.Parser do
   end
 
   # OSC: ESC ] Ps ; Pt, ended by BEL or ST (ESC \), read whole: a terminal's answer to a query,
-  # like OSC 11's background colour (ADR-0040). Incomplete → leftover (up to @max_osc bytes, then
-  # dropped). An ESC inside that isn't ST means it wasn't one: drop the ESC ] and re-scan.
+  # like OSC 11's background colour (ADR-0040). Ps is a number. Incomplete → leftover, up to
+  # @max_osc bytes. Anything else (an ESC inside that isn't ST, no number, past the cap) wasn't
+  # one: Esc, and the rest from `]` read again, as typed keys.
   defp do_parse(<<"\e]", rest::binary>> = seq, acc) do
     case osc_end(rest, 0) do
       {:end, n, len} ->
         <<body::binary-size(n), _terminator::binary-size(len), after_seq::binary>> = rest
-        do_parse(after_seq, push(osc(body), acc))
+
+        case osc(body) do
+          {:osc, <<d, _::binary>>, _} = event when d in ?0..?9 ->
+            do_parse(after_seq, [event | acc])
+
+          _not_osc ->
+            do_parse("]" <> rest, [{:key, :esc} | acc])
+        end
 
       :partial when byte_size(seq) <= @max_osc ->
         {Enum.reverse(acc), seq}
 
-      :partial ->
-        {Enum.reverse(acc), <<>>}
-
-      :invalid ->
-        do_parse(rest, acc)
+      _invalid_or_too_long ->
+        do_parse("]" <> rest, [{:key, :esc} | acc])
     end
   end
 

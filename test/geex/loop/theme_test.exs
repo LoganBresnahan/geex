@@ -102,6 +102,12 @@ defmodule Geex.Loop.ThemeTest do
     assert :reverse in Screen.get_cell(screen, 30 + gutter, 1).attrs
   end
 
+  test "the status line is a reversed bar under the terminal theme too", %{state: state} do
+    state = type(state, "theme terminal")
+    {state, screen} = frame(state)
+    assert :reverse in Screen.get_cell(screen, 0, state.h - 1).attrs
+  end
+
   test "Birds of Paradise draws exactly as before: no mark" do
     assert Theme.default().palette.mark == []
   end

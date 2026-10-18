@@ -24,7 +24,7 @@ defmodule Geex.ThemeTest do
     test "draws in SGR 30-37/90-97 and the terminal's default, never truecolor" do
       t = Theme.Terminal.theme(nil)
       assert Ansi.sgr(Theme.style_for(t, "keyword")) == "\e[35m"
-      assert Ansi.sgr(Theme.style_for(t, "comment")) == "\e[3;90m"
+      assert Ansi.sgr(Theme.style_for(t, "comment")) == "\e[2;3m"
       assert Ansi.sgr(Theme.style_for(t, "variable")) == ""
     end
 

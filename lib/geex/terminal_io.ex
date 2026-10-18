@@ -153,7 +153,7 @@ defmodule Geex.TerminalIO do
       esc_flush: nil,
       # Until when (monotonic ms) the start of an OSC 11 answer is waited for, not flushed as
       # Alt+] (`Parser.osc_reply?/2`); and the answer once it came, for later subscribers.
-      bg_asked_until: if(ask_bg?, do: now_ms() + @bg_wait_ms, else: 0),
+      bg_asked_until: if(ask_bg?, do: now_ms() + @bg_wait_ms),
       bg_answer: nil,
       subscribers: MapSet.new(),
       monitors: %{}
@@ -235,7 +235,10 @@ defmodule Geex.TerminalIO do
   # Nothing followed the leftover within @esc_timeout_ms: it was typed, not sent as one
   # sequence (a bare Esc, or Esc then `[`). Deliver it (`Parser.flush/1`).
   def handle_info({:flush_esc, ref}, %{esc_flush: ref, esc_buf: buf} = state) do
-    Enum.each(Parser.flush(buf), fn ev -> publish({:geex_io, ev}, state) end)
+    # The start of an OSC 11 answer whose rest never came is the terminal's, not typed: dropped.
+    unless Parser.osc_reply?(buf, false),
+      do: Enum.each(Parser.flush(buf), fn ev -> publish({:geex_io, ev}, state) end)
+
     {:noreply, %{state | esc_buf: <<>>, esc_flush: nil}}
   end
 
@@ -347,12 +350,15 @@ defmodule Geex.TerminalIO do
 
   defp schedule_flush(<<>>, _asked_until), do: nil
 
+  # `asked_until` is nil when no query went out (monotonic time can be negative, so no number
+  # stands for "never").
   defp schedule_flush(leftover, asked_until) do
-    wait = asked_until - now_ms()
+    wait = if asked_until, do: asked_until - now_ms(), else: 0
 
     cond do
       Parser.mouse_report?(leftover) -> nil
-      Parser.osc_reply?(leftover, false) -> nil
+      # An answer's start: its rest gets a second, then it is dropped (the flush, above).
+      Parser.osc_reply?(leftover, false) -> flush_later(@bg_wait_ms)
       # Maybe the answer's start: wait out the query's window, then it was typed.
       wait > 0 and Parser.osc_reply?(leftover, true) -> flush_later(wait + @esc_timeout_ms)
       true -> flush_later(@esc_timeout_ms)
