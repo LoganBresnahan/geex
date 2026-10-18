@@ -227,6 +227,91 @@ defmodule Geex.Loop.SettingsTest do
     end
   end
 
+  # The step 6 review's findings, and the coordinator's note on General's paths.
+  describe "review fixes" do
+    test "an install still running doesn't choose its theme after the user chose another",
+         %{state: state, dir: dir} do
+      state = send_io(state, {:alt, ?y})
+      pending = %{pid: self(), ref: make_ref(), then: {:choose_theme, "birds-of-paradise"}}
+      state = %{state | installing: %{"birds-of-paradise" => pending}}
+
+      # Themes highlights the theme in use, terminal; Enter keeps it.
+      state = state |> send_io({:key, :tab}) |> send_io({:key, :enter})
+      assert state.settings.message == "theme terminal kept"
+      state = send_io(state, {:key, :esc})
+
+      done = %{kind: :theme, name: "birds-of-paradise", display: "Birds", sha256: "x"}
+
+      {:noreply, state} =
+        Loop.handle_info({:geex_install_done, self(), "birds-of-paradise", {:ok, done}}, state)
+
+      assert state.theme_id == "terminal"
+      assert JSON.decode!(File.read!(Path.join(dir, "settings.json"))) == %{"theme" => "terminal"}
+    end
+
+    test "moving to Themes highlights the theme in use", %{state: state} do
+      state = Loop.apply_settings(state, %{"theme" => "birds-of-paradise"})
+      state = state |> send_io({:alt, ?y}) |> send_io({:key, :tab})
+      rows = Settings.rows(state.settings, %{theme_id: state.theme_id})
+      assert Enum.at(rows, state.settings.sel).name == "birds-of-paradise"
+    end
+
+    test "General shows and turns over what geex starts with, not this session's state",
+         %{state: state, dir: dir} do
+      File.write!(Path.join(dir, "settings.json"), ~s({"tree": true}))
+      state = %{state | tree_shown: false}
+      state = state |> send_io({:alt, ?y}) |> send_io({:key, :left})
+      rows = Settings.rows(state.settings, %{saved: state.settings_saved})
+      assert %{cells: ["File tree", "on", _]} = Enum.at(rows, 1)
+      assert %{cells: ["Mouse", "on", _]} = Enum.at(rows, 0)
+
+      state = state |> send_io({:key, :down}) |> send_io({:key, :enter})
+      assert state.tree_shown == false
+      assert JSON.decode!(File.read!(Path.join(dir, "settings.json"))) == %{"tree" => false}
+    end
+
+    test "a settings.json that isn't JSON is left alone, and the view says so",
+         %{state: state, dir: dir} do
+      file = Path.join(dir, "settings.json")
+      File.write!(file, ~s({"theme": "x", oops}))
+      assert Geex.Settings.put("mouse", false) == {:error, :unreadable}
+      state = state |> send_io({:alt, ?y}) |> send_io({:key, :left}) |> send_io({:key, :enter})
+      assert state.settings.message =~ "isn't valid JSON, left alone"
+      assert File.read!(file) == ~s({"theme": "x", oops})
+    end
+
+    test "a file opening while the view is open keeps its hint for later",
+         %{state: state, dir: dir} do
+      state = send_io(state, {:alt, ?y})
+      {:ok, js} = Session.open_file(Path.join(dir, "b.js"))
+      {:noreply, state} = Loop.handle_info({:geex_active_buffer, js}, state)
+      assert state.hinted == []
+    end
+
+    test "on a screen too short for a list, a click on the help line acts on nothing" do
+      view = Settings.open()
+      rows = Settings.rows(view, %{})
+      press = %{action: :press, button: :left, x: 3, y: 2}
+      assert {_, :none} = Settings.mouse(view, press, rows, {80, 3})
+      %Screen{} = Settings.draw(view, rows, Geex.Theme.default().palette, {10, 2})
+    end
+
+    test "General's paths show ~ and keep their file name, cut from the left", %{state: state} do
+      state = %{state | w: 40} |> send_io({:alt, ?y}) |> send_io({:key, :left})
+      {_state, screen} = frame(state)
+      settings_row = row_text(screen, 5)
+      assert String.starts_with?(settings_row, "Settings")
+      assert String.ends_with?(settings_row, "settings.json")
+      assert settings_row =~ "…"
+    end
+
+    test "geex install --force alone, or with --list, is the listing" do
+      import ExUnit.CaptureIO
+      assert capture_io(fn -> assert Geex.CLI.install(["--force"]) == 0 end) =~ "rust"
+      assert capture_io(fn -> assert Geex.CLI.install(["--list", "--force"]) == 0 end) =~ "rust"
+    end
+  end
+
   test "a catalog install already up to date fetches nothing; --force would" do
     entry = Geex.Catalog.grammar("rust")
     dir = Installed.dir(:grammar, "rust")

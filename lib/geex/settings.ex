@@ -33,11 +33,37 @@ defmodule Geex.Settings do
     end
   end
 
-  @doc "Set `key` to `value` and write the file. Returns `:ok` or `{:error, reason}`."
+  @doc """
+  Set `key` to `value` and write the file. Returns `:ok` or `{:error, reason}`. A file that is
+  there but isn't a JSON object is left alone (`{:error, :unreadable}`): rewriting it with only
+  this key would lose the rest.
+  """
   @spec put(String.t(), term()) :: :ok | {:error, term()}
   def put(key, value) do
-    settings = Map.put(load(), key, value)
     file = path()
+
+    with {:ok, current} <- current(file) do
+      write(file, Map.put(current, key, value))
+    end
+  end
+
+  defp current(file) do
+    case File.read(file) do
+      {:ok, json} ->
+        case JSON.decode(json) do
+          {:ok, %{} = settings} -> {:ok, settings}
+          _ -> {:error, :unreadable}
+        end
+
+      {:error, :enoent} ->
+        {:ok, %{}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp write(file, settings) do
     tmp = file <> ".tmp-#{System.pid()}"
 
     with :ok <- File.mkdir_p(Path.dirname(file)),

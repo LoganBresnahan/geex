@@ -289,6 +289,8 @@ defmodule Geex.Loop do
       # hinted at (once each), the last of them first in the view.
       settings: nil,
       settings_theme: nil,
+      # What settings.json keeps, read when the view opens and after each change it makes.
+      settings_saved: %{},
       installing: %{},
       hinted: [],
       # The file panes and their tabs (ADR-0038); `watched` every buffer in a tab: its monitor
@@ -445,8 +447,9 @@ defmodule Geex.Loop do
 
   # The settings view (`Alt+Y`) takes the mouse while it is open (ADR-0040 §7, ADR-0039).
   def handle_info({:geex_io, {:mouse, m}}, %{settings: %Settings{} = view} = state) do
-    {view, action} = Settings.mouse(view, m, settings_rows(view, state), {state.w, state.h})
-    {:noreply, schedule_repaint(settings_action(action, %{state | settings: view}))}
+    {new, action} = Settings.mouse(view, m, settings_rows(view, state), {state.w, state.h})
+    state = %{state | settings: same_tab_or_reselect(view, new, state)}
+    {:noreply, schedule_repaint(settings_action(action, state))}
   end
 
   # The mouse (ADR-0039). A release ends a drag wherever it is; while the minibuffer is open, only
@@ -509,6 +512,25 @@ defmodule Geex.Loop do
     %{pid: ^pid, ref: ref, then: then} = installing[name]
     Process.demonitor(ref, [:flush])
     state = %{state | installing: Map.delete(installing, name)}
+    # Read what's installed now (the install process did, but a read on the loop that began
+    # before its swap could have put back the list without it), and keep the highlight on the
+    # row it was on: an installed row can move.
+    picked =
+      case state.settings do
+        %Settings{} = view -> (Enum.at(settings_rows(view, state), view.sel) || %{})[:name]
+        nil -> nil
+      end
+
+    Geex.Installed.refresh()
+
+    state =
+      case state.settings do
+        %Settings{} = view ->
+          %{state | settings: Settings.reselect(view, settings_rows(view, state), picked)}
+
+        nil ->
+          state
+      end
 
     message =
       case result do
@@ -569,7 +591,8 @@ defmodule Geex.Loop do
         {view, action} =
           Settings.key(state.settings, event, settings_rows(state.settings, state), state.h)
 
-        {:noreply, schedule_repaint(settings_action(action, %{state | settings: view}))}
+        state = %{state | settings: same_tab_or_reselect(state.settings, view, state)}
+        {:noreply, schedule_repaint(settings_action(action, state))}
 
       event in [{:alt, ?y}, {:alt, ?Y}] and not Minibuffer.active?(state.minibuffer) ->
         {:noreply, schedule_repaint(open_settings(state))}
@@ -762,6 +785,9 @@ defmodule Geex.Loop do
   # A newly shown file geex could highlight says how, once per language a session: its grammar
   # is in the catalog but not installed, or the one here is built for a tree-sitter ABI this
   # geex doesn't load (ADR-0040 §4, §5). `Alt+Y` then opens on that language.
+  # Not while the settings view covers the screen: the hint would be used up unseen.
+  defp grammar_notice(%{settings: %Settings{}} = state, _pid), do: state
+
   defp grammar_notice(state, pid) do
     with %{path: path} when is_binary(path) <- Enum.find(safe_buffers(), &(&1.pid == pid)),
          {status, display} when status in [:available, :needs_update] <-
@@ -1998,15 +2024,19 @@ defmodule Geex.Loop do
 
     # Another geex may have installed something since: read the directories again.
     Geex.Installed.refresh()
-    %{state | settings: view, settings_theme: state.theme_id}
+
+    %{
+      state
+      | settings: view,
+        settings_theme: state.theme_id,
+        settings_saved: Geex.Settings.load()
+    }
   end
 
   defp settings_ctx(state) do
     %{
       theme_id: state.theme_id,
-      mouse: state.mouse,
-      tree_shown: state.tree_shown,
-      edits_shown: state.edits_shown,
+      saved: state.settings_saved,
       installing: MapSet.new(Map.keys(state.installing))
     }
   end
@@ -2023,7 +2053,7 @@ defmodule Geex.Loop do
 
   # Closing without choosing a theme puts back the one in use when the view opened.
   defp settings_action(:close, state) do
-    state = %{state | settings: nil}
+    state = drop_pending_choices(%{state | settings: nil})
 
     if state.theme_id != state.settings_theme and is_binary(state.settings_theme),
       do: retheme(state, state.settings_theme),
@@ -2036,7 +2066,7 @@ defmodule Geex.Loop do
 
   defp settings_action({:choose_theme, name}, state) do
     if name in Theme.names() do
-      state = retheme(state, name)
+      state = retheme(drop_pending_choices(state), name)
 
       if state.theme_id == name do
         keep(%{state | settings_theme: name}, "theme", name, "theme #{name} kept")
@@ -2048,41 +2078,60 @@ defmodule Geex.Loop do
     end
   end
 
+  # General's toggles turn over what geex starts with (settings.json), and the session follows.
+  # Unset, the mouse starts on, and the tree and edits pane start as they are now.
   defp settings_action({:toggle, :mouse}, state) do
-    on? = not state.mouse
+    on? = state.settings_saved["mouse"] == false
     TerminalIO.set_mouse(on?)
-    keep(%{state | mouse: on?, drag: nil}, "mouse", on?, "mouse #{if on?, do: "on", else: "off"}")
+    keep(%{state | mouse: on?, drag: nil}, "mouse", on?, "the mouse is #{onoff(on?)} at start")
   end
 
   defp settings_action({:toggle, :tree}, state) do
-    shown = not state.tree_shown
+    shown = not at_start(state, "tree", state.tree_shown)
     state = %{state | tree_shown: shown, focus: if(shown, do: state.focus, else: :editor)}
     state = if shown, do: reload_tree(state), else: state
-    keep(state, "tree", shown, "the tree #{if shown, do: "shows", else: "stays hidden"} at start")
+    keep(state, "tree", shown, "the tree is #{onoff(shown)} at start")
   end
 
   defp settings_action({:toggle, :edits}, state) do
-    shown = not state.edits_shown
+    shown = not at_start(state, "edits", state.edits_shown)
     state = %{state | edits_shown: shown, focus: if(shown, do: state.focus, else: :editor)}
-
-    keep(
-      state,
-      "edits",
-      shown,
-      "the edits pane #{if shown, do: "shows", else: "stays hidden"} at start"
-    )
+    keep(state, "edits", shown, "the edits pane is #{onoff(shown)} at start")
   end
+
+  defp at_start(state, key, unset) do
+    case state.settings_saved[key] do
+      on? when is_boolean(on?) -> on?
+      _ -> unset
+    end
+  end
+
+  defp onoff(true), do: "on"
+  defp onoff(false), do: "off"
 
   # Keep a setting across starts (`Geex.Settings`), and say so, or that it couldn't be written.
   defp keep(state, key, value, message) do
     case Geex.Settings.put(key, value) do
       :ok ->
-        say(state, message)
+        say(%{state | settings_saved: Map.put(state.settings_saved, key, value)}, message)
+
+      {:error, :unreadable} ->
+        say(state, "#{message} for now: #{Geex.Settings.path()} isn't valid JSON, left alone")
 
       {:error, reason} ->
-        say(state, "#{message}, for now: #{Geex.Settings.path()}: #{inspect(reason)}")
+        say(state, "#{message} for now: #{Geex.Settings.path()}: #{inspect(reason)}")
     end
   end
+
+  # The view moved to another tab: highlight that tab's row in use (a theme), else its top.
+  defp same_tab_or_reselect(%Settings{tab: tab}, %Settings{tab: tab} = view, _state), do: view
+
+  defp same_tab_or_reselect(_old, view, state),
+    do: Settings.reselect(view, settings_rows(view, state))
+
+  # No install still running may choose a theme any more: the user chose, or left.
+  defp drop_pending_choices(state),
+    do: %{state | installing: Map.new(state.installing, fn {n, i} -> {n, %{i | then: nil}} end)}
 
   # An install runs in a process of its own (ADR-0035: a download is slow work), which answers
   # `{:geex_install_done, …}`. `then` is what to do when it succeeds.
@@ -2122,7 +2171,7 @@ defmodule Geex.Loop do
         schedule_repaint(%{state | theme_id: id, theme: theme})
 
       {:error, reason} ->
-        schedule_repaint(%{state | notice: "theme #{id} didn't load: #{inspect(reason)}"})
+        schedule_repaint(say(state, "theme #{id} didn't load: #{inspect(reason)}"))
     end
   end
 

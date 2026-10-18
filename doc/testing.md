@@ -3000,3 +3000,25 @@ the terminal theme; `named/1` loads an installed theme and refuses one that isn'
 
 **Not deployed yet:** held, at the coordinator session's request, until the step 6 review's fixes
 are in. After it lands, the maintainer's geex shows plain text until `geex install elixir`.
+
+### 2026-10-18 — The step 6 review's fixes; General's paths
+
+An adversarial review of `ae9b714` (a subagent with probes) found three state bugs, one latent
+bug that step 7 made reachable, and smaller ones. ADR-0040's step 6 notes list them; each is
+fixed. `loop/settings_test.exs` "review fixes" has a test each:
+- a slow install no longer chooses its theme after the user chose another;
+- Tab to Themes highlights the theme in use;
+- General shows and turns over what's kept, not the session (`{"tree": true}` with the tree
+  hidden reads "on", and Enter keeps false);
+- a `settings.json` that isn't JSON is left alone, and the view says so;
+- a hint from a file opened behind the view is kept for later;
+- a 3-row screen's help line takes no click, and drawing at 10×2 doesn't crash;
+- `--force` alone, or with `--list`, lists;
+- General's paths keep their file name at 40 columns, cut from the left with "…".
+
+**BUG-5:** a new flake, the reconcile quiet-period test finding the buffer behind an empty
+file, happened once in ~13 full runs (seed 125550; not reproduced in 3 runs of that seed). It is
+in `bugs.md` with what is known. Nothing in this run's code explains it.
+
+**1075 tests + 67 doctests.** One run of three hit BUG-5; ten more had one hit (that one), the
+rest green.

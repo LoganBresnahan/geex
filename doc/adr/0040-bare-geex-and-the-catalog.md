@@ -299,6 +299,31 @@ drawing, all pure. The loop carries out what it asks for. `Alt+Y` amends ADR-003
 - **Up to date** (the coordinator's note on step 5): installing a package whose installed
   record is already this catalog's sha256 fetches nothing ("rust is already installed (up to
   date; --force installs it again)"). `geex install --force` reinstalls a damaged one.
+- **The step 6 review** (an adversarial subagent, with probes) found these, fixed and tested:
+  - **A slow install could undo a later choice.** One started by choosing an uninstalled theme
+    chose it when it finished, even after the user chose another and closed the view, and
+    rewrote `settings.json`. Now choosing a theme, or closing the view, cancels every pending
+    choice.
+  - **Moving to Themes highlighted row 0** (the terminal theme), so Tab then Enter switched
+    to it. A tab change now highlights the theme in use.
+  - **General showed this session's state** under the label "at start", and saved the opposite
+    of it. It now shows and turns over what `settings.json` keeps: unset, the mouse is on, and
+    the tree and the edits pane are "auto" (wide terminals).
+  - **A `settings.json` that isn't JSON** was rewritten with only the new key. It is left alone
+    now, and the view says so.
+  - **A hint from a file opened behind the open view** was used up unseen; it is now kept for
+    later.
+  - **A theme that fails to load** said so in the hidden notice; it now says so in the view.
+  - **On a screen three rows tall**, a click on the help line acted on a row. The list has no
+    rows there now.
+  - **`geex install --force`**, alone or with `--list`, is the listing.
+  - **After an install** the loop reads the packages again, in case its own read raced the
+    install's, and keeps the highlight on its row by name.
+  - **The view now keeps the highlight on screen** after the terminal shrinks.
+  - **Left as is:** two geex writing `settings.json` at once can lose one of the writes; the
+    file itself never corrupts.
+- **The coordinator's note:** General's paths show `~` for the home directory, and one too long
+  is cut from the left with "…", so its file name shows.
 
 ### 8. Compiling a grammar is cached on disk (step 2)
 

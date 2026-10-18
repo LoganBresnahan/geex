@@ -117,20 +117,50 @@ defmodule Geex.Loop.Settings do
     for {group, keys, what} <- KeyHelp.search(query), do: %{name: nil, cells: [keys, what, group]}
   end
 
+  # What geex starts with, as `settings.json` keeps it (`ctx.saved`): not this session's state,
+  # which `mouse`, `Alt+T` and `Alt+L` change without keeping. A tree or edits pane left unset
+  # shows when the terminal is wide enough.
   def rows(%__MODULE__{tab: :general}, ctx) do
-    on = fn key -> if Map.get(ctx, key), do: "on", else: "off" end
+    saved = Map.get(ctx, :saved, %{})
+
+    at_start = fn key, unset ->
+      case saved[key] do
+        true -> "on"
+        false -> "off"
+        _ -> unset
+      end
+    end
 
     [
-      %{name: :mouse, cells: ["Mouse", on.(:mouse), "Enter turns it on or off (also `mouse`)"]},
-      %{name: :tree, cells: ["File tree", on.(:tree_shown), "shown when geex starts"]},
-      %{name: :edits, cells: ["Edits pane", on.(:edits_shown), "shown when geex starts"]},
-      %{name: nil, cells: ["Settings", Geex.Settings.path(), ""]},
-      %{name: nil, cells: ["Packages", Installed.root(), ""]},
+      %{
+        name: :mouse,
+        cells: ["Mouse", at_start.("mouse", "on"), "at start; Enter turns it over"]
+      },
+      %{
+        name: :tree,
+        cells: ["File tree", at_start.("tree", "auto"), "at start (auto: wide terminals)"]
+      },
+      %{
+        name: :edits,
+        cells: ["Edits pane", at_start.("edits", "auto"), "at start (auto: wide terminals)"]
+      },
+      %{name: nil, cells: ["Settings", tilde(Geex.Settings.path()), ""], left_cut: 1},
+      %{name: nil, cells: ["Packages", tilde(Installed.root()), ""], left_cut: 1},
       %{
         name: nil,
-        cells: ["Compiled grammars", Geex.Highlight.Grammars.cache_dir() || "(off)", ""]
+        cells: ["Compiled grammars", tilde(Geex.Highlight.Grammars.cache_dir() || "(off)"), ""],
+        left_cut: 1
       }
     ]
+  end
+
+  # `~` for the home directory, so a path fits.
+  defp tilde(path) do
+    home = System.user_home() || ""
+
+    if home != "" and String.starts_with?(path, home <> "/"),
+      do: "~" <> String.replace_prefix(path, home, ""),
+      else: path
   end
 
   defp package_status(pkg),
@@ -196,6 +226,18 @@ defmodule Geex.Loop.Settings do
     i = Enum.find_index(@tabs, &(&1 == view.tab))
     tab = Enum.at(@tabs, Integer.mod(i + step, length(@tabs)))
     %{view | tab: tab, sel: 0, top: 0, message: nil}
+  end
+
+  @doc """
+  After a tab change (or rows that moved): highlight the row named `name`, else on Themes the
+  theme in use, else the top. The caller passes the new tab's rows.
+  """
+  @spec reselect(t(), [map()], term()) :: t()
+  def reselect(view, rows, name \\ nil) do
+    sel =
+      (name && Enum.find_index(rows, &(&1[:name] == name))) || current_row(rows)
+
+    %{view | sel: sel, top: 0}
   end
 
   defp search(view, query), do: %{view | query: query, sel: 0, top: 0}
@@ -286,8 +328,9 @@ defmodule Geex.Loop.Settings do
 
   ## Drawing
 
-  # The rows a list has: the screen less the tabs, the rule, the message and the help line.
-  defp list_height(h), do: max(h - 4, 1)
+  # The rows a list has: the screen less the tabs, the rule, the message and the help line. None
+  # on a screen too short for them; then a click lands on no row.
+  defp list_height(h), do: max(h - 4, 0)
 
   # Each tab's label on the top row: `{tab, x0, x1}`.
   defp tab_spans(_w) do
@@ -326,18 +369,27 @@ defmodule Geex.Loop.Settings do
         else: String.duplicate("─", w)
 
     screen = Screen.draw_text(screen, 0, 1, clip(rule, w), dim)
-    widths = column_widths(rows, w)
+    # Columns as wide as their cells, a path's aside (it is cut to fit instead).
+    widths =
+      case Enum.reject(rows, & &1[:left_cut]) do
+        [] -> column_widths(rows, w)
+        sized -> column_widths(sized, w)
+      end
+
+    # The highlight stays on screen, even after the terminal shrank.
+    %{top: top} = scroll(view, h)
 
     screen =
       rows
       |> Enum.with_index()
-      |> Enum.slice(view.top, list_height(h))
+      |> Enum.slice(top, list_height(h))
       |> Enum.with_index(2)
       |> Enum.reduce(screen, fn {{row, i}, y}, acc ->
         style = if i == view.sel, do: picked, else: %Cell{fg: pal.fg, bg: pal.bg}
 
         line =
           row.cells
+          |> fit_left(row[:left_cut], widths, w - 1)
           |> Enum.zip(widths)
           |> Enum.map_join("  ", fn {cell, width} -> pad(cell, width) end)
 
@@ -384,6 +436,31 @@ defmodule Geex.Loop.Settings do
   end
 
   defp pad(text, width), do: text <> String.duplicate(" ", max(width - Width.string(text), 0))
+
+  # A cell that must keep its end (a path's file name): cut from the left, with "…", to what the
+  # line leaves it.
+  defp fit_left(cells, nil, _widths, _w), do: cells
+
+  defp fit_left(cells, i, widths, w) do
+    # What the line leaves the cell: the columns before it, and the separators around it.
+    before = widths |> Enum.take(i) |> Enum.sum()
+    room = max(w - before - 2 * i, 1)
+
+    List.update_at(cells, i, fn cell ->
+      if Width.string(cell) <= room, do: cell, else: "…" <> take_end(cell, room - 1)
+    end)
+  end
+
+  defp take_end(text, n) do
+    text
+    |> String.graphemes()
+    |> Enum.reverse()
+    |> Enum.reduce_while({"", 0}, fn g, {acc, used} ->
+      gw = Width.string(g)
+      if used + gw > n, do: {:halt, {acc, used}}, else: {:cont, {g <> acc, used + gw}}
+    end)
+    |> elem(0)
+  end
 
   defp clip(text, w) do
     if Width.string(text) <= w, do: text, else: take(text, w)

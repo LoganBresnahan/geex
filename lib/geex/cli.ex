@@ -213,8 +213,14 @@ defmodule Geex.CLI do
   end
 
   def install(args) do
-    {force, args} = Enum.split_with(args, &(&1 == "--force"))
+    case Enum.split_with(args, &(&1 == "--force")) do
+      # `--force` alone, or with `--list`, is the listing: there's nothing to force.
+      {_force, rest} when rest in [[], ["--list"]] -> install(rest)
+      {force, names} -> install_each(names, force != [])
+    end
+  end
 
+  defp install_each(args, force?) do
     results =
       for arg <- args do
         local? = String.contains?(arg, "/") or String.ends_with?(arg, ".zip")
@@ -222,7 +228,7 @@ defmodule Geex.CLI do
         result =
           if local?,
             do: Geex.Install.install_path(arg),
-            else: Geex.Install.install(arg, force: force != [])
+            else: Geex.Install.install(arg, force: force?)
 
         case result do
           {:ok, %{unchanged: true, name: name}} ->
