@@ -3829,3 +3829,27 @@ All 8 runs were green, and no `geex-test-data-*` directory was left behind.
 `0.2.0+08883564`, and the deploy kept that unpack, since it was in use. In tmux with scratch
 state, the log read "loading code in embedded mode", typing and `Ctrl-O` saved, `Ctrl-X` gave
 the shell back, and the log was clean.
+
+### 2026-10-18 — Burrito fork `4407714` in geex: the wrapper's output on stderr, `maintenance purge`
+
+**Deployed** as `0.2.0+429ff9dd.89a87236`. `mix.exs` pins the fork at `4407714`, and in the lock
+only Burrito's entry changed.
+
+**Checked in the installed binary:**
+- with `GEEX_INSTALL_DIR` set to a scratch directory, `geex --version 2>/dev/null` printed only
+  `geex 0.2.0+429ff9dd.89a87236`;
+- `geex maintenance purge` there printed "removed geex_erts-16.1_0.2.0+429ff9dd…" and "1
+  removed, 0 kept" (its own unpack, idle). Burrito takes `maintenance` before geex's CLI does;
+- purge runs before anything is unpacked: for a version not unpacked yet it removes nothing of
+  its own (the coordinator session's question). Before this commit, a scratch base with no
+  unpacks printed "0 removed, 0 kept".
+
+The fork's own checks before its commit are in `FORK.md`: purge over four unpacks removed two
+and kept two running ones, each with its reason.
+
+**A correction to the entry above.** Its "two geex were running from `0.2.0+08883564`" came from
+a `pgrep` pattern that also matched pharos-mcp's processes. No geex was running. The deploy kept
+that unpack because it was `geex.prev`'s, not because it was in use. This time `/proc/<pid>/exe`
+was read for every `beam.smp`: the only ones running were pharos-mcp's.
+
+**1109 tests + 79 doctests**, green twice.
