@@ -3655,3 +3655,19 @@ did.
 open. Restart open editors after a version change.
 
 **1106 tests + 80 doctests**, green twice.
+
+**Deployed** as `0.2.0+e4582ae8.89a87236`, after the coordinator session had created the v0.2.0
+release (31 assets, each downloaded back and its sha256 checked). No geex was running. Its first
+run removed the 0.1.0 unpack, as above; `geex.prev` unpacks again if it is ever run.
+
+**Over the real network** (tmux, scratch `GEEX_INSTALL_DIR` and XDG directories, nothing
+installed):
+- Alt+Y, then Themes, listed the 15 catalog themes as `available`.
+- Enter on Catppuccin Latte downloaded it from v0.2.0: sha256 `3965053aae66…`, as the catalog
+  pins.
+- It was installed, chosen (`✓ in use`) and kept in `settings.json`.
+- The editor then drew Latte's background `#EFF1F5` and its active line `#DCE0E8`.
+- The log shows the install and no error.
+
+**Also checked:** `--version`, `--frob` exits 2, `Ctrl-X` gives the shell back, the discovery
+file is removed, and the log has no `terminating` or `undef` lines.
