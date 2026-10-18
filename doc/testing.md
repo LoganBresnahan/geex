@@ -3347,3 +3347,7 @@ at the tree's edge (column 30), and `⠛⠛` at the edits title's centre.
 **Not checked live:** a stacked split's bar (the tests cover it).
 
 **1093 tests + 76 doctests**, green twice.
+
+**Deployed** as `0.1.0+3852ff83.89a87236`. In the installed binary (tmux, scratch state),
+`geex .` then `Alt+=` showed the same three handles. `Ctrl-X` gave the shell back, and the log
+had no `terminating` or `undef` lines.
