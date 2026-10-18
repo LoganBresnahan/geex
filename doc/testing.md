@@ -2641,3 +2641,35 @@ the captured fixture); the flaky failure above.
   `inotifywait` left.
 
 **Not tested:** Windows Terminal.
+
+### 2026-10-18 — Compiled grammars cached on disk (ADR-0040 step 2)
+
+`tree_sitter_wasm` 0bc6629 adds wasmtime's compilation cache (`load_grammar/4`, `cache_dir:`).
+geex passes `$XDG_CACHE_HOME/geex/wasm`.
+
+**Measured** (8 cores, release NIF):
+- **The NIF alone,** five loads per VM:
+  - Elixir's `parser.wasm`: 141–145 ms each with no cache, 5 ms from the cache. That held in a
+    second VM, so the cache is on disk and not in memory.
+  - JSON: 9 ms with no cache, 0.4 ms from the cache.
+  - Timing each phase put the rest of Elixir's load (~67 ms) in `Query::new` (its
+    `highlights.scm`), which isn't wasm.
+- **Through `Geex.Highlight.Grammars.handle/1`,** a new VM each time with a scratch
+  `XDG_CACHE_HOME`: Elixir 154 ms, then 72 ms; JSON 3 ms, then 0.
+
+**Read, not run:** that a wasmtime upgrade misses the cache. The key hashes
+`Config::module_version`, and loading a cached artifact checks the version again. The test
+"an entry wasmtime can't load is compiled again" damages every entry, and the next load compiles
+and highlights the same.
+
+**Automated:**
+- `tree_sitter_wasm`, 11 tests:
+  - the cache's files appear, and a cached load highlights the same;
+  - a damaged entry is recompiled;
+  - a file where the directory should be, or a path under that file, loads with no cache;
+  - a bad grammar is still an error.
+- geex: `grammars_cache_test.exs` (where the cache goes; off under test). **1018 tests + 54
+  doctests**, green twice.
+
+**Not tested:** the installed binary's first start with an empty cache against a warm one (next,
+with the deploy); a wasmtime version bump for real.

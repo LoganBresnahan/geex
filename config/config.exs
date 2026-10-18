@@ -23,4 +23,7 @@ config :geex,
   start_highlight: config_env() != :test,
   # The durable ledger (ADR-0033): each path-backed buffer's history is appended to
   # ~/.local/state/geex/ledger/ (`ledger_dir` overrides). Tests opt in per buffer.
-  ledger: config_env() != :test
+  ledger: config_env() != :test,
+  # Compiled grammars kept in $XDG_CACHE_HOME/geex/wasm (ADR-0040 §8). Tests leave the user's
+  # cache alone.
+  wasm_cache: config_env() != :test

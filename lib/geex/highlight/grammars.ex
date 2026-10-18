@@ -68,10 +68,25 @@ defmodule Geex.Highlight.Grammars do
     ArgumentError -> {:error, {:app_not_loaded, :geex}}
   end
 
+  # Compiled grammars are kept in `$XDG_CACHE_HOME/geex/wasm` (ADR-0040 §8), so a later start
+  # loads them in a few ms instead of compiling them again. Off under test (`wasm_cache`).
   defp load_grammar(wasm, name, scm) do
-    case TreeSitterWasm.load_grammar(wasm, name, scm) do
+    opts = if cache_dir = cache_dir(), do: [cache_dir: cache_dir], else: []
+
+    case TreeSitterWasm.load_grammar(wasm, name, scm, opts) do
       {:ok, grammar} -> {:ok, grammar}
       {:error, message} -> {:error, {:engine, message}}
+    end
+  end
+
+  @doc "Where compiled grammars are cached, or `nil` when the cache is off."
+  @spec cache_dir() :: Path.t() | nil
+  def cache_dir do
+    if Application.get_env(:geex, :wasm_cache, true) do
+      case System.get_env("XDG_CACHE_HOME") do
+        empty when empty in [nil, ""] -> Path.expand("~/.cache/geex/wasm")
+        dir -> Path.join([dir, "geex", "wasm"])
+      end
     end
   end
 end

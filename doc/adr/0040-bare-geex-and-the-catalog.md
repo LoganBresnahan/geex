@@ -133,6 +133,25 @@ With a catalog of 16 or more grammars this is paid on every first open of each l
 gets wasmtime's compilation cache, kept in `$XDG_CACHE_HOME/geex/wasm`. An unwritable directory
 means no cache, never an error, and a wasmtime upgrade must not load stale code from it.
 
+**Built 2026-10-18 (step 2),** `tree_sitter_wasm` 0bc6629:
+- **How:** `TreeSitterWasm.load_grammar/4` takes `cache_dir:`. A direct `wasmtime =36.0.10`
+  dependency with its `cache` feature unifies with the wasmtime tree-sitter embeds. Read in
+  tree-sitter's `wasm_store.c`: both its stdlib module and the grammar compile with
+  `wasmtime_module_new` on the engine passed in, so both are cached. There is one engine per
+  directory, made once (a cache starts a worker thread).
+- **Staleness, read in wasmtime's source:** the cache key hashes `Config::module_version`
+  (wasmtime's version) with the compiler's settings, and a cached artifact is version-checked
+  again when loaded. So another wasmtime misses and compiles. The cache's directory name, meant
+  to carry the git revision, is empty in a crates.io build, so the key carries the version
+  instead. A test damages every entry and checks the next load compiles afresh.
+- **Measured** through `Geex.Highlight.Grammars.handle/1`, a new VM each time: Elixir 154 ms
+  with an empty cache, 72 ms warm; JSON 3 ms, then under 1 ms. In the NIF alone, Elixir's
+  `.wasm` takes 5 ms from the cache. The other ~67 ms is `Query::new` compiling its
+  `highlights.scm`, which no wasm cache covers. Caching the query would need tree-sitter to
+  serialize one, which it can't.
+- **geex** caches in `$XDG_CACHE_HOME/geex/wasm` (`~/.cache/geex/wasm` by default,
+  `Grammars.cache_dir/0`). It is off under test (`wasm_cache`).
+
 ### 9. Not covered: injections
 
 The NIF highlights one grammar per file. A language embedded in another (HEEx inside `~H`,
