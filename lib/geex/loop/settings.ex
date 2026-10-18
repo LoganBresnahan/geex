@@ -13,8 +13,8 @@ defmodule Geex.Loop.Settings do
     * **General** — the mouse, whether the tree and the edits pane start shown, and where
       geex keeps its settings, packages and caches.
 
-  Esc or `Alt+Y` closes it; Tab, Left and Right move between tabs; Up, Down, `Alt+W` and
-  `Alt+S` move the highlight; the mouse clicks tabs and rows and scrolls (ADR-0039).
+  Esc or `Alt+Y` closes it; Tab, Left, Right, `Alt+A` and `Alt+D` move between tabs; Up, Down,
+  `Alt+W` and `Alt+S` move the highlight; the mouse clicks tabs and rows and scrolls (ADR-0039).
 
   This module is the view's state, how a key or a click changes it (`key/3`, `click/4`), which
   rows it shows (`rows/2`) and how it is drawn (`draw/4`). What an action does to the editor
@@ -190,10 +190,18 @@ defmodule Geex.Loop.Settings do
       {:key, :tab} ->
         {switch(view, +1), :none}
 
+      # Alt+D and Alt+A as well, the editor's right and left (ADR-0026); an Alt chord is never
+      # typed into the Keys search.
       {:key, :right} ->
         {switch(view, +1), :none}
 
+      {:alt, c} when c in [?d, ?D] ->
+        {switch(view, +1), :none}
+
       {:key, :left} ->
+        {switch(view, -1), :none}
+
+      {:alt, c} when c in [?a, ?A] ->
         {switch(view, -1), :none}
 
       {:key, :up} ->
@@ -415,10 +423,16 @@ defmodule Geex.Loop.Settings do
     })
   end
 
-  defp help(:languages), do: " Enter installs or updates · Tab, ←, → tabs · Esc or Alt+Y closes "
-  defp help(:themes), do: " ↑ ↓ preview · Enter chooses · Esc puts it back · Tab, ←, → tabs "
-  defp help(:keys), do: " type to search · Tab, ←, → tabs · Esc or Alt+Y closes "
-  defp help(:general), do: " Enter turns it on or off · Tab, ←, → tabs · Esc or Alt+Y closes "
+  defp help(:languages),
+    do: " Enter installs or updates · ← → or Alt+A Alt+D tabs · Esc or Alt+Y closes "
+
+  defp help(:themes),
+    do: " ↑ ↓ preview · Enter chooses · Esc puts it back · ← → or Alt+A Alt+D tabs "
+
+  defp help(:keys), do: " type to search · ← → or Alt+A Alt+D tabs · Esc or Alt+Y closes "
+
+  defp help(:general),
+    do: " Enter turns it on or off · ← → or Alt+A Alt+D tabs · Esc or Alt+Y closes "
 
   # Each column as wide as its widest cell, the last taking what's left.
   defp column_widths([], _w), do: []

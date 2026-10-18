@@ -57,7 +57,10 @@ and tabs after that.
 [ADR-0040](0040-bare-geex-and-the-catalog.md) §7 takes `Y`, the last free Alt letter (`E`, `F`,
 `Q` and `R` are motion), for the settings view: languages to install, themes, the keys, and the
 general settings. `Alt+Y` opens it from the editor, the tree or the edits pane, though not from
-the minibuffer, where keys are typed. `Alt+Y` or Esc closes it. Its typed twins are the verbs it
+the minibuffer, where keys are typed. `Alt+Y` or Esc closes it. Inside it, the editor's own
+motion keys move: `Alt+A`/`Alt+D` (or ←/→, or Tab) change tabs, and `Alt+W`/`Alt+S` (or ↑/↓)
+move the highlight. An Alt chord is never typed into the Keys tab's search. Its typed twins are
+the verbs it
 stands over (`theme`, `mouse`, `tree`, `edits`) and `geex install` in the terminal.
 
 ## See

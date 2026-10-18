@@ -31,6 +31,8 @@ defmodule Geex.Loop.KeyHelp do
     {"Commands", "Alt+I", "the command palette"},
     {"Commands", "Alt+G", "grid mode: pick by row and column"},
     {"Commands", "Alt+Y", "these settings"},
+    {"Settings", "Alt+A  Alt+D  ← →", "in these settings: the tab to the left, to the right"},
+    {"Settings", "Alt+W  Alt+S  ↑ ↓", "in these settings: move the highlight"},
     {"Commands", "Ctrl-X  Ctrl-Q  Ctrl-C", "quit"},
     {"Mouse", "click", "place the cursor; a tab, a tree row, an edit: open it"},
     {"Mouse", "drag", "select; past the edge it scrolls"},

@@ -287,7 +287,8 @@ drawing, all pure. The loop carries out what it asks for. `Alt+Y` amends ADR-003
   must match).
 - **General:** the mouse; the file tree and the edits pane shown at start (each toggled now and
   kept); where the settings, the packages and the compiled grammars live.
-- **Moving around:** Tab, ←, → change tabs; ↑ ↓ (or `Alt+W`/`Alt+S`) move the highlight; the
+- **Moving around:** Tab, ←, → (or `Alt+A`/`Alt+D`, added the same day) change tabs; ↑ ↓ (or
+  `Alt+W`/`Alt+S`) move the highlight; the
   wheel moves it three rows; a click on a tab switches to it. The quit keys still quit.
 - **Settings** (`Geex.Settings`) are `theme`, `mouse`, `tree` and `edits` in `settings.json`,
   written to a temporary file and renamed in. They're applied at start, and anything malformed

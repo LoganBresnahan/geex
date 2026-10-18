@@ -73,6 +73,20 @@ defmodule Geex.Loop.SettingsTest do
       assert {_, :none} = Settings.key(%{view | sel: elixir}, {:key, :enter}, rows, 30)
     end
 
+    test "Alt+A and Alt+D change tabs, and never type into the Keys search" do
+      view = Settings.open()
+      {view, :none} = Settings.key(view, {:alt, ?d}, [], 30)
+      assert view.tab == :themes
+      {view, :none} = Settings.key(view, {:alt, ?A}, [], 30)
+      {view, :none} = Settings.key(view, {:alt, ?a}, [], 30)
+      assert view.tab == :general
+      {view, :none} = Settings.key(view, {:alt, ?a}, [], 30)
+      assert {view.tab, view.query} == {:keys, ""}
+      {view, :none} = Settings.key(view, {:alt, ?D}, [], 30)
+      assert {view.tab, view.query} == {:general, ""}
+      assert Enum.any?(Geex.Loop.KeyHelp.search("alt+a"), &(elem(&1, 0) == "Settings"))
+    end
+
     test "tabs, moving, closing; Keys filters as you type" do
       view = Settings.open()
       {view, :none} = Settings.key(view, {:key, :tab}, [], 30)

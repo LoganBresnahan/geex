@@ -3068,3 +3068,11 @@ The coordinator session found 23 geex releases in the bare binary's unpack, some
   - Ctrl-X clean: no discovery file left, no `terminating` lines.
 
 **1075 tests + 67 doctests**, green twice.
+
+### 2026-10-18 — `Alt+A` / `Alt+D` change tabs in the settings view
+
+**Live** (`mix run` in tmux): `Alt+Y`, then `Alt+D` reversed "Themes". Three `Alt+A` reached
+Keys, with its search still empty. The footer read "← → or Alt+A Alt+D tabs".
+
+**Automated:** `settings_test.exs` (`Alt+D`/`Alt+A` in both cases, wrapping, never typed into
+the search; KeyHelp lists them). **1076 tests + 67 doctests**, green twice.
