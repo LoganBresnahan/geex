@@ -258,7 +258,7 @@ defmodule Geex.Buffer do
   chain rule. The payload doesn't count `:held` as taken, so it also spools the attestation,
   and a crash before the fast-forward still credits the write on reopen.
 
-  Returns `:attested`, `:held`, or `:ignored` (no `before`, so a created file can't match;
+  Returns `:attested`, `:held`, or `:ignored` (no `before`, from an older payload's message;
   or the matching group is already attested).
   """
   @spec attest(GenServer.server(), map()) :: :attested | :held | :ignored

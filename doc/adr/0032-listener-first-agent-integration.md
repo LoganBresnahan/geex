@@ -1,6 +1,7 @@
 # ADR-0032: Listener-first agent integration — agents edit natively, geex records, captAInHook attributes; MCP frozen
 
-- **Status:** Accepted (amended 2026-10-14: attestation safety + write completion). For open
+- **Status:** Accepted (amended 2026-10-14: attestation safety + write completion; 2026-10-18: a
+  created file is sent as `created`). For open
   buffers, step b's disk-wins merge and the pending table are superseded by
   [ADR-0034](0034-panes-tree-edits-hold.md) (buffers hold; `git merge-file`; held attestations)
 - **Date:** 2026-10-14
@@ -448,3 +449,24 @@ ADR-0031 history is linear. Built to the approved mockup:
   semantics over "marked until the agent's text is gone"). Enter at the end of an agent's line
   marks only the new line.
 - **A late attestation repaints at once:** the TUI now handles `{:geex_buffer_attested, …}`.
+
+## Amendment — 2026-10-18: a file the agent creates is sent, as `created`
+
+The maintainer watched an agent create files with an edits pane open and saw none of them listed.
+The payload sent nothing for a created file (step d above: "a message without `before` could only
+be ignored"). Since the edits pane (ADR-0034 §6) lists an attestation for any file, open or not,
+with no hash match needed, a created file has a use after all. Relayed by the coordinator session.
+
+- **The payload** sends a `Write` whose `tool_response.type` is `"create"` and whose
+  `originalFile` is `null` (the `write-create.jsonl` fixture) as `"created": true`, with no
+  `before`. Any other writer with no prior text still sends nothing.
+- **The intake** (`Geex.Attest.parse/1`) takes `created` (a boolean; given with `before`, the
+  message is rejected) and sets `before` to the empty text's sha256. So:
+  - the edits pane lists the file as the agent's;
+  - a buffer open on the path credits the write only if it held nothing (a fresh buffer on a
+    path that didn't exist), by the usual both-hashes rule or the spool's chain rule;
+  - a buffer that held text can't link it, so the change stays `:external`. Still fail-safe.
+- **The spool** reads a `created` line the same way (`before` = the empty text). A created file
+  has no ledger, so this only arises when the agent recreates a file geex once kept one for.
+- A message with neither `before` nor `created` (an older payload) is still accepted and still
+  ignored by a buffer.

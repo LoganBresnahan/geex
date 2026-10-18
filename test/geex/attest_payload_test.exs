@@ -134,7 +134,48 @@ defmodule Geex.AttestPayloadTest do
       assert %{"user_modified" => true, "tool_use" => _} = JSON.decode!(body)
     end
 
-    for fixture <- ~w(write-create.jsonl read-text.jsonl read-notebook.jsonl bash.jsonl) do
+    # ADR-0032, amended 2026-10-18: a file the call created is sent as created, with no before.
+    test "write-create.jsonl: created, no before", ctx do
+      listen(ctx, "/tap")
+      line = envelope("write-create.jsonl")
+      payload = JSON.decode!(line)["event"]["payload"]
+      assert payload["tool_response"]["type"] == "create"
+      assert payload["tool_response"]["originalFile"] == nil
+      path = target(ctx, "new", "alpha\nbeta\n")
+
+      assert %{status: 0, stdout: "", stderr: ""} = run(ctx, retarget(line, path))
+      assert_receive {:tapped, "/tap", _, body}, 2_000
+
+      assert JSON.decode!(body) == %{
+               "v" => 1,
+               "path" => path,
+               "created" => true,
+               "sha256" => hex("alpha\nbeta\n"),
+               "harness" => "claude-code",
+               "session" => payload["session_id"],
+               "turn" => payload["prompt_id"],
+               "tool_use" => payload["tool_use_id"]
+             }
+    end
+
+    test "a writer reporting no prior text that didn't create the file sends nothing", ctx do
+      listen(ctx, "/tap")
+
+      for {fixture, type} <- [{"write-update.jsonl", "update"}, {"edit.jsonl", "create"}] do
+        line =
+          envelope(fixture)
+          |> retarget(target(ctx, "f", "x\n"))
+          |> JSON.decode!()
+          |> put_in(["event", "payload", "tool_response", "originalFile"], nil)
+          |> put_in(["event", "payload", "tool_response", "type"], type)
+          |> JSON.encode!()
+
+        assert %{status: 0, stdout: ""} = run(ctx, line)
+        refute_receive {:tapped, _, _, _}, 200
+      end
+    end
+
+    for fixture <- ~w(read-text.jsonl read-notebook.jsonl bash.jsonl) do
       test "#{fixture}: sends nothing", ctx do
         listen(ctx, "/tap")
         line = envelope(unquote(fixture))
@@ -364,6 +405,36 @@ defmodule Geex.AttestPayloadTest do
                turn: payload["prompt_id"],
                tool_use: payload["tool_use_id"]
              }
+    end
+
+    # ADR-0032, amended 2026-10-18.
+    test "a created file no geex has open is listed as the agent's", ctx do
+      path = target(ctx, "made.txt", "alpha\nbeta\n")
+      assert %{status: 0, stderr: ""} = run(ctx, retarget(envelope("write-create.jsonl"), path))
+      payload = JSON.decode!(envelope("write-create.jsonl"))["event"]["payload"]
+
+      assert [%{who: {:agent, %{tool_use: tool_use}}, sha256: sha} | _] =
+               Enum.filter(Geex.Edits.rows(), &(&1.path == path))
+
+      assert {tool_use, sha} == {payload["tool_use_id"], hex("alpha\nbeta\n")}
+    end
+
+    test "a created file is credited to a buffer that held nothing, not to one with text", ctx do
+      # Open on a path that doesn't exist yet: empty.
+      empty = Path.join(ctx.dir, "empty.txt")
+      buf = open(empty)
+      File.write!(empty, "alpha\n")
+      assert %{status: 0, stderr: ""} = run(ctx, retarget(envelope("write-create.jsonl"), empty))
+      {:fast_forwarded, snap, 0} = Reconcile.fast_forward(buf)
+      assert [{:agent, %{harness: "claude-code"}}] = Enum.map(snap.history, & &1.meta.actor)
+
+      # A buffer that held text when the "create" landed: the hashes can't link, so :external.
+      full = target(ctx, "full.txt", "already here\n")
+      buf = open(full)
+      File.write!(full, "alpha\n")
+      assert %{status: 0, stderr: ""} = run(ctx, retarget(envelope("write-create.jsonl"), full))
+      {:fast_forwarded, snap, 0} = Reconcile.fast_forward(buf)
+      assert Enum.uniq(Enum.map(snap.history, & &1.meta.actor)) == [:external]
     end
 
     test "a Write over a CRLF file (rewritten as LF) is credited", ctx do

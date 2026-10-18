@@ -8,24 +8,27 @@
 #
 # The message (geex's Geex.Attest, v1), POSTed to each geex's loopback /attest:
 #
-#   {"v":1, "path", "before", "sha256", "harness", "session", "turn"?, "tool_use"?,
-#    "user_modified"?}
+#   {"v":1, "path", "before" | "created", "sha256", "harness", "session", "turn"?,
+#    "tool_use"?, "user_modified"?}
 #
 #   before  sha256 of the file before the call, as the harness reports it
 #           (claude-code: tool_response.originalFile, or original_file for NotebookEdit).
 #           Claude Code reports a CRLF file's text with each "\r\n" as "\n"; geex
 #           matches that form too, so it is sent as given.
+#   created true, in place of before, when the call created the file (claude-code: a Write
+#           whose tool_response.type is "create", with originalFile null). geex lists it as
+#           the agent's; an open buffer credits it only from empty text.
 #   sha256  sha256 of the file on disk now.
 #   user_modified  true when you edited the agent's proposed change in the permission prompt
 #           before accepting it (claude-code: tool_response.userModified); geex says "edited
 #           by you" (ADR-0034). Left out otherwise, so the message is unchanged for the rest.
 #
-# geex relabels a change only when BOTH hashes match it, so a wrong, late or duplicate
-# message costs nothing: the change stays :external.
+# geex relabels a change only when BOTH hashes match it (for a created file, the empty
+# text's), so a wrong, late or duplicate message costs nothing: the change stays :external.
 #
 # Sends nothing for: a harness other than claude-code, a tool that isn't a writer
-# (Write / Edit / NotebookEdit; MultiEdit if a version still has it), a file the call
-# created (no before; geex can't match it), a NotebookEdit that reports an error, or a
+# (Write / Edit / NotebookEdit; MultiEdit if a version still has it), a writer that reports
+# no prior text and didn't create the file, a NotebookEdit that reports an error, or a
 # path that isn't absolute. Read and Grep are excluded on purpose: they carry paths too,
 # and attesting them would credit an agent with someone else's write.
 #
@@ -78,8 +81,8 @@ else
   exit 0
 fi
 
-# Line 1: the path. Line 2: the message without its hashes. Nothing at all when this
-# call isn't one to attest.
+# Line 1: the path. Line 2: "created" or "edited". Line 3: the message without its hashes.
+# Nothing at all when this call isn't one to attest.
 picked=$(printf '%s\n' "$envelope" | jq -r '
   .event as $e
   | $e.payload as $p
@@ -92,10 +95,13 @@ picked=$(printf '%s\n' "$envelope" | jq -r '
   | (if $p.tool_name == "NotebookEdit" then $r.original_file else $r.originalFile end) as $orig
   | select(($path | type) == "string" and ($path | startswith("/"))
            and ($path | test("[\r\n]") | not))
-  | select(($orig | type) == "string")
+  | (($orig == null) and $p.tool_name == "Write" and $r.type == "create") as $created
+  | select(($orig | type) == "string" or $created)
   | select(($e.sessionId | type) == "string" and $e.sessionId != "")
   | ($path,
+     (if $created then "created" else "edited" end),
      ({v: 1, path: $path, harness: $e.harness, session: $e.sessionId}
+      + (if $created then {created: true} else {} end)
       + (if ($p.prompt_id | type) == "string" and $p.prompt_id != ""
          then {turn: $p.prompt_id} else {} end)
       + (if ($p.tool_use_id | type) == "string" and $p.tool_use_id != ""
@@ -108,23 +114,29 @@ picked=$(printf '%s\n' "$envelope" | jq -r '
 }
 [ -n "$picked" ] || exit 0
 
-{ IFS= read -r path; IFS= read -r draft; } <<EOF
+{ IFS= read -r path; IFS= read -r kind; IFS= read -r draft; } <<EOF
 $picked
 EOF
-
-# The prior text, byte for byte as jq decodes it (-j: no trailing newline).
-before=$(printf '%s\n' "$envelope" | jq -j '
-  .event.payload
-  | if .tool_name == "NotebookEdit" then .tool_response.original_file
-    else .tool_response.originalFile end
-' | hash256)
-before=${before%% *}
 
 after=$(hash256 <"$path" 2>/dev/null) || exit 0
 after=${after%% *}
 
-msg=$(jq -cn --argjson d "$draft" --arg b "$before" --arg s "$after" \
-  '$d + {before: $b, sha256: $s}') || exit 0
+case $kind in
+  created)
+    msg=$(jq -cn --argjson d "$draft" --arg s "$after" '$d + {sha256: $s}') || exit 0
+    ;;
+  *)
+    # The prior text, byte for byte as jq decodes it (-j: no trailing newline).
+    before=$(printf '%s\n' "$envelope" | jq -j '
+      .event.payload
+      | if .tool_name == "NotebookEdit" then .tool_response.original_file
+        else .tool_response.originalFile end
+    ' | hash256)
+    before=${before%% *}
+    msg=$(jq -cn --argjson d "$draft" --arg b "$before" --arg s "$after" \
+      '$d + {before: $b, sha256: $s}') || exit 0
+    ;;
+esac
 
 # The token goes in on fd 3, never on curl's argv: ps shows argv to every local user. The
 # answer's body lands in $3, so the caller can see whether any geex took the message.

@@ -12,8 +12,11 @@ defmodule Geex.Attest do
        "turn": "…", "tool_use": "…", "user_modified": true}
 
   `before` and `sha256` are **exactly 64 lowercase hex characters** (what `sha256sum`
-  prints). `before` is the file's contents before the call; it is absent only for a file the
-  call created, which can't match. `turn` and `tool_use` are optional. `user_modified` is
+  prints). `before` is the file's contents before the call. A file the call created sends
+  `"created": true` instead (ADR-0032, amended 2026-10-18): it is listed in the edits pane as
+  the agent's, and `before` becomes the empty text's hash, so a buffer open on the path credits
+  it only if it held nothing. A message with neither is still accepted; it can't match.
+  `turn` and `tool_use` are optional. `user_modified` is
   optional too: `true` when you edited the agent's proposed change in the permission prompt
   before accepting it (Claude Code's `userModified`, ADR-0034 §8); geex then says "edited by
   you". Anything else is rejected rather than accepted as a hash that could never match.
@@ -34,10 +37,12 @@ defmodule Geex.Attest do
           session: String.t(),
           turn: String.t() | nil,
           tool_use: String.t() | nil,
-          user_modified: boolean()
+          user_modified: boolean(),
+          created: boolean()
         }
 
   @hex ~r/\A[0-9a-f]{64}\z/
+  @empty_sha256 :crypto.hash(:sha256, "") |> Base.encode16(case: :lower)
 
   @doc """
   Validate a decoded JSON message into an attestation.
@@ -49,6 +54,13 @@ defmodule Geex.Attest do
 
       iex> Geex.Attest.parse(%{"v" => 1, "path" => "/f", "sha256" => "ABC"})
       {:error, "sha256 must be 64 lowercase hex characters"}
+
+  A created file's `before` is the empty text's:
+
+      iex> {:ok, a} = Geex.Attest.parse(%{"v" => 1, "path" => "/f", "sha256" => String.duplicate("a", 64),
+      ...>   "created" => true, "harness" => "claude-code", "session" => "s1"})
+      iex> {a.created, a.before == :crypto.hash(:sha256, "") |> Base.encode16(case: :lower)}
+      {true, true}
   """
   @spec parse(map()) :: {:ok, t()} | {:error, String.t()}
   def parse(%{"v" => 1} = msg) do
@@ -56,6 +68,8 @@ defmodule Geex.Attest do
          :ok <- absolute(path),
          {:ok, sha256} <- hash(msg, "sha256", :required),
          {:ok, before} <- hash(msg, "before", :optional),
+         {:ok, created} <- optional_boolean(msg, "created"),
+         :ok <- created_or_before(created, before),
          {:ok, harness} <- required_string(msg, "harness"),
          {:ok, session} <- required_string(msg, "session"),
          {:ok, turn} <- optional_string(msg, "turn"),
@@ -64,7 +78,8 @@ defmodule Geex.Attest do
       {:ok,
        %{
          path: path,
-         before: before,
+         before: if(created, do: @empty_sha256, else: before),
+         created: created,
          sha256: sha256,
          harness: harness,
          session: session,
@@ -145,6 +160,11 @@ defmodule Geex.Attest do
       _ -> {:error, "#{key} must be true or false when present"}
     end
   end
+
+  defp created_or_before(true, before) when is_binary(before),
+    do: {:error, "before must be absent when created is true"}
+
+  defp created_or_before(_created, _before), do: :ok
 
   defp absolute(path) do
     if Path.type(path) == :absolute, do: :ok, else: {:error, "path must be absolute"}

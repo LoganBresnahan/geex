@@ -129,12 +129,12 @@ defmodule Geex.Ledger.Spool do
   end
 
   defp entry(line) do
-    with {:ok,
-          %{"before" => before, "sha256" => sha256, "harness" => harness, "session" => session} =
-            m}
-         when is_binary(before) and is_binary(sha256) and is_binary(harness) and
-                is_binary(session) <-
-           JSON.decode(line) do
+    with {:ok, %{"sha256" => sha256, "harness" => harness, "session" => session} = m}
+         when is_binary(sha256) and is_binary(harness) and is_binary(session) <-
+           JSON.decode(line),
+         # A created file's entry has no `before`: it was the empty text (ADR-0032).
+         before when is_binary(before) <-
+           if(m["created"] == true, do: Geex.Ledger.Restore.sha256(""), else: m["before"]) do
       [
         %{
           before: before,

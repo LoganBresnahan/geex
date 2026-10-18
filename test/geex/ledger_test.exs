@@ -385,6 +385,23 @@ defmodule Geex.LedgerTest do
         tool_use: tool_use
       }
 
+    test "a spooled created file starts from the empty text; one with neither is skipped", ctx do
+      ledger_file = Path.join(ctx.dir, "k.jsonl")
+      base = %{"v" => 1, "path" => "/f", "harness" => "claude-code", "session" => "s"}
+
+      lines = [
+        Map.merge(base, %{"created" => true, "sha256" => hex("new\n")}),
+        Map.merge(base, %{"sha256" => hex("x")})
+      ]
+
+      File.write!(Spool.file(ledger_file), Enum.map_join(lines, "\n", &JSON.encode!/1))
+      assert [%{before: before, sha256: sha}] = Spool.read(ledger_file)
+      assert {before, sha} == {hex(""), hex("new\n")}
+
+      assert {:ok, {:agent, %{session: "s"}}, [nil]} =
+               Spool.chain(Spool.read(ledger_file), "", "new\n")
+    end
+
     test "a chain restarts from the last known content; mixed sessions never link" do
       round_trip = [e("a", "b", "x", "u1"), e("b", "a", "x", "u2")]
 
