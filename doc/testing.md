@@ -3022,3 +3022,26 @@ in `bugs.md` with what is known. Nothing in this run's code explains it.
 
 **1075 tests + 67 doctests.** One run of three hit BUG-5; ten more had one hit (that one), the
 rest green.
+
+### 2026-10-18 — `geex 0.1.0+1cbe3f34.89a87236` deployed: geex is bare (step 7)
+
+- **First deploy:** `99cd35eb`, from the clean tree at `99cd35e` (steps 7 and the review's
+  fixes), as the coordinator session asked: after the step 6 review's fixes, with the release up.
+- **Live with the binary,** scratch XDG directories, nothing installed:
+  - `--version`, `--frob` (2).
+  - `geex install --force` listed the catalog, exit 0.
+  - `geex a.ex notes.txt`: plain text in the terminal's colours, with "Elixir highlighting
+    available: Alt+Y".
+  - `Alt+Y` opened on Elixir ("available"); Enter turned it "installed" with "installed Elixir".
+    After Esc, `defmodule` was magenta (35).
+  - Ctrl-X was clean, with the discovery file gone.
+- **The binary showed a layout bug:** General's "Compiled grammars" label overflowed its column,
+  and its path was cut on the right. `1cbe3f3` fixed it.
+- **Redeploy:** `1cbe3f34`. General at 100 columns aligned, each path cut from the left with
+  "…", ending in `settings.json`, `geex` and `wasm`. Ctrl-X was clean, with no `terminating`
+  lines.
+
+**For the maintainer:** their installed geex now shows plain text until `geex install elixir`
+(or `Alt+Y`). The coordinator session told them beforehand.
+
+**Not tested:** Windows Terminal with the bare binary.
