@@ -3398,3 +3398,13 @@ had no `terminating` or `undef` lines.
 **Not checked:**
 - two live geex instances sharing the file (the concurrent-writer test covers the appends);
 - a rotation in a running geex.
+
+**Deployed** as `0.1.0+c1a9cb7e.89a87236`. Checked in the installed binary (tmux, scratch
+`XDG_STATE_HOME`):
+- `geex notes.txt`, a typed character and `Ctrl-O` wrote one line, mode `600`;
+- `Ctrl-X` gave the shell back;
+- `geex .` started again and showed the save under `── earlier ──`, dated;
+- the log had no `terminating`, `undef` or warning lines.
+
+From this build on, the maintainer's own geex keeps its list in
+`~/.local/state/geex/edits.jsonl`.
