@@ -3522,3 +3522,82 @@ failing test. Commits are now gated on `mix test`'s own exit status.
 **1106 tests + 79 doctests**, green twice.
 
 **Not checked:** a light theme live (the 14 themes, next, include six).
+
+### 2026-10-18 — fourteen more themes, and the v0.2.0 catalog (ADR-0040 amendment)
+
+**What changed:**
+- Catppuccin Mocha and Latte, Gruvbox Dark and Light, Solarized Dark and Light, Rosé Pine and
+  Dawn, One Dark and One Light, Tokyo Night, Dracula, Nord and Kanagawa, each as JSON plus a
+  LICENSE in `catalog/themes/`, with a recipe in `themes.exs`.
+- `mix.exs` has `catalog_release: "v0.2.0"` (the catalog task's base), and geex's version is
+  0.2.0.
+- A full `mix geex.catalog` first empties `dist`.
+
+**How the themes were made:**
+- Five subagents, one per family, fetched each upstream: palette repository and editor port.
+  Each read the licence file at a recorded commit, copied it verbatim into the `.LICENSE`, and
+  mapped 55 captures from the official palette after the port.
+- All 14 are MIT.
+  - Nord: nordtheme/nord and nordtheme/vim, not the GPL-2.0 nord.nvim.
+  - Tokyo Night: the MIT VS Code theme, not the Apache-2.0 Neovim port.
+  - Gruvbox's original repository has no LICENSE file: its README says MIT/X11, and that is
+    copied verbatim beside gruvbox.nvim's MIT LICENSE.
+- I then checked contrast across all of them and raised what geex's chrome needs, each time to
+  the theme's own nearest colour:
+  - `line_number` (it also draws the tree's directories): Tokyo Night 1.55 → 2.50, Nord 1.69 →
+    2.43 (comments too: nord-vim's `#616E88`), Kanagawa 2.23 → 3.33;
+  - Catppuccin Latte's `cursor` (notices): 2.34 → 3.48, maroon.
+
+**Contrast, as shipped** (WCAG; `al` = `active_line_bg`):
+
+| Theme | fg/bg | fg/al | fg/selection | line number/bg | cursor/bg | accent/bg | accent/al |
+|---|---|---|---|---|---|---|---|
+| Catppuccin Latte | 7.06 | 6.04 | 5.17 | 3.49 | 3.48 | 4.34 | 3.71 |
+| Catppuccin Mocha | 11.34 | 9.62 | 6.31 | 3.36 | 12.95 | 8.69 | 7.37 |
+| Dracula | 13.36 | 11.06 | 8.59 | 3.03 | 8.36 | 10.29 | 8.52 |
+| Gruvbox Dark | 10.75 | 8.45 | 4.75 | 3.03 | 5.84 | 5.48 | 4.31 |
+| Gruvbox Light | 10.22 | 8.45 | 5.32 | 3.24 | 5.40 | 5.82 | 4.81 |
+| Kanagawa | 11.26 | 8.16 | 8.93 | 3.33 | 7.94 | 7.23 | 5.24 |
+| Nord | 9.25 | 7.45 | 6.39 | 2.43 | 8.00 | 6.24 | 5.03 |
+| One Dark | 6.57 | 6.03 | 4.58 | 2.70 | 4.33 | 5.92 | 5.44 |
+| One Light | 10.86 | 9.96 | 9.01 | 5.01 | 3.96 | 4.00 | 3.67 |
+| Rosé Pine | 13.39 | 11.51 | 7.93 | 3.42 | 10.77 | 10.37 | 8.91 |
+| Rosé Pine Dawn | 8.69 | 7.92 | 6.86 | 4.02 | 3.84 | 5.59 | 5.09 |
+| Solarized Dark | 4.75 | 4.11 | 3.22 | 2.79 | 4.68 | 4.08 | 3.53 |
+| Solarized Light | 4.13 | 3.64 | 2.98 | 2.48 | 4.27 | 3.41 | 3.00 |
+| Tokyo Night | 8.10 | 7.64 | 6.27 | 2.50 | 8.55 | 9.96 | 9.41 |
+
+Solarized's soft contrast is its design and is kept. Catppuccin Latte's and One Light's accents
+(4.34 and 4.00) are the best blues their palettes have.
+
+**The catalog build:**
+- `mix geex.catalog` took 34 s and wrote 31 assets (1.4 MB), all under `.../download/v0.2.0/`.
+- The 16 grammar assets are named exactly as in v0.1.0 (same bytes).
+- A second full build gave the identical sha256 for every asset.
+
+**Live** (the dev build in tmux, 120 × 32, scratch XDG directories). All 15 themes and Elixir,
+JSON and Markdown were installed from `_build/catalog/dist` through `GEEX_CATALOG_URL`. For each
+of the 14, a script:
+- opened `sample.ex` (lib/geex/edits.ex), `sample.json` (catalog.json) and `sample.md` (an ADR)
+  as tabs;
+- typed and saved (an edits row);
+- dragged a mouse selection;
+- focused the edits pane, showed each tab, and opened Alt+Y.
+
+`check_shots.py` parsed the SGR colours actually drawn and checked, per theme:
+- the editor background, the keyword and function colours, and the moduledoc;
+- the selection background, the scroll-bar thumb in `cursor`, the handle in
+  `active_line_number`, and the line numbers;
+- the tree's open file in `accent`, and the current one in `accent` bold;
+- the focused edits entry in `accent` on `active_line_bg`;
+- JSON's string colour, Markdown's heading colour, and Alt+Y's installed rows in `accent`.
+
+All 14 passed every check. With Nord's JSON checked against Dracula's screens, every check
+failed, so the checks discriminate. No run logged an error.
+
+**1106 tests + 79 doctests**, green twice.
+
+**Not checked:**
+- a human eye on each theme (the checks are numeric);
+- the themes in a 256- or 16-colour terminal (geex draws truecolor);
+- installing from the real v0.2.0 release, which doesn't exist yet.

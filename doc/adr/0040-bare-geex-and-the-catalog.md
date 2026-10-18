@@ -446,6 +446,56 @@ records its licence; each package carries that licence.
   file name belongs to: a whole name first (`rebar.config`), then the longest ending
   (`.app.src`). `Geex.Catalog.match/2` does the same over installed manifests in step 5.
 
+### Amended 2026-10-18: the second catalog (v0.2.0), and one release per catalog
+
+The maintainer approved fourteen more themes, relayed by the coordinator session: Catppuccin
+Mocha and Latte, Gruvbox Dark and Light, Solarized Dark and Light, Rosé Pine and Rosé Pine Dawn,
+One Dark and One Light (Atom's), Tokyo Night, Dracula, Nord and Kanagawa.
+
+- **A catalog release holds the full set; a geex build names the catalog release it embeds.**
+  (The coordinator session's wording.)
+  - mix.exs carries `catalog_release` (`"v0.2.0"`), separate from geex's version, and bumped
+    only when the catalog changes, so a code-only release uploads nothing.
+  - `mix geex.catalog` puts every URL under that release (`--base` overrides).
+  - A full build first empties `_build/catalog/dist/`, so the directory is exactly the
+    release's assets.
+  - §2's "many catalog revisions share a release" is narrowed: a catalog's assets all live
+    on its own release. The v0.1.0 binaries keep naming v0.1.0's assets, which stay up.
+- **v0.2.0 is 31 assets, 1.4 MB:** the same 16 grammars (byte-identical, so the same names as
+  v0.1.0's), Birds of Paradise rebuilt with its accent, and the 14 themes. Each theme is
+  1.9–2.1 KB.
+- **Each theme is geex's native JSON** in `catalog/themes/`.
+  - It sets all eight palette keys, the accent included, and 55 syntax captures. That is
+    Birds of Paradise's 37 plus what the catalog's grammars also emit: `text.title`,
+    `function.method`, `variable.parameter`, `constant.builtin`, `string.special.key` and the
+    rest.
+  - The palette is the theme's official one. Which colour goes on which capture follows the
+    theme's official editor port: Neovim, Vim, or Atom's and VS Code's own theme files.
+- **Licences, each verified from its upstream repository at a recorded commit:** all MIT. Each
+  `.LICENSE` file names the palette's and the mapping's sources and commits, then carries the
+  upstream text verbatim.
+  - **Nord** takes its palette from nordtheme/nord and its mapping from nordtheme/vim. No GPL
+    port is used: the popular nord.nvim is GPL-2.0.
+  - **Tokyo Night** comes from the MIT VS Code theme. The Neovim port is Apache-2.0 and isn't
+    used.
+  - **Gruvbox's original repository** has no LICENSE file. Its README's licence section reads
+    "MIT/X11", and its package.json says MIT; that section is copied verbatim, beside
+    gruvbox.nvim's MIT LICENSE.
+  - Zed's bundled theme files aren't used.
+- **Readability over the port where geex's chrome needs it.** These are named in each theme's
+  testing.md entry.
+  - `line_number` also draws the tree's directories and dividers, so it was raised to the
+    theme's own nearest colour that reads:
+    - Tokyo Night: its comment colour, `#51597D`;
+    - Nord: nord-vim's `#616E88`, which its comments now use too;
+    - Kanagawa: fujiGray;
+    - Catppuccin Latte, One Light and Gruvbox Light: a darker gray of their own.
+  - `cursor` colours notices and "disk is newer" rows, so the light themes use a warm colour
+    of their own that reads on white: Catppuccin Latte maroon, Rosé Pine Dawn love, Gruvbox
+    Light faded orange, Solarized Light orange.
+  - Solarized keeps its famously soft contrast (fg on bg 4.75 dark, 4.13 light): it is the
+    design.
+
 ### Out of scope
 
 - A marketplace: listing, searching or hosting anything outside the release's own catalog.

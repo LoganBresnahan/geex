@@ -1,7 +1,11 @@
 defmodule Geex.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
+  # The GitHub release the embedded catalog's packages are on (ADR-0040 §2). Bumped only when the
+  # catalog changes, not with every version: a catalog release holds the full set of packages, and
+  # a geex build names the release of the catalog it embeds.
+  @catalog_release "v0.2.0"
 
   def project do
     [
@@ -17,7 +21,8 @@ defmodule Geex.MixProject do
       # Test fixtures as packages (geex ships none, ADR-0040): test/support, under test only.
       elixirc_paths: if(Mix.env() == :test, do: ["lib", "test/support"], else: ["lib"]),
       deps: deps(),
-      releases: releases()
+      releases: releases(),
+      catalog_release: @catalog_release
     ]
   end
 

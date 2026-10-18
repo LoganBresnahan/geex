@@ -27,24 +27,36 @@ defmodule Mix.Tasks.Geex.Catalog do
   licence. Then `catalog/catalog.json` lists every package: name, file endings, ABI, licence,
   upstream, size, sha256 and URL. Upload `_build/catalog/dist/*` to the release the URLs name;
   an asset already uploaded keeps its name, since an unchanged package zips to the same bytes.
+
+  The URLs name the release in mix.exs's `catalog_release` (`--base` overrides it), and a full
+  build first empties `_build/catalog/dist/`, so it holds that release's whole set of assets and
+  nothing else. A changed catalog goes on a new release, with `catalog_release` bumped; the
+  binaries built before keep the release they name.
   """
   use Mix.Task
 
   alias Geex.Catalog.Package
 
   @cli_version "0.26.9"
-  @default_base "https://github.com/LoganBresnahan/geex/releases/download/v0.1.0/"
+  # The release the assets go on: mix.exs's `catalog_release` (`v0.2.0`). It holds the whole
+  # catalog, and is bumped only when the catalog changes (ADR-0040 §2).
+  @releases "https://github.com/LoganBresnahan/geex/releases/download/"
   @catalog "catalog/catalog.json"
   @src "_build/catalog/src"
   @dist "_build/catalog/dist"
+
+  defp default_base, do: @releases <> Mix.Project.config()[:catalog_release] <> "/"
 
   @impl true
   def run(args) do
     {opts, _rest} = OptionParser.parse!(args, strict: [only: :keep, base: :string])
     Mix.Task.run("compile")
 
-    base = Keyword.get(opts, :base, @default_base)
+    base = Keyword.get(opts, :base, default_base())
     only = Keyword.get_values(opts, :only)
+
+    # A full build leaves in dist exactly the release's assets.
+    if only == [], do: File.rm_rf!(@dist)
     {grammars, _} = Code.eval_file("catalog/grammars.exs")
     {themes, _} = Code.eval_file("catalog/themes.exs")
     check_names!(grammars ++ themes, only)
