@@ -21,6 +21,6 @@
     {"abi":14,"asset":"grammar-yaml-da1c10a126b7.zip","display":"YAML","extensions":[".yml",".yaml"],"filenames":[],"license":"MIT","name":"yaml","sha256":"da1c10a126b7c7617170e9370cbc059e765ffc8d8e722a0a2351e9856ba33b4c","size":39319,"upstream":{"commit":"7708026449bed86239b1cd5bce6e3c34dbca6415","repo":"https://github.com/tree-sitter-grammars/tree-sitter-yaml","tag":"v0.7.2"},"url":"https://github.com/LoganBresnahan/geex/releases/download/v0.1.0/grammar-yaml-da1c10a126b7.zip"}
   ],
   "themes": [
-    {"appearance":"dark","asset":"theme-birds-of-paradise-038a23106e99.zip","display":"Birds of Paradise","license":"BSD-3-Clause","name":"birds-of-paradise","sha256":"038a23106e9905061ed2f4c125d0da0adec7d5e9375ec24dd65288d7cf6c117d","size":1906,"url":"https://github.com/LoganBresnahan/geex/releases/download/v0.1.0/theme-birds-of-paradise-038a23106e99.zip"}
+    {"appearance":"dark","asset":"theme-birds-of-paradise-aa8d2d44b5d2.zip","display":"Birds of Paradise","license":"BSD-3-Clause","name":"birds-of-paradise","sha256":"aa8d2d44b5d2b200af73db2365384c6ecbec16c2c6bfc688350ef97c376c081f","size":1917,"url":"https://github.com/LoganBresnahan/geex/releases/download/v0.1.0/theme-birds-of-paradise-aa8d2d44b5d2.zip"}
   ]
 }

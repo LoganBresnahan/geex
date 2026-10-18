@@ -8,7 +8,8 @@
     "active_line_number": "#E6E1C4",
     "active_line_bg": "#281C1C66",
     "cursor": "#EF5D32",
-    "selection": "#EF5D3233"
+    "selection": "#EF5D3233",
+    "installed": "#86B4BB"
   },
   "syntax": {
     "attribute": "#EFAC32",

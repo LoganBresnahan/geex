@@ -336,9 +336,11 @@ drawing, all pure. The loop carries out what it asks for. `Alt+Y` amends ADR-003
     ANSI bright cyan (14) when dark, which Windows Terminal's Campbell draws #61D6D6, a light
     blue. When light it gets blue (4), since cyan washes out on a light background.
   - The built-in terminal theme uses the same pair, by the background OSC 11 reports.
-  - Birds of Paradise doesn't set the slot yet, so it shows the fallback. Changing the
-    catalog's copy means a new package zip, a new `catalog.json` entry and an upload to the
-    release (§2), which is the maintainer's to do.
+  - Birds of Paradise sets `#86B4BB`, its lightest blue (its `tag` colour), at the maintainer's
+    choice. Changing the catalog's copy made a new package (`theme-birds-of-paradise-aa8d2d44b5d2.zip`)
+    and a new `catalog.json` entry. As §2 has it, the old zip stays for the binaries that pin
+    it. The new one must be uploaded before a binary pinning it is deployed. The test fixture
+    keeps the old file, so the suite exercises the fallback.
 
 ### 8. Compiling a grammar is cached on disk (step 2)
 

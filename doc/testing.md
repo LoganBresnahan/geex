@@ -3469,3 +3469,23 @@ in use):
 - a light theme live;
 - Birds of Paradise with its own slot colour (the catalog package isn't changed: that needs a
   rebuild and an upload).
+
+### 2026-10-18 — Birds of Paradise's installed colour: #86B4BB (ADR-0040 §7)
+
+**What changed:** `catalog/themes/birds-of-paradise.json` sets `"installed": "#86B4BB"`, its
+lightest blue (the `tag` colour). This was the maintainer's choice over the deeper `#6C99BB`.
+`mix geex.catalog --only birds-of-paradise` rebuilt its package and entry: asset
+`theme-birds-of-paradise-aa8d2d44b5d2.zip` (1,917 bytes), still under the v0.1.0 base.
+
+**Checked:**
+- A second build gave the same bytes (sha256 `aa8d2d44…c081f`).
+- With `GEEX_CATALOG_URL` pointed at `_build/catalog/dist/` and scratch data and config
+  directories, `Install.install("birds-of-paradise")` installed it, hash verified, and the
+  palette read `{:rgb, 134, 180, 187}`.
+- Live in the dev build via tmux, with Birds in use, its Themes row drew in
+  `38;2;134;180;187`.
+
+**Not done here:** the upload. The zip must be on the release its URL names before a binary
+pinning it is deployed, so this commit isn't deployed.
+
+**1104 tests + 79 doctests** (unchanged: the test fixture keeps the old file).
