@@ -124,7 +124,7 @@ defmodule Geex.MixProject do
       # machine has Zig 0.15.2, the same pin as pharos-mcp.
       {:burrito,
        github: "LoganBresnahan/burrito",
-       ref: "e008df96c870b6300eedc4eef6f838bc35503b22",
+       ref: "4407714f192e47c0e3b4794a8f16d8f3fdbe93f4",
        only: :prod,
        runtime: false}
     ]

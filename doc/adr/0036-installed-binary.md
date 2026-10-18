@@ -216,6 +216,15 @@ patches. It is fork-only, never sent upstream. Its `FORK.md` is the contract.
   that run safe, and the guard would only block a deploy that now does no harm. The advice to
   restart open editors after a version change stands only for a binary built before the fork.
 - `mix.exs` takes Burrito from the fork, pinned by its git sha.
+- **Amended the same day (fork `4407714`):**
+  - **The wrapper's own messages go to stderr.** With `GEEX_INSTALL_DIR` set they reached
+    stdout before geex's output. They broke pharos-mcp's stdio, and in geex they came before
+    `--version`.
+  - **`geex maintenance purge`** removes every unpack of geex that no process uses, the current
+    version's included, and says why it kept each other one. Burrito takes `maintenance` before
+    geex sees its arguments, so geex needs no command of its own for it.
+  - Purge runs before anything is unpacked, so it never unpacks its own version only to delete
+    it.
 
 ## Consequences
 
