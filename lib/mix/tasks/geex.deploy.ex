@@ -353,7 +353,7 @@ defmodule Mix.Tasks.Geex.Deploy do
     {id, _} = System.cmd("otool", ["-D", file], stderr_to_stdout: true)
 
     foreign =
-      for lib <- otool_libraries(otool) -- otool_libraries(id),
+      for lib <- otool_libraries(otool) -- otool_id(id),
           not String.starts_with?(lib, ["/usr/lib/", "/System/Library/"]),
           do: "links #{lib}"
 
@@ -413,7 +413,26 @@ defmodule Mix.Tasks.Geex.Deploy do
   end
 
   @doc """
-  The libraries in `otool -L`'s (or `-D`'s) output: each indented line's path.
+  A Mach-O's own install name, from `otool -D`'s output (none for a program or a bundle). A
+  dylib's `otool -L` lists it first, as if it linked itself: the tree_sitter_wasm NIF carries
+  Cargo's `target/release/deps/libtree_sitter_wasm.dylib`.
+
+      iex> Mix.Tasks.Geex.Deploy.otool_id(\"""
+      ...> lib/tree_sitter_wasm-0.0.0/priv/native/tree_sitter_wasm.so:
+      ...> /Users/runner/work/tree_sitter_wasm/target/release/deps/libtree_sitter_wasm.dylib
+      ...> \""")
+      ["/Users/runner/work/tree_sitter_wasm/target/release/deps/libtree_sitter_wasm.dylib"]
+
+      iex> Mix.Tasks.Geex.Deploy.otool_id("erts-16.1.1/bin/beam.smp:\\n")
+      []
+  """
+  @spec otool_id(String.t()) :: [String.t()]
+  def otool_id(otool) do
+    otool |> String.split("\n", trim: true) |> Enum.drop(1) |> Enum.map(&String.trim/1)
+  end
+
+  @doc """
+  The libraries in `otool -L`'s output: each indented line's path.
 
       iex> Mix.Tasks.Geex.Deploy.otool_libraries(\"""
       ...> erts/bin/beam.smp:

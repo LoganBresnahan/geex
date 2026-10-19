@@ -14,4 +14,8 @@ end)
 # A message a test waits for (`assert_receive`) gets 1 s, not ExUnit's 100 ms: under the full
 # suite's load a watcher's restart or a background read can take longer, and the default made
 # those tests flaky. A test that passes is no slower.
-ExUnit.start(assert_receive_timeout: 1_000)
+#
+# The tests that watch a real directory need `inotifywait` (inotify-tools); without it they're
+# left out, and ExUnit says how many.
+inotify = if System.find_executable("inotifywait"), do: [], else: [:inotify]
+ExUnit.start(assert_receive_timeout: 1_000, exclude: inotify)

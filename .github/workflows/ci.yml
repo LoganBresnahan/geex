@@ -35,6 +35,11 @@ jobs:
             geex/_build
           key: mix-test-linux-x64-${{ hashFiles('geex/mix.lock', 'geex/rel/build-runtime.sh') }}
 
+      # The tree watcher's tests watch a real directory (test_helper.exs leaves them out without
+      # inotifywait, but CI should run them).
+      - name: inotify-tools
+        run: sudo apt-get install -y inotify-tools
+
       # Tests that commit to a scratch repository need an identity.
       - name: git identity
         run: |

@@ -149,10 +149,8 @@ defmodule Geex.Tree.WatcherTest do
   end
 
   describe "with inotify" do
+    # Excluded by test_helper.exs where there's no `inotifywait`.
     @describetag :inotify
-    setup do
-      if System.find_executable("inotifywait"), do: :ok, else: {:skip, "no inotifywait"}
-    end
 
     # `inotifywait` sets its watches some time after it starts; on a loaded machine longer than
     # any fixed sleep (300 ms wasn't). So: make a file in `dir` until its event arrives, then

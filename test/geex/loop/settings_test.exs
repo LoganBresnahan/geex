@@ -245,10 +245,12 @@ defmodule Geex.Loop.SettingsTest do
       File.write!(installed, ~s({"source":"catalog","sha256":"#{String.duplicate("0", 64)}"}))
       Installed.refresh()
 
-      # The catalog's package, rebuilt from the recipe: the bytes the catalog pins.
-      {themes, _} = Code.eval_file("catalog/themes.exs")
-      {_manifest, zip} = Mix.Tasks.Geex.Catalog.theme_zip(hd(themes))
+      # The catalog's package as published (v0.2.0), the bytes the catalog pins. Not rebuilt from
+      # the recipe: the deflated bytes depend on the zlib the VM was built with (OTP's own copy in
+      # CI's runtime, the system's here), so a rebuild matches the pinned hash only on a machine
+      # like the one that built the catalog.
       entry = Geex.Catalog.theme("birds-of-paradise")
+      zip = File.read!(Path.join("test/fixtures/catalog", entry["asset"]))
       assert Base.encode16(:crypto.hash(:sha256, zip), case: :lower) == entry["sha256"]
       File.write!(Path.join(dir, entry["asset"]), zip)
       System.put_env("GEEX_CATALOG_URL", "file://" <> dir)
