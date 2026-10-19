@@ -190,8 +190,13 @@ EOF
     case $url in http://127.0.0.1:*) ;; *) continue ;; esac
     case $token in '' | *[!0-9a-f]*) continue ;; esac
     case $pid in '' | *[!0-9]*) continue ;; esac
-    # A crashed geex leaves its file behind; don't spend the timeout on it.
-    kill -0 "$pid" 2>/dev/null || continue
+    # A crashed geex leaves its file behind; don't spend the timeout on it. Drop it too, as geex's
+    # own start-up sweep would, so a pid the OS hands out again can't revive it: only a plain
+    # file of ours (checked above; not a link) named by that pid.
+    if ! kill -0 "$pid" 2>/dev/null; then
+      [ ! -L "$file" ] && [ "${file##*/}" = "$pid.json" ] && rm -f "$file"
+      continue
+    fi
 
     # In parallel, so a hung instance costs at most one timeout however many are running.
     n=$((n + 1))

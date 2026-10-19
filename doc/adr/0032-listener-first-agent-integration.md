@@ -264,6 +264,18 @@ none changes the direction.
      geex's leftover discovery file would add latency to every agent edit. The discovery file
      records geex's OS pid; geex removes its file on clean exit, and the payload **skips any
      entry whose pid is gone** (crashes skip cleanup), with a short connect timeout either way.
+     **Amended 2026-10-19:** skipping isn't enough once the OS hands the pid out again. Then
+     the stale file looks live, and the payload POSTs its token to a port that may now be
+     someone else's. So stale files are removed in two places:
+     - **geex, at the attest listener's start, before writing its own file.** It removes only
+       a `<digits>.json` that is a regular file (not a link), owned by this user, whose pid
+       `kill -0` can't signal (the ledger's stale-lock test). It never touches a live pid's
+       file or any other name, and logs one line with the count when it removes any.
+     - **The payload**, when it skips a dead pid: only a plain file of ours (not a link) named
+       `<that pid>.json`.
+
+     A pid reused by another process of the same user before either sweep runs still looks live;
+     the token and the loopback-only URL check are what's left in that window.
 
 ## Amendment — 2026-10-14 (later): the before/after match, fixture-verified fields, arrival order
 

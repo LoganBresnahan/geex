@@ -251,6 +251,38 @@ defmodule Geex.AttestPayloadTest do
       assert err =~ "127.0.0.1:1/attest answered 000"
     end
 
+    test "drops a dead geex's own file; keeps a link, another name, and a live one", ctx do
+      disc = Path.join(ctx.dir, "disc")
+      File.mkdir_p!(disc)
+      dead = fn -> System.cmd("sh", ["-c", "echo $$"]) |> elem(0) |> String.trim() end
+      [gone, linked, renamed] = [dead.(), dead.(), dead.()]
+      live = System.pid()
+
+      write = fn name, pid ->
+        file = Path.join(disc, name)
+        message = %{"v" => 1, "url" => "http://127.0.0.1:1/attest", "token" => "ab", "pid" => pid}
+        File.write!(file, JSON.encode!(message))
+        File.chmod!(file, 0o600)
+        file
+      end
+
+      gone_file = write.("#{gone}.json", gone)
+      renamed_file = write.("other.json", renamed)
+      live_file = write.("#{live}.json", live)
+      target = write.("target", linked)
+      link = Path.join(disc, "#{linked}.json")
+      File.ln_s!(target, link)
+
+      line = envelope("edit.jsonl") |> retarget(target(ctx, "f", "x\n"))
+      assert %{status: 0, stdout: ""} = run(ctx, line)
+
+      refute File.exists?(gone_file)
+      assert File.exists?(renamed_file)
+      assert File.exists?(live_file)
+      assert {:ok, %File.Stat{type: :symlink}} = File.lstat(link)
+      assert File.exists?(target)
+    end
+
     test "macOS-style: no sha256sum, falls back to shasum -a 256", ctx do
       listen(ctx, "/tap")
       bin = Path.join(ctx.dir, "bin")

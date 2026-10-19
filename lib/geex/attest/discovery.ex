@@ -9,7 +9,9 @@ defmodule Geex.Attest.Discovery do
   `<dir>` is `$XDG_RUNTIME_DIR/geex`, or `<tmp>/geex-<user>` without it, created `0700`; the
   file is `0600`. The payload sends to every live instance's file and skips any whose `pid`
   is gone (a crash skips cleanup). On a clean stop the file is removed, and on start any file
-  left by a geex that is no longer running is swept, so a reused pid never gets a stale token.
+  left by a geex that is no longer running is swept, so a pid the OS reuses later can't make a
+  stale file look live. The sweep removes only `<digits>.json`, a regular file (not a link)
+  owned by this user, whose pid isn't running; anything else in the directory stays.
 
   The token keeps other local users' processes out. A process running as the same user could
   read it, but it could also write the file directly, so the token is hygiene, not a
@@ -76,21 +78,48 @@ defmodule Geex.Attest.Discovery do
     :ok
   end
 
-  # A crashed geex (kill -9) leaves its file. The directory is 0700 and ours, so every file in
-  # it was written by one of our geex processes: one whose pid is gone is stale.
+  # A crashed geex (kill -9) leaves its file, named by its pid. Only such a file, a regular one
+  # owned by us, goes, and only when that pid is gone. A link, another user's file or any other
+  # name is left alone, and with no uid to compare against nothing is removed.
   defp sweep(dir) do
-    for file <- Path.wildcard(Path.join(dir, "*.json")),
-        {:ok, bytes} <- [File.read(file)],
-        {:ok, %{"pid" => pid}} when is_integer(pid) <- [JSON.decode(bytes)],
-        not os_alive?(pid) do
-      File.rm(file)
+    uid = own_uid()
+
+    removed =
+      for name <- ls(dir),
+          [_, pid] <- [Regex.run(~r/\A(\d+)\.json\z/, name)],
+          file = Path.join(dir, name),
+          {:ok, %File.Stat{type: :regular, uid: ^uid}} <- [File.lstat(file)],
+          not os_alive?(pid),
+          File.rm(file) == :ok,
+          do: file
+
+    if removed != [] do
+      Logger.info("geex attest: removed #{length(removed)} stale discovery file(s) in #{dir}")
     end
 
     :ok
   end
 
+  defp ls(dir) do
+    case File.ls(dir) do
+      {:ok, names} -> names
+      {:error, _} -> []
+    end
+  end
+
+  defp own_uid do
+    case System.cmd("id", ["-u"], stderr_to_stdout: true) do
+      {out, 0} -> out |> String.trim() |> String.to_integer()
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  # The ledger's stale-lock test (`Geex.Ledger`): `kill -0` answers for a process of ours. One
+  # it can't signal (another user's, or none) is not a geex of ours.
   defp os_alive?(pid) do
-    match?({_, 0}, System.cmd("kill", ["-0", Integer.to_string(pid)], stderr_to_stdout: true))
+    match?({_, 0}, System.cmd("kill", ["-0", pid], stderr_to_stdout: true))
   end
 
   # Write to a temp name and rename into place, so a reader never sees a half-written file;

@@ -278,16 +278,24 @@ defmodule Geex.AttestTest do
       assert Integer.to_string(pid) == System.pid()
     end
 
-    test "on start, files left by geex processes that are gone are swept", %{dir: dir} do
+    test "on start, a file left by a geex that is gone is swept, and nothing else", %{dir: dir} do
       stop_supervised!(Discovery)
-      {dead, 0} = System.cmd("sh", ["-c", "echo $$"])
+      dead = fn -> System.cmd("sh", ["-c", "echo $$"]) |> elem(0) |> String.trim() end
       port = Port.open({:spawn, "sleep 30"}, [])
       {:os_pid, live} = Port.info(port, :os_pid)
       on_exit(fn -> System.cmd("kill", [Integer.to_string(live)]) end)
+      [gone, linked, odd] = [dead.(), dead.(), dead.()]
+      write = fn name, pid -> File.write!(Path.join(dir, name), JSON.encode!(%{"pid" => pid})) end
 
-      for {name, pid} <- [{"dead", String.to_integer(String.trim(dead))}, {"live", live}],
-          do:
-            File.write!(Path.join(dir, name <> ".json"), JSON.encode!(%{"v" => 1, "pid" => pid}))
+      write.("#{gone}.json", gone)
+      write.("#{live}.json", live)
+      # Not `<digits>.json`, though the pid inside is gone.
+      write.("#{odd}x.json", odd)
+      write.("notes.json", odd)
+      # A link named like a stale file: neither it nor what it points at is touched.
+      target = Path.join(dir, "target")
+      File.write!(target, "keep")
+      File.ln_s!(target, Path.join(dir, "#{linked}.json"))
 
       log =
         ExUnit.CaptureLog.capture_log(fn ->
@@ -296,9 +304,27 @@ defmodule Geex.AttestTest do
           :sys.get_state(Discovery)
         end)
 
-      refute File.exists?(Path.join(dir, "dead.json"))
-      assert File.exists?(Path.join(dir, "live.json"))
+      refute File.exists?(Path.join(dir, "#{gone}.json"))
+      assert File.exists?(Path.join(dir, "#{live}.json"))
+      assert File.exists?(Path.join(dir, "#{odd}x.json"))
+      assert File.exists?(Path.join(dir, "notes.json"))
+      assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(dir, "#{linked}.json"))
+      assert File.read!(target) == "keep"
+      assert File.exists?(Path.join(dir, "#{System.pid()}.json"))
+      assert log =~ "geex attest: removed 1 stale discovery file(s)"
       refute log =~ "unexpected message"
+    end
+
+    test "a sweep that removes nothing says nothing", %{dir: dir} do
+      stop_supervised!(Discovery)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          start_supervised!({Discovery, url: "http://127.0.0.1:1/attest", dir: dir})
+          :sys.get_state(Discovery)
+        end)
+
+      refute log =~ "stale discovery"
     end
 
     test "the discovery file is removed on a clean stop", %{dir: dir} do

@@ -4230,3 +4230,37 @@ was dispatched on main (39330516335).
 - Both Linux build logs show "smoke: ok: a SIGKILLed geex left no file watcher running", so the
   check runs on CI's runners, which now have inotify-tools.
 - main's CI run 39330517012 was green, shellcheck of the new `rel/smoke.sh` included.
+
+### 2026-10-19 — stale attestation discovery files are removed (ADR-0032's amendment)
+
+**What changed:**
+- `Geex.Attest.Discovery`'s start-up sweep already removed files whose JSON `pid` was gone. It
+  now goes by the file's name, and removes only:
+  - a `<digits>.json`;
+  - that is a regular file (`File.lstat`, so a link stays);
+  - owned by this user (`id -u`; with no uid, nothing is removed);
+  - whose pid `kill -0` can't signal (the ledger's stale-lock test).
+
+  It logs one line with the count when it removes any.
+- `geex-attest.sh`, on skipping a dead pid, also removes that file when it's a plain file of
+  ours (not a link) named `<that pid>.json`.
+
+**Verified:**
+- `attest_test.exs`:
+  - removed: a dead pid's file, with the count logged;
+  - kept: a sleeper's file, `<pid>x.json` and `notes.json` (each holding a dead pid), and a
+    link named `<dead pid>.json` (its target untouched);
+  - geex's own file is written after the sweep;
+  - a sweep that removes nothing logs nothing.
+- `attest_payload_test.exs`: the payload drops a dead pid's own file, and keeps a link, another
+  name and a live pid's file.
+- 1133 tests + 93 doctests green twice; compile warnings-clean.
+
+**Live:** the maintainer's `handlers.json` runs this checkout's `geex-attest.sh`, so the
+payload change took effect as it was saved. No geex was running here: `$XDG_RUNTIME_DIR/geex`
+doesn't exist.
+
+**Not tested:**
+- macOS.
+- A pid reused by another process of the same user before either sweep runs: that still looks
+  live (ADR-0032's amendment names it).
