@@ -4003,3 +4003,30 @@ scratch `HOME`, with install.sh:
 - The post-release smoke from the public URL. It runs after the tag.
 - darwin-x64, which isn't built.
 - The TUI on a real Mac by hand: the M1 has no tmux. macos-14 in CI is the TUI check on macOS.
+
+### 2026-10-19 — bandit 1.13.1, hpax 1.1.0, thousand_island 1.6.0 (advisories)
+
+**Why.** CI's `mix deps.get` (the current Hex) flagged two locked packages as vulnerable:
+- **bandit 1.11.1:** EEF-CVE-2026-74836 and -105659 (HIGH, HTTP/2 DoS), -65623 (HIGH),
+  -105660 (an HTTP/1 absolute-form request-target sets `conn.host`/`port`) and -75484 (HTTP/2
+  header values with CR, LF or NUL passed unvalidated).
+- **hpax 1.0.3:** EEF-CVE-2026-58226 (HIGH, unbounded HPACK integer decoding).
+
+The new lock lines came from `mix deps.update bandit hpax thousand_island` in a scratch copy and
+were applied by hand. `mix deps.get` left the lock as it was. Nothing else moved.
+
+**-105660 against geex.** Neither listener reads `conn.host`:
+- the MCP router checks the `Origin` header, parsed by host;
+- `/attest` refuses any `Origin` and needs the bearer token;
+- both bind 127.0.0.1.
+
+**Live** (`mix geex.serve`, scratch `XDG_STATE_HOME` and `XDG_RUNTIME_DIR`):
+- MCP `initialize` → 200, serverInfo geex 0.3.0. `tools/list` returned 13 tools.
+- `Origin: http://localhost.evil.com` → 403.
+- An absolute-form request-target `POST http://localhost.evil.com:80/mcp` with that Origin
+  → 403.
+- `/attest` with the discovery file's token → 200 `{"status":"not_open"}`; without it → 401
+  (also in absolute form, with `Host: evil.example`); with an `Origin` → 403.
+- On exit the discovery file was gone, and the log had no errors.
+
+**1124 tests + 90 doctests**, green twice.
