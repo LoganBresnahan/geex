@@ -24,13 +24,15 @@ as-of-write-time and can drift. When in doubt, read the code.
   through a tmux pty, the MCP server through a live loopback handshake. Run
   after any change a human or agent would *see*.
 
-- **`/deploy`** — builds geex into one executable with Burrito and installs it as
-  `~/.local/bin/geex` (`mix geex.deploy`, ADR-0036), then checks it live. Run when the
-  `geex` command should be the current build.
+- **`/deploy`** — builds this checkout into the release tarball and installs it as
+  `~/.local/bin/geex` through `install.sh`, the way a release installs (`mix geex.deploy`,
+  ADR-0041), then checks it live. Run when the `geex` command should be the current build.
 
-The installed binary is local: it carries this machine's ERTS and the glibc NIF, so it runs
-here, not on a Mac or other Linux machines (ADR-0036). Development still runs from this
-checkout via `mix`.
+A local build carries the OTP that runs Mix, so it runs on this machine. Portable releases
+(linux-x64/arm64, darwin-arm64/x64) are CI's: `release.yml` on a `v*` tag builds each target
+with `rel/build-runtime.sh`'s OTP and smoke-tests it; users install with
+`curl …/releases/latest/download/install.sh | sh` ([doc/install.md](doc/install.md), ADR-0041).
+Development still runs from this checkout via `mix`.
 
 ## Architecture in one breath
 
@@ -73,13 +75,14 @@ One Mix app, `:geex`, under `lib/geex/`:
    regenerate the golden from the replay under test.
 4. **The terminal belongs to the renderer.** In TUI mode only
    `Geex.TerminalIO` writes the tty; `Logger` is redirected to
-   `<tmp>/geex.log` before the app boots (`Geex.run/1`, hence `--no-start`).
+   `Geex.log_file/0` before the app boots (`Geex.run/1`, hence `--no-start`).
    No `IO.puts`/`IO.write` in `lib/` outside `terminal_io.ex`, the
-   `lib/mix/tasks/` CLI tasks, and `cli.ex`'s `--version`/`--help`/usage/`install`
-   (printed before the terminal is taken, then the VM halts). Anything that
+   `lib/mix/tasks/` CLI tasks, and `cli.ex`'s `--version`/`--help`/usage/`install`/
+   `highlight` and its start-failure line (printed before the terminal is taken, or
+   instead of it, then the VM halts). Anything that
    stops the VM goes through `Geex.stop/0`, never `System.stop/0`: the
-   installed binary's application never finishes starting, so only an
-   explicit stop restores the terminal there (ADR-0036).
+   installed program's application never finishes starting, so only an
+   explicit stop restores the terminal there (ADR-0036 §3).
 5. **Grapheme addressing; width never addresses.** Commands address graphemes
    (and logical lines); display width (`Geex.Width`) is a *render* concern only
    — width can mis-render, never mis-address. Display→grapheme casts are pure.
@@ -98,8 +101,8 @@ One Mix app, `:geex`, under `lib/geex/`:
 ## Build / test / run
 
 ```sh
-mix compile --warnings-as-errors   # the bar (no CI yet — this is the only gate)
-mix test                           # ~650 tests, ~2s; green TWICE is the ship bar
+mix compile --warnings-as-errors   # the bar locally; ci.yml runs it and the suite on every push
+mix test                           # ~1100 tests, ~10s; green TWICE is the ship bar
 mix test test/geex/mcp/grid_test.exs
 mix geex.serve                     # headless + loopback MCP on a free port (logged)
 mix geex.serve --port 4000         # pin 4000 to match presets/claude-code/.mcp.json
@@ -109,8 +112,9 @@ mix geex.ledger list               # the durable ledgers (ADR-0033); also forget
 # mode that is the ONLY route — the frozen MCP surface needs mix geex.serve
 # the interactive TUI (needs a real tty — /dogfood drives it through tmux):
 elixir --erl "-noshell -noinput +Bd" -S mix run --no-start -e 'Geex.run("path")'
-mix geex.deploy                    # build the Burrito binary, install ~/.local/bin/geex (ADR-0036)
-mix geex.deploy --rollback         # put the previous binary back
+mix geex.deploy                    # build the release tarball, install it with install.sh (ADR-0041)
+mix geex.deploy --rollback         # switch back to the previous version (install.sh --rollback)
+rel/smoke.sh --version X           # install a release into a temp HOME and run it (CI's smoke)
 mix geex.catalog                   # build the grammar/theme packages from catalog/*.exs into
                                    # _build/catalog/dist, write catalog/catalog.json (ADR-0040)
 ```
@@ -199,12 +203,20 @@ session's `Co-Authored-By` trailer.
 - edits list kept across restarts (ADR-0034's 2026-10-18 amendment): `$XDG_STATE_HOME/geex/edits.jsonl`
   (+ `edits.1.jsonl`, the previous generation), `0600`; app gate `edits_log` (off under test;
   tests pass `:file`), `edits_file` overrides
-- TUI log: `<tmp>/geex.log` (`System.tmp_dir!/0`)
-- installed binary (ADR-0036): built to `burrito_out/geex_linux` (gitignored), installed at
-  `$XDG_DATA_HOME/geex/bin/geex` (default `~/.local/share/geex/bin`) with `geex.prev` beside it,
-  linked from `~/.local/bin/geex`; Burrito unpacks it to
-  `~/.local/share/.burrito/geex_erts-<erts>_<version>/`; a prod build's version is
-  `0.1.0+<geex sha8>.<tree_sitter_wasm sha8>` (`.dirty` added when either tree is uncommitted)
+- TUI log: `$XDG_STATE_HOME/geex/geex.log` (`Geex.log_file/0`, default `~/.local/state/geex/`,
+  0700, rotates at 1 MB); a VM crash dump lands beside it (`erl_crash.dump`, the launcher's
+  `ERL_CRASH_DUMP`)
+- installed program (ADR-0041): built to `_build/package/geex-<version>-<os>-<arch>.tar.gz` +
+  `SHA256SUMS`; `install.sh` unpacks it to `$GEEX_INSTALL_DIR/versions/<version>/` (default
+  `${XDG_DATA_HOME:-~/.local/share}/geex`) and links `$GEEX_BIN_DIR/geex` (default
+  `~/.local/bin`) to its `bin/geex` launcher; `previous` names the rollback version;
+  `GEEX_DOWNLOAD_URL` replaces the release download dir (`file://` works). A local prod build's
+  version is `0.3.0+<geex sha8>.<tree_sitter_wasm sha8>` (`.dirty` when either tree is
+  uncommitted); a release build (`GEEX_RELEASE=1`) is the plain version, at
+  `@tree_sitter_wasm_ref`. The launcher passes `-geex standalone true` (`Geex.CLI.standalone?/0`)
+- releases: `v*` tags are geex versions (`release.yml` publishes, `smoke.yml` checks from the
+  public URL); catalog releases keep `v0.1.0`/`v0.2.0` and are `catalog-v<N>` from now on,
+  published as not-latest (ADR-0041 §5)
 - sibling path dep: `~/tree_sitter_wasm` (Rustler NIF; must exist to compile)
 - harness presets: `presets/<harness>/` — copy into a *target* project, never
   geex's own root (it would deny your editor's writers here).
