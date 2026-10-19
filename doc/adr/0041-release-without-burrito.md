@@ -218,6 +218,12 @@ For another BEAM app (pharos), the parts that carry over:
 - Building the runtime is our job now: an OTP or OpenSSL update is a change to
   `rel/build-runtime.sh`, and CI rebuilds it once per target.
 - A system without glibc 2.35, or a Mac on Intel, has no build yet.
+- **Catalog packages aren't byte-reproducible across zlibs.** `mix geex.catalog` deflates with
+  the VM's zlib: OTP's own copy in this runtime, the system's under asdf. The same recipe can make
+  different bytes, and so a different sha256. That's harmless: a catalog pins the bytes it
+  published, and an install checks the bytes it downloads. But a test may not rebuild a package
+  and expect the pinned hash. `SettingsTest` reads the published Birds of Paradise package from
+  `test/fixtures/catalog/` instead.
 
 ## See
 
