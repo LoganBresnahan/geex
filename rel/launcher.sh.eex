@@ -20,6 +20,50 @@ esac
 root=$(cd "$dir/.." && pwd -P) || exit 1
 rel=$root/releases/<%= @version %>
 
+# `geex self …` (ADR-0041 §4): the installer, on the install this release is in
+# (GEEX_INSTALL_DIR/versions/VERSION). It runs from this shell with no VM, because a running
+# geex is what --prune and --uninstall leave alone: from a VM, uninstall would refuse itself. The
+# bundled install.sh is read from stdin, so no command line names versions/ either. `update`
+# fetches the newest installer instead (or VERSION's), so an update never runs an old one.
+# Anything else, and a release install.sh didn't install, goes on to the VM: `Geex.CLI` prints
+# the usage, or how to install geex.
+versions=${root%/*}
+if [ "${1:-}" = self ] && [ "${versions##*/}" = versions ] && [ -f "$root/install.sh" ]; then
+  GEEX_INSTALL_DIR=${versions%/*}
+  # Run through its link (GEEX_BIN_DIR/geex, found on PATH), the link's directory is the bin
+  # directory, wherever the install put it; a GEEX_BIN_DIR of the user's own still wins.
+  if [ -z "${GEEX_BIN_DIR:-}" ] && [ -L "$0" ]; then
+    case $0 in
+      */*) GEEX_BIN_DIR=${0%/*} ;;
+      *) GEEX_BIN_DIR=. ;;
+    esac
+    export GEEX_BIN_DIR
+  fi
+  export GEEX_INSTALL_DIR
+  case $#:${2:-}:${3:-} in
+    2:rollback:|2:prune:|2:uninstall:) exec sh -s -- "--$2" <"$root/install.sh" ;;
+    2:update:|4:update:--version)
+      if [ $# = 4 ]; then
+        want=${4#v}
+        base=https://github.com/LoganBresnahan/geex/releases/download/v$want
+      else
+        want=
+        base=https://github.com/LoganBresnahan/geex/releases/latest/download
+      fi
+      base=${GEEX_DOWNLOAD_URL:-$base}
+      tmp=$(mktemp "${TMPDIR:-/tmp}/geex-install.XXXXXX") || exit 1
+      trap 'rm -f "$tmp"' EXIT
+      trap 'exit 130' INT TERM
+      curl -fsSL --retry 3 -o "$tmp" "$base/install.sh" || {
+        echo "geex self: couldn't download $base/install.sh" >&2
+        exit 1
+      }
+      if [ -n "$want" ]; then sh "$tmp" --version "$want"; else sh "$tmp"; fi
+      exit
+      ;;
+  esac
+fi
+
 ROOTDIR=$root
 BINDIR=$root/erts-<%= @erts %>/bin
 EMU=beam

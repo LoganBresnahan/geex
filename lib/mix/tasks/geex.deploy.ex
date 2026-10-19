@@ -235,8 +235,8 @@ defmodule Mix.Tasks.Geex.Deploy do
   end
 
   @doc """
-  A release step, after `trim_release/1`: write the launcher to `bin/geex`, drop what Mix
-  generated for its own scripts, and pack the release as
+  A release step, after `trim_release/1`: write the launcher to `bin/geex`, copy `install.sh`
+  beside it (`geex self`), drop what Mix generated for its own scripts, and pack the release as
   `_build/package/geex-<version>-<os>-<arch>.tar.gz`, with a `SHA256SUMS` beside it.
   """
   @spec package(Mix.Release.t()) :: Mix.Release.t()
@@ -248,6 +248,8 @@ defmodule Mix.Tasks.Geex.Deploy do
 
     File.write!(Path.join(path, "bin/geex"), launcher)
     File.chmod!(Path.join(path, "bin/geex"), 0o755)
+    # The installer that goes with this version, for `geex self rollback|prune|uninstall` offline.
+    File.cp!("install.sh", Path.join(path, "install.sh"))
 
     # Mix's own launch scripts (the launcher replaces them) and the distribution cookie (geex
     # never starts distribution, and a published cookie is everyone's).

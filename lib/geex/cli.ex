@@ -12,8 +12,8 @@ defmodule Geex.CLI do
   Because the application never finishes starting, `System.stop/0` can't stop it in order: the
   terminal would be left on the alternate screen. So quitting (`Geex.stop/0`, and SIGTERM through
   `Geex.CLI.Signals`) sends this process `:geex_quit`. It stops the supervision tree, which runs
-  each child's `terminate/2`, and then halts. `--version`, `--help`, `install`, `highlight` and
-  bad options halt directly.
+  each child's `terminate/2`, and then halts. `--version`, `--help`, `install`, `highlight`,
+  `self` and bad options halt directly.
 
       geex                 the current directory: its tree and a scratch buffer
       geex a.txt sub/b.ex  open both, show the first
@@ -26,9 +26,17 @@ defmodule Geex.CLI do
       geex install --force rust  install it again though it's up to date
       geex install ./pkg   install a local package (a directory or a .zip)
       geex highlight FILE  print FILE highlighted (ANSI), with no editor
+      geex self update     install the latest release (or `--version X`) with its install.sh
+      geex self rollback   switch back to the previous version
+      geex self prune      remove old versions no running geex uses
+      geex self uninstall  remove geex's program files and its link
 
-  `geex -- install` opens a file named `install`, and `geex -- highlight` one named
-  `highlight`.
+  `geex -- install` opens a file named `install`, `geex -- highlight` one named `highlight`, and
+  `geex -- self` one named `self`.
+
+  `self` is the launcher's (`rel/launcher.sh.eex`): it runs `install.sh` from its shell, with no
+  VM, on the install the launcher is in. Only what it doesn't take reaches `parse/1`: a bad
+  `self` command, or a release that install.sh didn't install, which has nothing to manage.
 
   Under `mix run` (`Geex.run/1`) none of this applies: `standalone?/0` is false there.
   """
@@ -37,6 +45,7 @@ defmodule Geex.CLI do
   usage: geex [PATH ...]
          geex install [--force] NAME ... | --list | ./PACKAGE
          geex highlight FILE
+         geex self update [--version VERSION] | rollback | prune | uninstall
 
   Opens each PATH (a file, or a directory for its file tree) and shows the first.
   With no PATH, opens the current directory. Paths after `--` are never options.
@@ -47,6 +56,10 @@ defmodule Geex.CLI do
   `highlight` prints FILE with the installed grammar for it and the theme in use, as
   terminal colours, and exits.
 
+  `self` manages this geex's install with the install.sh it came with: `update` to the
+  latest release (or VERSION), `rollback` to the previous version, `prune` old versions,
+  or `uninstall` (grammars, themes, settings and the edit history are kept).
+
     -v, --version   print the version
     -h, --help      print this help
   """
@@ -55,6 +68,7 @@ defmodule Geex.CLI do
           {:open, [String.t()]}
           | {:install, [String.t()]}
           | {:highlight, [String.t()]}
+          | {:self, [String.t()]}
           | :version
           | :help
           | {:error, String.t()}
@@ -93,6 +107,9 @@ defmodule Geex.CLI do
 
       iex> Geex.CLI.parse(["highlight", "a.json"])
       {:highlight, ["a.json"]}
+
+      iex> Geex.CLI.parse(["self", "prune"])
+      {:self, ["prune"]}
   """
   @spec parse([String.t()]) :: parsed()
   def parse([]), do: {:open, ["."]}
@@ -100,6 +117,7 @@ defmodule Geex.CLI do
   def parse([flag]) when flag in ["-h", "--help"], do: :help
   def parse(["install" | args]), do: {:install, args}
   def parse(["highlight" | args]), do: {:highlight, args}
+  def parse(["self" | args]), do: {:self, args}
   def parse(["--" | paths]), do: open(paths)
 
   def parse(args) do
@@ -168,6 +186,11 @@ defmodule Geex.CLI do
         Geex.redirect_logs_to_file()
         :erlang.halt(highlight(args), flush_timeout: 2_000)
 
+      {:self, args} ->
+        {message, code} = self_command(args)
+        IO.write(:stderr, message)
+        :erlang.halt(code, flush_timeout: 2_000)
+
       {:open, paths} ->
         Geex.redirect_logs_to_file()
         # Embedded mode loads every module at boot, so a running geex needs none of its release's
@@ -209,6 +232,36 @@ defmodule Geex.CLI do
         System.halt(0)
     end
   end
+
+  @doc """
+  `geex self …` as far as the VM sees it: the launcher runs every `self` command it takes, so
+  one that reaches here is either not a `self` command (exit 2), or from a release install.sh
+  didn't install (exit 1), which is told how to install geex. Pure: returns what to print on
+  stderr, and the exit status.
+
+      iex> {_, 2} = Geex.CLI.self_command(["frob"])
+
+      iex> {message, 1} = Geex.CLI.self_command(["update", "--version", "0.3.2"])
+      iex> message =~ "releases/latest/download/install.sh | sh"
+      true
+  """
+  @spec self_command([String.t()]) :: {String.t(), 1 | 2}
+  def self_command(args) do
+    if self_command?(args) do
+      {"""
+       geex self: this geex wasn't installed by install.sh, so it has no install to manage.
+       Install or update geex with:
+
+           curl -fsSL https://github.com/LoganBresnahan/geex/releases/latest/download/install.sh | sh
+       """, 1}
+    else
+      {"usage: geex self update [--version VERSION] | rollback | prune | uninstall\n", 2}
+    end
+  end
+
+  defp self_command?([cmd]) when cmd in ~w(update rollback prune uninstall), do: true
+  defp self_command?(["update", "--version", _]), do: true
+  defp self_command?(_), do: false
 
   @doc """
   `geex install …` (ADR-0040 §6): install each catalog name or local package (a path: it has a

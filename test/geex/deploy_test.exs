@@ -44,7 +44,7 @@ defmodule Geex.DeployTest do
     end
 
     # On the release and tarball the last build made, if there is one.
-    test "the built package holds the launcher, naming its version" do
+    test "the built package holds the launcher, naming its version, and install.sh" do
       case Path.wildcard("_build/package/geex-*.tar.gz") do
         [tarball] ->
           {version, target} = Deploy.parse_tarball(Path.basename(tarball))
@@ -53,6 +53,8 @@ defmodule Geex.DeployTest do
           {launcher, 0} = System.cmd("tar", ["-xzOf", tarball, "#{name}/bin/geex"])
           assert launcher =~ ~s|rel=$root/releases/#{version}|
           assert launcher =~ "-mode embedded"
+          {installer, 0} = System.cmd("tar", ["-xzOf", tarball, "#{name}/install.sh"])
+          assert installer == File.read!("install.sh")
 
         _ ->
           :ok

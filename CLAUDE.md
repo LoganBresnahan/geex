@@ -78,7 +78,7 @@ One Mix app, `:geex`, under `lib/geex/`:
    `Geex.log_file/0` before the app boots (`Geex.run/1`, hence `--no-start`).
    No `IO.puts`/`IO.write` in `lib/` outside `terminal_io.ex`, the
    `lib/mix/tasks/` CLI tasks, and `cli.ex`'s `--version`/`--help`/usage/`install`/
-   `highlight` and its start-failure line (printed before the terminal is taken, or
+   `highlight`/`self` and its start-failure line (printed before the terminal is taken, or
    instead of it, then the VM halts). Anything that
    stops the VM goes through `Geex.stop/0`, never `System.stop/0`: the
    installed program's application never finishes starting, so only an
@@ -213,7 +213,10 @@ session's `Co-Authored-By` trailer.
   `GEEX_DOWNLOAD_URL` replaces the release download dir (`file://` works). A local prod build's
   version is `0.3.0+<geex sha8>.<tree_sitter_wasm sha8>` (`.dirty` when either tree is
   uncommitted); a release build (`GEEX_RELEASE=1`) is the plain version, at
-  `@tree_sitter_wasm_ref`. The launcher passes `-geex standalone true` (`Geex.CLI.standalone?/0`)
+  `@tree_sitter_wasm_ref`. The launcher passes `-geex standalone true` (`Geex.CLI.standalone?/0`).
+  Each version carries its `install.sh`; `geex self update|rollback|prune|uninstall` is the
+  launcher's own (sh, no VM: a running geex is what prune and uninstall leave alone), and only a
+  bad `self` or a release install.sh didn't install reaches `Geex.CLI`
 - releases: `v*` tags are geex versions (`release.yml` publishes, `smoke.yml` checks from the
   public URL); catalog releases keep `v0.1.0`/`v0.2.0` and are `catalog-v<N>` from now on,
   published as not-latest (ADR-0041 §5)
