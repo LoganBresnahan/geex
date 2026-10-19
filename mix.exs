@@ -1,7 +1,7 @@
 defmodule Geex.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.3.0"
   # The GitHub release the embedded catalog's packages are on (ADR-0040 §2). Bumped only when the
   # catalog changes, not with every version: a catalog release holds the full set of packages, and
   # a geex build names the release of the catalog it embeds.
