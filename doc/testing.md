@@ -4223,3 +4223,10 @@ match the coordinator's list, the release's `SHA256SUMS`, and `sha256sum` of the
 - The suite is green twice.
 
 **Not tested:** the new step in CI, which runs at the next release or dispatched run.
+
+**Later the same day, the coordinator's report:** after `c5984d3` was pushed, a release dry run
+was dispatched on main (39330516335).
+- It was green on all four builds.
+- Both Linux build logs show "smoke: ok: a SIGKILLed geex left no file watcher running", so the
+  check runs on CI's runners, which now have inotify-tools.
+- main's CI run 39330517012 was green, shellcheck of the new `rel/smoke.sh` included.
