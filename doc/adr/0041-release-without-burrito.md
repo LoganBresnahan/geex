@@ -165,8 +165,9 @@ GitHub and a local build alike:
   ubuntu-22.04-arm, darwin-arm64 on macos-14), the cached runtime, a release build
   (`GEEX_RELEASE=1`), and a smoke test of the tarball on that runner through install.sh. Then
   one job publishes a normal release (not a pre-release, so `releases/latest` is geex) with
-  every tarball, one `SHA256SUMS` and `install.sh`. darwin-x64 is optional and left out for now.
-  Publishing runs only for a `refs/tags/v*` ref.
+  every tarball, one `SHA256SUMS` and `install.sh`. Publishing runs only for a `refs/tags/v*`
+  ref. **Amended 2026-10-19:** darwin-x64 on macos-15-intel joins the matrix after 0.3.0 (and
+  the post-release smoke), once the NIFs are signed (§1). 0.3.0 itself has three targets.
 - **Catalog releases** (ADR-0040) keep their tags `v0.1.0` and `v0.2.0`: built geex versions
   name them. From now on a catalog release is tagged `catalog-v<N>` (the next is `catalog-v3`)
   and published as not-latest, so app versions own `v*` and `releases/latest`.
@@ -215,15 +216,15 @@ For another BEAM app (pharos), the parts that carry over:
 
 ## Consequences
 
-- geex installs on Linux (x64, arm64; glibc 2.35+) and Apple silicon Macs from one command, and
-  the same path installs a local build.
+- geex installs on Linux (x64, arm64; glibc 2.35+) and Macs from one command (Intel Macs from
+  the release after 0.3.0), and the same path installs a local build.
 - One directory per version, and nothing unpacks at run time: there is no second cache to clean,
   and no Burrito fork to keep. The fork stays on GitHub for history.
 - The release is ~14 MB packed, ~40 MB unpacked: the same trimmed release as before, no longer
   inside a self-extracting file.
 - Building the runtime is our job now: an OTP or OpenSSL update is a change to
   `rel/build-runtime.sh`, and CI rebuilds it once per target.
-- A system without glibc 2.35, or a Mac on Intel, has no build yet.
+- A system without glibc 2.35 has no build, and an Intel Mac has none in 0.3.0 itself.
 - **Catalog packages aren't byte-reproducible across zlibs.** `mix geex.catalog` deflates with
   the VM's zlib: OTP's own copy in this runtime, the system's under asdf. The same recipe can make
   different bytes, and so a different sha256. That's harmless: a catalog pins the bytes it

@@ -30,6 +30,8 @@ jobs:
             runner: ubuntu-22.04-arm
           - target: darwin-arm64
             runner: macos-14
+          - target: darwin-x64
+            runner: macos-15-intel
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     steps:
@@ -133,7 +135,7 @@ jobs:
           curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | sh
           \`\`\`
 
-          Linux x64 and arm64 (glibc 2.35+), macOS on Apple silicon. See [doc/install.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/doc/install.md)."
+          Linux x64 and arm64 (glibc 2.35+), macOS on Apple silicon and Intel. See [doc/install.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/doc/install.md)."
 
   smoke:
     needs: publish

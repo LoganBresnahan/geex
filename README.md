@@ -32,7 +32,7 @@ elixir --erl "-noshell -noinput +Bd" -S mix run --no-start -e 'Geex.run("path")'
 mix geex.deploy
 ```
 
-To install a release instead (Linux x64/arm64 with glibc 2.35+, or an Apple silicon Mac; no
+To install a release instead (Linux x64/arm64 with glibc 2.35+, or a Mac, Intel builds from the release after 0.3.0; no
 Erlang needed), see [doc/install.md](doc/install.md):
 
 ```sh
