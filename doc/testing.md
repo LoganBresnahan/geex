@@ -4159,3 +4159,10 @@ set to 0.3.0, and the M1 says `geex 0.3.1`.
 - `self update` against GitHub (it runs only in the post-release smoke).
 - The new smoke run against a version before 0.3.2: `smoke.yml` dispatched for 0.3.1 with this
   `smoke.sh` would fail at `self`.
+
+### 2026-10-19 — 0.3.2: the release with `geex self` (ADR-0041 §4)
+
+`@version` is now 0.3.2, the first release with `geex self` and `install.sh --prune` (the entry
+above). 1131 tests + 93 doctests green twice; compile warnings-clean. **Not tested yet:** the
+v0.3.2 tag's release run and post-release smoke, which the coordinator pushes and watches. That
+smoke is the first to run `geex self update` against GitHub.
