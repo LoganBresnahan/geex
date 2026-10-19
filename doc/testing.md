@@ -4103,3 +4103,59 @@ tag carries it).
 
 **Not tested yet:** the v0.3.1 tag's own release run and post-release smoke. The coordinator
 pushes the tag and runs those.
+
+**Later the same day, the coordinator's report:** release run 39318958315, judged per job.
+- All four builds passed, darwin-x64 on macos-15-intel among them.
+- Publishing produced a normal release with four tarballs, `install.sh` and `SHA256SUMS`.
+- The post-release smoke passed on all 7 runners, macos-15-intel included.
+
+The maintainer's machine went from 0.3.0 to 0.3.1 through the public one-liner, with `previous`
+set to 0.3.0, and the M1 says `geex 0.3.1`.
+
+### 2026-10-19 — `geex self`, `install.sh --prune`, the installer in each version (ADR-0041 §4)
+
+**What changed:**
+- `286d128` adds `install.sh --prune`.
+- `22e42d0` adds:
+  - `install.sh` in the tarball;
+  - the launcher's `self update|rollback|prune|uninstall`;
+  - `Geex.CLI.self_command/1` for the cases the launcher leaves to the VM;
+  - the smoke test's `self` checks.
+- This entry's commit is the docs pass. It added the ADR-0041 amendment, then checked README.md
+  and `install.md` against the code and the published 0.3.1 assets. Fixes:
+  - RHEL 9 was listed, but its glibc is 2.34, below the floor. The list now names RHEL 10, and
+    Fedora 36 for Fedora.
+  - The paths table gained the cache and the crash dump.
+  - The from-source version had a stale literal; it is now the version's format.
+  - `self` and `--prune` are documented.
+  - The README gained a short "Using it" section; its commands and keys were checked against
+    `Geex.CLI`'s usage and `Loop.Settings`.
+
+**Verified:**
+- `install_sh_test.exs` gained 2 tests: `--prune` keeps a version a running process names and
+  removes it once that process is gone; with nothing installed, it removes nothing.
+- `launcher_test.exs` (new, 5 tests) renders the launcher in a stub layout:
+  - rollback, prune and uninstall reach the bundled installer with `GEEX_INSTALL_DIR` and the
+    link's `GEEX_BIN_DIR`, and with no `versions/` on its command line;
+  - a user's `GEEX_BIN_DIR` wins;
+  - `update` runs the downloaded installer and removes the temp file, and a failed download
+    exits 1;
+  - anything else, or a release outside `versions/`, reaches the VM.
+- The deploy test checks the tarball's `install.sh` against the checkout's.
+- The real local package (0.3.1+286d128b…dirty), in a sandbox `HOME` from `file://`:
+  - `self prune` keeps current;
+  - `self rollback` with nothing to roll back to exits 1;
+  - `self update --version` through `file://` says "already installed";
+  - `self frob` exits 2 with the usage;
+  - `self uninstall` removes the versions and the link;
+  - an unpacked release outside `versions/` prints the one-liner and exits 1.
+- `rel/smoke.sh` on that package passed in full, including `self prune` keeping a version that a
+  running geex (in tmux) uses, then removing it.
+- 1131 tests + 93 doctests green twice; compile warnings-clean.
+
+**Not tested:**
+- shellcheck: none is installed here; CI runs it.
+- macOS (CI's release matrix runs the smoke there).
+- `self update` against GitHub (it runs only in the post-release smoke).
+- The new smoke run against a version before 0.3.2: `smoke.yml` dispatched for 0.3.1 with this
+  `smoke.sh` would fail at `self`.

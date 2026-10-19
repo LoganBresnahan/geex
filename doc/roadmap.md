@@ -523,7 +523,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    test on the maintainer's M1. The open questions below are answered: each app keeps its own
    workflows (ADR-0041 §8 is the shared recipe), and OTP is built from source in CI.
    **0.3.1 adds darwin-x64** (macOS on Intel, built on macos-15-intel, its NIFs signed ad hoc),
-   so a release has four targets.
+   so a release has four targets. **0.3.2 lets the program manage itself:** `install.sh
+   --prune`, the installer inside each version, and `geex self update|rollback|prune|uninstall`
+   (ADR-0041 §4's amendment).
    1. **Goal:** depend on Burrito less, then not at all. Until then, the patched fork
       (`LoganBresnahan/burrito`, fork-only, never upstream) is the stopgap.
    2. **Approach:** plain release tarballs per target, built in GitHub Actions.

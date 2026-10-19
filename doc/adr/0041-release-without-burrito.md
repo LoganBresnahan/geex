@@ -156,6 +156,32 @@ GitHub and a local build alike:
   (grammars and themes, settings, the edit history and ledgers).
 - `GEEX_DOWNLOAD_URL` replaces the release's download directory; a `file://` directory works.
 
+**Amended 2026-10-19 (0.3.2): the installed program manages itself.** The maintainer asked for
+this; pharos and captAInHook take the same names.
+- **`install.sh --prune`** prunes as an install does (keep current and previous, and any version
+  a running process names), downloads nothing, and names what it keeps. With no current version
+  it removes nothing: the current one decides what stays.
+- **Each version carries its installer:** the tarball has `install.sh` at its top, so
+  `versions/<v>/install.sh` can roll back, prune and uninstall offline.
+- **`geex self update [--version X] | rollback | prune | uninstall`** is the launcher's, in sh,
+  with no VM:
+  - A running geex is what prune and uninstall leave alone, so from a VM, uninstall would
+    refuse itself.
+  - The bundled installer is fed to `sh -s` on stdin for the same reason: run as
+    `sh versions/<v>/install.sh`, its own command line names `versions/`.
+  - `update` downloads the latest release's `install.sh` (or X's) to a temporary file and runs
+    it, so an update never runs an old installer.
+  - It sets `GEEX_INSTALL_DIR` from the release's own place (`versions/<v>/../..`). Run
+    through its link, it also takes `GEEX_BIN_DIR` from the link's directory, unless the user
+    set one.
+  - A bad `self` command, or a release outside a `versions/` layout, goes on to the VM.
+    `Geex.CLI.self_command/1` prints the usage (exit 2) or the install one-liner (exit 1), and
+    touches nothing.
+- **The smoke test** (§6) also runs `geex self prune`. It keeps an old version while a geex runs
+  from it, then removes it; a copy of the one build stands in for the old version. `geex self
+  update` runs from GitHub after publishing, and `geex self uninstall` replaces
+  `install.sh --uninstall`.
+
 ### 5. CI
 
 - **`ci.yml`, every push:** the suite on Linux (ubuntu-22.04), compiled with the runtime §1 builds
@@ -210,7 +236,9 @@ For another BEAM app (pharos), the parts that carry over:
    (`-app key value`), not an environment variable.
 4. `<app>-<version>-<os>-<arch>.tar.gz` with a top directory of that name, `SHA256SUMS`,
    `install.sh`: versions in their own directories, a file symlink switched by rename, fail
-   closed on the hash, keep current and previous, prune by command line, no rc edits.
+   closed on the hash, keep current and previous, prune by command line, no rc edits. Ship the
+   installer inside each version too, and give the launcher `self update|rollback|prune|uninstall`,
+   run from the launcher's shell, not the VM (§4's amendment).
 5. A headless verb for the smoke test, and a smoke workflow that installs the published release
    from its public URL on fresh runners.
 

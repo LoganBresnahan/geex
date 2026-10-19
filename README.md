@@ -39,6 +39,23 @@ from 0.3.1; on Windows, use WSL; no Erlang needed), see [doc/install.md](doc/ins
 curl -fsSL https://github.com/LoganBresnahan/geex/releases/latest/download/install.sh | sh
 ```
 
+From 0.3.2, an installed geex manages itself: `geex self update`, `geex self rollback`,
+`geex self prune` and `geex self uninstall`. See [doc/install.md](doc/install.md).
+
+## Using it
+
+```sh
+geex                    # the current directory: its file tree and a scratch buffer
+geex a.txt sub/b.ex     # open both files, show the first
+geex DIR                # DIR's file tree
+geex -- -odd-name       # paths after -- are never options
+geex highlight FILE     # print FILE highlighted, with no editor
+geex --help             # every command
+```
+
+In the editor, `Ctrl-X` quits. `Alt+Y` opens the settings: languages, themes, every key, and
+general options such as the mouse.
+
 ## Languages and themes
 
 geex ships with no grammar and no theme: out of the box it draws in your terminal's own colours
