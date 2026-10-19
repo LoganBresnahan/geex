@@ -525,7 +525,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    **0.3.1 adds darwin-x64** (macOS on Intel, built on macos-15-intel, its NIFs signed ad hoc),
    so a release has four targets. **0.3.2 lets the program manage itself:** `install.sh
    --prune`, the installer inside each version, and `geex self update|rollback|prune|uninstall`
-   (ADR-0041 §4's amendment).
+   (ADR-0041 §4's amendment). **0.3.3** brings three things: install.sh's "on Windows, run it
+   inside WSL"; the smoke check that a SIGKILLed geex leaves no file watcher (no bosun: ADR-0041
+   §6's amendment); and stale attestation discovery files removed at start and by the payload
+   (ADR-0032's amendment).
    1. **Goal:** depend on Burrito less, then not at all. Until then, the patched fork
       (`LoganBresnahan/burrito`, fork-only, never upstream) is the stopgap.
    2. **Approach:** plain release tarballs per target, built in GitHub Actions.

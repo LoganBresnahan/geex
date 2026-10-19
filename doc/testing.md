@@ -4264,3 +4264,18 @@ doesn't exist.
 - macOS.
 - A pid reused by another process of the same user before either sweep runs: that still looks
   live (ADR-0032's amendment names it).
+
+### 2026-10-19 — 0.3.3 (ADR-0041)
+
+`@version` is now 0.3.3. The maintainer asked for this release. Since 0.3.2 it has:
+- `cce4010`: install.sh's error on an unsupported system says "on Windows, run it inside WSL".
+- `c5984d3`: the smoke check that a SIGKILLed geex leaves no file watcher, and inotify-tools on
+  CI's Linux runners.
+- `7d94935`: stale attestation discovery files are removed at geex's start and by
+  `geex-attest.sh`.
+
+1133 tests + 93 doctests green twice; compile warnings-clean.
+
+**Not tested yet:**
+- the v0.3.3 tag's release run and post-release smoke;
+- the first real `geex self update`, from 0.3.2 on the maintainer's machine.
