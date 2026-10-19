@@ -1,0 +1,45 @@
+# The post-release smoke (ADR-0041 §6): on fresh runners, install a published geex from its
+# public URL, exactly as a user would, and run it. release.yml calls it after publishing; run it
+# by hand for any version (empty: the latest release).
+name: smoke
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to install (empty for the latest release)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-22.04, ubuntu-24.04, ubuntu-22.04-arm, ubuntu-24.04-arm, macos-14, macos-15]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      # The smoke script only: the install itself comes from the release.
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: rel/smoke.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Install tmux
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y tmux
+
+      - name: Smoke
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$VERSION" ]; then sh rel/smoke.sh --version "$VERSION"; else sh rel/smoke.sh; fi

@@ -1,0 +1,137 @@
+# A geex release (ADR-0041 §3, §5): one tarball per target, each built and smoke-tested on its own
+# runner, then published as a normal release with SHA256SUMS and install.sh, then the
+# post-release smoke from the public URL. Publishing runs only for a `v*` tag; a branch run or a
+# manual run builds and checks everything and publishes nothing.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["ci/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-22.04
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm
+          - target: darwin-arm64
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: geex
+
+      - uses: ./geex/.github/actions/setup
+        with:
+          key: ${{ matrix.target }}-${{ matrix.runner }}
+
+      - name: The version
+        id: version
+        shell: bash
+        run: |
+          version=$(sed -n 's/^  @version "\(.*\)"$/\1/p' geex/mix.exs)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "the tag $GITHUB_REF_NAME doesn't name mix.exs's version $version" >&2
+            exit 1
+          fi
+
+      # GEEX_RELEASE=1: the plain version, clean trees, tree_sitter_wasm at its pin, and the native
+      # check enforced (ADR-0041 §1).
+      - name: Build
+        working-directory: geex
+        env:
+          MIX_ENV: prod
+          GEEX_RELEASE: "1"
+        run: |
+          mix deps.get --only prod
+          mix release --overwrite
+          ls -l _build/package
+          test -f "_build/package/geex-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz"
+
+      - name: Check the launcher
+        if: runner.os == 'Linux'
+        working-directory: geex
+        run: |
+          name=geex-${{ steps.version.outputs.version }}-${{ matrix.target }}
+          tar -xzOf "_build/package/$name.tar.gz" "$name/bin/geex" > "$RUNNER_TEMP/launcher"
+          shellcheck -s sh "$RUNNER_TEMP/launcher"
+
+      - name: Install tmux
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y tmux
+
+      - name: Smoke-test the tarball
+        working-directory: geex
+        run: GEEX_DOWNLOAD_URL="file://$PWD/_build/package" sh rel/smoke.sh --version "${{ steps.version.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: geex-${{ matrix.target }}
+          path: geex/_build/package/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.files.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: install.sh
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: built
+
+      - name: Gather the release files
+        id: files
+        run: |
+          mkdir dist
+          cp built/*/geex-*.tar.gz dist/
+          cat built/*/SHA256SUMS | sort -k2 > dist/SHA256SUMS
+          cp install.sh dist/
+          (cd dist && sha256sum -c SHA256SUMS)
+          ls -l dist
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # A normal release, marked latest: releases/latest/download/install.sh is this one.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "geex $version" \
+            --latest \
+            --notes "Install or upgrade:
+
+          \`\`\`sh
+          curl -fsSL https://github.com/$GITHUB_REPOSITORY/releases/latest/download/install.sh | sh
+          \`\`\`
+
+          Linux x64 and arm64 (glibc 2.35+), macOS on Apple silicon. See [doc/install.md](https://github.com/$GITHUB_REPOSITORY/blob/$GITHUB_REF_NAME/doc/install.md)."
+
+  smoke:
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    uses: ./.github/workflows/smoke.yml
+    with:
+      version: ${{ needs.publish.outputs.version }}

@@ -1,0 +1,75 @@
+# The toolchain every geex job runs on (ADR-0041 §1, §5): the OTP and Elixir that
+# rel/build-runtime.sh builds, restored from the cache or built (about 15 minutes cold), Hex and
+# rebar, and Rust for the tree_sitter_wasm NIF. The job checks geex out at `geex/` first (this
+# action lives there); the action checks tree_sitter_wasm out beside it, at `tree_sitter_wasm/`.
+name: geex setup
+description: Check out geex and tree_sitter_wasm, and put geex's own OTP and Elixir on the PATH
+inputs:
+  key:
+    description: What the runtime is built for (a target name plus the runner image), for the cache key
+    required: true
+runs:
+  using: composite
+  steps:
+    # tree_sitter_wasm is geex's path dependency, at the commit mix.exs pins.
+    - name: Find the pinned tree_sitter_wasm
+      id: nif
+      shell: bash
+      run: |
+        ref=$(sed -n 's/^  @tree_sitter_wasm_ref "\([0-9a-f]\{40\}\)"$/\1/p' geex/mix.exs)
+        [ -n "$ref" ] || { echo "no @tree_sitter_wasm_ref in mix.exs" >&2; exit 1; }
+        echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/checkout@v4
+      with:
+        repository: LoganBresnahan/tree_sitter_wasm
+        ref: ${{ steps.nif.outputs.ref }}
+        path: tree_sitter_wasm
+
+    - name: Restore the runtime
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/geex-runtime
+        key: runtime-${{ inputs.key }}-${{ hashFiles('geex/rel/build-runtime.sh') }}
+
+    - name: Build the runtime (OTP, OpenSSL, ncurses, Elixir)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: geex/rel/build-runtime.sh "$HOME/geex-runtime"
+
+    - name: Put it on the PATH
+      shell: bash
+      run: |
+        echo "$HOME/geex-runtime/bin" >> "$GITHUB_PATH"
+        echo "$HOME/geex-runtime/elixir/bin" >> "$GITHUB_PATH"
+
+    - name: Hex and rebar
+      shell: bash
+      run: |
+        mix local.hex --force
+        mix local.rebar --force
+        erl -noshell -eval 'io:format("OTP ~s, erts ~s~n", [erlang:system_info(otp_release), erlang:system_info(version)]), halt().'
+        elixir --version | tail -1
+
+    - name: Rust
+      shell: bash
+      run: |
+        if ! command -v rustup >/dev/null 2>&1; then
+          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH=$HOME/.cargo/bin:$PATH
+        fi
+        rustup toolchain install stable --profile minimal
+        rustup default stable
+        rustc --version
+
+    # The NIF's Rust build (wasmtime) is most of a cold build.
+    - name: Restore the NIF's Rust build
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          tree_sitter_wasm/native/tree_sitter_wasm/target
+        key: cargo-${{ inputs.key }}-${{ hashFiles('tree_sitter_wasm/native/tree_sitter_wasm/Cargo.lock') }}

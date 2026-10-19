@@ -1,0 +1,61 @@
+# The suite on every push (ADR-0041 §5): Linux, compiled with geex's own OTP (the one releases
+# carry), with tree_sitter_wasm at the commit mix.exs pins.
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: geex
+
+      - uses: ./geex/.github/actions/setup
+        with:
+          key: linux-x64-ubuntu-22.04
+
+      - name: Restore deps and _build
+        uses: actions/cache@v4
+        with:
+          path: |
+            geex/deps
+            geex/_build
+          key: mix-test-linux-x64-${{ hashFiles('geex/mix.lock', 'geex/rel/build-runtime.sh') }}
+
+      # Tests that commit to a scratch repository need an identity.
+      - name: git identity
+        run: |
+          git config --global user.name "geex CI"
+          git config --global user.email "ci@geex.invalid"
+
+      - name: Shell scripts
+        working-directory: geex
+        run: |
+          shellcheck -s sh install.sh rel/smoke.sh
+          shellcheck rel/build-runtime.sh
+          dash -n install.sh
+
+      - name: Compile
+        working-directory: geex
+        env:
+          MIX_ENV: test
+        run: |
+          mix deps.get
+          mix compile --warnings-as-errors
+
+      - name: Test
+        working-directory: geex
+        run: mix test
