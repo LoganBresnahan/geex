@@ -4030,3 +4030,31 @@ were applied by hand. `mix deps.get` left the lock as it was. Nothing else moved
 - On exit the discovery file was gone, and the log had no errors.
 
 **1124 tests + 90 doctests**, green twice.
+
+### 2026-10-19 — geex 0.3.0 published; the post-release smoke is green on six runners
+
+The coordinator session fast-forwarded main to `0761713` and pushed the annotated tag `v0.3.0`.
+
+**release run 39289557694**, judged per job:
+- The darwin-arm64, linux-arm64 and linux-x64 builds each rebuilt with `GEEX_RELEASE=1` and
+  passed their smoke tests.
+- `publish` made a normal release (not a pre-release, not a draft). It has
+  `geex-0.3.0-darwin-arm64.tar.gz` (14.0 MB), `geex-0.3.0-linux-arm64.tar.gz` (16.2 MB),
+  `geex-0.3.0-linux-x64.tar.gz` (16.3 MB), `install.sh` and `SHA256SUMS`.
+- `releases/latest` resolves to `v0.3.0`, through the API and through the redirect install.sh
+  follows.
+
+**The post-release smoke** (`smoke.yml`, called by the release) ran on six fresh runners:
+ubuntu-22.04, ubuntu-24.04, ubuntu-22.04-arm, ubuntu-24.04-arm, macos-14 and macos-15. Each one
+did `curl …/releases/download/v0.3.0/install.sh | sh -s -- --version 0.3.0` from the public URL,
+then ran `rel/smoke.sh`, and all six passed:
+- `geex 0.3.0`, and `--frob` exits 2;
+- `geex install json` from the catalog;
+- `geex highlight` colours;
+- the tmux open and `Ctrl-X` quit with 0 (macOS included);
+- uninstall.
+
+**Not tested:**
+- The bare one-liner (`…/releases/latest/download/install.sh | sh`, no `--version`) on a runner.
+  The smoke pins the version; only the redirect it relies on was checked above.
+- darwin-x64.
