@@ -58,8 +58,10 @@ done
 install_dir=${GEEX_INSTALL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/$APP}
 bin_dir=${GEEX_BIN_DIR:-$HOME/.local/bin}
 mkdir -p "$install_dir/versions" "$bin_dir"
-# Physical paths: the launcher names its release by one, so a running geex is found by it.
-versions=$(cd "$install_dir/versions" && pwd -P)
+# Physical paths: the launcher names its release by one, so a running geex is found by it, and
+# every message spells a directory one way (macOS's /var is /private/var).
+install_dir=$(cd "$install_dir" && pwd -P)
+versions=$install_dir/versions
 bin_dir=$(cd "$bin_dir" && pwd -P)
 link=$bin_dir/$APP
 previous_file=$install_dir/previous
