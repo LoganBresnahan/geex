@@ -64,6 +64,8 @@ used. CI caches the result per target, keyed by the script's hash.
 - **macOS:** only the OS's own libraries (`/usr/lib`, `/System/Library`). Every Mach-O must
   verify with `codesign --verify --strict`: Apple silicon kills an arm64 program whose signature a
   strip broke, so `trim_erts/2` signs the programs it strips again, ad hoc (`codesign -s - -f`).
+  Every NIF's `.so` is signed ad hoc too. The arm64 linker signs what it links, but the x86_64
+  one doesn't: pharos-mcp found `crypto.so` unsigned on macos-15-intel.
 
 A release build (`GEEX_RELEASE=1`) stops on any problem. A local build, which carries whatever OTP
 runs Mix (asdf's, here) and runs only on this machine, prints them as a note.

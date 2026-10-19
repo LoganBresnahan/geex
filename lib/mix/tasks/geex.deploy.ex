@@ -189,6 +189,7 @@ defmodule Mix.Tasks.Geex.Deploy do
   def trim_release(%Mix.Release{path: path} = release) do
     [bin] = Path.wildcard(Path.join(path, "erts-*/bin"))
     trim_erts(bin, System.find_executable("strip"))
+    if :os.type() == {:unix, :darwin}, do: sign_nifs(path)
 
     for pattern <- @release_drop,
         file <- Path.wildcard(Path.join(path, pattern)),
@@ -474,6 +475,21 @@ defmodule Mix.Tasks.Geex.Deploy do
     end
 
     Enum.sort(removed)
+  end
+
+  # Sign every NIF's shared object, ad hoc. The arm64 linker signs what it links, but the x86_64
+  # one leaves dylibs unsigned (crypto.so, the tree_sitter_wasm NIF), and the native check
+  # (`codesign --verify --strict`) refuses an unsigned Mach-O; pharos-mcp found it on
+  # macos-15-intel. Signing one already signed only replaces its ad hoc signature.
+  defp sign_nifs(path) do
+    case Path.wildcard(Path.join(path, "lib/*/priv/**/*.so")) do
+      [] ->
+        :ok
+
+      nifs ->
+        {_, 0} = System.cmd("codesign", ["-s", "-", "-f" | nifs], stderr_to_stdout: true)
+        :ok
+    end
   end
 
   @doc """
