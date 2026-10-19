@@ -28,13 +28,14 @@ jobs:
         with:
           key: linux-x64-ubuntu-22.04
 
-      - name: Restore deps and _build
+      # deps only, not _build: the NIF's .so lives in tree_sitter_wasm's priv/ (gitignored, so
+      # not in a fresh checkout), and a cached _build would tell Mix the dependency is compiled,
+      # so the NIF would never be built and wouldn't load. Its cargo build is cached by setup.
+      - name: Restore deps
         uses: actions/cache@v4
         with:
-          path: |
-            geex/deps
-            geex/_build
-          key: mix-test-linux-x64-${{ hashFiles('geex/mix.lock', 'geex/rel/build-runtime.sh') }}
+          path: geex/deps
+          key: mix-deps-${{ hashFiles('geex/mix.lock') }}
 
       # The tree watcher's tests watch a real directory (test_helper.exs leaves them out without
       # inotifywait, but CI should run them).
