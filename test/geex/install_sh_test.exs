@@ -107,6 +107,44 @@ defmodule Geex.InstallShTest do
     assert installed(ctx) == ~w(3.0.0 4.0.0)
   end
 
+  test "--prune removes what an install would, names what it keeps, and downloads nothing", ctx do
+    for v <- ~w(1.0.0 2.0.0 3.0.0), do: package(ctx, v)
+    for v <- ~w(1.0.0 2.0.0 3.0.0), do: assert({_, 0} = install(ctx, ["--version", v]))
+    # An install prunes as it goes, so plant an old version the way a running one would leave it.
+    File.cp_r!(Path.join(ctx.versions, "2.0.0"), Path.join(ctx.versions, "0.9.0"))
+    File.rm_rf!(ctx.dirs["dl"])
+
+    port =
+      Port.open({:spawn_executable, "/bin/sh"},
+        args: ["-c", "sleep 30; :", Path.join(ctx.versions, "0.9.0/erts/bin/beam.smp")]
+      )
+
+    {:os_pid, pid} = Port.info(port, :os_pid)
+
+    try do
+      assert {out, 0} = install(ctx, ["--prune"])
+      assert out =~ "kept 0.9.0: a running geex uses it"
+      assert out =~ "kept 3.0.0 (current)"
+      assert out =~ "kept 2.0.0 (previous)"
+      assert installed(ctx) == ~w(0.9.0 2.0.0 3.0.0)
+    after
+      Port.close(port)
+      System.cmd("kill", ["#{pid}"])
+    end
+
+    assert {out, 0} = install(ctx, ["--prune"])
+    assert out =~ "removed 0.9.0"
+    assert installed(ctx) == ~w(2.0.0 3.0.0)
+    assert linked(ctx) == {:ok, Path.join(ctx.versions, "3.0.0/bin/geex")}
+  end
+
+  test "--prune with no geex installed removes nothing", ctx do
+    File.mkdir_p!(Path.join(ctx.versions, "1.0.0"))
+    assert {out, 0} = install(ctx, ["--prune"])
+    assert out =~ "nothing to prune"
+    assert installed(ctx) == ~w(1.0.0)
+  end
+
   test "a download whose sha256 doesn't match unpacks nothing and switches nothing", ctx do
     package(ctx, "1.0.0")
     package(ctx, "2.0.0")
