@@ -272,6 +272,11 @@ do_rollback() {
   say "rolled back to geex $prev (geex $current is now the previous version)"
 }
 
+# DIR's physical path when it exists (as every other path here is spelled), else DIR as given.
+physical() {
+  if [ -d "$1" ]; then (cd "$1" && pwd -P); else printf '%s\n' "$1"; fi
+}
+
 do_uninstall() {
   read_current
   read_running
@@ -281,8 +286,9 @@ do_uninstall() {
   if [ -n "$current" ]; then rm -f "$link"; fi
   rm -rf "$versions" "$previous_file"
   say "removed geex from $install_dir/versions and $link"
-  say "kept: grammars and themes ($install_dir), settings (${XDG_CONFIG_HOME:-~/.config}/geex),"
-  say "the edit history and ledgers (${XDG_STATE_HOME:-~/.local/state}/geex); remove those by hand if you like"
+  home=$(physical "$HOME")
+  say "kept: grammars and themes ($install_dir), settings ($(physical "${XDG_CONFIG_HOME:-$home/.config}")/geex),"
+  say "the edit history and ledgers ($(physical "${XDG_STATE_HOME:-$home/.local/state}")/geex); remove those by hand if you like"
 }
 
 case $action in

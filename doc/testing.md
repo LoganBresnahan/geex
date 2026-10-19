@@ -4058,3 +4058,12 @@ then ran `rel/smoke.sh`, and all six passed:
 - The bare one-liner (`…/releases/latest/download/install.sh | sh`, no `--version`) on a runner.
   The smoke pins the version; only the redirect it relies on was checked above.
 - darwin-x64.
+
+**Later the same day:** the coordinator session ran the bare one-liner, with no `--version`, on
+the maintainer's M1, into a throwaway `HOME`.
+- It resolved and installed 0.3.0, and `geex --version` printed `geex 0.3.0`.
+- Run again, it said "geex 0.3.0 is already installed (--force installs it again)".
+
+That covers the unpinned path above on a real Mac. `install.sh --uninstall`'s "kept" lines now
+spell the settings and state directories physically too (macOS's `/private/var`), as the rest
+of the script does.
