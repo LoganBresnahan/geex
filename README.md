@@ -32,8 +32,8 @@ elixir --erl "-noshell -noinput +Bd" -S mix run --no-start -e 'Geex.run("path")'
 mix geex.deploy
 ```
 
-To install a release instead (Linux x64/arm64 with glibc 2.35+, or a Mac, Intel builds from the release after 0.3.0; no
-Erlang needed), see [doc/install.md](doc/install.md):
+To install a release instead (Linux x64/arm64 with glibc 2.35+, or a Mac, Apple silicon or Intel
+from 0.3.1; on Windows, use WSL; no Erlang needed), see [doc/install.md](doc/install.md):
 
 ```sh
 curl -fsSL https://github.com/LoganBresnahan/geex/releases/latest/download/install.sh | sh

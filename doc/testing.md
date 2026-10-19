@@ -4085,3 +4085,21 @@ on tags), judged per job:
 
 **Not tested:** an Intel Mac in hand, or a published darwin-x64 asset (0.3.0 has none; the next
 tag carries it).
+
+### 2026-10-19 — 0.3.1: the release that adds darwin-x64 (ADR-0041 §5)
+
+**What changed:**
+- `@version` is now 0.3.1. The maintainer asked for a release so that Intel Macs have a build;
+  the coordinator session relayed the request.
+- 0.3.1's code is 0.3.0's plus `96fd4de` (NIFs signed ad hoc on macOS) and `42e1baa` (darwin-x64
+  in `release.yml` and `smoke.yml`). Its tag builds and smoke-tests all four targets.
+- `install.md`, the README and the roadmap now name 0.3.1 as the first release for Intel Macs.
+  They also say "on Windows, use WSL" (the maintainer's decision: no Windows build).
+
+**Verified:**
+- `mix compile --warnings-as-errors` is clean.
+- `mix test` passed twice (1124 tests + 90 doctests).
+- The four-target build was last checked in the dry run 39298580711 (the entry above).
+
+**Not tested yet:** the v0.3.1 tag's own release run and post-release smoke. The coordinator
+pushes the tag and runs those.

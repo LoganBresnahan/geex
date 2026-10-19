@@ -521,13 +521,15 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
 
    The release dry run is green on all three targets, and the darwin build passed the smoke
    test on the maintainer's M1. The open questions below are answered: each app keeps its own
-   workflows (ADR-0041 §8 is the shared recipe), and OTP is built from source in CI. macOS on
-   Intel is optional and not built yet.
+   workflows (ADR-0041 §8 is the shared recipe), and OTP is built from source in CI.
+   **0.3.1 adds darwin-x64** (macOS on Intel, built on macos-15-intel, its NIFs signed ad hoc),
+   so a release has four targets.
    1. **Goal:** depend on Burrito less, then not at all. Until then, the patched fork
       (`LoganBresnahan/burrito`, fork-only, never upstream) is the stopgap.
    2. **Approach:** plain release tarballs per target, built in GitHub Actions.
       - Targets: linux-x86_64 (its own ERTS, no system OpenSSL), linux-aarch64, macos-arm64 and
-        macos-x86_64. Windows only if wanted later.
+        macos-x86_64. No Windows: Windows users run geex in WSL (the maintainer's decision,
+        2026-10-19).
       - The tree_sitter_wasm NIF cross-built per target, in the manner of rustler_precompiled.
    3. **Install:** a curl installer, with the tarballs hosted on GitHub Releases.
       - It unpacks into a versioned folder (by version or content hash), atomically, then flips

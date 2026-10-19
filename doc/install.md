@@ -1,9 +1,10 @@
 # Installing geex
 
 geex runs on **Linux** (x64 and arm64, glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora,
-RHEL 9 and newer) and **macOS** (Apple silicon from 0.3.0, Intel from the release after 0.3.0). Each release is one tarball per platform with
-its own Erlang runtime inside, so you don't need Erlang or Elixir installed. How it's built, and
-why: [ADR-0041](adr/0041-release-without-burrito.md).
+RHEL 9 and newer) and **macOS** (Apple silicon from 0.3.0, Intel from 0.3.1). On Windows, use
+WSL: geex has no Windows build. Each release is one tarball per platform with its own Erlang
+runtime inside, so you don't need Erlang or Elixir installed. How it's built, and why:
+[ADR-0041](adr/0041-release-without-burrito.md).
 
 ## Install
 
@@ -22,7 +23,7 @@ file. It never edits that file itself, and it needs no sudo.
 To install a particular version:
 
 ```sh
-curl -fsSL https://github.com/LoganBresnahan/geex/releases/latest/download/install.sh | sh -s -- --version 0.3.0
+curl -fsSL https://github.com/LoganBresnahan/geex/releases/latest/download/install.sh | sh -s -- --version 0.3.1
 ```
 
 Then install the languages and themes you use (geex ships none,
@@ -99,4 +100,4 @@ rm -rf ~/.local/share/geex/bin ~/.local/share/.burrito/geex_erts-*
 ## From source
 
 See the [README](../README.md): `mix geex.deploy` builds this checkout and installs it with the
-same script, as `0.3.0+<commit>`.
+same script, as `0.3.1+<commit>`.
