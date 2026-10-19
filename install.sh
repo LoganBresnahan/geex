@@ -166,7 +166,7 @@ platform() {
   case $(uname -s) in
     Linux) os=linux ;;
     Darwin) os=darwin ;;
-    *) die "geex is built for Linux and macOS, not $(uname -s)" ;;
+    *) die "geex is built for Linux and macOS, not $(uname -s) (on Windows, run it inside WSL)" ;;
   esac
   case $(uname -m) in
     x86_64|amd64) arch=x64 ;;

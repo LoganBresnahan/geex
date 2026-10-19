@@ -4166,3 +4166,32 @@ set to 0.3.0, and the M1 says `geex 0.3.1`.
 above). 1131 tests + 93 doctests green twice; compile warnings-clean. **Not tested yet:** the
 v0.3.2 tag's release run and post-release smoke, which the coordinator pushes and watches. That
 smoke is the first to run `geex self update` against GitHub.
+
+**Later the same day, the coordinator's report:**
+- Before the tag, CI run 39321846010 and release dry run 39321846238 on `ci/geex-70` (78b0170)
+  were green at job level: all four builds, the macOS smokes with `self`, and shellcheck.
+- Release run 39322474462, judged per job: four builds, then publish, then the post-release
+  smoke on all 7 runners, macos-15-intel included. That smoke is the first `geex self update`
+  against GitHub; it found the version installed, as it should.
+- The maintainer's machine:
+  - The curl one-liner took it from 0.3.1 (which has no `self`) to 0.3.2. It pruned 0.3.0 and
+    kept 0.3.1 as the previous version.
+  - `geex self prune` printed the kept lines.
+  - `geex self update` said "already installed".
+  - `versions/0.3.2/install.sh` is present.
+
+### 2026-10-19 — install.sh: "on Windows, run it inside WSL"
+
+`install.sh`'s error on a system other than Linux or macOS now ends "(on Windows, run it inside
+WSL)". The maintainer decided geex has no Windows build, and pharos's installer uses the same
+words.
+
+This change also exposed a flaw in 22e42d0's package test. It compared the last local build's
+bundled `install.sh` byte for byte with the checkout's, so any `install.sh` edit made after a
+build failed the suite. It now checks only that the bundled file is geex's installer.
+
+**Verified:**
+- 1131 tests + 93 doctests green twice; compile warnings-clean.
+- `dash -n` passes; shellcheck runs in CI.
+
+**Not tested:** the message on a Windows shell (MSYS, Git Bash).
