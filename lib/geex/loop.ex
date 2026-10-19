@@ -699,7 +699,7 @@ defmodule Geex.Loop do
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{tree: %{reading: {_, ref}}} = state) do
     Logger.warning("geex tree: reading the files failed: #{inspect(reason)}")
     tree = %{state.tree | reading: nil, again: false, index: state.tree.index || %{}}
-    notice = "the file tree couldn't be read (see #{Path.join(System.tmp_dir!(), "geex.log")})"
+    notice = "the file tree couldn't be read (see #{Geex.log_file()})"
     {:noreply, schedule_repaint(%{state | tree: tree, notice: notice})}
   end
 
@@ -707,7 +707,7 @@ defmodule Geex.Loop do
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{finder: %{matching: {_, ref}}} = state) do
     Logger.warning("geex finder: the search failed: #{inspect(reason)}")
     finder = %{state.finder | matching: nil, submit: false}
-    notice = "the file search failed (see #{Path.join(System.tmp_dir!(), "geex.log")})"
+    notice = "the file search failed (see #{Geex.log_file()})"
     {:noreply, schedule_repaint(%{state | finder: finder, notice: notice})}
   end
 

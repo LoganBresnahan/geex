@@ -302,8 +302,7 @@ defmodule Geex.CLI do
       "geex: needs a terminal, and its input or output isn't one (to print a file in colour: geex highlight FILE)"
 
       iex> Geex.CLI.start_failure(:boom, nil, true)
-      "geex: couldn't start (the log has the details: " <>
-        Path.join(System.tmp_dir!(), "geex.log") <> ")"
+      "geex: couldn't start (the log has the details: " <> Geex.log_file() <> ")"
   """
   @spec start_failure(term(), String.t() | nil, boolean()) :: String.t()
   def start_failure(
@@ -321,9 +320,7 @@ defmodule Geex.CLI do
   end
 
   def start_failure(_reason, _term, _tty?),
-    do:
-      "geex: couldn't start (the log has the details: " <>
-        Path.join(System.tmp_dir!(), "geex.log") <> ")"
+    do: "geex: couldn't start (the log has the details: " <> Geex.log_file() <> ")"
 
   @doc """
   `geex highlight FILE` (ADR-0041 §6): print FILE highlighted as ANSI, with the installed grammar

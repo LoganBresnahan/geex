@@ -56,7 +56,7 @@ Why each flag (don't "simplify" them away):
 | --- | --- |
 | `-noshell -noinput` | keep the Erlang shell off stdin so `:prim_tty` owns the terminal |
 | `+Bd` | disable the BREAK handler — an outside SIGINT ends the VM instead of opening the BEAM's `BREAK:` menu on the terminal geex owns (`sigint` isn't trappable). Ctrl-C itself sends no SIGINT: `TerminalIO` runs `stty -isig -ixon`, so it reaches the keymap (BUG-3) |
-| `--no-start` | `Geex.run/1` redirects `Logger` to `<tmp>/geex.log` *before* the app boots; started early, the inotify warning paints over the alt-screen and the sparse cell-diff never clears it |
+| `--no-start` | `Geex.run/1` redirects `Logger` to `geex.log` in the state directory (`Geex.log_file/0`) *before* the app boots; started early, the inotify warning paints over the alt-screen and the sparse cell-diff never clears it |
 
 Drive and observe:
 
@@ -69,7 +69,7 @@ tmux -L geexdf capture-pane -t g -p           # the rendered grid as text — RE
 tmux -L geexdf capture-pane -t g -p -e        # with SGR colour (truecolor 38;2;r;g;b / 48;2;…)
 tmux -L geexdf display-message -t g -p '#{cursor_x},#{cursor_y}'   # the hardware cursor, 0-based
 tmux -L geexdf resize-window -t g -x 60 -y 15 # SIGWINCH path
-tail -20 "$(elixir -e 'IO.write System.tmp_dir!()')/geex.log"      # what Logger said
+tail -20 "${XDG_STATE_HOME:-$HOME/.local/state}/geex/geex.log"    # what Logger said
 ```
 
 Quit and clean up — **Ctrl-X** (Ctrl-Q and Ctrl-C quit too; Ctrl-Z and Ctrl-S do

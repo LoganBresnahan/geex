@@ -102,7 +102,9 @@ if command -v tmux >/dev/null 2>&1; then
     sleep 0.1
   done
   [ "$(cat "$box/exit")" = geex-exit=0 ] || fail "geex quit with $(cat "$box/exit")"
-  if grep -q terminating "$TMPDIR/geex.log" 2>/dev/null; then fail "geex.log: $(cat "$TMPDIR/geex.log")"; fi
+  log=$XDG_STATE_HOME/geex/geex.log
+  [ -s "$log" ] || fail "no log at $log"
+  if grep -q terminating "$log"; then fail "geex.log: $(cat "$log")"; fi
   tmux -L geex-smoke kill-server
   ok "geex opened the file in tmux and quit on Ctrl-X"
 else

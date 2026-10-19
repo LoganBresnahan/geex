@@ -31,8 +31,8 @@ defmodule Geex do
 
       elixir --erl "-noshell -noinput +Bd" -S mix run --no-start -e 'Geex.run("lib/geex/loop.ex")'
 
-  Quit with **Ctrl-X**, Ctrl-Q or Ctrl-C. Logs go to `<tmpdir>/geex.log`. With no path, geex boots to an empty
-  screen. The live dogfood: watch geex recolour its own source as you type.
+  Quit with **Ctrl-X**, Ctrl-Q or Ctrl-C. Logs go to `Geex.log_file/0` (default
+  `~/.local/state/geex/geex.log`). With no path, geex boots to an empty screen. The live dogfood: watch geex recolour its own source as you type.
 
   `path` may also be a **list** of paths, all opened, the first one shown (`buffers` switches,
   ADR-0034), or a **directory**, which opens an empty scratch buffer.
@@ -99,10 +99,22 @@ defmodule Geex do
   # warnings when inotify-tools is missing). Send logs to a file and detach every
   # other handler — done *before* the app starts (hence `mix run --no-start`).
   # Best-effort: a logging hiccup must never stop the editor from booting.
+  #
+  # The file is `log_file/0`, in geex's own 0700 state directory: a fixed name in a shared
+  # temporary directory could be planted (a symlink) by another user of the machine. It rotates
+  # at 1 MB, keeping one previous file (`geex.log.0`).
   @doc false
   def redirect_logs_to_file do
-    file = System.tmp_dir!() |> Path.join("geex.log") |> String.to_charlist()
-    _ = :logger.add_handler(:geex_file, :logger_std_h, %{config: %{type: {:file, file}}})
+    dir = state_dir()
+    _ = File.mkdir_p(dir)
+    _ = File.chmod(dir, 0o700)
+    file = String.to_charlist(log_file())
+
+    _ =
+      :logger.add_handler(:geex_file, :logger_std_h, %{
+        config: %{type: {:file, file}, max_no_bytes: 1_000_000, max_no_files: 1}
+      })
+
     for id <- :logger.get_handler_ids(), id != :geex_file, do: :logger.remove_handler(id)
     :ok
   rescue
@@ -110,4 +122,20 @@ defmodule Geex do
   catch
     _, _ -> :ok
   end
+
+  @doc """
+  geex's state directory: `$XDG_STATE_HOME/geex`, else `~/.local/state/geex`. It holds the
+  ledgers, the edits list, the log and a VM crash dump, and geex keeps it 0700.
+  """
+  @spec state_dir() :: Path.t()
+  def state_dir do
+    case System.get_env("XDG_STATE_HOME") do
+      state when is_binary(state) and state != "" -> Path.join(state, "geex")
+      _ -> Path.join([System.user_home!(), ".local", "state", "geex"])
+    end
+  end
+
+  @doc "The editor's log, in `state_dir/0` (`Logger` writes there once the editor starts)."
+  @spec log_file() :: Path.t()
+  def log_file, do: Path.join(state_dir(), "geex.log")
 end

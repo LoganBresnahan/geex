@@ -50,7 +50,7 @@ You can read the script before running it:
 | the `geex` link | `~/.local/bin/geex` | `GEEX_BIN_DIR` |
 | grammars and themes you install | `${XDG_DATA_HOME:-~/.local/share}/geex/{grammars,themes}/` | |
 | settings (`Alt+Y`) | `${XDG_CONFIG_HOME:-~/.config}/geex/` | |
-| edit history and ledgers | `${XDG_STATE_HOME:-~/.local/state}/geex/` | |
+| edit history, ledgers, the log (`geex.log`) | `${XDG_STATE_HOME:-~/.local/state}/geex/` | |
 
 ## Upgrade
 

@@ -83,6 +83,10 @@ points at it), then `exec`s `erts-*/bin/erlexec` directly, with no other shell i
   by the programs geex starts.
 - It sets `ROOTDIR`, `BINDIR`, `EMU` and `PROGNAME` for erlexec, and `RELEASE_ROOT` and
   `RELEASE_SYS_CONFIG` for Elixir's config provider (`config/runtime.exs`).
+- `ERL_CRASH_DUMP`, unless the user set it, is `erl_crash.dump` in geex's state directory
+  (`${XDG_STATE_HOME:-~/.local/state}/geex`, made 0700), beside `geex.log`, which moved there
+  from the temporary directory in the same change. A fixed name in a shared `/tmp` could be
+  planted as a symlink by another user, and the VM's default is the current directory.
 - No cookie: geex never starts distribution, and a cookie published in a tarball would be
   everyone's. `package/1` removes it, and Mix's own scripts (`bin/geex.bat`, `releases/V/elixir`,
   `iex`, `env.sh`, `remote.vm.args`, `start_clean.*`).

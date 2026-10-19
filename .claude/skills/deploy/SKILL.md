@@ -49,7 +49,7 @@ Use an isolated tmux socket (the `/dogfood` way) and scratch state, so the user'
 log stay clean:
 
 ```sh
-export XDG_STATE_HOME=$(mktemp -d) TMPDIR=$(mktemp -d)
+export XDG_STATE_HOME=$(mktemp -d)
 tmux -L deploy new-session -d -s g -x 120 -y 30 "cd $SCRATCH_REPO && geex a.txt"
 ```
 
@@ -60,7 +60,8 @@ tmux -L deploy new-session -d -s g -x 120 -y 30 "cd $SCRATCH_REPO && geex a.txt"
   the alternate screen is gone and the cursor is visible.
 - While it runs, `$XDG_RUNTIME_DIR/geex/<pid>.json` exists (the attestation listener). It is
   gone after quitting.
-- `$TMPDIR/geex.log` reads "loading code in embedded mode" and has no `terminating` lines.
+- `$XDG_STATE_HOME/geex/geex.log` reads "loading code in embedded mode" and has no
+  `terminating` lines. A VM crash would leave `erl_crash.dump` beside it.
 - `geex notes.txt`, where `notes.txt` holds `IO.puts("x")`, opens the file. It must not
   print `x` (ADR-0036 §2).
 - `geex highlight some.json` prints it in colour, when the JSON grammar is installed.
