@@ -3938,3 +3938,68 @@ asdf-built package of the same commit, both in scratch homes, two rounds each):
 - linux-arm64.
 - A real release download (there is none yet).
 - shellcheck: it isn't installed here; CI will run it.
+
+### 2026-10-19 — CI and the release dry run, three targets; geex 0.3.0 ready to tag (ADR-0041)
+
+**What landed after `b43cc32`,** on the branch `ci/geex-e1` (the coordinator session pushed it;
+GitHub Actions was degraded for the first hour):
+- `ci.yml`, `release.yml`, `smoke.yml`, the `setup` action, and `rel/smoke.sh`.
+- install.sh:
+  - a signal now exits;
+  - `--uninstall` checks for a running geex first;
+  - shellcheck is clean;
+  - every message spells a directory one way.
+- A one-line message instead of a stack trace when geex can't drive the terminal.
+- `geex.log` and the VM's crash dump moved to the 0700 state directory. They used to be
+  `<tmp>/geex.log` and the working directory.
+- The version is 0.3.0.
+
+**CI round 1 (`93489e1`).**
+- linux-x64 and linux-arm64 built and passed their smoke tests on the first run.
+- Three failures:
+  - darwin-arm64's native check flagged the NIF's own install name (`otool -D` prints it
+    unindented; fixed by `otool_id/1`). Every Mach-O's signature verified, the stripped and
+    re-signed erts included.
+  - `WatcherTest` returned `{:skip, …}` from a setup. Now `:inotify` tests are excluded without
+    `inotifywait`, and CI installs inotify-tools.
+  - `SettingsTest` rebuilt the Birds package and expected the catalog's sha256. Deflate depends
+    on the VM's zlib: CI's runtime uses OTP's own copy. The test now reads the published package
+    from `test/fixtures/catalog/`.
+
+**CI round 2 (`42d62a1`), all green:**
+- `ci`: 1124 tests + 90 doctests, 0 failures on ubuntu-22.04 with the built runtime, the
+  inotify tests included. shellcheck passed.
+- `release` (dry run, `GEEX_RELEASE=1`), each target:
+  - built `geex-0.3.0-<target>.tar.gz`;
+  - passed the native check (Linux: libc family plus `libgcc_s`, glibc ≤ 2.35; macOS: OS
+    libraries only, signatures valid);
+  - passed `rel/smoke.sh` on its own runner: `--version` is `geex 0.3.0`, `--frob` exits 2,
+    `geex install json` from the real catalog, `geex highlight` colours, and `--uninstall`.
+  - On Linux, also the tmux open and `Ctrl-X`, with exit 0 and a clean log.
+  - Packed sizes: 16.3 MB (linux-x64), 14.0 MB (darwin-arm64).
+- The second run restored the runtime and cargo caches.
+
+**Round 3 (`d8f3765`, then `5640bb1`).**
+- `d8f3765` installed tmux on the macOS runners. Its `ci` run failed: it had restored the
+  `_build` that round 2 cached, so Mix took tree_sitter_wasm as compiled. The NIF's `.so` lives
+  in tree_sitter_wasm's gitignored `priv/`, so it was missing from the fresh checkout and never
+  loaded, and every highlighting test failed.
+- `5640bb1` caches `deps/` only. With it everything was green, judged per job (the run-level
+  status was unreliable during GitHub's incident):
+  - `ci`: 1124 tests + 90 doctests, 0 failures, with the NIF built fresh.
+  - `release`: all three builds and smoke tests passed. On darwin-arm64 (macos-14, the OS's
+    ncurses) that now includes the terminal check: geex opened the file in tmux and quit on
+    `Ctrl-X` with 0, and the log was clean.
+
+**On the maintainer's M1** (macOS 26.7.1, arm64, with no Erlang and no tmux on the PATH), the
+coordinator session installed the darwin-arm64 artifact from that dry run, from `file://` into a
+scratch `HOME`, with install.sh:
+- `rel/smoke.sh` passed: `geex 0.3.0`, `--frob` 2, `geex install json` over TLS against the macOS
+  trust store, `geex highlight` colour, uninstall;
+- 4.4 s for the whole run;
+- the only note was the `/private/var` vs `/var` spelling, now fixed.
+
+**Not tested here:**
+- The post-release smoke from the public URL. It runs after the tag.
+- darwin-x64, which isn't built.
+- The TUI on a real Mac by hand: the M1 has no tmux. macos-14 in CI is the TUI check on macOS.

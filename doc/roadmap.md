@@ -510,10 +510,17 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    relayed by the coordinator session. See [adr/0036](adr/0036-installed-binary.md)
    (the binary, and §6 the fork) and [adr/0040](adr/0040-bare-geex-and-the-catalog.md) (packages
    on GitHub releases).
-   **In progress 2026-10-19 ([adr/0041](adr/0041-release-without-burrito.md)), shipping as 0.3.0.**
-   Burrito is removed; the runtime build (`rel/build-runtime.sh`), the launcher, the package,
-   `install.sh` and `mix geex.deploy` through it are built. Next: CI (`ci.yml`, `release.yml`)
-   and the post-release smoke. The open questions below are answered: each app keeps its own
+   **Built 2026-10-19 ([adr/0041](adr/0041-release-without-burrito.md)), shipping as 0.3.0.**
+   Built:
+   - Burrito is removed.
+   - The runtime build (`rel/build-runtime.sh`), the launcher, the package, `install.sh`, and
+     `mix geex.deploy` through it.
+   - CI: `ci.yml` (the suite on every push), `release.yml` (linux-x64, linux-arm64 and
+     darwin-arm64, each built and smoke-tested natively; publishes on a `v*` tag) and
+     `smoke.yml` (the post-release check from the public URL).
+
+   The release dry run is green on all three targets, and the darwin build passed the smoke
+   test on the maintainer's M1. The open questions below are answered: each app keeps its own
    workflows (ADR-0041 §8 is the shared recipe), and OTP is built from source in CI. macOS on
    Intel is optional and not built yet.
    1. **Goal:** depend on Burrito less, then not at all. Until then, the patched fork

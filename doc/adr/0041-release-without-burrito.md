@@ -2,7 +2,9 @@
 
 - **Status:** Accepted 2026-10-19. The maintainer's big run, directed by the coordinator session:
   Burrito leaves geex (and pharos), and geex is the first to ship this way. pharos copies the
-  recipe, so §8 states it apart from geex.
+  recipe, so §8 states it apart from geex. Built and shipped as 0.3.0. Before the tag, the
+  release dry run was green on all three targets, and the darwin-arm64 tarball passed
+  `rel/smoke.sh` on the maintainer's M1.
 - **Date:** 2026-10-19
 - **Supersedes:** [ADR-0036](0036-installed-binary.md) §1 (the Burrito wrap), §4 (`mix geex.deploy`)
   and §6 (the Burrito fork). §2 and §3 (the work done inside `Application.start/2`, the orderly
@@ -177,7 +179,9 @@ release's own runners and after publishing (`smoke.yml`, on fresh runners, from 
 - `curl … install.sh | sh` into a temporary `HOME`;
 - `geex --version` is the tag's version;
 - `geex install json` from the catalog, then `geex highlight` on a JSON file prints colour;
-- on Linux, geex starts in tmux on a file, shows it, and `Ctrl-X` quits.
+- where tmux is installed (CI installs it on Linux and macOS runners), geex starts in tmux on a
+  file and shows it, `Ctrl-X` quits with 0, and the log has no `terminating` lines;
+- `install.sh --uninstall` removes it.
 
 ### 7. `mix geex.deploy`
 
