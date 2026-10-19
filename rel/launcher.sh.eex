@@ -27,7 +27,9 @@ PROGNAME=geex
 # Elixir's config provider (config/runtime.exs) finds the release by these two.
 RELEASE_ROOT=$root
 RELEASE_SYS_CONFIG=$rel/sys
-export ROOTDIR BINDIR EMU PROGNAME RELEASE_ROOT RELEASE_SYS_CONFIG
+# A VM crash writes its dump beside geex.log, not into the directory geex was started in.
+ERL_CRASH_DUMP=${ERL_CRASH_DUMP:-${TMPDIR:-/tmp}/geex_erl_crash.dump}
+export ROOTDIR BINDIR EMU PROGNAME RELEASE_ROOT RELEASE_SYS_CONFIG ERL_CRASH_DUMP
 
 exec "$BINDIR/erlexec" -noshell -mode embedded \
   -boot "$rel/start" -boot_var RELEASE_LIB "$root/lib" \

@@ -170,8 +170,8 @@ defmodule Geex.CLI do
 
       {:open, paths} ->
         Geex.redirect_logs_to_file()
-        # Embedded mode loads every module at boot, so a running geex no longer needs its unpack
-        # (ADR-0036's 2026-10-18 amendment: the Burrito fork passes `-mode embedded` right).
+        # Embedded mode loads every module at boot, so a running geex needs none of its release's
+        # files but the VM's helper programs (the launcher's `-mode embedded`, ADR-0041 §2).
         require Logger
 
         Logger.info(
@@ -181,7 +181,20 @@ defmodule Geex.CLI do
         # Registered first, so a quit (`Geex.stop/0`) finds this process from the first key.
         Process.register(self(), __MODULE__)
         _ = Geex.CLI.Signals.install()
-        {:ok, sup} = start_tree.()
+
+        sup =
+          case start_tree.() do
+            {:ok, sup} ->
+              sup
+
+            {:error, reason} ->
+              Logger.error("geex: couldn't start: #{inspect(reason)}")
+              tty? = :prim_tty.isatty(:stdin) == true and :prim_tty.isatty(:stdout) == true
+              IO.puts(:stderr, start_failure(reason, System.get_env("TERM"), tty?))
+              flush_log()
+              :erlang.halt(1, flush_timeout: 2_000)
+          end
+
         paths |> Enum.map(&Path.expand/1) |> Geex.open_paths()
 
         receive do
@@ -276,6 +289,41 @@ defmodule Geex.CLI do
 
     if :error in results, do: 1, else: 0
   end
+
+  @doc """
+  What to tell the user when the editor couldn't start, from the supervision tree's `reason`,
+  `TERM`, and whether stdin and stdout are a terminal. `:prim_tty` refuses (`:enotsup`) both no
+  terminal and a terminal type it can't look up.
+
+      iex> enotsup = {:shutdown, {:failed_to_start_child, Geex.TerminalIO, {:enotsup, []}}}
+      iex> Geex.CLI.start_failure(enotsup, "rxvt-unicode", true)
+      "geex: can't drive this terminal: TERM=rxvt-unicode has no terminfo entry on this system"
+      iex> Geex.CLI.start_failure(enotsup, "xterm", false)
+      "geex: needs a terminal, and its input or output isn't one (to print a file in colour: geex highlight FILE)"
+
+      iex> Geex.CLI.start_failure(:boom, nil, true)
+      "geex: couldn't start (the log has the details: " <>
+        Path.join(System.tmp_dir!(), "geex.log") <> ")"
+  """
+  @spec start_failure(term(), String.t() | nil, boolean()) :: String.t()
+  def start_failure(
+        {:shutdown, {:failed_to_start_child, Geex.TerminalIO, {:enotsup, _}}},
+        term,
+        tty?
+      ) do
+    if tty? do
+      "geex: can't drive this terminal: TERM=#{term || "(unset)"} has no terminfo entry " <>
+        "on this system"
+    else
+      "geex: needs a terminal, and its input or output isn't one " <>
+        "(to print a file in colour: geex highlight FILE)"
+    end
+  end
+
+  def start_failure(_reason, _term, _tty?),
+    do:
+      "geex: couldn't start (the log has the details: " <>
+        Path.join(System.tmp_dir!(), "geex.log") <> ")"
 
   @doc """
   `geex highlight FILE` (ADR-0041 §6): print FILE highlighted as ANSI, with the installed grammar
