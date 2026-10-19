@@ -1,56 +1,53 @@
 defmodule Mix.Tasks.Geex.Deploy do
-  @shortdoc "Build the geex binary with Burrito and install it as ~/.local/bin/geex (ADR-0036)"
+  @shortdoc "Build geex's release tarball and install it with install.sh (ADR-0041)"
   @moduledoc """
-  Build geex into one executable and install it on this machine
-  ([ADR-0036](../../../doc/adr/0036-installed-binary.md)).
+  Build geex and install it on this machine the way a release installs
+  ([ADR-0041](../../../doc/adr/0041-release-without-burrito.md)).
 
       mix geex.deploy             build, check, install
-      mix geex.deploy --no-build  install the last build (burrito_out/geex_linux) as it is
-      mix geex.deploy --rollback  put the previously installed binary back
+      mix geex.deploy --no-build  install the last build (_build/package) as it is
+      mix geex.deploy --rollback  switch back to the previous version
 
-  1. **Build:** `MIX_ENV=prod mix release --overwrite`. That assembles the release, and
-     Burrito wraps it into `burrito_out/geex_linux`. The first prod build compiles the
-     tree_sitter_wasm NIF in release mode, which takes a few minutes. The old `geex.app` is
-     removed first, so the version is this commit's even when no module changed, and so is
-     the old release directory, so the binary carries this release only (BUG-6). Before the
-     wrap, `trim_release/1` drops the VM programs geex never runs and strips the rest, and
-     stops the build if a module geex calls is missing. Burrito's working copy in the temp
-     directory is removed after.
-  2. **Fresh unpack:** Burrito runs the binary from a directory named after the version, and it
-     skips unpacking when that directory already exists. A dirty build's version (`….dirty`)
-     repeats across builds, so the new build's directory is removed first, and the first run
-     unpacks this build. Not while a running geex uses it: a committed build's is the same code
-     and stays; a dirty one stops the deploy.
-  3. **Check:** the new binary must print `geex <version>` for `--version`.
-  4. **Install:** the binary goes to `$XDG_DATA_HOME/geex/bin/geex` (default
-     `~/.local/share/geex/bin`), and the one it replaces is kept as `geex.prev`. The swap is a
-     rename, so a running geex keeps its file. `~/.local/bin/geex` links to it. An existing
-     `~/.local/bin/geex` that is anything else is left alone, and the task stops.
-  5. **Prune:** Burrito never removes an older geex unpack (semver ignores `+<sha>`), so the
-     task removes the other `geex_erts-*`. It keeps `geex.prev`'s, and any a running process
-     uses (its executable or an argument under it, from `/proc`): a VM loads modules from its
-     unpack as it needs them, so removing it crashes the geex running there (BUG-4). A later
-     deploy removes it once that geex has quit.
+  1. **Build:** `MIX_ENV=prod mix release --overwrite`. Mix assembles the release, then two
+     steps of geex's own run: `trim_release/1` drops the VM programs geex never runs, strips the
+     rest, and stops the build if a module geex calls is missing, a native library is one the
+     release can't count on, or the boot script names something that isn't there. `package/1`
+     puts the launcher in `bin/geex` and packs the release into
+     `_build/package/geex-<version>-<os>-<arch>.tar.gz`, with its `SHA256SUMS`. The first prod
+     build compiles the tree_sitter_wasm NIF in release mode, which takes a few minutes. The old
+     `geex.app` is removed first, so the version is this commit's even when no module changed,
+     and so is the old release directory, so the tarball carries this release only (BUG-6).
+  2. **Install:** `install.sh` from this checkout, with `GEEX_DOWNLOAD_URL` pointing at
+     `_build/package`: the same script, checks and layout as `curl … | sh` from a release. It
+     verifies the sha256, runs the new `geex --version`, unpacks into
+     `$GEEX_INSTALL_DIR/versions/<version>`, points `~/.local/bin/geex` at it, and prunes
+     versions older than the previous one that no running geex uses. A dirty build's version
+     repeats with other code under it, so it is installed with `--force`; a committed build
+     already installed is left as it is. `GEEX_INSTALL_DIR` and `GEEX_BIN_DIR` pass through, so
+     a sandbox works.
 
-  `--rollback` swaps `geex` and `geex.prev`.
+  `--rollback` is `install.sh --rollback`.
+
+  A build is for the machine it was built on (its VM is the one running Mix). One built with
+  the runtime `rel/build-runtime.sh` makes, as CI's are, passes the native-library check that a
+  release build (`GEEX_RELEASE=1`) enforces; one built with another OTP only warns.
   """
   use Mix.Task
 
-  @built "burrito_out/geex_linux"
+  @package "_build/package"
 
   @impl true
   def run(args) do
     {opts, _rest, _invalid} =
       OptionParser.parse(args, strict: [build: :boolean, rollback: :boolean])
 
-    bin_dir = bin_dir()
-    link = Path.expand("~/.local/bin/geex")
+    cond do
+      opts[:rollback] ->
+        install_sh(["--rollback"])
 
-    if opts[:rollback] do
-      rollback(bin_dir, link)
-    else
-      if Keyword.get(opts, :build, true), do: build()
-      install(Path.expand(@built), bin_dir, link)
+      true ->
+        if Keyword.get(opts, :build, true), do: build()
+        install(Path.expand(@package))
     end
   end
 
@@ -60,10 +57,8 @@ defmodule Mix.Tasks.Geex.Deploy do
     # docs-only commit would keep the previous commit's version. Removing it makes it fresh.
     File.rm("_build/prod/lib/geex/ebin/geex.app")
     # `mix release` keeps every earlier release beside the new one (each build's version
-    # differs), and Burrito packs the whole directory: the binary carried every geex since the
-    # first deploy, grammars and themes included after geex went bare (BUG-6). Start empty.
+    # differs), and the tarball packs the whole directory (BUG-6). Start empty.
     File.rm_rf!("_build/prod/rel/geex")
-    staged = burrito_work_dirs()
 
     {_, status} =
       System.cmd("mix", ["release", "--overwrite"],
@@ -72,20 +67,87 @@ defmodule Mix.Tasks.Geex.Deploy do
         stderr_to_stdout: true
       )
 
-    # Burrito leaves its working copy of the release (~120 MB) in the temp directory. Remove the
-    # ones this build made, not another project's that may be building now.
-    for dir <- burrito_work_dirs() -- staged, do: File.rm_rf(dir)
-
     if status != 0, do: Mix.raise("geex deploy: the build failed (exit #{status})")
   end
 
-  defp burrito_work_dirs, do: Path.wildcard(Path.join(System.tmp_dir!(), "burrito_build_*"))
+  defp install(package) do
+    {version, _target} =
+      case Path.wildcard(Path.join(package, "geex-*.tar.gz")) do
+        [tarball] -> parse_tarball(Path.basename(tarball))
+        [] -> Mix.raise("geex deploy: no build in #{package}")
+        many -> Mix.raise("geex deploy: more than one build in #{package}: #{inspect(many)}")
+      end
 
-  # The VM's own programs the binary runs (ADR-0036's 2026-10-18 amendment): Burrito's launcher
-  # execs `erlexec`, which starts `beam.smp`; `erl_child_setup` starts every port (git,
-  # inotifywait); `inet_gethost` looks up a host name for a download (ADR-0040 §3). The rest of
-  # `erts-*/bin` is tooling (erlc, dialyzer, ct_run, escript…), embedded-system helpers (heart,
-  # run_erl, to_erl) and `epmd`, which only distribution starts.
+    force = if String.ends_with?(version, ".dirty"), do: ["--force"], else: []
+
+    install_sh(["--version", version | force], [{"GEEX_DOWNLOAD_URL", "file://" <> package}])
+  end
+
+  defp install_sh(args, env \\ []) do
+    {_, status} =
+      System.cmd("sh", [Path.expand("install.sh") | args],
+        env: env,
+        into: IO.stream(:stdio, :line),
+        stderr_to_stdout: true
+      )
+
+    if status != 0, do: Mix.raise("geex deploy: install.sh #{Enum.join(args, " ")} failed")
+  end
+
+  @doc """
+  A tarball's version and target, from its name.
+
+      iex> Mix.Tasks.Geex.Deploy.parse_tarball("geex-0.3.0+1a2b3c4d.5e6f7a8b-linux-x64.tar.gz")
+      {"0.3.0+1a2b3c4d.5e6f7a8b", "linux-x64"}
+  """
+  @spec parse_tarball(String.t()) :: {String.t(), String.t()}
+  def parse_tarball(name) do
+    [arch, os | rest] =
+      name |> String.trim_trailing(".tar.gz") |> String.split("-") |> Enum.reverse()
+
+    ["geex" | version] = Enum.reverse(rest)
+    {Enum.join(version, "-"), "#{os}-#{arch}"}
+  end
+
+  @doc """
+  The `<os>-<arch>` this VM runs on, as release names spell it (`linux-x64`, `darwin-arm64`).
+  A release carries the VM that built it, so this is the release's target too.
+  """
+  @spec target() :: String.t()
+  def target, do: target(:os.type(), to_string(:erlang.system_info(:system_architecture)))
+
+  @doc """
+      iex> Mix.Tasks.Geex.Deploy.target({:unix, :linux}, "aarch64-unknown-linux-gnu")
+      "linux-arm64"
+
+      iex> Mix.Tasks.Geex.Deploy.target({:unix, :darwin}, "aarch64-apple-darwin24.6.0")
+      "darwin-arm64"
+
+      iex> Mix.Tasks.Geex.Deploy.target({:unix, :linux}, "x86_64-pc-linux-gnu")
+      "linux-x64"
+  """
+  @spec target({atom(), atom()}, String.t()) :: String.t()
+  def target(os_type, architecture) do
+    os =
+      case os_type do
+        {:unix, :linux} -> "linux"
+        {:unix, :darwin} -> "darwin"
+      end
+
+    arch =
+      case architecture |> String.split("-") |> hd() do
+        "x86_64" -> "x64"
+        a when a in ["aarch64", "arm64"] -> "arm64"
+      end
+
+    "#{os}-#{arch}"
+  end
+
+  # The VM's own programs geex runs (ADR-0036's 2026-10-18 amendment): the launcher execs
+  # `erlexec`, which starts `beam.smp`; `erl_child_setup` starts every port (git, inotifywait);
+  # `inet_gethost` looks up a host name for a download (ADR-0040 §3). The rest of `erts-*/bin` is
+  # tooling (erlc, dialyzer, ct_run, escript…), embedded-system helpers (heart, run_erl, to_erl)
+  # and `epmd`, which only distribution starts.
   @erts_keep ~w(beam.smp erlexec erl_child_setup inet_gethost)
 
   # Modules geex's code names that no release has carried, each unreachable from a running
@@ -102,15 +164,35 @@ defmodule Mix.Tasks.Geex.Deploy do
     :erl_syntax_lib => "the same"
   }
 
+  # The shared libraries a Linux release may link (ADR-0041 §1): glibc's own, which every system
+  # the release runs on has, and GCC's unwinder, which Rust's standard library links (the
+  # tree_sitter_wasm NIF) and every glibc system carries. OpenSSL, ncurses, zlib and the C++
+  # runtime are linked in statically.
+  @linux_system ~w(libc.so.6 libm.so.6 libdl.so.2 libpthread.so.0 librt.so.1 libutil.so.1
+                   ld-linux-x86-64.so.2 ld-linux-aarch64.so.1 libgcc_s.so.1)
+
+  # The oldest glibc the Linux release supports: Ubuntu 22.04's, where CI builds it.
+  @glibc_floor {2, 35}
+
+  # Files in a release that are test scaffolding, never loaded: crypto's test engine links
+  # libcrypto on its own.
+  @release_drop ["lib/crypto-*/priv/lib/otp_test_engine.so"]
+
   @doc """
-  A release step, between Mix's `:assemble` and Burrito's wrap: drop the VM programs geex never
+  A release step, between Mix's `:assemble` and `package/1`: drop the VM programs geex never
   runs, strip the debug information from the ones it does (`beam.smp` carries ~43 MB of it), and
-  check that every module geex's code reaches is still in the release (`unresolved/1`).
+  check what the release needs: every module geex's code reaches (`unresolved/1`), every shared
+  library its native code links (`native_problems/2`), and what its boot script loads
+  (`boot_problems/2`).
   """
   @spec trim_release(Mix.Release.t()) :: Mix.Release.t()
   def trim_release(%Mix.Release{path: path} = release) do
     [bin] = Path.wildcard(Path.join(path, "erts-*/bin"))
     trim_erts(bin, System.find_executable("strip"))
+
+    for pattern <- @release_drop,
+        file <- Path.wildcard(Path.join(path, pattern)),
+        do: File.rm!(file)
 
     case Map.drop(unresolved(path), Map.keys(@expected_unresolved)) do
       none when none == %{} ->
@@ -125,12 +207,79 @@ defmodule Mix.Tasks.Geex.Deploy do
         )
     end
 
+    check_native(path)
+
     [script] = Path.wildcard(Path.join(path, "releases/*/start.script"))
 
     case boot_problems(script, path) do
       [] -> release
       problems -> Mix.raise("geex deploy: the release won't boot: " <> Enum.join(problems, "; "))
     end
+  end
+
+  # A release build (GEEX_RELEASE=1) stops on a native problem; a local one, which carries
+  # whatever OTP built it and runs only here, says what it links.
+  defp check_native(path) do
+    case native_problems(path, :os.type()) do
+      [] ->
+        :ok
+
+      problems ->
+        message = "the release's native code " <> Enum.join(problems, "; ")
+
+        if System.get_env("GEEX_RELEASE") == "1",
+          do: Mix.raise("geex deploy: " <> message),
+          else: Mix.shell().info("geex deploy: (a local build, so only a note) " <> message)
+    end
+  end
+
+  @doc """
+  A release step, after `trim_release/1`: write the launcher to `bin/geex`, drop what Mix
+  generated for its own scripts, and pack the release as
+  `_build/package/geex-<version>-<os>-<arch>.tar.gz`, with a `SHA256SUMS` beside it.
+  """
+  @spec package(Mix.Release.t()) :: Mix.Release.t()
+  def package(%Mix.Release{path: path, version: version} = release) do
+    launcher =
+      EEx.eval_file("rel/launcher.sh.eex",
+        assigns: [version: version, erts: to_string(release.erts_version)]
+      )
+
+    File.write!(Path.join(path, "bin/geex"), launcher)
+    File.chmod!(Path.join(path, "bin/geex"), 0o755)
+
+    # Mix's own launch scripts (the launcher replaces them) and the distribution cookie (geex
+    # never starts distribution, and a published cookie is everyone's).
+    rel = Path.join(path, "releases/#{version}")
+
+    for f <-
+          [Path.join(path, "bin/geex.bat"), Path.join(path, "releases/COOKIE")] ++
+            for(
+              f <- ~w(elixir elixir.bat iex iex.bat env.sh env.bat remote.vm.args
+                      start_clean.boot start_clean.script),
+              do: Path.join(rel, f)
+            ),
+        do: File.rm_rf!(f)
+
+    out = Path.expand(@package)
+    File.rm_rf!(out)
+    File.mkdir_p!(out)
+    name = "geex-#{version}-#{target()}"
+    File.cp_r!(path, Path.join(out, name))
+
+    {_, 0} =
+      System.cmd("tar", ["-C", out, "-czf", "#{name}.tar.gz", name],
+        cd: out,
+        env: [{"COPYFILE_DISABLE", "1"}],
+        stderr_to_stdout: true
+      )
+
+    File.rm_rf!(Path.join(out, name))
+    tarball = Path.join(out, "#{name}.tar.gz")
+    sha = :crypto.hash(:sha256, File.read!(tarball)) |> Base.encode16(case: :lower)
+    File.write!(Path.join(out, "SHA256SUMS"), "#{sha}  #{name}.tar.gz\n")
+    Mix.shell().info("geex deploy: packed #{tarball}")
+    release
   end
 
   @doc """
@@ -172,20 +321,135 @@ defmodule Mix.Tasks.Geex.Deploy do
     problems
   end
 
+  @doc """
+  What in the release at `rel` the release can't count on where it runs (ADR-0041 §1), on the
+  OS `os_type` (`:os.type/0`):
+
+    * on Linux, a shared library outside `@linux_system` that a VM program or a NIF links, or a
+      glibc symbol newer than the floor (2.35);
+    * on macOS, a library outside the OS (`/usr/lib`, `/System`), or a Mach-O whose code
+      signature doesn't verify: Apple silicon kills an arm64 program whose signature a strip or
+      a patch broke.
+
+  `[]` when there's nothing.
+  """
+  @spec native_problems(Path.t(), {atom(), atom()}) :: [String.t()]
+  def native_problems(rel, os_type) do
+    for file <- native_files(rel), problem <- file_problems(file, os_type) do
+      "#{Path.relative_to(file, rel)} #{problem}"
+    end
+  end
+
+  @doc false
+  # The VM's programs and every NIF's shared object.
+  @spec native_files(Path.t()) :: [Path.t()]
+  def native_files(rel) do
+    Path.wildcard(Path.join(rel, "erts-*/bin/*")) ++
+      Path.wildcard(Path.join(rel, "lib/*/priv/**/*.so"))
+  end
+
+  defp file_problems(file, {:unix, :darwin}) do
+    {otool, 0} = System.cmd("otool", ["-L", file], stderr_to_stdout: true)
+    {id, _} = System.cmd("otool", ["-D", file], stderr_to_stdout: true)
+
+    foreign =
+      for lib <- otool_libraries(otool) -- otool_libraries(id),
+          not String.starts_with?(lib, ["/usr/lib/", "/System/Library/"]),
+          do: "links #{lib}"
+
+    case System.cmd("codesign", ["--verify", "--strict", file], stderr_to_stdout: true) do
+      {_, 0} -> foreign
+      {out, _} -> foreign ++ ["has no valid code signature: #{String.trim(out)}"]
+    end
+  end
+
+  defp file_problems(file, _linux) do
+    {dynamic, 0} = System.cmd("readelf", ["-d", file], stderr_to_stdout: true)
+    {symbols, 0} = System.cmd("readelf", ["-W", "--dyn-syms", file], stderr_to_stdout: true)
+
+    foreign = for lib <- elf_needed(dynamic), lib not in @linux_system, do: "links #{lib}"
+
+    case glibc_needed(symbols) do
+      newer when newer > @glibc_floor ->
+        {major, minor} = newer
+        floor = Tuple.to_list(@glibc_floor) |> Enum.join(".")
+        foreign ++ ["needs glibc #{major}.#{minor}, newer than the #{floor} floor"]
+
+      _ ->
+        foreign
+    end
+  end
+
+  @doc """
+  The libraries in `readelf -d`'s output (its `NEEDED` entries).
+
+      iex> Mix.Tasks.Geex.Deploy.elf_needed(\"""
+      ...>  0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]
+      ...>  0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]
+      ...>  0x000000000000000e (SONAME)             Library soname: [x.so]
+      ...> \""")
+      ["libgcc_s.so.1", "libc.so.6"]
+  """
+  @spec elf_needed(String.t()) :: [String.t()]
+  def elf_needed(readelf) do
+    for [_, lib] <- Regex.scan(~r/\(NEEDED\)\s+Shared library: \[([^\]]+)\]/, readelf), do: lib
+  end
+
+  @doc """
+  The newest glibc symbol version named in `readelf --dyn-syms`'s output, or `{0, 0}`.
+
+      iex> Mix.Tasks.Geex.Deploy.glibc_needed(\"""
+      ...>      1: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND memcpy@GLIBC_2.14 (2)
+      ...>      2: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND pthread_create@GLIBC_2.34 (3)
+      ...>      3: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND free@GLIBC_2.2.5 (4)
+      ...> \""")
+      {2, 34}
+  """
+  @spec glibc_needed(String.t()) :: {non_neg_integer(), non_neg_integer()}
+  def glibc_needed(readelf) do
+    Regex.scan(~r/@GLIBC_(\d+)\.(\d+)/, readelf)
+    |> Enum.map(fn [_, major, minor] -> {String.to_integer(major), String.to_integer(minor)} end)
+    |> Enum.max(fn -> {0, 0} end)
+  end
+
+  @doc """
+  The libraries in `otool -L`'s (or `-D`'s) output: each indented line's path.
+
+      iex> Mix.Tasks.Geex.Deploy.otool_libraries(\"""
+      ...> erts/bin/beam.smp:
+      ...> \t/usr/lib/libncurses.5.4.dylib (compatibility version 5.4.0, current version 5.4.0)
+      ...> \t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)
+      ...> \""")
+      ["/usr/lib/libncurses.5.4.dylib", "/usr/lib/libSystem.B.dylib"]
+  """
+  @spec otool_libraries(String.t()) :: [String.t()]
+  def otool_libraries(otool) do
+    for line <- String.split(otool, "\n"),
+        String.starts_with?(line, "\t"),
+        do: line |> String.trim() |> String.replace(~r/ \(compatibility version.*\)$/, "")
+  end
+
   @doc false
   @spec expected_unresolved() :: %{module() => String.t()}
   def expected_unresolved, do: @expected_unresolved
 
   @doc false
   # Remove everything in an `erts-*/bin` directory but `@erts_keep`, and strip what's kept with
-  # `strip` (an executable's path), when there is one.
+  # `strip` (an executable's path), when there is one. On macOS a stripped program is signed
+  # again (ad hoc): the strip breaks the signature the linker made, and Apple silicon kills an
+  # arm64 program without a valid one.
   @spec trim_erts(Path.t(), Path.t() | nil) :: [String.t()]
   def trim_erts(bin, strip) do
     removed = for f <- File.ls!(bin), f not in @erts_keep, do: File.rm_rf!(Path.join(bin, f)) && f
 
     if strip do
       kept = for f <- @erts_keep, File.exists?(Path.join(bin, f)), do: Path.join(bin, f)
-      {_, 0} = System.cmd(strip, ["--strip-debug" | kept], stderr_to_stdout: true)
+      # `-S` is the debug information only, in GNU's strip and Apple's alike.
+      {_, 0} = System.cmd(strip, ["-S" | kept], stderr_to_stdout: true)
+
+      if :os.type() == {:unix, :darwin} do
+        {_, 0} = System.cmd("codesign", ["-s", "-", "-f" | kept], stderr_to_stdout: true)
+      end
     else
       Mix.shell().info("geex deploy: no `strip` on the PATH; the VM keeps its debug information")
     end
@@ -223,186 +487,5 @@ defmodule Mix.Tasks.Geex.Deploy do
     {found, lost} = Enum.split_with(new, &Map.has_key?(beams, &1))
     missing = Enum.reduce(lost, missing, &Map.update(&2, &1, [mod], fn from -> [mod | from] end))
     reach(found ++ rest, Enum.into(found, seen), beams, preloaded, missing)
-  end
-
-  defp install(built, bin_dir, link) do
-    unless File.regular?(built), do: Mix.raise("geex deploy: no build at #{built}")
-
-    dir = unpack_dir(built)
-    fresh_unpack(dir)
-    version = check(built)
-
-    File.mkdir_p!(bin_dir)
-    target = Path.join(bin_dir, "geex")
-    staged = target <> ".new"
-    File.cp!(built, staged)
-    File.chmod!(staged, 0o755)
-    if File.exists?(target), do: File.rename!(target, target <> ".prev")
-    File.rename!(staged, target)
-
-    link!(target, link)
-    prev = target <> ".prev"
-    prune_unpacks([dir | if(File.regular?(prev), do: [unpack_dir(prev)], else: [])])
-    Mix.shell().info("geex deploy: installed #{version} at #{target}, linked from #{link}")
-  end
-
-  # The new build must run from its own files, so its unpack is removed first. A committed
-  # build's unpack is that commit's, so one a running geex is using is kept as it is; a dirty
-  # build's version repeats with other code under it, so deploying over a running one stops.
-  defp fresh_unpack(dir) do
-    case users(dir, in_use()) do
-      [] ->
-        File.rm_rf!(dir)
-
-      pids ->
-        if String.ends_with?(dir, ".dirty") do
-          Mix.raise(
-            "geex deploy: a running geex (pid #{Enum.join(pids, ", ")}) uses #{dir}, " <>
-              "which this dirty build would replace; quit it first"
-          )
-        end
-    end
-  end
-
-  # Where Burrito unpacks this binary: `~/.local/share/.burrito/geex_erts-<erts>_<version>`.
-  defp unpack_dir(built) do
-    case System.cmd(built, ["maintenance", "directory"], stderr_to_stdout: true) do
-      {out, 0} ->
-        dir = out |> String.split("\n", trim: true) |> List.last("") |> String.trim()
-
-        if String.contains?(dir, "/.burrito/geex_erts-"),
-          do: dir,
-          else: Mix.raise("geex deploy: unexpected unpack directory #{inspect(dir)}")
-
-      {out, status} ->
-        Mix.raise("geex deploy: `maintenance directory` failed (exit #{status}): #{out}")
-    end
-  end
-
-  # Burrito removes only versions that sort older, and semver ignores the `+<sha>` part, so it
-  # never removes a geex build's unpack: each would stay (~40 MB). Keep the new one, geex.prev's
-  # (so `--rollback` starts at once), and any a running geex is using: a VM loads modules from
-  # it as it needs them, so removing it under one crashes it.
-  defp prune_unpacks([new | _] = keep) do
-    dirs = Path.wildcard(Path.join(Path.dirname(new), "geex_erts-*"))
-    procs = in_use()
-
-    for dir <- stale_unpacks(dirs, keep, procs) do
-      File.rm_rf!(dir)
-      Mix.shell().info("geex deploy: removed the old unpack #{Path.basename(dir)}")
-    end
-
-    for dir <- dirs -- keep, pids = users(dir, procs), pids != [] do
-      Mix.shell().info(
-        "geex deploy: kept #{Path.basename(dir)}, in use by pid #{Enum.join(pids, ", ")}"
-      )
-    end
-
-    :ok
-  end
-
-  @doc """
-  The unpacks in `dirs` to remove: not one of `keep`, and no process in `procs` (each
-  `{pid, paths}`, its executable and arguments) runs from it.
-
-      iex> beam = {7, ["/b/geex_erts-1_0.1.0+aa/erts/bin/beam.smp", "-root", "/b/geex_erts-1_0.1.0+aa"]}
-      iex> Mix.Tasks.Geex.Deploy.stale_unpacks(
-      ...>   ["/b/geex_erts-1_0.1.0+aa", "/b/geex_erts-1_0.1.0+bb", "/b/geex_erts-1_0.1.0+cc"],
-      ...>   ["/b/geex_erts-1_0.1.0+cc"],
-      ...>   [beam, {8, ["/bin/sh", "/b/geex_erts-1_0.1.0+bbb"]}]
-      ...> )
-      ["/b/geex_erts-1_0.1.0+bb"]
-  """
-  @spec stale_unpacks([Path.t()], [Path.t()], [{pos_integer(), [String.t()]}]) :: [Path.t()]
-  def stale_unpacks(dirs, keep, procs) do
-    Enum.filter(dirs, &(&1 not in keep and users(&1, procs) == []))
-  end
-
-  @doc "The processes in `procs` running from `dir`: a path that is it, or is under it."
-  @spec users(Path.t(), [{pos_integer(), [String.t()]}]) :: [pos_integer()]
-  def users(dir, procs) do
-    for {pid, paths} <- procs,
-        Enum.any?(paths, &(&1 == dir or String.starts_with?(&1, dir <> "/"))),
-        do: pid
-  end
-
-  @doc false
-  # Each process's executable and arguments, from /proc. A process that ends while it is read,
-  # or that isn't ours to read, has none.
-  @spec in_use() :: [{pos_integer(), [String.t()]}]
-  def in_use do
-    for entry <- File.ls!("/proc"), pid = parse_pid(entry) do
-      exe =
-        case File.read_link("/proc/#{pid}/exe") do
-          {:ok, exe} -> [exe]
-          {:error, _} -> []
-        end
-
-      args =
-        case File.read("/proc/#{pid}/cmdline") do
-          {:ok, cmdline} -> String.split(cmdline, <<0>>, trim: true)
-          {:error, _} -> []
-        end
-
-      {pid, exe ++ args}
-    end
-  end
-
-  defp parse_pid(entry) do
-    case Integer.parse(entry) do
-      {pid, ""} -> pid
-      _ -> nil
-    end
-  end
-
-  # The `geex <version>` line. Burrito may print lines of its own first (an older version it
-  # removed, on a new version's first run).
-  defp check(built) do
-    {out, status} = System.cmd(built, ["--version"], stderr_to_stdout: true)
-    line = out |> String.split("\n") |> Enum.find(&String.starts_with?(&1, "geex "))
-
-    case {line, status} do
-      {"geex " <> version, 0} -> String.trim(version)
-      _ -> Mix.raise("geex deploy: `#{built} --version` failed (exit #{status}): #{out}")
-    end
-  end
-
-  defp rollback(bin_dir, link) do
-    target = Path.join(bin_dir, "geex")
-    prev = target <> ".prev"
-    unless File.regular?(prev), do: Mix.raise("geex deploy: nothing to roll back to (#{prev})")
-
-    swap = target <> ".swap"
-    File.rename!(target, swap)
-    File.rename!(prev, target)
-    File.rename!(swap, prev)
-    link!(target, link)
-    Mix.shell().info("geex deploy: rolled back to #{check(target)}; the replaced one is #{prev}")
-  end
-
-  defp link!(target, link) do
-    case File.read_link(link) do
-      {:ok, ^target} ->
-        :ok
-
-      {:ok, other} ->
-        Mix.raise("geex deploy: #{link} links to #{other}, not #{target}; left alone")
-
-      {:error, :enoent} ->
-        File.mkdir_p!(Path.dirname(link))
-        File.ln_s!(target, link)
-
-      {:error, _} ->
-        Mix.raise("geex deploy: #{link} exists and isn't a link; left alone")
-    end
-  end
-
-  defp bin_dir, do: Path.join([data_home(), "geex", "bin"])
-
-  defp data_home do
-    case System.get_env("XDG_DATA_HOME") do
-      empty when empty in [nil, ""] -> Path.expand("~/.local/share")
-      dir -> dir
-    end
   end
 end

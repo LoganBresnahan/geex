@@ -1,5 +1,6 @@
 defmodule Geex.DeployTest do
-  # `mix geex.deploy`'s pruning (ADR-0036): an unpack a running geex uses is never removed.
+  # The release `mix geex.deploy` builds (ADR-0036, ADR-0041): the trim, and the checks that stop
+  # a release that can't run. Installing it is install.sh's (install_sh_test.exs).
   use ExUnit.Case, async: true
 
   alias Mix.Tasks.Geex.Deploy
@@ -13,27 +14,49 @@ defmodule Geex.DeployTest do
     %{dir: dir}
   end
 
-  test "a process running from an unpack keeps it; a sibling with the same prefix is stale",
-       %{dir: dir} do
-    used = Path.join(dir, "geex_erts-1_0.1.0+aa")
-    other = Path.join(dir, "geex_erts-1_0.1.0+aab")
-    exe = Path.join([used, "bin", "sleep"])
-    File.mkdir_p!(Path.dirname(exe))
-    File.mkdir_p!(other)
-    File.cp!(System.find_executable("sleep"), exe)
-    File.chmod!(exe, 0o755)
+  describe "the native-library check (ADR-0041 §1)" do
+    test "a Linux program linking only glibc passes; one linking more is named", %{dir: dir} do
+      if :os.type() == {:unix, :linux} do
+        bin = Path.join(dir, "erts-1/bin")
+        File.mkdir_p!(bin)
+        File.cp!(System.find_executable("ls"), Path.join(bin, "ls"))
+        {readelf, 0} = System.cmd("readelf", ["-d", Path.join(bin, "ls")])
 
-    port = Port.open({:spawn_executable, exe}, [:binary, args: ["30"]])
-    {:os_pid, pid} = Port.info(port, :os_pid)
+        expected =
+          for lib <- Deploy.elf_needed(readelf),
+              lib not in ~w(libc.so.6 ld-linux-x86-64.so.2 ld-linux-aarch64.so.1),
+              do: "erts-1/bin/ls links #{lib}"
 
-    try do
-      procs = Deploy.in_use()
-      assert pid in Deploy.users(used, procs)
-      assert Deploy.users(other, procs) == []
-      assert Deploy.stale_unpacks([used, other], [], procs) == [other]
-    after
-      Port.close(port)
-      System.cmd("kill", ["#{pid}"])
+        problems = Deploy.native_problems(dir, {:unix, :linux})
+        # `ls` links libselinux on Debian and Ubuntu; its glibc may be newer than the floor.
+        assert Enum.reject(problems, &(&1 =~ "needs glibc")) == expected
+      end
+    end
+
+    test "an empty release has nothing to check", %{dir: dir} do
+      assert Deploy.native_problems(dir, :os.type()) == []
+    end
+  end
+
+  describe "the package (ADR-0041 §2)" do
+    test "the target names this machine's OS and architecture" do
+      assert Deploy.target() =~ ~r/^(linux|darwin)-(x64|arm64)$/
+    end
+
+    # On the release and tarball the last build made, if there is one.
+    test "the built package holds the launcher, naming its version" do
+      case Path.wildcard("_build/package/geex-*.tar.gz") do
+        [tarball] ->
+          {version, target} = Deploy.parse_tarball(Path.basename(tarball))
+          assert target == Deploy.target()
+          name = "geex-#{version}-#{target}"
+          {launcher, 0} = System.cmd("tar", ["-xzOf", tarball, "#{name}/bin/geex"])
+          assert launcher =~ ~s|rel=$root/releases/#{version}|
+          assert launcher =~ "-mode embedded"
+
+        _ ->
+          :ok
+      end
     end
   end
 

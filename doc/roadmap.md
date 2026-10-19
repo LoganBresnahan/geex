@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). Since the
+**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -258,11 +258,10 @@ none — [adr/0016](adr/0016-external-harness-integration.md)).
 
 Each gated on a **named consumer** (the brain/world test, [vision.md](vision.md) §3):
 
-- **Distribution** — *local install built* ([adr/0036](adr/0036-installed-binary.md)):
-  a Burrito binary carrying this machine's ERTS and the glibc tree_sitter_wasm NIF, installed by
-  `mix geex.deploy`. *Portable* binaries (the Mac, other Linux machines) need the NIF built per
-  target (`rustler_precompiled`, or Zig-linked musl) and Burrito's default phases back; gated on
-  a second machine.
+- **Distribution** — *portable releases* ([adr/0041](adr/0041-release-without-burrito.md),
+  superseding [adr/0036](adr/0036-installed-binary.md)'s Burrito binary): a tarball per target
+  (linux-x64, linux-arm64, darwin-arm64), each built natively in CI with its own OTP, installed
+  by `install.sh`. See command-surface item 13.
 - **Direction B (geex-calls-LLM)** — in-editor AI features (rename-suggestion,
   commit-message) on the thin `balance_beam` extraction helper; results become
   `%Command{}`s via the §2 composition rule ([adr/0011](adr/0011-direction-b-balance-beam.md)).
@@ -508,9 +507,15 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      meanwhile.
 
 13. **Portable builds, with less Burrito or none at all** — the maintainer's decision 2026-10-18,
-   relayed by the coordinator session. Not started. See [adr/0036](adr/0036-installed-binary.md)
+   relayed by the coordinator session. See [adr/0036](adr/0036-installed-binary.md)
    (the binary, and §6 the fork) and [adr/0040](adr/0040-bare-geex-and-the-catalog.md) (packages
    on GitHub releases).
+   **In progress 2026-10-19 ([adr/0041](adr/0041-release-without-burrito.md)), shipping as 0.3.0.**
+   Burrito is removed; the runtime build (`rel/build-runtime.sh`), the launcher, the package,
+   `install.sh` and `mix geex.deploy` through it are built. Next: CI (`ci.yml`, `release.yml`)
+   and the post-release smoke. The open questions below are answered: each app keeps its own
+   workflows (ADR-0041 §8 is the shared recipe), and OTP is built from source in CI. macOS on
+   Intel is optional and not built yet.
    1. **Goal:** depend on Burrito less, then not at all. Until then, the patched fork
       (`LoganBresnahan/burrito`, fork-only, never upstream) is the stopgap.
    2. **Approach:** plain release tarballs per target, built in GitHub Actions.

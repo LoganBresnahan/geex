@@ -1,24 +1,25 @@
 ---
 name: deploy
-description: Build geex into one executable with Burrito and install it as ~/.local/bin/geex (ADR-0036), then check the installed binary live — version, a file, a directory, quitting restores the terminal, the attestation discovery file. Keeps the previous binary for --rollback. Run when you want the `geex` command to be the current build; requires the suite green twice first.
+description: Build this checkout into geex's release tarball and install it as ~/.local/bin/geex through install.sh, the way a release installs (ADR-0041), then check the installed program live — version, a file, a directory, quitting restores the terminal, the attestation discovery file. Keeps the previous version for --rollback. Run when you want the `geex` command to be the current build; requires the suite green twice first.
 ---
 
-# /deploy — build and install the `geex` binary
+# /deploy — build and install `geex`
 
 `mix geex.deploy` does the build and the install. This skill adds the bar before it and the live
-check after it. The binary is local: it carries this machine's ERTS and the glibc
-tree_sitter_wasm NIF ([ADR-0036](../../../doc/adr/0036-installed-binary.md)), so it is not
-something to copy to another machine.
+check after it. The build carries the OTP that runs Mix (asdf's, here), so it runs on this
+machine; a portable build is CI's, with the runtime `rel/build-runtime.sh` makes
+([ADR-0041](../../../doc/adr/0041-release-without-burrito.md)).
 
 **Preconditions (stop if unmet):**
 
-1. The working tree is clean, and so is `../tree_sitter_wasm`'s, or the user okayed deploying it
-   dirty. The version is `0.1.0+<geex sha8>.<tree_sitter_wasm sha8>`; a dirty build's ends in
-   `.dirty`, so it doesn't name its code.
+1. The working tree is clean, or the user okayed deploying it dirty. A dirty build's version is
+   `0.3.0+<sha>.<sha>.dirty`, so it doesn't name its code.
 2. The ship bar: `mix compile --warnings-as-errors`, then `mix test` green **twice**. Run them;
    don't go from memory.
-3. The toolchain: `zig version` is `0.15.2` (Burrito 1.5 needs 0.15; 1.6 needs 0.16), and `xz`
-   is present.
+3. Whether this install is live. `mix geex.deploy` installs into `~/.local/share/geex/versions`
+   and moves `~/.local/bin/geex` unless `GEEX_INSTALL_DIR` and `GEEX_BIN_DIR` say otherwise. To
+   try a build without touching the user's install, point both (and `HOME`, `XDG_*`) at a
+   scratch directory.
 
 ## 1. Build and install
 
@@ -26,18 +27,23 @@ something to copy to another machine.
 mix geex.deploy
 ```
 
-- It runs `MIX_ENV=prod mix release --overwrite`, so the build output streams by.
+- It runs `MIX_ENV=prod mix release --overwrite`, so the build output streams by. The release
+  steps trim and check the release (a native-library note is expected for a local build: it links
+  this machine's libraries), then pack `_build/package/geex-<version>-<os>-<arch>.tar.gz`.
+- Mix's closing "To start your system … bin/geex start" text is Mix's own and doesn't apply:
+  `bin/geex` is geex's launcher.
 - The first prod build, or one after `../tree_sitter_wasm` changed, compiles the Rust NIF in
-  release mode and takes minutes. Later builds take about a minute.
-- It ends with `geex deploy: installed <version> at …/geex/bin/geex, linked from
-  ~/.local/bin/geex`.
-- If it stops because `~/.local/bin/geex` is something else, ask the user. Don't remove it.
+  release mode and takes minutes.
+- Then `install.sh` installs it from `_build/package` (`GEEX_DOWNLOAD_URL=file://…`), checking
+  the sha256 and the new `--version`, and ends with `geex install: installed geex <version> at …,
+  linked from ~/.local/bin/geex`. A dirty build goes in with `--force`.
+- If install.sh stops because `~/.local/bin/geex` is something it didn't make, ask the user.
+  Don't remove it.
 
-Check it by exit status and that last line, not by scrollback. Burrito prints a lot, and a
-stale binary looks the same in a listing. The version has to name the commits you meant:
-`git rev-parse --short=8 HEAD`, then the same in `../tree_sitter_wasm`.
+Check it by exit status and that last line, not by scrollback. The version has to be the commit
+you meant: `git rev-parse --short=8 HEAD`.
 
-## 2. Check the installed binary live
+## 2. Check the installed program live
 
 Use an isolated tmux socket (the `/dogfood` way) and scratch state, so the user's ledger and
 log stay clean:
@@ -54,9 +60,10 @@ tmux -L deploy new-session -d -s g -x 120 -y 30 "cd $SCRATCH_REPO && geex a.txt"
   the alternate screen is gone and the cursor is visible.
 - While it runs, `$XDG_RUNTIME_DIR/geex/<pid>.json` exists (the attestation listener). It is
   gone after quitting.
-- `$TMPDIR/geex.log` has no `terminating` lines.
+- `$TMPDIR/geex.log` reads "loading code in embedded mode" and has no `terminating` lines.
 - `geex notes.txt`, where `notes.txt` holds `IO.puts("x")`, opens the file. It must not
-  print `x`: Elixir's CLI evaluating arguments is the trap ADR-0036 §2 avoids.
+  print `x` (ADR-0036 §2).
+- `geex highlight some.json` prints it in colour, when the JSON grammar is installed.
 
 ## 3. Log it
 
@@ -73,19 +80,15 @@ Add a dated entry to [doc/testing.md](../../../doc/testing.md) with:
 mix geex.deploy --rollback
 ```
 
-It swaps `geex` and `geex.prev` under `$XDG_DATA_HOME/geex/bin` and prints the version now
-installed. `mix geex.deploy --no-build` reinstalls the last build without building.
+It runs `install.sh --rollback`: `~/.local/bin/geex` points at the previous version again, with
+no download. Running it again switches forward. `mix geex.deploy --no-build` installs the last
+build without building.
 
 ## Traps
 
-- **A stale unpack:** Burrito skips unpacking when `~/.local/share/.burrito/geex_erts-*_<version>`
-  exists. The task removes the new version's directory before its first run. If a binary still
-  runs old code, run `geex maintenance directory` to find the directory, delete it, and run
-  again.
-- **`geex maintenance …` is Burrito's**, not a file. `geex -- maintenance` opens a file named
-  `maintenance`.
-- **Running editors keep their unpack.** The deploy removes old `geex_erts-*` unpacks (Burrito
-  never does, because semver ignores `+<sha>`), but not `geex.prev`'s or one a running process
-  uses: removing it crashed the maintainer's open geex (BUG-4). Its `kept … in use by pid`
-  line says which stayed; a later deploy removes it after that geex quits. Deploying a dirty
-  tree over a running geex of the same dirty version stops instead.
+- **Restart running editors after a deploy** to get the new code. They keep running: each
+  version has its own directory, and install.sh removes an old one only when no running process
+  names it.
+- **An old Burrito install** (0.2 and before: `~/.local/share/geex/bin/geex`): install.sh replaces
+  its link and leaves its files, saying so. `~/.local/share/.burrito/geex_erts-*` can go once no
+  old geex runs.

@@ -12,6 +12,3 @@ erl_crash.dump
 # Claude Code local state (skills/ and workflows/ are tracked)
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
-
-# The Burrito-built binary (ADR-0036; `mix geex.deploy`)
-/burrito_out/

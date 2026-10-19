@@ -10,7 +10,8 @@ defmodule Mix.Tasks.Geex.Highlight do
       mix geex.highlight                        # built-in elixir sample
 
   The language comes from the installed grammars' file names (ADR-0040: geex ships none;
-  `geex install elixir`). Loads the app without starting the TUI.
+  `geex install elixir`). Loads the app without starting the TUI. The installed program's
+  `geex highlight FILE` is the same (`Geex.CLI.highlight/1`).
   """
   use Mix.Task
 
@@ -32,46 +33,15 @@ defmodule Mix.Tasks.Geex.Highlight do
     # grab.
     Mix.Task.run("app.config")
 
-    {text, lang} =
-      case args do
-        [] ->
-          {@sample, "elixir"}
+    case args do
+      [] ->
+        case Geex.CLI.ansi(@sample, "demo.ex") do
+          {:ok, ansi} -> IO.write(ansi)
+          {:error, message} -> Mix.raise("highlight failed: #{message}")
+        end
 
-        [path | _] ->
-          case File.read(path) do
-            {:ok, text} -> {text, lang_for(path)}
-            {:error, posix} -> Mix.raise("could not read #{path}: #{:file.format_error(posix)}")
-          end
-      end
-
-    case Geex.Highlight.spans(text, lang) do
-      {:ok, spans} ->
-        IO.write(Geex.Ansi.highlight(theme(), text, spans))
-
-      {:error, reason} ->
-        Mix.raise("highlight failed: #{inspect(reason)}")
-    end
-  end
-
-  defp theme do
-    with name when is_binary(name) <- Geex.Settings.load()["theme"],
-         {:ok, theme} <- Geex.Theme.named(name) do
-      theme
-    else
-      _ -> Geex.Theme.default()
-    end
-  end
-
-  defp lang_for(path) do
-    case Geex.Highlight.language_for_path(path) do
-      {:ok, lang} ->
-        lang
-
-      :error ->
-        Mix.raise(
-          "no grammar for #{inspect(Path.basename(path))} " <>
-            "(have: #{Enum.join(Geex.Highlight.Grammars.available(), ", ")})"
-        )
+      [path | _] ->
+        if Geex.CLI.highlight([path]) != 0, do: exit({:shutdown, 1})
     end
   end
 end

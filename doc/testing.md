@@ -3853,3 +3853,88 @@ that unpack because it was `geex.prev`'s, not because it was in use. This time `
 was read for every `beam.smp`: the only ones running were pharos-mcp's.
 
 **1109 tests + 79 doctests**, green twice.
+
+### 2026-10-19 — Burrito out: the launcher, the package, install.sh, the runtime build (ADR-0041)
+
+**What changed:**
+- `mix release` now runs `trim_release/1` and then `package/1` instead of Burrito's wrap.
+- The package is `_build/package/geex-<version>-<os>-<arch>.tar.gz` plus `SHA256SUMS`, and
+  `bin/geex` is geex's own POSIX launcher.
+- `install.sh` installs a release or a local build. `mix geex.deploy` runs it from
+  `_build/package`.
+- `Geex.CLI.standalone?/0` reads `-geex standalone true` (no `__BURRITO`).
+- `geex highlight FILE` is new.
+- The native-library check runs in the release step.
+- `rel/build-runtime.sh` builds OTP 28.1.1 with static OpenSSL 3.5.9 and static ncurses 6.5.
+- Burrito is gone from `mix.exs` and the lock.
+
+**The runtime, built here** (`rel/build-runtime.sh` into scratch; 2 min on 8 cores):
+
+| | Before | After |
+|---|---|---|
+| `beam.smp` | `libtinfo` `libz` `libstdc++` `libgcc_s` `libm` `libc` | `libm`, `libc` and the loader only |
+| `crypto.so` | `libcrypto.so.3` | `libc` only |
+
+- The first try linked the system's `libtinfo.so`: OTP's configure tries `-ltinfo` first, and
+  the ncurses build made only `libncursesw.a`. It is now built `--with-termlib --disable-widec`.
+- An earlier try failed installing ncurses's terminfo data into `/usr/share`. Only the
+  libraries and headers are installed now.
+
+**terminfo with the static ncurses.** These runs used the release built with this runtime, under
+tmux, in a user and mount namespace (`unshare -rm`) with an empty directory bind-mounted over
+`/usr/share/terminfo`:
+- `TERM` set to `xterm-256color`, `tmux-256color` or `linux` drew the file. Those come from the
+  compiled-in fallbacks.
+- `rxvt-unicode-256color`, which has no fallback, exited 1, as any geex does without a terminfo
+  entry.
+- With the database present, `rxvt-unicode-256color` drew.
+- The compiled-in search path is `/etc/terminfo:/lib/terminfo:/usr/share/terminfo:/usr/lib/terminfo`.
+  This machine has no separate `/lib/terminfo` (`/lib` is `/usr/lib`), so the Debian-only
+  location wasn't exercised on its own.
+
+**The package and install.sh, live,** in scratch `HOME`/`XDG_*` directories:
+- The build with asdf's OTP printed the native note: libtinfo, libz, libstdc++ and libcrypto,
+  and glibc 2.38.
+- The build with the new runtime printed only glibc 2.38, since this machine is Ubuntu 24.04;
+  CI builds on 22.04.
+- Packed sizes: 13.8 MB (asdf) and 16.3 MB (static).
+- The first install failed closed: the launcher lacked `RELEASE_SYS_CONFIG`, and the new
+  `--version` crashed in Elixir's config provider. install.sh refused to switch the link.
+- Fixed, the install unpacked into `versions/<version>` (40 MB) and linked `~/.local/bin/geex`.
+- `geex --version` printed the version; `geex --frob` exited 2.
+- In tmux:
+  - `geex notes.txt` (holding `IO.puts("x")`) opened the file without evaluating it;
+  - typing worked;
+  - `Ctrl-X` exited 0;
+  - the attestation file existed while geex ran and was gone after;
+  - the log read "loading code in embedded mode", with no `terminating` lines.
+
+**Launch time** (`measure.sh` in scratch, a copy of the installed Burrito binary against the
+asdf-built package of the same commit, both in scratch homes, two rounds each):
+
+| | Burrito `0.2.0+429ff9dd` | launcher |
+|---|---|---|
+| warm `--version`, median of 7 | 436, 486 ms | 471, 466 ms |
+| launch to the first frame, median of 5 | 532, 555 ms | 525, 521 ms |
+
+**Tests:**
+- `install_sh_test.exs` runs install.sh with `sh` (dash) over fake packages. It covers:
+  - install, link and idempotence;
+  - keeping the current and previous versions, and pruning the rest;
+  - a version named on a running process's command line is kept, then pruned once free;
+  - a hash mismatch, and a missing `SHA256SUMS` line, unpack nothing;
+  - `--force`, `--rollback` both ways, a foreign link left alone, and `--uninstall`.
+- `deploy_test.exs`:
+  - the native check on a copied `ls` and an empty release;
+  - the target name;
+  - the built package's launcher.
+  - The `/proc` pruning tests went with the code.
+- `cli_test.exs`: `highlight/1` colours JSON with the fixture grammar, and its three failures.
+
+**1123 tests + 86 doctests**, green twice.
+
+**Not tested:**
+- macOS: no Mac build yet. CI's macos-14 runner is the first one.
+- linux-arm64.
+- A real release download (there is none yet).
+- shellcheck: it isn't installed here; CI will run it.

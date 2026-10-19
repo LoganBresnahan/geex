@@ -1,0 +1,36 @@
+#!/bin/sh
+# geex <%= @version %>: start the release this file is in (ADR-0041 §2).
+#
+# ~/.local/bin/geex is a symlink to this file, so the real file is found first, and the release
+# is the directory above it. Then the VM replaces this shell: erlexec starts beam.smp, every
+# module loads at boot (`-mode embedded`), and the arguments after `-extra` are geex's own
+# (`Geex.CLI`). `-geex standalone true` tells geex it is the installed program, not `mix run`.
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=${self%/*}/$link ;;
+  esac
+done
+case $self in
+  */*) dir=${self%/*} ;;
+  *) dir=. ;;
+esac
+root=$(cd "$dir/.." && pwd -P) || exit 1
+rel=$root/releases/<%= @version %>
+
+ROOTDIR=$root
+BINDIR=$root/erts-<%= @erts %>/bin
+EMU=beam
+PROGNAME=geex
+# Elixir's config provider (config/runtime.exs) finds the release by these two.
+RELEASE_ROOT=$root
+RELEASE_SYS_CONFIG=$rel/sys
+export ROOTDIR BINDIR EMU PROGNAME RELEASE_ROOT RELEASE_SYS_CONFIG
+
+exec "$BINDIR/erlexec" -noshell -mode embedded \
+  -boot "$rel/start" -boot_var RELEASE_LIB "$root/lib" \
+  -args_file "$rel/vm.args" -config "$rel/sys.config" \
+  -geex standalone true \
+  -extra "$@"

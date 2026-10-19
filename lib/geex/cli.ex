@@ -1,17 +1,19 @@
 defmodule Geex.CLI do
   @moduledoc """
-  The installed binary's entry point ([ADR-0036](../../doc/adr/0036-installed-binary.md)).
+  The installed program's entry point ([ADR-0036](../../doc/adr/0036-installed-binary.md),
+  [ADR-0041](../../doc/adr/0041-release-without-burrito.md)).
 
-  The binary is a release wrapped by Burrito. Its launcher boots the release and then runs
-  Elixir's own CLI on the arguments, and that CLI treats a plain argument as a script to
-  evaluate: `geex notes.txt` would run `notes.txt` as Elixir code. So the binary does its work
-  inside `Geex.Application.start/2`, before the boot finishes, and never returns from it. That
-  is the pattern Burrito documents.
+  The program is a release, started by its launcher (`rel/launcher.sh.eex`), which passes geex's
+  arguments after `-extra` and `-geex standalone true` before them. geex does its work inside
+  `Geex.Application.start/2`, before the boot finishes, and never returns from it: nothing after
+  the boot (Elixir's own CLI, which would run a file argument as a script, ADR-0036 §2) gets the
+  arguments.
 
   Because the application never finishes starting, `System.stop/0` can't stop it in order: the
   terminal would be left on the alternate screen. So quitting (`Geex.stop/0`, and SIGTERM through
   `Geex.CLI.Signals`) sends this process `:geex_quit`. It stops the supervision tree, which runs
-  each child's `terminate/2`, and then halts. `--version`, `--help` and bad options halt directly.
+  each child's `terminate/2`, and then halts. `--version`, `--help`, `install`, `highlight` and
+  bad options halt directly.
 
       geex                 the current directory: its tree and a scratch buffer
       geex a.txt sub/b.ex  open both, show the first
@@ -23,8 +25,10 @@ defmodule Geex.CLI do
       geex install --list  the catalog, and what's installed or has an update
       geex install --force rust  install it again though it's up to date
       geex install ./pkg   install a local package (a directory or a .zip)
+      geex highlight FILE  print FILE highlighted (ANSI), with no editor
 
-  `geex -- install` opens a file named `install`.
+  `geex -- install` opens a file named `install`, and `geex -- highlight` one named
+  `highlight`.
 
   Under `mix run` (`Geex.run/1`) none of this applies: `standalone?/0` is false there.
   """
@@ -32,12 +36,16 @@ defmodule Geex.CLI do
   @usage """
   usage: geex [PATH ...]
          geex install [--force] NAME ... | --list | ./PACKAGE
+         geex highlight FILE
 
   Opens each PATH (a file, or a directory for its file tree) and shows the first.
   With no PATH, opens the current directory. Paths after `--` are never options.
 
   `install` adds a grammar or a theme from the catalog this geex was built with, or a
   local package; `install --list` shows the catalog. Nothing else uses the network.
+
+  `highlight` prints FILE with the installed grammar for it and the theme in use, as
+  terminal colours, and exits.
 
     -v, --version   print the version
     -h, --help      print this help
@@ -46,13 +54,18 @@ defmodule Geex.CLI do
   @type parsed ::
           {:open, [String.t()]}
           | {:install, [String.t()]}
+          | {:highlight, [String.t()]}
           | :version
           | :help
           | {:error, String.t()}
 
-  @doc "True inside the Burrito-built binary: its launcher sets `__BURRITO=1`."
+  @doc """
+  True in the installed program: its launcher starts the VM with `-geex standalone true`, which
+  sets that application environment key. A command-line flag, not an environment variable, so
+  nothing geex starts inherits it.
+  """
   @spec standalone?() :: boolean()
-  def standalone?, do: System.get_env("__BURRITO") == "1"
+  def standalone?, do: Application.get_env(:geex, :standalone) == true
 
   @doc """
   Parse the binary's arguments. Pure.
@@ -77,12 +90,16 @@ defmodule Geex.CLI do
 
       iex> Geex.CLI.parse(["--", "install"])
       {:open, ["install"]}
+
+      iex> Geex.CLI.parse(["highlight", "a.json"])
+      {:highlight, ["a.json"]}
   """
   @spec parse([String.t()]) :: parsed()
   def parse([]), do: {:open, ["."]}
   def parse([flag]) when flag in ["-v", "--version"], do: :version
   def parse([flag]) when flag in ["-h", "--help"], do: :help
   def parse(["install" | args]), do: {:install, args}
+  def parse(["highlight" | args]), do: {:highlight, args}
   def parse(["--" | paths]), do: open(paths)
 
   def parse(args) do
@@ -146,6 +163,10 @@ defmodule Geex.CLI do
           end
 
         :erlang.halt(code, flush_timeout: 2_000)
+
+      {:highlight, args} ->
+        Geex.redirect_logs_to_file()
+        :erlang.halt(highlight(args), flush_timeout: 2_000)
 
       {:open, paths} ->
         Geex.redirect_logs_to_file()
@@ -254,6 +275,78 @@ defmodule Geex.CLI do
       end
 
     if :error in results, do: 1, else: 0
+  end
+
+  @doc """
+  `geex highlight FILE` (ADR-0041 §6): print FILE highlighted as ANSI, with the installed grammar
+  its name picks and the theme the settings keep (else the built-in terminal theme). No editor,
+  no terminal: a check that the VM, the tree_sitter_wasm NIF, an installed grammar and a theme
+  all work where geex is installed, which a smoke test can run. Returns the exit status: 0, 1
+  when FILE can't be highlighted, 2 for bad arguments. Also callable under `mix run`.
+  """
+  @spec highlight([String.t()]) :: 0 | 1 | 2
+  def highlight([path]) do
+    with {:ok, text} <- read(path),
+         {:ok, ansi} <- ansi(text, path) do
+      IO.write(ansi)
+      0
+    else
+      {:error, message} ->
+        IO.puts(:stderr, "geex highlight #{path}: #{message}")
+        1
+    end
+  end
+
+  def highlight(_args) do
+    IO.puts(:stderr, "usage: geex highlight FILE")
+    2
+  end
+
+  defp read(path) do
+    case File.read(path) do
+      {:ok, text} -> {:ok, text}
+      {:error, posix} -> {:error, :file.format_error(posix) |> to_string()}
+    end
+  end
+
+  @doc false
+  # `text` highlighted as ANSI, by the installed grammar for `path`'s name.
+  @spec ansi(String.t(), String.t()) :: {:ok, iodata()} | {:error, String.t()}
+  def ansi(text, path) do
+    with {:ok, lang} <- language(path),
+         {:ok, spans} <- spans(text, lang) do
+      {:ok, Geex.Ansi.highlight(theme(), text, spans)}
+    end
+  end
+
+  defp language(path) do
+    case Geex.Highlight.language_for_path(path) do
+      {:ok, lang} ->
+        {:ok, lang}
+
+      :error ->
+        have = Geex.Highlight.Grammars.available()
+
+        {:error,
+         "no installed grammar for it (installed: " <>
+           if(have == [], do: "none", else: Enum.join(have, ", ")) <> "; see geex install --list)"}
+    end
+  end
+
+  defp spans(text, lang) do
+    case Geex.Highlight.spans(text, lang) do
+      {:ok, spans} -> {:ok, spans}
+      {:error, reason} -> {:error, "highlighting failed: #{inspect(reason)}"}
+    end
+  end
+
+  defp theme do
+    with name when is_binary(name) <- Geex.Settings.load()["theme"],
+         {:ok, theme} <- Geex.Theme.named(name) do
+      theme
+    else
+      _ -> Geex.Theme.default()
+    end
   end
 
   # Best-effort: the halt mustn't wait on, or fail over, the log file.

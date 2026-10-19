@@ -2,7 +2,9 @@
 
 - **Status:** Accepted 2026-10-16. The maintainer asked for it ("go ahead and implement the
   deploy with burrito so we can start building locally"). Built by the coordinator session.
-  Amended 2026-10-18: the release is trimmed (§5).
+  Amended 2026-10-18: the release is trimmed (§5). **Superseded in part by
+  [ADR-0041](0041-release-without-burrito.md) (2026-10-19):** Burrito is gone; §1's wrap, §4's
+  deploy and §6's fork are replaced by a tarball, a launcher and install.sh. §2, §3 and §5 stand.
 - **Date:** 2026-10-16
 - **Relates to:** [ADR-0001](0001-build-on-the-beam.md) (the BEAM), the sacred invariant "the
   terminal belongs to the renderer", [ADR-0032](0032-listener-first-agent-integration.md) (the

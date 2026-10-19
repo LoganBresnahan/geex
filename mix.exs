@@ -26,18 +26,49 @@ defmodule Geex.MixProject do
     ]
   end
 
-  # A prod build carries its commits in its version: geex's and the tree_sitter_wasm NIF's
-  # (`0.1.0+1a2b3c4d.5e6f7a8b`), plus `.dirty` when either tree is uncommitted. Burrito unpacks
-  # the binary into a directory named after the version and skips unpacking when that directory
-  # exists, and a deploy keeps an unpack a running geex uses, so two builds sharing a version
-  # would run the first one's code (ADR-0036). The NIF changes without geex changing, so its
-  # commit is part of the name. Dev and test keep the plain version.
+  # The tree_sitter_wasm commit geex is built against: CI and release builds check it out beside
+  # this checkout (`../tree_sitter_wasm`, the path dep), and a release build stops when the one
+  # there is another (ADR-0041 §5). A local build uses whatever is there, and names it.
+  @tree_sitter_wasm_ref "89a872365aa02b7c5e1b29327c799cac26bde5c8"
+
+  # A local prod build carries its commits in its version: geex's and the tree_sitter_wasm NIF's
+  # (`0.3.0+1a2b3c4d.5e6f7a8b`), plus `.dirty` when either tree is uncommitted. Each version
+  # installs into a directory of its own (ADR-0041 §4), so two builds sharing a version would
+  # be one install. The NIF changes without geex changing, so its commit is part of the name.
+  # A release build (`GEEX_RELEASE=1`, CI on a `v*` tag) is the plain version, built from clean
+  # trees at the pinned NIF. Dev and test keep the plain version.
   defp version do
-    if Mix.env() == :prod, do: "#{@version}+#{build_id()}", else: @version
+    cond do
+      Mix.env() != :prod -> @version
+      System.get_env("GEEX_RELEASE") == "1" -> release_version()
+      true -> "#{@version}+#{build_id()}"
+    end
+  end
+
+  defp release_version do
+    nif = Path.expand("../tree_sitter_wasm", __DIR__)
+
+    case {commit(__DIR__), commit(nif), full_sha(nif)} do
+      {{_, false}, {_, false}, @tree_sitter_wasm_ref} ->
+        @version
+
+      other ->
+        Mix.raise(
+          "a release build needs clean trees and tree_sitter_wasm at #{@tree_sitter_wasm_ref}; " <>
+            "got #{inspect(other)}"
+        )
+    end
+  end
+
+  defp full_sha(dir) do
+    case System.cmd("git", ["-C", dir, "rev-parse", "HEAD"], stderr_to_stdout: true) do
+      {sha, 0} -> String.trim(sha)
+      _ -> nil
+    end
   end
 
   # A tree that isn't a git checkout names no code, so it reads `nogit` and the build is dirty:
-  # a deploy then won't keep an in-use unpack of that name, as it would a committed one's.
+  # a deploy then installs it again (`--force`), as it would any dirty build.
   defp build_id do
     commits = Enum.map([__DIR__, Path.expand("../tree_sitter_wasm", __DIR__)], &commit/1)
     shas = Enum.map_join(commits, ".", fn {sha, _dirty} -> sha end)
@@ -59,22 +90,21 @@ defmodule Geex.MixProject do
     end
   end
 
-  # The installed binary (ADR-0036): `MIX_ENV=prod mix release` assembles the release, then
-  # Burrito wraps it into one file, `burrito_out/geex_linux`. `mix geex.deploy` does both and
-  # installs it.
-  #
-  # Burrito's own phases are cut down to "copy the release, build the wrapper". Its default
-  # Linux flow swaps in a precompiled musl ERTS, and the tree_sitter_wasm NIF (Rust, built
-  # against this machine's glibc) can't load into that. The release already carries this
-  # machine's ERTS, so it is wrapped as built: the binary runs where it was built, which is
-  # what a local install needs. A Mac or a portable Linux binary needs the NIF built for
-  # that target first.
+  # The installed program (ADR-0041): `MIX_ENV=prod mix release` assembles the release with the
+  # VM that runs Mix, trims and checks it, puts geex's launcher in `bin/geex`, and packs it as
+  # `_build/package/geex-<version>-<os>-<arch>.tar.gz`. `mix geex.deploy` installs that with
+  # install.sh, as a release install does. CI builds one per target, each on its own runner.
   defp releases do
     [
       geex: [
-        # Between assembling and wrapping, the VM programs geex never runs go, and the rest lose
-        # their debug information (ADR-0036's 2026-10-18 amendment).
-        steps: [:assemble, &Mix.Tasks.Geex.Deploy.trim_release/1, &Burrito.wrap/1],
+        # After assembling: the VM programs geex never runs go, the rest lose their debug
+        # information, and the release is checked (ADR-0036's 2026-10-18 amendment, ADR-0041 §1);
+        # then the launcher and the tarball (ADR-0041 §2).
+        steps: [
+          :assemble,
+          &Mix.Tasks.Geex.Deploy.trim_release/1,
+          &Mix.Tasks.Geex.Deploy.package/1
+        ],
         # Mix's default, stated: no debug information or docs in the .beam files.
         strip_beams: true,
         # :inets (`:httpc`) downloads a grammar or theme the user asked for (ADR-0040 §3).
@@ -82,14 +112,7 @@ defmodule Geex.MixProject do
         # a permanent app depend on a loaded one): `Geex.Install` starts it when a download
         # begins, so a geex that installs nothing never starts an HTTP client. (:ssl is already
         # started at boot, for Bandit's ThousandIsland.)
-        applications: [inets: :load],
-        burrito: [
-          targets: [linux: [os: :linux, cpu: :x86_64]],
-          phases: [
-            fetch: [Burrito.Steps.Fetch.Init],
-            patch: []
-          ]
-        ]
+        applications: [inets: :load]
       ]
     ]
   end
@@ -117,16 +140,7 @@ defmodule Geex.MixProject do
       # tree-sitter runtime that loads portable grammar.wasm. Net-new on the BEAM
       # (every other binding static-links grammars). Path dep during the spike;
       # github/hex once its highlight/4 API stabilizes.
-      {:tree_sitter_wasm, path: "../tree_sitter_wasm"},
-      # Wraps the release into one executable (ADR-0036). Build-time only, and only for prod
-      # builds. The fork of 1.5.0 (ADR-0036 §6: embedded mode, and cleanup that spares a running
-      # unpack; fork-only, never upstream), pinned by sha. 1.5: 1.6 needs Zig 0.16, and this
-      # machine has Zig 0.15.2, the same pin as pharos-mcp.
-      {:burrito,
-       github: "LoganBresnahan/burrito",
-       ref: "4407714f192e47c0e3b4794a8f16d8f3fdbe93f4",
-       only: :prod,
-       runtime: false}
+      {:tree_sitter_wasm, path: "../tree_sitter_wasm"}
     ]
   end
 end

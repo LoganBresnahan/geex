@@ -1,6 +1,7 @@
 defmodule Geex.CLITest do
-  # The installed binary's entry point (ADR-0036): its arguments, and how quitting reaches it.
-  # The binary itself (Burrito, the terminal, the halt) is checked live by /deploy.
+  # The installed program's entry point (ADR-0036, ADR-0041): its arguments, `geex highlight`, and
+  # how quitting reaches it. The program itself (the launcher, the terminal, the halt) is checked
+  # live by /deploy and by CI's smoke tests.
   use ExUnit.Case, async: false
   doctest Geex.CLI
 
@@ -38,6 +39,43 @@ defmodule Geex.CLITest do
 
   test "standalone? is false outside the binary" do
     refute CLI.standalone?()
+  end
+
+  describe "highlight/1 (ADR-0041 §6)" do
+    setup do
+      dir = Path.join(System.tmp_dir!(), "geex_cli_hl_#{Geex.Fixtures.uniq()}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+      %{dir: dir}
+    end
+
+    test "prints the file in colour, by the installed grammar its name picks", %{dir: dir} do
+      path = Path.join(dir, "a.json")
+      File.write!(path, ~s|{"key": [1, true, "s"]}\n|)
+
+      out = ExUnit.CaptureIO.capture_io(fn -> assert CLI.highlight([path]) == 0 end)
+      assert out =~ "\e["
+      assert out |> String.replace(~r/\e\[[0-9;]*m/, "") == ~s|{"key": [1, true, "s"]}\n|
+    end
+
+    test "a file no installed grammar covers, or none at all, fails and says why", %{dir: dir} do
+      path = Path.join(dir, "a.unknown-ext")
+      File.write!(path, "x")
+
+      err =
+        ExUnit.CaptureIO.capture_io(:stderr, fn -> assert CLI.highlight([path]) == 1 end)
+
+      assert err =~ "no installed grammar"
+
+      err =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          assert CLI.highlight([Path.join(dir, "gone.json")]) == 1
+        end)
+
+      assert err =~ "no such file"
+      err = ExUnit.CaptureIO.capture_io(:stderr, fn -> assert CLI.highlight([]) == 2 end)
+      assert err =~ "usage"
+    end
   end
 
   describe "quitting under the binary" do

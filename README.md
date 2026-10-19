@@ -28,8 +28,15 @@ takes minutes), `git`, and on Linux `inotify-tools` to notice files changed on d
 ```sh
 # the editor, in a real terminal
 elixir --erl "-noshell -noinput +Bd" -S mix run --no-start -e 'Geex.run("path")'
-# or build one executable and install it as ~/.local/bin/geex (Linux, this machine only)
+# or build this checkout and install it as ~/.local/bin/geex, the way a release installs
 mix geex.deploy
+```
+
+To install a release instead (Linux x64/arm64 with glibc 2.35+, or an Apple silicon Mac; no
+Erlang needed), see [doc/install.md](doc/install.md):
+
+```sh
+curl -fsSL https://github.com/LoganBresnahan/geex/releases/latest/download/install.sh | sh
 ```
 
 ## Languages and themes
