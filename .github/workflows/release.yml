@@ -73,9 +73,10 @@ jobs:
           tar -xzOf "_build/package/$name.tar.gz" "$name/bin/geex" > "$RUNNER_TEMP/launcher"
           shellcheck -s sh "$RUNNER_TEMP/launcher"
 
+      # For the smoke test's terminal check (geex opens a file, Ctrl-X quits).
       - name: Install tmux
-        if: runner.os == 'Linux'
-        run: sudo apt-get install -y tmux
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install -y tmux; else brew install tmux; fi
 
       - name: Smoke-test the tarball
         working-directory: geex

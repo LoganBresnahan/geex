@@ -34,9 +34,10 @@ jobs:
           sparse-checkout: rel/smoke.sh
           sparse-checkout-cone-mode: false
 
+      # For the terminal check (geex opens a file, Ctrl-X quits).
       - name: Install tmux
-        if: runner.os == 'Linux'
-        run: sudo apt-get install -y tmux
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install -y tmux; else brew install tmux; fi
 
       - name: Smoke
         env:
