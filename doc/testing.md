@@ -4067,3 +4067,21 @@ the maintainer's M1, into a throwaway `HOME`.
 That covers the unpinned path above on a real Mac. `install.sh --uninstall`'s "kept" lines now
 spell the settings and state directories physically too (macOS's `/private/var`), as the rest
 of the script does.
+
+### 2026-10-19 — darwin-x64 joins the release; NIFs signed on macOS (ADR-0041 §1, §5)
+
+**What changed:**
+- `96fd4de`: on macOS, `trim_release/1` signs every NIF's `.so` ad hoc. pharos-mcp's
+  macos-15-intel run found `crypto.so` unsigned: the x86_64 linker doesn't sign.
+- `42e1baa`: darwin-x64 on macos-15-intel joins `release.yml` and `smoke.yml`.
+
+**Release dry run 39298580711** (dispatched on main at `42e1baa`; publish and smoke stay gated
+on tags), judged per job:
+- all four builds green;
+- darwin-x64 passed the native check (every Mach-O's signature valid) and `rel/smoke.sh` in full:
+  `geex 0.3.0`, `--frob` 2, `geex install json`, `geex highlight`, the tmux open and `Ctrl-X`,
+  uninstall;
+- darwin-arm64, with its NIFs now re-signed, passed the same, as did both Linux targets.
+
+**Not tested:** an Intel Mac in hand, or a published darwin-x64 asset (0.3.0 has none; the next
+tag carries it).
