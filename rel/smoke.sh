@@ -15,6 +15,7 @@
 #   - `geex install json` installs the JSON grammar from the catalog;
 #   - `geex highlight` prints a JSON file in colour, and the same text without the colour;
 #   - where tmux is installed: geex opens the file in a terminal, and Ctrl-X quits with status 0;
+#   - on Linux, with tmux and inotifywait: a SIGKILLed geex leaves no file watcher running;
 #   - `geex self prune` keeps the current version, and an old one while a geex runs from it
 #     (tmux), then removes the old one (a copy of this version stands in for it: one build);
 #   - from GitHub only: `geex self update` fetches the release's install.sh, which finds this
@@ -43,9 +44,12 @@ XDG_CONFIG_HOME=$HOME/.config
 XDG_STATE_HOME=$HOME/.local/state
 XDG_CACHE_HOME=$HOME/.cache
 TMPDIR=$box/tmp
+# The attestation discovery file goes here: a SIGKILLed geex (below) can't remove its own.
+XDG_RUNTIME_DIR=$box/run
 unset GEEX_INSTALL_DIR GEEX_BIN_DIR
-export HOME XDG_DATA_HOME XDG_CONFIG_HOME XDG_STATE_HOME XDG_CACHE_HOME TMPDIR
+export HOME XDG_DATA_HOME XDG_CONFIG_HOME XDG_STATE_HOME XDG_CACHE_HOME TMPDIR XDG_RUNTIME_DIR
 mkdir -p "$HOME" "$TMPDIR" "$box/work"
+mkdir -m 700 "$XDG_RUNTIME_DIR"
 
 if [ -n "${GEEX_DOWNLOAD_URL:-}" ]; then
   [ -n "$version" ] || fail "GEEX_DOWNLOAD_URL needs --version"
@@ -113,6 +117,44 @@ if command -v tmux >/dev/null 2>&1; then
   ok "geex opened the file in tmux and quit on Ctrl-X"
 else
   echo "smoke: (no tmux here: the terminal check is skipped)"
+fi
+
+# The file watchers die with the VM, however it dies. geex doesn't run inotifywait itself: the
+# file_system dep runs each under `sh -c 'inotifywait … & PID=$!; read a; kill -KILL $PID'`, and
+# that shell kills it when the VM's end of the port closes. This guards against a file_system
+# upgrade that drops the wrapper (and is why geex ships no bosun: ADR-0041 §6's amendment).
+if [ "$(uname -s)" = Linux ] && command -v tmux >/dev/null 2>&1 &&
+  command -v inotifywait >/dev/null 2>&1; then
+  # A repository, so the tree's watcher runs too, beside the open file's and the installed one's.
+  want=2
+  if command -v git >/dev/null 2>&1; then
+    want=3
+    git -C "$box/work" init -q
+    git -C "$box/work" add smoke.json
+    git -C "$box/work" -c user.name=smoke -c user.email=smoke@localhost commit -qm smoke
+  fi
+  # This box's processes whose program is NAME (a watcher names a directory in the box).
+  procs() { ps -A -ww -o pid=,args= | awk -v box="$box" -v name="$1" \
+    'index($0, box) { n = split($2, p, "/"); if (p[n] == name) print $1 }'; }
+  tmux -L geex-smoke new-session -d -s g -x 100 -y 20 \
+    "cd '$box/work' && TERM=xterm-256color geex smoke.json; sleep 30"
+  i=0
+  until [ "$(procs inotifywait | wc -l)" -ge $want ]; do
+    i=$((i + 1))
+    [ $i -lt 100 ] || fail "geex started $(procs inotifywait | wc -l) file watchers, not $want"
+    sleep 0.1
+  done
+  beam=$(procs beam.smp)
+  [ -n "$beam" ] || fail "no beam.smp for the geex in tmux"
+  kill -KILL "$beam"
+  i=0
+  while [ -n "$(procs inotifywait)" ]; do
+    i=$((i + 1))
+    [ $i -lt 50 ] || fail "a SIGKILLed geex left inotifywait running: $(procs inotifywait)"
+    sleep 0.1
+  done
+  tmux -L geex-smoke kill-server
+  ok "a SIGKILLed geex left no file watcher running"
 fi
 
 versions=$(cd "$XDG_DATA_HOME/geex/versions" && pwd -P)

@@ -4195,3 +4195,31 @@ build failed the suite. It now checks only that the bundled file is geex's insta
 - `dash -n` passes; shellcheck runs in CI.
 
 **Not tested:** the message on a Windows shell (MSYS, Git Bash).
+
+### 2026-10-19 — a SIGKILLed geex leaves no watcher; no bosun (ADR-0041 §6's amendment)
+
+**Measured:** before wiring bosun v0.2.0 (the coordinator's task), the leak it would fix was
+reproduced on 0.3.1+286d128b…dirty, sandboxed in tmux on a git repo with three watchers up.
+- SIGKILL of `beam.smp`: no `inotifywait` was left within 2 s. `file_system`'s `sh -c '… & read
+  a; kill -KILL $PID'` wrapper kills it on the port's EOF.
+- SIGKILL of one wrapper shell alone: its `inotifywait` was orphaned (reparented), and it
+  survived a later SIGKILL of the VM. It was then killed by pid.
+
+The coordinator decided against bosun in geex. The bosun v0.2.0 digests were checked anyway: they
+match the coordinator's list, the release's `SHA256SUMS`, and `sha256sum` of the downloads.
+
+**What changed:**
+- `rel/smoke.sh` on Linux SIGKILLs geex's VM with its watchers up (the open file's, the installed
+  packages', and the tree's in a repo it makes) and fails if any `inotifywait` naming the box
+  survives 5 s.
+- The smoke's `XDG_RUNTIME_DIR` is now inside the box, so the SIGKILLed geex's attestation
+  discovery file doesn't land in the real runtime directory.
+- `release.yml` and `smoke.yml` install inotify-tools on Linux, so the check runs in CI.
+
+**Verified:**
+- `rel/smoke.sh` on the local package passed in full.
+- A scratch copy that plants a detached `inotifywait` in the box before the kill failed with
+  "a SIGKILLed geex left inotifywait running", as it should.
+- The suite is green twice.
+
+**Not tested:** the new step in CI, which runs at the next release or dispatched run.

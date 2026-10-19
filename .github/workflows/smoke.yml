@@ -34,10 +34,11 @@ jobs:
           sparse-checkout: rel/smoke.sh
           sparse-checkout-cone-mode: false
 
-      # For the terminal check (geex opens a file, Ctrl-X quits).
+      # For the terminal check (geex opens a file, Ctrl-X quits), and on Linux the watchers that
+      # must die with a SIGKILLed geex.
       - name: Install tmux
         run: |
-          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install -y tmux; else brew install tmux; fi
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install -y tmux inotify-tools; else brew install tmux; fi
 
       - name: Smoke
         env:

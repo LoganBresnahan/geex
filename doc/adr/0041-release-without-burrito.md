@@ -212,6 +212,28 @@ release's own runners and after publishing (`smoke.yml`, on fresh runners, from 
   file and shows it, `Ctrl-X` quits with 0, and the log has no `terminating` lines;
 - `install.sh --uninstall` removes it.
 
+**Amended 2026-10-19: no bosun in geex; the smoke checks that the watchers die with the VM.**
+The proposal: run `inotifywait` through bosun (`--pdeathsig KILL --no-setsid`), so a SIGKILLed
+geex can't leave watchers holding inotify watches. Measured first, on a sandboxed build in tmux
+on a git repo, with three watchers up (the installed packages', the open file's directory's and
+the tree's):
+- **SIGKILL the VM: no watcher survives, without bosun.** geex never runs inotifywait itself.
+  The `file_system` dep (1.1.1) runs it as
+  `/bin/sh -c 'inotifywait "$0" "$@" & PID=$!; read a; kill -KILL $PID'`. When the VM dies, that
+  shell's stdin (the port) reaches EOF, and the shell kills inotifywait. All three were gone
+  within 2 s.
+- **The hole left: that wrapper shell SIGKILLed alone** (by pid, or by the OOM killer). Its
+  inotifywait is orphaned and outlives the VM. bosun would close this. But it would mean
+  leaning on `file_system` interpolating `executable_file` unquoted into the `sh -c` string, or
+  owning a fork of its backend, plus a shipped binary per Linux target and a pin. The
+  coordinator decided it isn't worth it for so rare a case.
+
+So `rel/smoke.sh` (Linux, with tmux and inotifywait; the workflows install inotify-tools) SIGKILLs
+geex's VM with its watchers up and checks that none survives. It guards against a `file_system`
+upgrade that drops the wrapper, and it failed as it should when a surviving watcher was planted.
+Re-propose bosun for geex only with new facts: geex spawning a long-lived program itself, or that
+wrapper disappearing.
+
 ### 7. `mix geex.deploy`
 
 Builds as §3 does, then runs this checkout's `install.sh` with `GEEX_DOWNLOAD_URL` pointing at
