@@ -145,6 +145,7 @@ path_hint() {
   case ":${PATH:-}:" in
     *":$bin_dir:"*) ;;
     *) say "$bin_dir isn't on your PATH; add it in your shell's startup file:"
+       # shellcheck disable=SC2016 # the line to paste, with $PATH as it is
        printf '    export PATH="%s:$PATH"\n' "$bin_dir" ;;
   esac
 }
@@ -220,7 +221,7 @@ do_install() {
   say "installed geex $version at $versions/$version, linked from $link"
   if [ -n "$legacy" ]; then
     say "replaced the link to $legacy; once no geex runs from it, its directory and"
-    say "~/.local/share/.burrito/geex_erts-* can be removed"
+    say "${XDG_DATA_HOME:-$HOME/.local/share}/.burrito/geex_erts-* can be removed"
   fi
   prune "$version"
   path_hint
@@ -232,7 +233,8 @@ fetch_and_unpack() {
   stage=$versions/.tmp-$$
   rm -rf "$stage"
   mkdir -p "$stage"
-  trap 'rm -rf "$stage"' EXIT INT TERM
+  trap 'rm -rf "$stage"' EXIT
+  trap 'exit 130' INT TERM
 
   say "downloading $name.tar.gz"
   curl -fsSL --retry 3 -o "$stage/SHA256SUMS" "$base/SHA256SUMS" ||
@@ -262,7 +264,7 @@ fetch_and_unpack() {
 do_rollback() {
   read_current
   prev=$(previous_version)
-  [ -n "$prev" ] && [ -d "$versions/$prev" ] || die "no previous version to roll back to"
+  if [ -z "$prev" ] || [ ! -d "$versions/$prev" ]; then die "no previous version to roll back to"; fi
   switch_to "$prev"
   if [ -n "$current" ]; then remember_previous "$current"; fi
   say "rolled back to geex $prev (geex $current is now the previous version)"
@@ -270,16 +272,15 @@ do_rollback() {
 
 do_uninstall() {
   read_current
-  if [ -n "$current" ]; then rm -f "$link"; fi
   read_running
   if in_use "$versions"; then
-    say "a running geex uses $versions; quit it, then run --uninstall again to remove it"
-    exit 1
+    die "a running geex uses $versions; quit it, then run --uninstall again (nothing was removed)"
   fi
+  if [ -n "$current" ]; then rm -f "$link"; fi
   rm -rf "$versions" "$previous_file"
   say "removed geex from $install_dir/versions and $link"
-  say "kept: grammars and themes ($install_dir), settings (~/.config/geex),"
-  say "the edit history and ledgers (~/.local/state/geex); remove those by hand if you like"
+  say "kept: grammars and themes ($install_dir), settings (${XDG_CONFIG_HOME:-~/.config}/geex),"
+  say "the edit history and ledgers (${XDG_STATE_HOME:-~/.local/state}/geex); remove those by hand if you like"
 }
 
 case $action in

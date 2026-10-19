@@ -159,6 +159,28 @@ defmodule Geex.InstallShTest do
     assert linked(ctx) == {:ok, "/usr/bin/true"}
   end
 
+  test "--uninstall while a geex runs removes nothing", ctx do
+    package(ctx, "1.0.0")
+    assert {_, 0} = install(ctx, ["--version", "1.0.0"])
+
+    port =
+      Port.open({:spawn_executable, "/bin/sh"},
+        args: ["-c", "sleep 30; :", Path.join(ctx.versions, "1.0.0/erts/bin/beam.smp")]
+      )
+
+    {:os_pid, pid} = Port.info(port, :os_pid)
+
+    try do
+      assert {out, 1} = install(ctx, ["--uninstall"])
+      assert out =~ "nothing was removed"
+      assert linked(ctx) == {:ok, Path.join(ctx.versions, "1.0.0/bin/geex")}
+      assert installed(ctx) == ~w(1.0.0)
+    after
+      Port.close(port)
+      System.cmd("kill", ["#{pid}"])
+    end
+  end
+
   test "--uninstall removes the versions and the link, and nothing else", ctx do
     package(ctx, "1.0.0")
     assert {_, 0} = install(ctx, ["--version", "1.0.0"])
