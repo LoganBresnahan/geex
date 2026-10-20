@@ -4426,3 +4426,34 @@ Final count: 1185 tests + 107 doctests, green twice.
   only;
 - the mouse in the output pane, live;
 - the installed release.
+
+### 2026-10-19 — the smoke test runs a `!` command (ADR-0042)
+
+The coordinator's ask, so the release's smoke covers `!` on every runner, macOS included. In
+`rel/smoke.sh`'s tmux section, after the file shows:
+- `Alt+M`, then `!echo smoke-$((40+2))`. The pane must show `smoke-42` (the output, not the
+  command's own text, which the title shows) and `exit 0`. `q` must close it.
+- `!vim smoke.json` must be refused ("needs a real terminal").
+
+Two helpers, `shows` and `gone`, wait on the pane for up to 10 s.
+
+**Checked** against a local release build (`0.3.3+01725a78.89a87236.dirty`, from
+`_build/package` through `GEEX_DOWNLOAD_URL`, in the smoke's own temporary HOME). All 12 smoke
+lines passed, the two new ones included: "a ! command's output showed with its exit, and q closed
+the pane" and "!vim was refused: it needs a real terminal". This was the first run of `!` in an
+installed release, on Linux. Not checked: shellcheck isn't installed here, so CI's run is the
+first; `sh -n` passes.
+
+### 2026-10-19 — 0.3.4 (ADR-0041)
+
+`@version` is now 0.3.4. The maintainer wants it out with this day's editor features. Since 0.3.3:
+- `c05ad88`: creating, deleting and renaming files from the TUI (ADR-0019's amendment);
+- `9a37a12`: `open PATH` from the project root (ADR-0037's amendment);
+- `01725a7`: shell commands from the minibuffer, `!`, `!!`, `|`, and the minibuffer's history
+  (ADR-0042);
+- the smoke steps above.
+
+1185 tests + 107 doctests green twice; compile warnings-clean.
+
+**Not tested yet:** the release dry run and the v0.3.4 tag's release run and post-release smoke,
+which the coordinator dispatches; the maintainer's `geex self update` from 0.3.3.
