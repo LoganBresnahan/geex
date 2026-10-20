@@ -14,7 +14,9 @@
 #   - `geex --frob` exits 2;
 #   - `geex install json` installs the JSON grammar from the catalog;
 #   - `geex highlight` prints a JSON file in colour, and the same text without the colour;
-#   - where tmux is installed: geex opens the file in a terminal, and Ctrl-X quits with status 0;
+#   - where tmux is installed: geex opens the file in a terminal; a `!` command's output shows in
+#     the output pane with its exit, `q` closes it, and `!vim` is refused (ADR-0042); Ctrl-X quits
+#     with status 0;
 #   - on Linux, with tmux and inotifywait: a SIGKILLed geex leaves no file watcher running;
 #   - `geex self prune` keeps the current version, and an old one while a geex runs from it
 #     (tmux), then removes the old one (a copy of this version stands in for it: one build);
@@ -35,6 +37,25 @@ done
 
 fail() { echo "smoke: FAIL: $*" >&2; exit 1; }
 ok() { echo "smoke: ok: $*"; }
+
+# The geex in tmux shows PATTERN within 10 s (`shows`), or stops showing it (`gone`).
+pane() { tmux -L geex-smoke capture-pane -p -t g; }
+shows() {
+  i=0
+  until pane | grep -q -- "$1"; do
+    i=$((i + 1))
+    [ $i -lt 100 ] || fail "$2: $(pane)"
+    sleep 0.1
+  done
+}
+gone() {
+  i=0
+  while pane | grep -q -- "$1"; do
+    i=$((i + 1))
+    [ $i -lt 100 ] || fail "$2: $(pane)"
+    sleep 0.1
+  done
+}
 
 box=$(mktemp -d)
 trap 'tmux -L geex-smoke kill-server 2>/dev/null || true; rm -rf "$box"' EXIT
@@ -102,6 +123,29 @@ if command -v tmux >/dev/null 2>&1; then
     [ $i -lt 100 ] || fail "geex didn't show the file in tmux: $(tmux -L geex-smoke capture-pane -p -t g)"
     sleep 0.1
   done
+
+  # A shell command from the minibuffer (Alt+M), its output in the output pane (ADR-0042). The
+  # output, `smoke-42`, isn't the command's own text, which the pane's title shows.
+  tmux -L geex-smoke send-keys -t g Escape m
+  shows 'geex:' "Alt+M didn't open the minibuffer"
+  # The $((…)) is for geex's shell to expand, not this one.
+  # shellcheck disable=SC2016
+  tmux -L geex-smoke send-keys -t g -l '!echo smoke-$((40+2))'
+  tmux -L geex-smoke send-keys -t g Enter
+  shows 'smoke-42' "the ! command's output didn't show"
+  shows 'exit 0' "the output pane didn't show the exit"
+  tmux -L geex-smoke send-keys -t g q
+  gone 'smoke-42' "q didn't close the output pane"
+  ok "a ! command's output showed with its exit, and q closed the pane"
+
+  # A full-screen program isn't run: it needs a real terminal.
+  tmux -L geex-smoke send-keys -t g Escape m
+  shows 'geex:' "Alt+M didn't open the minibuffer"
+  tmux -L geex-smoke send-keys -t g -l '!vim smoke.json'
+  tmux -L geex-smoke send-keys -t g Enter
+  shows 'needs a real terminal' "!vim wasn't refused"
+  ok "!vim was refused: it needs a real terminal"
+
   tmux -L geex-smoke send-keys -t g C-x
   i=0
   until [ -s "$box/exit" ]; do
