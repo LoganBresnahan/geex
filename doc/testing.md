@@ -4558,3 +4558,19 @@ doctests) green. 1190 tests + 107 doctests green twice; compile warnings-clean.
 
 **Not tested yet:** the ci.yml trigger change (the next push to main runs it; the next tag
 should start no ci run).
+
+### 2026-10-19 — 0.3.6 (ADR-0041)
+
+`@version` is now 0.3.6, at the coordinator's ask: the maintainer wants the flood fix out now.
+Since 0.3.5:
+- `2dca0e5`: a `!` flood's mailbox stays at the cap under load (ADR-0042's amendment), and
+  ci.yml runs on branch pushes only (ADR-0041 §5's amendment). Main CI on it (run 39364323427)
+  is green, so the branch trigger works.
+
+1190 tests + 107 doctests green twice; compile warnings-clean.
+
+**Not tested yet:**
+- the release dry run, and the v0.3.6 tag's release run and post-release smoke, which the
+  coordinator dispatches;
+- that the v0.3.6 tag starts no ci.yml run;
+- the maintainer's `geex self update` from 0.3.5.

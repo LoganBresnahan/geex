@@ -537,6 +537,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    covers them too. **0.3.5** carries the captAInHook payload in each version, and install.sh
    links the current one's at `~/.local/share/geex/integrations/geex-attest.sh` (`92cf2d2`,
    ADR-0041's amendment), so a handlers.json can name the installed copy instead of a checkout.
+   **0.3.6** keeps a `!` flood's mailbox at its cap under load (`2dca0e5`, ADR-0042's
+   amendment), and ci.yml no longer runs on tags.
    1. **Goal:** depend on Burrito less, then not at all. Until then, the patched fork
       (`LoganBresnahan/burrito`, fork-only, never upstream) is the stopgap.
    2. **Approach:** plain release tarballs per target, built in GitHub Actions.
