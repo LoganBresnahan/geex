@@ -4506,3 +4506,18 @@ uninstall.
 the macOS runners (the dry run); a real attestation through the installed link (the payload is
 the same file `attest_payload_test.exs` runs); the maintainer's handlers.json pointing at the
 link, which their dotfiles own.
+
+### 2026-10-19 — 0.3.5 (ADR-0041)
+
+`@version` is now 0.3.5, at the coordinator's ask: this release is what lets the maintainer's live
+handler move from the checkout to the installed payload. Since 0.3.4:
+- `92cf2d2`: the captAInHook payload in each version, linked at
+  `~/.local/share/geex/integrations/geex-attest.sh` (ADR-0041's amendment).
+
+1190 tests + 107 doctests green twice; compile warnings-clean. Main CI on `92cf2d2` (run
+39360757576) is green, so shellcheck accepted the new install.sh and smoke lines.
+
+**Not tested yet:**
+- the release dry run: the first macOS run of the payload link;
+- the v0.3.5 tag's release run and post-release smoke, which the coordinator dispatches;
+- the maintainer's `geex self update` from 0.3.4, and their handlers.json pointing at the link.

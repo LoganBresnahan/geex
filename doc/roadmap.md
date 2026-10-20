@@ -534,7 +534,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    move: creating, deleting and renaming files from the TUI (`c05ad88`, item 14), `open PATH`
    from the project root (`9a37a12`), and shell commands from the minibuffer (`01725a7`, item 15,
    ADR-0042). Its smoke test runs a `!` command and checks that `!vim` is refused, so macOS
-   covers them too.
+   covers them too. **0.3.5** carries the captAInHook payload in each version, and install.sh
+   links the current one's at `~/.local/share/geex/integrations/geex-attest.sh` (`92cf2d2`,
+   ADR-0041's amendment), so a handlers.json can name the installed copy instead of a checkout.
    1. **Goal:** depend on Burrito less, then not at all. Until then, the patched fork
       (`LoganBresnahan/burrito`, fork-only, never upstream) is the stopgap.
    2. **Approach:** plain release tarballs per target, built in GitHub Actions.
