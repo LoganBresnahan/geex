@@ -4457,3 +4457,52 @@ first; `sh -n` passes.
 
 **Not tested yet:** the release dry run and the v0.3.4 tag's release run and post-release smoke,
 which the coordinator dispatches; the maintainer's `geex self update` from 0.3.3.
+
+**Later the same day, the coordinator's report:**
+- Dry run 39351958593 on `f0ae4eb`: all 4 builds green. Every build log has "a ! command's
+  output showed with its exit, and q closed the pane" and "!vim was refused: it needs a real
+  terminal", macos-14 and macos-15-intel included: the first macOS run of `!` (ADR-0042 had
+  "macOS not tested"). The main CI run on `f0ae4eb` is green, so shellcheck accepted the SC2016
+  disable on its first run.
+- Release run 39352222044: 4 builds, then publish, then the post-release smoke on 7 runners;
+  every log has one "passed" line and no FAIL.
+- The maintainer's `geex self update`: 0.3.3 → 0.3.4; it removed 0.3.2 and kept 0.3.3 as the
+  previous version.
+
+### 2026-10-19 — the captAInHook payload ships with each release (ADR-0041's amendment)
+
+The coordinator relayed the maintainer's ask: `geex-attest.sh` lived only in the source
+repository, so a handlers.json had to name a checkout. That doesn't work on a machine with only
+the installed geex (the maintainer's Mac), and on this one every edit to the checkout went live
+in the hook.
+- `package/1` puts `integrations/captainhook/geex-attest.sh` (0755) and its README in the
+  release.
+- install.sh keeps `$GEEX_INSTALL_DIR/integrations/geex-attest.sh`, a file symlink switched by
+  rename, at the current version's payload: on an install, a reinstall of the current version
+  and a rollback; it prints the path. A version without a payload removes the link; a non-link
+  there is left alone; uninstall removes the link and the emptied directory. It never touches
+  handlers.json.
+- Docs: install.md's "captAInHook" section and the integration README show the handler entry
+  with `~/.local/share/geex/integrations/geex-attest.sh`, and say to write the absolute path
+  before captAInHook 0.1.3 (which expands `~/`). The README's log path was stale
+  (`<tmp>/geex.log`); it is `~/.local/state/geex/geex.log`.
+- `rel/smoke.sh`: the link exists, is executable, names this version's payload and runs with no
+  envelope (exit 0); `geex self uninstall` removes it.
+
+**Tests:** five in `install_sh_test.exs` (the link follows installs and a rollback, and the
+payload runs through it; a reinstall puts a removed link back; a switch to a version without a
+payload removes it; uninstall removes it and its directory; a user's file there is left alone),
+and `deploy_test.exs` checks that the last build's tarball holds the payload, executable, and
+its README. 1190 tests + 107 doctests green twice; compile warnings-clean.
+
+**Checked** against a local release build (`0.3.4+f0ae4eb3.89a87236.dirty`, built with
+`MIX_ENV=prod mix release`, installed by the smoke from `_build/package` through
+`GEEX_DOWNLOAD_URL` into its own temporary HOME): all 13 smoke lines passed, the new one
+included ("the captAInHook payload is linked at …/.local/share/geex/integrations/geex-attest.sh"),
+and the uninstall removed the link. install.sh printed the path on install and the removal on
+uninstall.
+
+**Not tested yet:** shellcheck isn't installed here, so CI's run is the first (`dash -n` passes);
+the macOS runners (the dry run); a real attestation through the installed link (the payload is
+the same file `attest_payload_test.exs` runs); the maintainer's handlers.json pointing at the
+link, which their dotfiles own.

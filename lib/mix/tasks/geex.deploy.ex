@@ -236,7 +236,8 @@ defmodule Mix.Tasks.Geex.Deploy do
 
   @doc """
   A release step, after `trim_release/1`: write the launcher to `bin/geex`, copy `install.sh`
-  beside it (`geex self`), drop what Mix generated for its own scripts, and pack the release as
+  beside it (`geex self`) and the captAInHook payload into `integrations/captainhook/`, drop
+  what Mix generated for its own scripts, and pack the release as
   `_build/package/geex-<version>-<os>-<arch>.tar.gz`, with a `SHA256SUMS` beside it.
   """
   @spec package(Mix.Release.t()) :: Mix.Release.t()
@@ -250,6 +251,15 @@ defmodule Mix.Tasks.Geex.Deploy do
     File.chmod!(Path.join(path, "bin/geex"), 0o755)
     # The installer that goes with this version, for `geex self rollback|prune|uninstall` offline.
     File.cp!("install.sh", Path.join(path, "install.sh"))
+    # The captAInHook payload and its README (ADR-0032 step d): install.sh links the current
+    # version's from `integrations/geex-attest.sh`, beside the versions.
+    payload = Path.join(path, "integrations/captainhook")
+    File.mkdir_p!(payload)
+
+    for f <- ~w(geex-attest.sh README.md),
+        do: File.cp!(Path.join("integrations/captainhook", f), Path.join(payload, f))
+
+    File.chmod!(Path.join(payload, "geex-attest.sh"), 0o755)
 
     # Mix's own launch scripts (the launcher replaces them) and the distribution cookie (geex
     # never starts distribution, and a published cookie is everyone's).

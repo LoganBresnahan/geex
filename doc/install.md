@@ -49,10 +49,42 @@ You can read the script before running it:
 |---|---|---|
 | program files, one directory per version | `${XDG_DATA_HOME:-~/.local/share}/geex/versions/` | `GEEX_INSTALL_DIR` (its `versions/`) |
 | the `geex` link | `~/.local/bin/geex` | `GEEX_BIN_DIR` |
+| the captAInHook payload's link (from 0.3.5) | `${XDG_DATA_HOME:-~/.local/share}/geex/integrations/geex-attest.sh` | `GEEX_INSTALL_DIR` (its `integrations/`) |
 | grammars and themes you install | `${XDG_DATA_HOME:-~/.local/share}/geex/{grammars,themes}/` | |
 | settings (`Alt+Y`) | `${XDG_CONFIG_HOME:-~/.config}/geex/` | |
 | edit history, ledgers, the log (`geex.log`), a crash dump | `${XDG_STATE_HOME:-~/.local/state}/geex/` | |
 | compiled grammars (a cache) | `${XDG_CACHE_HOME:-~/.cache}/geex/` | |
+
+## captAInHook: who wrote that?
+
+geex can credit an agent's edits to the agent that made them, through a captAInHook payload
+([ADR-0032](adr/0032-listener-first-agent-integration.md)). From 0.3.5 each release carries the
+payload, and the install keeps a link to the current version's copy at a path that doesn't change
+with the version:
+
+```
+~/.local/share/geex/integrations/geex-attest.sh
+```
+
+The install prints it. Register it in `~/.captainHook/handlers.json` (the install never edits that
+file):
+
+```json
+{
+  "name": "geex-attest",
+  "command": "~/.local/share/geex/integrations/geex-attest.sh",
+  "events": ["post-tool-use"],
+  "mode": "oneshot",
+  "failMode": "open",
+  "budgetMs": 1500,
+  "passEnv": ["XDG_RUNTIME_DIR"]
+}
+```
+
+captAInHook expands a leading `~/` from 0.1.3; with an older one, write the absolute path. An
+update or a rollback moves the link to the new version's payload, so the entry stays as it is.
+What the payload sends, and what it needs (`jq`, `curl`):
+[integrations/captainhook/README.md](../integrations/captainhook/README.md).
 
 ## Managing an install: `geex self`
 
@@ -114,16 +146,17 @@ geex self uninstall
 curl -fsSL https://github.com/LoganBresnahan/geex/releases/latest/download/install.sh | sh -s -- --uninstall
 ```
 
-This removes `~/.local/bin/geex` and every version under `~/.local/share/geex/versions/`. It keeps
-your grammars and themes, settings, and edit history. If a geex is running, it removes nothing:
-quit it first. To remove those too:
+This removes `~/.local/bin/geex`, every version under `~/.local/share/geex/versions/`, and the
+payload's link (`~/.local/share/geex/integrations/geex-attest.sh`): if your handlers.json names
+it, remove that entry. It keeps your grammars and themes, settings, and edit history. If a geex is
+running, it removes nothing: quit it first. To remove those too:
 
 ```sh
 rm -rf ~/.local/share/geex ~/.config/geex ~/.local/state/geex ~/.cache/geex
 ```
 
 By hand, without the script, the uninstall is
-`rm ~/.local/bin/geex && rm -rf ~/.local/share/geex/versions ~/.local/share/geex/previous`.
+`rm ~/.local/bin/geex && rm -rf ~/.local/share/geex/versions ~/.local/share/geex/previous ~/.local/share/geex/integrations`.
 
 ## From an older geex (0.2 and before)
 

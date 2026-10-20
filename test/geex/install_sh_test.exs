@@ -21,14 +21,23 @@ defmodule Geex.InstallShTest do
   end
 
   # A package for VERSION in the download directory, its SHA256SUMS listing every one there.
-  defp package(%{dirs: dirs}, version, marker \\ "") do
+  # `payload: true` puts a captAInHook payload in it, as a release from 0.3.5 has.
+  defp package(%{dirs: dirs}, version, opts \\ []) do
     name = "geex-#{version}-#{Deploy.target()}"
     stage = Path.join(dirs["dl"], name)
     File.mkdir_p!(Path.join(stage, "bin"))
     launcher = Path.join(stage, "bin/geex")
     File.write!(launcher, "#!/bin/sh\necho \"geex #{version}\"\n")
     File.chmod!(launcher, 0o755)
-    File.write!(Path.join(stage, "marker"), marker)
+    File.write!(Path.join(stage, "marker"), Keyword.get(opts, :marker, ""))
+
+    if opts[:payload] do
+      File.mkdir_p!(Path.join(stage, "integrations/captainhook"))
+      payload = Path.join(stage, "integrations/captainhook/geex-attest.sh")
+      File.write!(payload, "#!/bin/sh\necho \"payload #{version}\"\n")
+      File.chmod!(payload, 0o755)
+    end
+
     {_, 0} = System.cmd("tar", ["-czf", "#{name}.tar.gz", name], cd: dirs["dl"])
     File.rm_rf!(stage)
     write_sums(dirs["dl"])
@@ -58,6 +67,12 @@ defmodule Geex.InstallShTest do
 
   defp linked(%{bin: bin}), do: File.read_link(Path.join(bin, "geex"))
   defp installed(%{versions: versions}), do: versions |> File.ls!() |> Enum.sort()
+  # The payload's link, beside versions/, and VERSION's payload it should name.
+  defp attest_link(%{versions: versions}),
+    do: Path.join(Path.dirname(versions), "integrations/geex-attest.sh")
+
+  defp payload(%{versions: versions}, version),
+    do: Path.join(versions, "#{version}/integrations/captainhook/geex-attest.sh")
 
   test "installs a version, links it, and says so again without reinstalling", ctx do
     package(ctx, "1.0.0")
@@ -170,9 +185,9 @@ defmodule Geex.InstallShTest do
   end
 
   test "--force installs the same version again", ctx do
-    package(ctx, "1.0.0", "first")
+    package(ctx, "1.0.0", marker: "first")
     assert {_, 0} = install(ctx, ["--version", "1.0.0"])
-    package(ctx, "1.0.0", "second")
+    package(ctx, "1.0.0", marker: "second")
     assert {_, 0} = install(ctx, ["--version", "1.0.0", "--force"])
     assert File.read!(Path.join(ctx.versions, "1.0.0/marker")) == "second"
     assert installed(ctx) == ~w(1.0.0)
@@ -229,5 +244,65 @@ defmodule Geex.InstallShTest do
     refute File.exists?(Path.join(ctx.bin, "geex"))
     refute File.exists?(ctx.versions)
     assert File.dir?(themes)
+  end
+
+  describe "the captAInHook payload's link (ADR-0032 step d)" do
+    test "follows the current version through installs and a rollback", ctx do
+      for v <- ~w(1.0.0 2.0.0), do: package(ctx, v, payload: true)
+
+      assert {out, 0} = install(ctx, ["--version", "1.0.0"])
+      assert out =~ "the captAInHook payload is #{attest_link(ctx)}"
+      assert File.read_link(attest_link(ctx)) == {:ok, payload(ctx, "1.0.0")}
+      assert {"payload 1.0.0\n", 0} = System.cmd(attest_link(ctx), [])
+
+      assert {_, 0} = install(ctx, ["--version", "2.0.0"])
+      assert File.read_link(attest_link(ctx)) == {:ok, payload(ctx, "2.0.0")}
+
+      assert {_, 0} = install(ctx, ["--rollback"])
+      assert File.read_link(attest_link(ctx)) == {:ok, payload(ctx, "1.0.0")}
+    end
+
+    test "is put back by an install of the version already there", ctx do
+      package(ctx, "1.0.0", payload: true)
+      assert {_, 0} = install(ctx, ["--version", "1.0.0"])
+      File.rm!(attest_link(ctx))
+
+      assert {out, 0} = install(ctx, ["--version", "1.0.0"])
+      assert out =~ "already installed"
+      assert File.read_link(attest_link(ctx)) == {:ok, payload(ctx, "1.0.0")}
+    end
+
+    test "goes with a switch to a version without a payload", ctx do
+      package(ctx, "1.0.0")
+      package(ctx, "2.0.0", payload: true)
+      for v <- ~w(1.0.0 2.0.0), do: assert({_, 0} = install(ctx, ["--version", v]))
+      assert {:ok, _} = File.read_link(attest_link(ctx))
+
+      assert {out, 0} = install(ctx, ["--rollback"])
+      assert out =~ "geex 1.0.0 has no captAInHook payload"
+      assert {:error, :enoent} = File.read_link(attest_link(ctx))
+    end
+
+    test "goes with an uninstall, and its directory too", ctx do
+      package(ctx, "1.0.0", payload: true)
+      assert {_, 0} = install(ctx, ["--version", "1.0.0"])
+
+      assert {out, 0} = install(ctx, ["--uninstall"])
+      assert out =~ "removed #{attest_link(ctx)}"
+      refute File.exists?(Path.dirname(attest_link(ctx)))
+    end
+
+    test "a file there that isn't a link is left alone", ctx do
+      package(ctx, "1.0.0", payload: true)
+      File.mkdir_p!(Path.dirname(attest_link(ctx)))
+      File.write!(attest_link(ctx), "mine")
+
+      assert {out, 0} = install(ctx, ["--version", "1.0.0"])
+      assert out =~ "isn't a link; left alone"
+      assert File.read!(attest_link(ctx)) == "mine"
+
+      assert {_, 0} = install(ctx, ["--uninstall"])
+      assert File.read!(attest_link(ctx)) == "mine"
+    end
   end
 end

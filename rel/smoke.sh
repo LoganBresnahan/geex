@@ -11,6 +11,8 @@
 #
 # Checks:
 #   - `geex --version` is `geex VERSION` (or any `geex X.Y.Z` with no --version);
+#   - $XDG_DATA_HOME/geex/integrations/geex-attest.sh links to this version's captAInHook
+#     payload, which runs;
 #   - `geex --frob` exits 2;
 #   - `geex install json` installs the JSON grammar from the catalog;
 #   - `geex highlight` prints a JSON file in colour, and the same text without the colour;
@@ -22,7 +24,7 @@
 #     (tmux), then removes the old one (a copy of this version stands in for it: one build);
 #   - from GitHub only: `geex self update` fetches the release's install.sh, which finds this
 #     version already installed;
-#   - `geex self uninstall` removes it.
+#   - `geex self uninstall` removes it, and the payload's link.
 set -eu
 
 REPO=LoganBresnahan/geex
@@ -96,6 +98,17 @@ else
   esac
 fi
 ok "$said"
+
+# The captAInHook payload (ADR-0032 step d): a link beside the versions, to this version's copy,
+# which runs (with no envelope it sends nothing and exits 0).
+share=$(cd "$XDG_DATA_HOME/geex" && pwd -P)
+attest=$share/integrations/geex-attest.sh
+[ -L "$attest" ] || fail "no link at $attest"
+[ -x "$attest" ] || fail "$attest isn't executable"
+[ "$(readlink "$attest")" = "$share/versions/$version/integrations/captainhook/geex-attest.sh" ] ||
+  fail "$attest links to $(readlink "$attest"), not geex $version's payload"
+"$attest" </dev/null || fail "$attest exited $?"
+ok "the captAInHook payload is linked at $attest"
 
 status=0
 geex --frob >/dev/null 2>&1 || status=$?
@@ -242,5 +255,6 @@ fi
 geex self uninstall || fail "geex self uninstall"
 [ ! -e "$geex" ] || fail "geex self uninstall left $geex"
 [ ! -e "$versions" ] || fail "geex self uninstall left $versions"
+[ ! -L "$attest" ] || fail "geex self uninstall left $attest"
 ok "uninstalled"
 echo "smoke: geex $version passed"

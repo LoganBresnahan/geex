@@ -182,6 +182,28 @@ this; pharos and captAInHook take the same names.
   update` runs from GitHub after publishing, and `geex self uninstall` replaces
   `install.sh --uninstall`.
 
+**Amended 2026-10-19 (0.3.5): the captAInHook payload ships with each version, behind a stable
+link.** Until now `geex-attest.sh` (ADR-0032 step d) lived only in the source repository, so a
+handlers.json named a checkout: nothing to register on a machine with only the installed geex,
+and on a machine with the checkout every edit to it went live in the hook at once.
+- **In the package:** `package/1` copies `integrations/captainhook/geex-attest.sh` (mode 0755)
+  and its README into the release, so a version has them at
+  `versions/<v>/integrations/captainhook/`.
+- **The link:** `$GEEX_INSTALL_DIR/integrations/geex-attest.sh` is a file symlink to the current
+  version's payload, made like the `geex` link (`ln -s` to a temporary name, `mv -f` over it).
+  An install, a reinstall of the current version (so `geex self update` repairs a missing link),
+  and a rollback set it; install.sh then prints the path, the one to register. Switching to a
+  version without a payload (before 0.3.5) removes the link rather than leave one to a file that
+  isn't there. Something at that path that isn't a link is the user's, and is left alone.
+- **Uninstall** removes the link when it points into `versions/`, then the `integrations/`
+  directory if that leaves it empty, and says a handlers.json entry naming it needs removing.
+- **It is only a link.** install.sh never reads or edits `~/.captainHook/handlers.json`: the
+  user's (or their dotfiles') to change. captAInHook expands a leading `~/` in a handler's
+  command from 0.1.3; before that, the entry names the absolute path.
+- **The smoke test** (§6) checks that the link exists, is executable, names this version's
+  payload and runs with no envelope (exit 0, nothing sent), and that `geex self uninstall`
+  removes it.
+
 ### 5. CI
 
 - **`ci.yml`, every push:** the suite on Linux (ubuntu-22.04), compiled with the runtime §1 builds
@@ -289,3 +311,4 @@ For another BEAM app (pharos), the parts that carry over:
 - `Geex.CLI` (`standalone?/0`, `highlight/1`)
 - `.github/workflows/`
 - [doc/install.md](../install.md): installing, upgrading, rolling back, uninstalling
+- `integrations/captainhook/README.md`: registering the payload

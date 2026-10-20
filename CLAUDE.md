@@ -185,7 +185,10 @@ session's `Co-Authored-By` trailer.
   `:start_attest` (off under test)
 - attestation payload (ADR-0032 step d): `integrations/captainhook/geex-attest.sh`, which the
   user registers in `~/.captainHook/handlers.json` (never edit that file without asking);
-  tested against `test/fixtures/claude-code/` (verbatim captAInHook captures)
+  tested against `test/fixtures/claude-code/` (verbatim captAInHook captures). From 0.3.5 each
+  release carries it (`versions/<v>/integrations/captainhook/`), and install.sh links the current
+  version's at `$GEEX_INSTALL_DIR/integrations/geex-attest.sh`, the path to register; install.sh
+  never edits handlers.json
 - settings the `Alt+Y` view keeps (ADR-0040 §7): `$XDG_CONFIG_HOME/geex/settings.json` (default
   `~/.config/geex/`), written by geex (`Geex.Settings`); tests get their own `settings_path`
 - installed grammars and themes (ADR-0040): `$XDG_DATA_HOME/geex/{grammars,themes}/<name>/`

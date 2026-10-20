@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14); shell commands run from the minibuffer (`!`, `!!`, `|`, item 15); both ship in 0.3.4. Since the
+**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14); shell commands run from the minibuffer (`!`, `!!`, `|`, item 15); both ship in 0.3.4. From 0.3.5 the captAInHook payload ships in each release, linked at `~/.local/share/geex/integrations/geex-attest.sh` (ADR-0041's amendment). Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -162,7 +162,9 @@ The ledger track, in order (each builds on the one before):
    live discovery entry in parallel before exiting. A **CRLF** file matches because reconcile
    also stamps `before_sha256_lf` (the baseline with `\r\n` as `\n`, how Claude Code reports
    it). Tested against captAInHook's real envelopes (`test/fixtures/claude-code/`, from
-   `3ddb467`).
+   `3ddb467`). **From 0.3.5** each release carries it, and install.sh links the current
+   version's copy at `~/.local/share/geex/integrations/geex-attest.sh`, the path to register
+   (ADR-0041's 2026-10-19 amendment).
 5. **Surfacing in the TUI** — **display built 2026-10-15** (ADR-0032 step-e amendment): a `▌`
    gutter mark on each line an agent last wrote, and `✎ <harness>/<session8> · turn …` on the
    status line for the line under the cursor, both derived from `Geex.Blame` (a per-line

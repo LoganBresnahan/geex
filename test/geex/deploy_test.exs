@@ -44,7 +44,7 @@ defmodule Geex.DeployTest do
     end
 
     # On the release and tarball the last build made, if there is one.
-    test "the built package holds the launcher, naming its version, and install.sh" do
+    test "the built package holds the launcher, naming its version, install.sh and the payload" do
       case Path.wildcard("_build/package/geex-*.tar.gz") do
         [tarball] ->
           {version, target} = Deploy.parse_tarball(Path.basename(tarball))
@@ -56,6 +56,11 @@ defmodule Geex.DeployTest do
           # The checkout's install.sh may have changed since that build, so not byte for byte.
           {installer, 0} = System.cmd("tar", ["-xzOf", tarball, "#{name}/install.sh"])
           assert installer =~ ~r/\A#!\/bin\/sh\n# Install geex/
+          # The captAInHook payload, executable, where install.sh links it from.
+          {listing, 0} = System.cmd("tar", ["-tvzf", tarball])
+          payload = Regex.escape("#{name}/integrations/captainhook/geex-attest.sh")
+          assert listing =~ ~r"^-rwxr-xr-x .* #{payload}$"m
+          assert listing =~ "#{name}/integrations/captainhook/README.md"
 
         _ ->
           :ok

@@ -14,8 +14,11 @@
 # symlink to its launcher, replaced in one rename. The current and the previous version are kept;
 # an older one goes once no running process uses it. GEEX_DOWNLOAD_URL replaces the release's
 # download directory (a file:// directory works: `mix geex.deploy` installs a local build this way).
+# $GEEX_INSTALL_DIR/integrations/geex-attest.sh is a link to the current version's captAInHook
+# payload, switched with the geex link: the path a handlers.json names, whatever the version.
 #
-# POSIX sh, no sudo. It touches nothing but those two places: no shell rc, no geex settings.
+# POSIX sh, no sudo. It touches nothing but those places: no shell rc, no geex settings, no
+# handlers.json.
 set -eu
 
 REPO=LoganBresnahan/geex
@@ -33,8 +36,8 @@ usage: install.sh [--version VERSION] [--force] | --rollback | --prune | --unins
   --rollback         switch back to the previous version
   --prune            remove every version but the current and the previous one, unless a
                      running geex uses it (an install does this too); downloads nothing
-  --uninstall        remove geex's versions and ~/.local/bin/geex (keeps grammars, themes,
-                     settings and the edit history)
+  --uninstall        remove geex's versions, ~/.local/bin/geex and the payload link (keeps
+                     grammars, themes, settings and the edit history)
 
   GEEX_INSTALL_DIR   where versions go (default \${XDG_DATA_HOME:-~/.local/share}/geex)
   GEEX_BIN_DIR       where the geex link goes (default ~/.local/bin)
@@ -69,6 +72,8 @@ versions=$install_dir/versions
 bin_dir=$(cd "$bin_dir" && pwd -P)
 link=$bin_dir/$APP
 previous_file=$install_dir/previous
+integrations=$install_dir/integrations
+attest_link=$integrations/geex-attest.sh
 
 # Sets `current` to the version $link points at, or nothing. Stops when $link is something this
 # script didn't make.
@@ -99,6 +104,26 @@ switch_to() {
   rm -f "$tmp"
   ln -s "$versions/$1/bin/$APP" "$tmp"
   mv -f "$tmp" "$link"
+}
+
+# Point $attest_link at VERSION's captAInHook payload (ADR-0032 step d), in one rename as
+# switch_to does, and say where it is. A version without one (before 0.3.5) leaves no link: one
+# into it would name a file that isn't there. Something there that isn't a link is the user's.
+link_attest() {
+  payload=$versions/$1/integrations/captainhook/geex-attest.sh
+  if [ -e "$attest_link" ] && [ ! -L "$attest_link" ]; then
+    say "$attest_link exists and isn't a link; left alone"
+  elif [ -f "$payload" ]; then
+    mkdir -p "$integrations"
+    tmp=$integrations/.geex-attest.sh.tmp.$$
+    rm -f "$tmp"
+    ln -s "$payload" "$tmp"
+    mv -f "$tmp" "$attest_link"
+    say "the captAInHook payload is $attest_link (the path to register in handlers.json)"
+  elif [ -L "$attest_link" ]; then
+    rm -f "$attest_link"
+    say "geex $1 has no captAInHook payload; removed $attest_link"
+  fi
 }
 
 remember_previous() {
@@ -212,6 +237,7 @@ do_install() {
   read_current
   if [ "$version" = "$current" ] && [ -z "$force" ]; then
     say "geex $version is already installed (--force installs it again)"
+    link_attest "$version"
     path_hint
     exit 0
   fi
@@ -225,6 +251,7 @@ do_install() {
   if [ -n "$current" ] && [ "$current" != "$version" ]; then remember_previous "$current"; fi
   switch_to "$version"
   say "installed geex $version at $versions/$version, linked from $link"
+  link_attest "$version"
   if [ -n "$legacy" ]; then
     say "replaced the link to $legacy; once no geex runs from it, its directory and"
     say "${XDG_DATA_HOME:-$HOME/.local/share}/.burrito/geex_erts-* can be removed"
@@ -274,6 +301,7 @@ do_rollback() {
   switch_to "$prev"
   if [ -n "$current" ]; then remember_previous "$current"; fi
   say "rolled back to geex $prev (geex $current is now the previous version)"
+  link_attest "$prev"
 }
 
 # No current version (no link, or one to another layout) is nothing to prune: the current one is
@@ -299,6 +327,15 @@ do_uninstall() {
     die "a running geex uses $versions; quit it, then run --uninstall again (nothing was removed)"
   fi
   if [ -n "$current" ]; then rm -f "$link"; fi
+  # The payload link, if it's the one link_attest made; then its directory, if that leaves it empty.
+  if [ -L "$attest_link" ]; then
+    case $(readlink "$attest_link") in
+      "$versions"/*)
+        rm -f "$attest_link"
+        rmdir "$integrations" 2>/dev/null || true
+        say "removed $attest_link (if your handlers.json names it, remove that entry)" ;;
+    esac
+  fi
   rm -rf "$versions" "$previous_file"
   say "removed geex from $install_dir/versions and $link"
   home=$(physical "$HOME")
