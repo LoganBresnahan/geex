@@ -102,14 +102,17 @@ defmodule Geex.ShellTest do
 
   # Measured 2026-10-19: under `yes`, 76–610 chunks wait on an idle machine, level over 10 s;
   # under the full suite's load up to 9,943 before the cap. Without the drop it grew by
-  # thousands a second.
+  # thousands a second. Then with 16 and 64 busy processes in the VM, sampled every 10 ms: the
+  # mailbox peaked at 2,500–6,900, growing with the load, while a drain went unchecked and the
+  # runner waited on `sh` to send the TERM; with the cap checked in the drain and the TERM sent
+  # from its own process, it peaked at 1,967–2,048 under 16, 64 and 256.
   test "a flood the runner can't keep up with stays bounded", %{dir: dir} do
     sink = spawn(fn -> Process.sleep(:infinity) end)
     {pid, ref} = Shell.start("yes geex", cwd: dir, owner: sink)
 
     waiting =
-      for _ <- 1..2 do
-        Process.sleep(1_000)
+      for _ <- 1..100 do
+        Process.sleep(20)
 
         case Process.info(pid, :message_queue_len) do
           {:message_queue_len, n} -> n
@@ -119,8 +122,9 @@ defmodule Geex.ShellTest do
 
     Shell.stop(pid)
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 10_000
-    # 2,048 is the cap; a check can land while the runner is stopping the command.
-    assert Enum.all?(waiting, &(&1 < 2_600)), "chunks waiting: #{inspect(waiting)}"
+    # The cap is 2,048, checked at every chunk; the headroom is for the chunks that arrive while
+    # the runner handles one. Before the fix, loaded peaks were 1.2–3.4 times the cap.
+    assert Enum.max(waiting) < 2_048 + 512, "chunks waiting, at most: #{Enum.max(waiting)}"
   end
 
   test "past the cap the command is stopped, and says why", %{dir: dir} do

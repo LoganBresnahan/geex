@@ -208,7 +208,10 @@ and on a machine with the checkout every edit to it went live in the hook at onc
 
 - **`ci.yml`, every push:** the suite on Linux (ubuntu-22.04), compiled with the runtime §1 builds
   (cached), not a setup-beam OTP, so the `.beam` files and the shipped VM come from one OTP. It
-  checks tree_sitter_wasm out beside geex at the pinned commit.
+  checks tree_sitter_wasm out beside geex at the pinned commit. **Amended 2026-10-19:** branch
+  pushes only. A `v*` tag names a commit main's run already covered, and release.yml builds and
+  smoke-tests it; the tag's own run only repeated the suite (v0.3.5's flaked once, where main's
+  passed).
 - **`release.yml`, on a `v*` tag:** for each target (linux-x64 on ubuntu-22.04, linux-arm64 on
   ubuntu-22.04-arm, darwin-arm64 on macos-14), the cached runtime, a release build
   (`GEEX_RELEASE=1`), and a smoke test of the tarball on that runner through install.sh. Then

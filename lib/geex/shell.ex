@@ -130,6 +130,7 @@ defmodule Geex.Shell do
             case drain(%{run | tail: next_tail(run.tail, data)}, data, waiting) do
               {:ok, run, newest} -> show_loop(take(%{run | partial: "", resync: true}, newest))
               {:tty, run} -> show_loop(stop_for(run, :needs_tty))
+              {:overflow, run} -> show_loop(stop_for(run, :overflow))
             end
 
           true ->
@@ -169,15 +170,18 @@ defmodule Geex.Shell do
   # the chunks waiting are passed over, checked only for the alternate screen, and only the
   # newest is split, from its first whole line: the latest lines are what's kept anyway, and the
   # output's end (a test run's summary) is never lost. Should the chunks still pile up past
-  # `overflow` (a loaded machine), the command is stopped: its memory stays bounded.
+  # `overflow` (a loaded machine), the command is stopped: its memory stays bounded. That is
+  # checked at every chunk here too, so a long drain can't carry the mailbox past it.
   defp drain(run, newest, 0), do: {:ok, run, newest}
 
   defp drain(%{port: port} = run, newest, n) do
     receive do
       {^port, {:data, data}} ->
-        if alt_screen?(run, data),
-          do: {:tty, run},
-          else: drain(%{run | tail: next_tail(run.tail, data)}, data, n - 1)
+        cond do
+          alt_screen?(run, data) -> {:tty, run}
+          queued() > run.overflow -> {:overflow, run}
+          true -> drain(%{run | tail: next_tail(run.tail, data)}, data, n - 1)
+        end
     after
       0 -> {:ok, run, newest}
     end
@@ -282,8 +286,10 @@ defmodule Geex.Shell do
   defp handle_stop({:hard_stop, os}, os, _grace), do: signal(os, "KILL")
   defp handle_stop(_other, _os, _grace), do: :ok
 
+  # The TERM is sent from a process of its own: starting `sh` takes a while on a loaded machine,
+  # and meanwhile the runner keeps passing over the command's output instead of letting it pile up.
   defp stop_group(os, grace) do
-    signal(os, "TERM")
+    spawn(fn -> signal(os, "TERM") end)
     Process.send_after(self(), {:hard_stop, os}, grace)
   end
 

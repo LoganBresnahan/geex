@@ -1,16 +1,18 @@
 # The suite on every push (ADR-0041 §5): Linux, compiled with geex's own OTP (the one releases
-# carry), with tree_sitter_wasm at the commit mix.exs pins.
+# carry), with tree_sitter_wasm at the commit mix.exs pins. Branches only: a tag names a commit
+# already run on main, and release.yml builds and smoke-tests it.
 name: ci
 
 on:
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# A newer push to a branch cancels the older run; a tag's run is never cancelled.
+# A newer push to a branch cancels the older run; a run on a tag (dispatched by hand) never is.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}

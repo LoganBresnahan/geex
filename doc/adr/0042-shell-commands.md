@@ -50,7 +50,11 @@ history for the minibuffer.
   checked only for the alternate screen, and splits just the newest from its first whole line:
   the end of the output (a test run's summary) always arrives. If chunks still pile up past 2,048
   (about 128 MB, a loaded machine), the command is stopped: "it printed faster than geex can show
-  it: stopped (pipe it through head or tail)". A plain line (no control byte, UTF-8) is passed
+  it: stopped (pipe it through head or tail)". **Amended 2026-10-19:** the cap is checked at
+  every chunk the drain passes over too, and the TERM is sent from a process of its own, so the
+  runner keeps passing over output while `sh` starts. Before, a CI run under the suite's load saw
+  2,948 chunks waiting; with busy processes in the VM the peak grew with the load (2,500–6,900),
+  and now stays at the cap (1,967–2,048 under 16, 64 and 256). A plain line (no control byte, UTF-8) is passed
   through uncleaned, which made the runner about 4× faster. Measured: `!seq 1 50000000` ends in
   1.0 s with its last line shown, and `!yes` runs with the keys live until Ctrl-G.
 

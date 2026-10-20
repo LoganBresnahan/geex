@@ -4521,3 +4521,40 @@ handler move from the checkout to the installed payload. Since 0.3.4:
 - the release dry run: the first macOS run of the payload link;
 - the v0.3.5 tag's release run and post-release smoke, which the coordinator dispatches;
 - the maintainer's `geex self update` from 0.3.4, and their handlers.json pointing at the link.
+
+**Later the same day, the coordinator's report:** release run 39362084444 passed all 11 jobs.
+The maintainer is on 0.3.5 with the payload link in place. The ci.yml run on the v0.3.5 tag
+(39362084449) failed one test, where main's run on the same commit (39361424277) passed:
+`a flood the runner can't keep up with stays bounded`, with 2,948 chunks waiting against a bound
+of 2,600. Next entry.
+
+### 2026-10-19 — a flood's mailbox stays at the cap under load (ADR-0042's amendment)
+
+**Product or test?** The product. A scratch script sampled the runner's mailbox every 10 ms for
+3 s under `yes`, five runs each. With 24 `yes` CPU hogs outside the VM it stayed low (240–1,041,
+never at the cap), but with busy processes inside the VM, as the suite's async tests are, it
+went past the cap and grew with the load: 2,485–3,314 with 16, 3,211–6,927 with 64. Two gaps let
+it through:
+- `drain/3` passed over a backlog without checking the cap, so the mailbox could fill again
+  while it worked;
+- `stop_group/2` sent the TERM with `System.cmd("sh", …)`, and the runner waited for that `sh` to
+  start while the port kept delivering.
+
+**The fix** (`Geex.Shell`): the drain checks the cap at every chunk and stops the command when
+it's passed; the TERM goes from a spawned process, so the runner keeps passing over output. The
+same script then peaked at 2,007–2,048 (16), 1,967–2,034 (64) and 1,977–2,032 (256), every run
+draining to 0 after the stop.
+
+**The test** now samples every 20 ms for 2 s (it took two samples, a second apart) and asserts the
+peak is under 2,048 + 512, with a comment giving the measurements; the old code's loaded peaks
+were 1.2–3.4 times the cap.
+
+**ci.yml** runs on branch pushes only. A tag names a commit main's run already covered, and
+release.yml builds and smoke-tests it (ADR-0041 §5's amendment).
+
+**Checked:** the full suite 20 times in a row, all green; the flood test 31 times
+(`--repeat-until-failure 30`) beside 24 `yes` CPU hogs, all green. The shell tests (27 + 9
+doctests) green. 1190 tests + 107 doctests green twice; compile warnings-clean.
+
+**Not tested yet:** the ci.yml trigger change (the next push to main runs it; the next tag
+should start no ci run).
