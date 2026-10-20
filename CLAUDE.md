@@ -203,6 +203,9 @@ session's `Co-Authored-By` trailer.
 - edits list kept across restarts (ADR-0034's 2026-10-18 amendment): `$XDG_STATE_HOME/geex/edits.jsonl`
   (+ `edits.1.jsonl`, the previous generation), `0600`; app gate `edits_log` (off under test;
   tests pass `:file`), `edits_file` overrides
+- minibuffer history (ADR-0042): `$XDG_STATE_HOME/geex/history.json` (`{"command": [...],
+  "grid": [...]}`, newest first, 500 each), `0600`; app gate `minibuffer_history` (off under test),
+  `history_file` overrides. Shell commands (`!`, `|`) run in the project root via `Geex.Shell`
 - TUI log: `$XDG_STATE_HOME/geex/geex.log` (`Geex.log_file/0`, default `~/.local/state/geex/`,
   0700, rotates at 1 MB); a VM crash dump lands beside it (`erl_crash.dump`, the launcher's
   `ERL_CRASH_DUMP`)

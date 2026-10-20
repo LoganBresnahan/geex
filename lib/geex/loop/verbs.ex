@@ -30,6 +30,9 @@ defmodule Geex.Loop.Verbs do
       (`rename` alone asks for the path). Their paths are from the project root and keep their
       case; one that leaves the root is refused unless it is absolute (`/…`, `~/…`). ADR-0019's
       2026-10-19 amendment.
+    * `!COMMAND` — run a shell command in the project root, its output in the output pane;
+      `!!` — run the last one again; `|COMMAND` — pipe the selection through a command and
+      replace it with the output, one undoable edit. The command is kept as typed. ADR-0042.
     * `split` / `vsplit` — split the pane top and bottom / side by side (= `Alt+-` / `Alt+=`);
       `tab next` / `tab prev` / `tab N` — switch the pane's tab (= `Alt+.` / `Alt+,` /
       `Alt+N`). ADR-0038.
@@ -55,6 +58,8 @@ defmodule Geex.Loop.Verbs do
           | {:action, atom() | {:tab, non_neg_integer()}}
           | {:open, String.t()}
           | {:new | :mkdir | :rename, String.t()}
+          | {:shell | :pipe, String.t()}
+          | :shell_again
           | :cancel
           | :unknown
 
@@ -77,8 +82,23 @@ defmodule Geex.Loop.Verbs do
   """
   @spec parse(String.t()) :: verb()
   def parse(input) when is_binary(input) do
-    trimmed = String.trim(input)
+    case String.trim(input) do
+      "!!" -> :shell_again
+      "!" <> cmd -> shell_verb(:shell, cmd)
+      "|" <> cmd -> shell_verb(:pipe, cmd)
+      trimmed -> parse_verb(trimmed)
+    end
+  end
 
+  # A command line, kept as typed (ADR-0042).
+  defp shell_verb(verb, cmd) do
+    case String.trim(cmd) do
+      "" -> :unknown
+      cmd -> {verb, cmd}
+    end
+  end
+
+  defp parse_verb(trimmed) do
     # A verb that takes a path, before the rest is lowercased: a path keeps its case.
     case String.split(trimmed, ~r/\s+/, parts: 2) do
       [verb, path] -> path_verb(String.downcase(verb), path)

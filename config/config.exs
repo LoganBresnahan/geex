@@ -27,6 +27,9 @@ config :geex,
   # The edits list kept across restarts (ADR-0034 §6, amended 2026-10-18), in
   # ~/.local/state/geex/edits.jsonl (`edits_file` overrides). Tests pass a file of their own.
   edits_log: config_env() != :test,
+  # The minibuffer's history kept across restarts (ADR-0042), in
+  # ~/.local/state/geex/history.json (`history_file` overrides). Tests keep it in memory.
+  minibuffer_history: config_env() != :test,
   # Compiled grammars kept in $XDG_CACHE_HOME/geex/wasm (ADR-0040 §8). Tests leave the user's
   # cache alone.
   wasm_cache: config_env() != :test,

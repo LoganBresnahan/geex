@@ -65,6 +65,19 @@ rename lib/other.ex     # move this file, keeping its unsaved edits and undo his
 delete                  # delete this file, after a y/n
 ```
 
+The command line also runs shell commands, in the project root:
+
+```text
+!mix test               # run it; its output shows in a pane below the editor
+!!                      # run the last one again
+|sort                   # pipe the selection through a command and replace it (Alt+Z undoes it)
+```
+
+In the output pane, Enter on a `path:line` opens the file there, `!` runs the command again and
+`q` closes the pane; `Ctrl-G` stops a command that's running. The command runs without a terminal,
+so a full-screen program (vim, top, ssh) belongs in a terminal split instead. Up and Down in the
+command line bring back what you entered before.
+
 Paths are from the project root; an absolute path (`/…`, `~/…`) goes anywhere. In the file tree
 (`Alt+T` shows it, `Alt+P` moves into it), `a` adds a file or directory where the highlight is,
 `d` deletes the highlighted entry (a directory only when it's empty), and `r` renames it.

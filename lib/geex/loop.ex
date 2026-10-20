@@ -65,7 +65,22 @@ defmodule Geex.Loop do
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
-  alias Geex.Loop.{EditsPane, FileOps, Keymap, Mouse, Panes, ScrollBar, Settings, TabBar, Verbs}
+
+  alias Geex.Loop.{
+    EditsPane,
+    FileOps,
+    Keymap,
+    Mouse,
+    Output,
+    Panes,
+    ScrollBar,
+    Settings,
+    TabBar,
+    Verbs
+  }
+
+  alias Geex.Minibuffer.Recall
+  alias Geex.Shell
   alias Geex.MCP.ViewActions
 
   # Rows of context kept between the cursor and the top/bottom of the viewport
@@ -239,7 +254,7 @@ defmodule Geex.Loop do
     active = Session.subscribe()
     safe_subscribe_edits()
     {w, h} = safe_window_size()
-    state = new_state(w, h) |> apply_settings(Geex.Settings.load())
+    state = new_state(w, h) |> apply_settings(Geex.Settings.load()) |> load_history()
     # Say whether the mouse is on, in case this loop restarted after the `mouse` verb turned it
     # off, or the settings start it off.
     TerminalIO.set_mouse(state.mouse)
@@ -267,6 +282,22 @@ defmodule Geex.Loop do
           _ -> acc
         end
     end)
+  end
+
+  # The minibuffer's history from its file (ADR-0042), unless the `minibuffer_history` gate is
+  # off. The file is bounded (500 entries a mode), so reading it here costs little.
+  defp load_history(state) do
+    if Application.get_env(:geex, :minibuffer_history, true) do
+      file = Application.get_env(:geex, :history_file) || Recall.default_file()
+      lists = Recall.load(file)
+
+      recall =
+        for {mode, _} <- state.recall, into: %{}, do: {mode, Recall.new(lists["#{mode}"] || [])}
+
+      %{state | recall: recall, history_file: file}
+    else
+      state
+    end
   end
 
   @doc false
@@ -312,6 +343,16 @@ defmodule Geex.Loop do
       # `:ask` waits for the new path.
       file_ops: %{},
       asking: nil,
+      # Shell commands (ADR-0042): the one running, `%{pid, ref, kind: :show | :pipe, …}` from
+      # `Geex.Shell.start/2`; the output pane's `Geex.Loop.Output`, shown in the edits pane's
+      # band while it is open; the last `!` command, for `!!`.
+      shell: nil,
+      output: nil,
+      last_shell: nil,
+      # The minibuffer's history, per mode (`Geex.Minibuffer.Recall`), and the file it's kept in
+      # (nil: in memory only, as under test).
+      recall: %{command: Recall.new(), grid: Recall.new()},
+      history_file: nil,
       # The edits pane (ADR-0034 §6): shown at start when the terminal has 20 rows; `edits`
       # toggles it (Alt+L). `focus` is where keys go (`Alt+P`); `edits_sel` its highlighted entry.
       edits_shown: h >= 20,
@@ -619,12 +660,17 @@ defmodule Geex.Loop do
       event in [{:alt, ?y}, {:alt, ?Y}] and not Minibuffer.active?(state.minibuffer) ->
         {:noreply, schedule_repaint(open_settings(state))}
 
+      # Ctrl-G stops the shell command running, from anywhere (ADR-0042).
+      event in [{:ctrl, ?g}, {:ctrl, ?G}] and state.shell != nil ->
+        {:noreply, schedule_repaint(stop_shell(state))}
+
       Minibuffer.active?(state.minibuffer) ->
         {:noreply, apply_minibuffer_key(event, state)}
 
       # A pane can have gone (hidden by a resize); then the keys are the editor's again.
       state.focus != :editor ->
         case focused(state, layout(state)) do
+          :output -> {:noreply, apply_output_key(event, state)}
           :edits -> {:noreply, apply_edits_key(event, state)}
           :tree -> {:noreply, apply_tree_key(event, state)}
           :editor -> {:noreply, apply_editor_key(event, %{state | focus: :editor})}
@@ -737,6 +783,24 @@ defmodule Geex.Loop do
     finder = %{state.finder | matching: nil, submit: false}
     notice = "the file search failed (see #{Geex.log_file()})"
     {:noreply, schedule_repaint(%{state | finder: finder, notice: notice})}
+  end
+
+  # The shell command running answered (`Geex.Shell`, ADR-0042).
+  def handle_info({:geex_shell, pid, msg}, %{shell: %{pid: pid}} = state),
+    do: {:noreply, schedule_repaint(shell_said(msg, state))}
+
+  # Its runner died without saying how the command ended.
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{shell: %{ref: ref}} = state) do
+    Logger.warning("geex shell: the command's runner failed: #{inspect(reason)}")
+    output = state.output && Output.finish(state.output, {:exit, -1}, now_ms())
+    notice = "the command's runner failed (see #{Geex.log_file()})"
+    {:noreply, schedule_repaint(%{state | shell: nil, output: output, notice: notice})}
+  end
+
+  # While a `!` runs, its title counts the seconds.
+  def handle_info(:geex_shell_tick, %{shell: %{kind: :show}} = state) do
+    Process.send_after(self(), :geex_shell_tick, 1_000)
+    {:noreply, schedule_repaint(state)}
   end
 
   # A file operation's step answered (`start_file_op/2`).
@@ -1040,10 +1104,20 @@ defmodule Geex.Loop do
       end
 
     case region(state, m.x, m.y) do
-      {:file, id, rect} -> schedule_repaint(wheel(state, id, rect, step))
-      {:tree, rect} -> schedule_repaint(scroll_tree(state, rect, elem(step, 1)))
-      {:edits, rect} -> schedule_repaint(scroll_edits(state, rect, elem(step, 1)))
-      _ -> state
+      {:file, id, rect} ->
+        schedule_repaint(wheel(state, id, rect, step))
+
+      {:tree, rect} ->
+        schedule_repaint(scroll_tree(state, rect, elem(step, 1)))
+
+      {:edits, rect} ->
+        schedule_repaint(scroll_edits(state, rect, elem(step, 1)))
+
+      {:output, _rect} ->
+        schedule_repaint(%{state | output: Output.move(state.output, elem(step, 1))})
+
+      _ ->
+        state
     end
   end
 
@@ -1075,6 +1149,7 @@ defmodule Geex.Loop do
       {:file, id, rect} -> bar_or_text_press(state, id, rect, m)
       {:tree, rect} -> tree_press(state, rect, m)
       {:edits, rect} -> edits_press(state, rect, m)
+      {:output, rect} -> output_press(state, rect, m)
       :status -> status_press(state, m.x)
       nil -> state
     end
@@ -1315,6 +1390,7 @@ defmodule Geex.Loop do
     state =
       case {target, region(state, m.x, m.y)} do
         {:edits, _} -> %{state | focus: :edits}
+        {:output, _} -> %{state | focus: :output}
         {:tree, _} -> %{state | focus: :tree}
         {{:split, _}, {:file, id, _rect}} -> enter_pane({:file, id}, state)
         _ -> state
@@ -1393,6 +1469,9 @@ defmodule Geex.Loop do
 
       inside?.(l.tree) ->
         {:tree, l.tree}
+
+      inside?.(l.edits) and state.output != nil ->
+        {:output, l.edits}
 
       inside?.(l.edits) ->
         {:edits, l.edits}
@@ -1521,6 +1600,13 @@ defmodule Geex.Loop do
     end
   end
 
+  # A press in the output pane focuses it and highlights the line pressed (ADR-0042).
+  defp output_press(state, rect, m) do
+    out = state.output
+    out = if m.y > rect.y, do: Output.move(out, out.top + m.y - rect.y - 1 - out.sel), else: out
+    %{state | focus: :output, output: out}
+  end
+
   # A press on the status line's "behind disk (Alt+J)": fast-forward.
   defp status_press(state, x) do
     with {:ok, %{behind: behind} = snap} when behind not in [nil, false] <-
@@ -1614,7 +1700,7 @@ defmodule Geex.Loop do
   defp repaint(state) do
     state = ensure_tree(state)
     layout = layout(state)
-    entries = if layout.edits, do: edits_entries(), else: []
+    entries = if layout.edits && !state.output, do: edits_entries(), else: []
     state = settle_lists(state, layout, entries)
     editing? = focused(state, layout) == :editor
     active = safe_session_snapshot()
@@ -1656,7 +1742,7 @@ defmodule Geex.Loop do
       |> Layout.dividers(state.panes.split)
       |> Enum.reduce(screen, &draw_divider(&2, &1, state.theme))
       |> draw_tree(layout.tree, state)
-      |> draw_edits_pane(layout.edits, state, entries)
+      |> draw_band(layout.edits, state, entries)
 
     {screen, cursor} =
       case active do
@@ -1955,6 +2041,56 @@ defmodule Geex.Loop do
     {candidates, start, rows, state.h - 1 - rows}
   end
 
+  # The band under the editor: the output pane while one is open, else the edits pane.
+  defp draw_band(screen, nil, _state, _entries), do: screen
+
+  defp draw_band(screen, rect, %{output: %Output{}} = state, _entries),
+    do: draw_output_pane(screen, rect, state)
+
+  defp draw_band(screen, rect, state, entries), do: draw_edits_pane(screen, rect, state, entries)
+
+  # The output pane (ADR-0042): a title row with the command and how it is going, then its
+  # lines, the highlighted one tinted while the pane has focus.
+  defp draw_output_pane(
+         screen,
+         %Geex.Rect{x: x, y: y, w: w, h: h},
+         %{theme: %Theme{palette: pal}, output: out} = state
+       ) do
+    focused? = state.focus == :output
+
+    hint =
+      cond do
+        state.shell && state.shell.kind == :show -> " Ctrl-G stops "
+        focused? -> " Enter opens · ! again · q closes "
+        true -> " Alt+P "
+      end
+
+    head = "── " <> Output.title(out, now_ms()) <> " "
+    rule = String.duplicate("─", max(w - Width.string(head) - String.length(hint), 0))
+
+    screen =
+      screen
+      |> Screen.fill_rect(x, y, w, h, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
+      |> Screen.draw_text(x, y, palette_clip(head <> rule <> hint, w), %Cell{
+        fg: pal.line_number,
+        bg: pal.bg
+      })
+
+    out
+    |> Output.rows(h - 1)
+    |> Enum.with_index()
+    |> Enum.reduce(screen, fn {text, i}, acc ->
+      row = y + 1 + i
+      selected? = focused? and out.top + i == out.sel
+      {fg, bg} = if selected?, do: {pal.accent, pal.active_line_bg}, else: {pal.fg, pal.bg}
+      attrs = if selected?, do: pal.mark, else: []
+
+      acc
+      |> Screen.fill_rect(x, row, w, 1, %Cell{char: " ", fg: fg, bg: bg, attrs: attrs})
+      |> Screen.draw_text(x, row, palette_clip(text, w), %Cell{fg: fg, bg: bg, attrs: attrs})
+    end)
+  end
+
   # The edits pane (ADR-0034 §6): a title row, then the entries, the highlighted one tinted
   # while the pane has focus. `nil` when it isn't shown.
   defp draw_edits_pane(screen, nil, _state, _entries), do: screen
@@ -2126,7 +2262,8 @@ defmodule Geex.Loop do
   # The layout for this frame: the tree only once geex knows its root.
   defp layout(state) do
     Layout.resolve(state.w, state.h, %{
-      edits: state.edits_shown,
+      # The band under the editor holds the output pane while one is open (ADR-0042).
+      edits: state.edits_shown or state.output != nil,
       tree: state.tree_shown and safe_start().root != nil,
       tree_w: state.tree_w,
       edits_h: state.edits_h,
@@ -2154,6 +2291,9 @@ defmodule Geex.Loop do
       nil ->
         state
 
+      rect when state.output != nil ->
+        %{state | output: Output.settle(state.output, rect.h - 1)}
+
       rect ->
         n = length(entries)
         sel = min(state.edits_sel, max(n - 1, 0))
@@ -2172,7 +2312,8 @@ defmodule Geex.Loop do
   # Which pane has focus, of those on screen (a pane a resize hid gives it back to the editor).
   defp focused(state, layout) do
     case state.focus do
-      :edits when layout.edits != nil -> :edits
+      :output when layout.edits != nil and state.output != nil -> :output
+      :edits when layout.edits != nil and state.output == nil -> :edits
       :tree when layout.tree != nil -> :tree
       _ -> :editor
     end
@@ -2425,7 +2566,8 @@ defmodule Geex.Loop do
   defp next_pane(state) do
     l = layout(state)
     files = for id <- Panes.ids(state.panes), do: {:file, id}
-    panes = if(l.tree, do: [:tree], else: []) ++ files ++ if(l.edits, do: [:edits], else: [])
+    band = if state.output, do: :output, else: :edits
+    panes = if(l.tree, do: [:tree], else: []) ++ files ++ if(l.edits, do: [band], else: [])
 
     case panes do
       [{:file, _}] ->
@@ -2450,6 +2592,8 @@ defmodule Geex.Loop do
     sel = past_divider(edits_entries(), 0, +1)
     %{state | focus: :edits, edits_sel: sel, edits_view: %{state.edits_view | hold: nil}}
   end
+
+  defp enter_pane(:output, state), do: %{state | focus: :output}
 
   defp enter_pane(:tree, state) do
     state = reload_tree(state)
@@ -2652,6 +2796,225 @@ defmodule Geex.Loop do
 
         rows = Tree.rows(state.tree.index || %{}, open)
         %{state | tree: %{state.tree | open: open, rows: rows, want: rel}}
+    end
+  end
+
+  ## Shell commands (ADR-0042): `!cmd` shows its output in the output pane, `!!` runs the last
+  ## one again, `|cmd` replaces the selection with what the selection piped through `cmd` gives.
+  ## `Geex.Shell` runs each in a process of its own; its answers come to `shell_said/2`.
+
+  defp now_ms, do: System.monotonic_time(:millisecond)
+
+  @running "a command is still running (Ctrl-G stops it)"
+  @needs_tty "this needs a real terminal: run it in a terminal split"
+  @overflow "it printed faster than geex can show it: stopped (pipe it through head or tail)"
+
+  defp run_shell(%{shell: %{}} = state, _cmd), do: %{state | notice: @running}
+
+  defp run_shell(state, cmd) do
+    if Geex.Shell.Text.full_screen?(cmd),
+      do: %{state | notice: @needs_tty, last_shell: cmd},
+      else: start_show(state, cmd)
+  end
+
+  defp start_show(state, cmd) do
+    {pid, ref} = Shell.start(cmd, cwd: file_root())
+    Process.send_after(self(), :geex_shell_tick, 1_000)
+
+    %{
+      state
+      | shell: %{pid: pid, ref: ref, kind: :show, stopping: false, tty: false},
+        output: Output.new(cmd, :show, now_ms()),
+        last_shell: cmd,
+        focus: :output
+    }
+  end
+
+  defp run_pipe(%{shell: %{}} = state, _cmd), do: %{state | notice: @running}
+
+  defp run_pipe(state, cmd) do
+    with false <- Geex.Shell.Text.full_screen?(cmd),
+         %Selection{anchor: a, active: b} = sel when a != b <- state.selection,
+         {:ok, pid} <- safe_active_buffer(),
+         {:ok, %{text: text}} <- safe_buffer_snapshot(pid),
+         range = Selection.range(sel),
+         {:ok, input} <- Doc.slice(Doc.new(text), range) do
+      {rpid, ref} = Shell.start(cmd, cwd: file_root(), input: input)
+
+      shell = %{
+        pid: rpid,
+        ref: ref,
+        kind: :pipe,
+        stopping: false,
+        tty: false,
+        cmd: cmd,
+        buffer: pid,
+        text: text,
+        range: range,
+        input: input,
+        started: now_ms()
+      }
+
+      %{state | shell: shell, notice: "running | #{cmd} (Ctrl-G stops it)"}
+    else
+      true -> %{state | notice: @needs_tty}
+      _ -> %{state | notice: "| needs a selection to pipe (Alt+H starts one)"}
+    end
+  end
+
+  defp stop_shell(%{shell: shell} = state) do
+    Shell.stop(shell.pid)
+    %{state | shell: %{shell | stopping: true}, notice: "stopping…"}
+  end
+
+  defp shell_said({:lines, lines, partial}, %{output: %Output{}} = state),
+    do: %{state | output: Output.add(state.output, lines, partial)}
+
+  # The pane was closed while the command ran: its output goes nowhere.
+  defp shell_said({:lines, _, _}, state), do: state
+
+  defp shell_said(:needs_tty, state),
+    do: %{state | shell: %{state.shell | tty: true}, notice: @needs_tty}
+
+  defp shell_said(:overflow, state),
+    do: %{state | shell: Map.put(state.shell, :overflow, true), notice: @overflow}
+
+  defp shell_said({:exit, status}, %{shell: shell} = state) do
+    Process.demonitor(shell.ref, [:flush])
+
+    how =
+      cond do
+        shell.tty -> :needs_tty
+        shell[:overflow] -> :overflow
+        true -> {:exit, status}
+      end
+
+    output = state.output && Output.finish(state.output, how, now_ms())
+
+    notice =
+      cond do
+        shell.tty -> @needs_tty
+        shell[:overflow] -> @overflow
+        shell.stopping and state.notice == "stopping…" -> nil
+        true -> state.notice
+      end
+
+    %{state | shell: nil, output: output, notice: notice}
+  end
+
+  defp shell_said({:piped, status, out, err}, %{shell: shell} = state) do
+    Process.demonitor(shell.ref, [:flush])
+    state = %{state | shell: nil}
+
+    cond do
+      shell.tty ->
+        %{state | notice: @needs_tty <> "; the text is unchanged"}
+
+      shell.stopping ->
+        %{state | notice: "| #{shell.cmd} stopped; the text is unchanged"}
+
+      out == :too_big ->
+        notice = "| #{shell.cmd} printed more than 64 MB: stopped; the text is unchanged"
+        %{state | notice: notice}
+
+      status != 0 ->
+        output =
+          Output.new(shell.cmd, :pipe, shell.started)
+          |> Output.append(err)
+          |> Output.finish({:exit, status}, now_ms())
+
+        notice = "| #{shell.cmd} failed (exit #{status}); the text is unchanged"
+        %{state | output: output, focus: :output, notice: notice}
+
+      true ->
+        replace_selection(state, shell, out)
+    end
+  end
+
+  # The selection's text, piped, becomes the command's stdout: one recorded edit, yours, so one
+  # Alt+Z takes it back. Only while the buffer is the one shown and unchanged since it began.
+  # Output ending in a newline loses it when the selection didn't end in one (`sort`, `fmt` …).
+  defp replace_selection(state, shell, out) do
+    text = shell.text
+
+    same? =
+      safe_active_buffer() == {:ok, shell.buffer} and
+        match?({:ok, %{text: ^text}}, safe_buffer_snapshot(shell.buffer))
+
+    if same? do
+      out =
+        if String.ends_with?(out, "\n") and not String.ends_with?(shell.input, "\n"),
+          do: String.slice(out, 0..-2//1),
+          else: out
+
+      {from, _to} = shell.range
+      landing = cursor_after_insert(from, out)
+      state = apply_clipboard_edit(state, replace_cmd(shell.range, out), landing)
+      %{state | notice: "| #{shell.cmd} replaced the selection (Alt+Z takes it back)"}
+    else
+      %{state | notice: "the text changed while | #{shell.cmd} ran; nothing replaced"}
+    end
+  end
+
+  # Keys while the output pane has focus: move, Enter opens the `path:line` on the highlighted
+  # line, `!` runs the command again, `q` closes the pane (stopping the command), Esc goes back.
+  defp apply_output_key(event, %{output: out} = state) do
+    case event do
+      e when e in [{:key, :up}, {:alt, ?w}, {:alt, ?W}] ->
+        schedule_repaint(%{state | output: Output.move(out, -1)})
+
+      e when e in [{:key, :down}, {:alt, ?s}, {:alt, ?S}] ->
+        schedule_repaint(%{state | output: Output.move(out, +1)})
+
+      {:key, :home} ->
+        schedule_repaint(%{state | output: Output.move(out, -out.sel)})
+
+      {:key, :end} ->
+        schedule_repaint(%{state | output: Output.move(out, Output.size(out))})
+
+      {:key, :enter} ->
+        schedule_repaint(open_location(state, Output.line(out, out.sel)))
+
+      {:char, "!"} ->
+        cond do
+          state.shell != nil -> %{state | notice: @running}
+          out.kind == :pipe -> %{state | notice: "Alt+M, then Up, runs a | again"}
+          true -> schedule_repaint(run_shell(state, out.cmd))
+        end
+
+      {:char, c} when c in ["q", "Q"] ->
+        schedule_repaint(close_output(state))
+
+      {:key, :esc} ->
+        schedule_repaint(%{state | focus: :editor})
+
+      _ ->
+        panel_chord(event, state)
+    end
+  end
+
+  defp close_output(state) do
+    state = if state.shell && state.shell.kind == :show, do: stop_shell(state), else: state
+    %{state | output: nil, focus: :editor}
+  end
+
+  # Open the file a line of output names, at its line and column.
+  defp open_location(state, nil), do: state
+
+  defp open_location(state, text) do
+    case Geex.Shell.Text.location(text) do
+      nil ->
+        %{state | notice: "no path:line on this line"}
+
+      {path, line, col} ->
+        with {:ok, full} <- FileOps.resolve(path, file_root()),
+             true <- File.regular?(full) do
+          state = do_open(full, state)
+          set_cursor({line - 1, (col || 1) - 1})
+          %{state | goal: (col || 1) - 1, selection: nil}
+        else
+          _ -> %{state | notice: "no such file here: #{path}"}
+        end
     end
   end
 
@@ -3715,7 +4078,46 @@ defmodule Geex.Loop do
   defp close_minibuffer(state) do
     state = stop_matching(state)
     finder = %{state.finder | matches: [], submit: false}
-    schedule_repaint(%{state | minibuffer: Minibuffer.new(), finder: finder, asking: nil})
+    recall = Map.new(state.recall, fn {mode, r} -> {mode, Recall.reset(r)} end)
+
+    schedule_repaint(%{
+      state
+      | minibuffer: Minibuffer.new(),
+        finder: finder,
+        asking: nil,
+        recall: recall
+    })
+  end
+
+  # The line entered, kept in its mode's history (ADR-0042) and written to the history file in
+  # a process of its own.
+  defp remember(%{minibuffer: %Minibuffer{mode: mode} = mb} = state)
+       when is_map_key(state.recall, mode) do
+    state = update_in(state.recall[mode], &Recall.push(&1, Minibuffer.value(mb)))
+
+    if file = state.history_file do
+      lists = Map.new(state.recall, fn {m, r} -> {to_string(m), r.entries} end)
+      spawn(fn -> Recall.save(file, lists) end)
+    end
+
+    state
+  end
+
+  defp remember(state), do: state
+
+  # Up and Down in the minibuffer: an older or newer line from its mode's history.
+  defp recall(%{minibuffer: %Minibuffer{mode: mode} = mb} = state, dir) do
+    r = state.recall[mode]
+    step = if dir == :older, do: Recall.older(r, Minibuffer.value(mb)), else: Recall.newer(r)
+
+    case step do
+      {r, text} ->
+        state = put_in(state.recall[mode], r)
+        schedule_repaint(%{state | minibuffer: Minibuffer.open(mode, text)})
+
+      :none ->
+        state
+    end
   end
 
   # A y/n question before a file operation (`Geex.Loop.FileOps`): `y` runs it; `n`, Enter, Esc
@@ -3756,6 +4158,12 @@ defmodule Geex.Loop do
       _ when mb.mode in @pickers and event in [{:alt, ?s}, {:alt, ?S}, {:key, :down}] ->
         move_palette(state, +1)
 
+      {:key, :up} when is_map_key(state.recall, mb.mode) ->
+        recall(state, :older)
+
+      {:key, :down} when is_map_key(state.recall, mb.mode) ->
+        recall(state, :newer)
+
       {:char, g} ->
         schedule_repaint(refresh_matches(%{state | minibuffer: Minibuffer.insert(mb, g)}))
 
@@ -3794,6 +4202,7 @@ defmodule Geex.Loop do
   # …) apply through the same apply_action/4 the chords use. Unknown input is a no-op.
   # Grid commands (ADR-0027) and the palette (ADR-0028 §3); search and the finder are next.
   defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :grid}} = state) do
+    state = remember(state)
     close_minibuffer(do_grid(Verbs.parse_grid(Minibuffer.value(state.minibuffer)), state))
   end
 
@@ -3847,7 +4256,7 @@ defmodule Geex.Loop do
   # Close first, then act: an action may open the minibuffer again (`buffers` opens its picker).
   defp submit_minibuffer(state) do
     input = Minibuffer.value(state.minibuffer)
-    state = close_minibuffer(state)
+    state = state |> remember() |> close_minibuffer()
 
     case Verbs.parse(input) do
       {:line, n} -> jump_to_line(n, state)
@@ -3855,6 +4264,10 @@ defmodule Geex.Loop do
       {:new, path} -> with_path(state, path, &start_file_op(state, {:new, &1}))
       {:mkdir, path} -> with_path(state, path, &start_file_op(state, {:mkdir, &1}))
       {:rename, path} -> rename_current(state, path)
+      {:shell, cmd} -> run_shell(state, cmd)
+      :shell_again when state.last_shell == nil -> %{state | notice: "no ! command yet"}
+      :shell_again -> run_shell(state, state.last_shell)
+      {:pipe, cmd} -> run_pipe(state, cmd)
       {:action, action} -> apply_verb(action, state)
       :cancel -> state
       :unknown -> state

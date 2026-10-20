@@ -4353,3 +4353,76 @@ in `lib/`):
 - From `a.ex`, `open lib/README.md` opened lib's; `open ../x` was refused with the
   outside-the-root notice.
 - It quit cleanly; the log had no errors.
+
+### 2026-10-19 — shell commands from the minibuffer (ADR-0042)
+
+The maintainer's ask, relayed by the coordinator session: `!cmd`, the output pane, `!!`, `|cmd`
+and the minibuffer's history.
+
+**Measured first:** a port program's process is already a session and group leader
+(`erl_child_setup` calls `setsid()`): a `sh` port started `sleep` twice, `ps` showed all three in
+the shell's group, and `kill -TERM -- -<pid>` ended them all (exit 143, nothing left). dash's
+`set -m` was not an option: without a tty it turns job control off.
+
+**Tests** (1179 + 106 doctests at the first full run, before the flood work below; green twice;
+compile warnings-clean):
+- `shell_test`, against real `sh`:
+  - output with its exit status, in the directory given;
+  - `TERM`/`PAGER`/`GIT_PAGER`, with stdin empty and not a tty;
+  - `stop/1` ending a grandchild `sleep`, checked in `ps` before and after;
+  - an alternate-screen switch split across two writes;
+  - `|` keeping stdout and stderr apart, and a failing `|` leaving no temporary files.
+- `Geex.Shell.Text` doctests: cleaning, the alternate screen, `path:line[:col]` (a URL's port isn't
+  one), the full-screen check.
+- `loop/shell_test`, through `Loop.handle_info/2` with the runner's answers delivered:
+  - `!` output and exit, and Enter on `lib/a.ex:3:2` opening it at 3:2;
+  - `!` in the pane, `q`, `!!`;
+  - Ctrl-G, and a second command refused while one runs;
+  - the alternate-screen stop, and `!vim` not started;
+  - `|sort` as one `:human` edit that one undo takes back;
+  - the trailing newline rule, a failure leaving the text and showing stderr, and nothing
+    replaced when the text changed meanwhile;
+  - the output pane's following and line cap;
+  - Up and Down walking the history back to the draft, and the history file's mode and a corrupt
+    file.
+
+**Live, in tmux** (`mix run`, the scratch repository, scratch `XDG_*` dirs):
+- `!echo start; git status --short; echo "lib/a.ex:3:2: look here"` showed its lines under
+  "exit 0 · 0.0s". Enter on the last line opened `lib/a.ex` at 3:2.
+- `!echo working; sleep 60` counted "running 3s" with "Ctrl-G stops" in the title. Ctrl-G made
+  it "exit 143 · 3.5s", and no `sleep 60` was left.
+- **`!vi list.txt` found a gap,** now closed: under `TERM=dumb`, vim printed "Output is not to a
+  terminal", drew a dumb frame and waited (running 9s) without ever switching screens. Ctrl-G
+  stopped it. Since then a known full-screen program isn't started: after a restart, `!vim
+  list.txt` said "this needs a real terminal: run it in a terminal split", and no vim ran.
+- `!date +%N`, then `!` in the pane, printed a new value; `q` gave the band back to the edits
+  pane.
+- `Alt+B` and `|sort` turned `c b a` into `a b c` ("replaced the selection"); one `Alt+Z` put it
+  back.
+- `|sort --bogus` showed sort's two stderr lines under "| sort --bogus · exit 2". The text was
+  unchanged.
+- Up in the command line gave `|sort --bogus`, then `|sort`. `history.json` was `0600` with the
+  six commands, and after a restart Up gave `|sort --bogus` again.
+- Both runs quit cleanly; the log had no errors or warnings.
+
+**A flood, found live and fixed.** `!seq 1 5000000` froze the editor: the title stayed at
+"running 0s" and a typed key didn't land until the command ended. The loop was splitting and
+cleaning every chunk. Now the runner does that and sends batches (ADR-0042 §1).
+- `yes` under the full suite's load then showed the runner itself falling behind: up to 9,943
+  chunks waiting (about 650 MB). Passing over waiting chunks, and a stop at 2,048, bound it.
+- That first version lost the output's end, since a passed-over chunk could be the last; the
+  newest chunk is now always split. `shell_test` pins it, with every chunk treated as behind.
+- On an idle machine `!seq 1 20000000` still hit the cap. The runner's cleaning cost 18.7 ms
+  per 5,000 lines, against 0.5 ms with the control-byte check compiled once. With the
+  plain-line fast path, the peak queue went from about 450 chunks to 70–124.
+- Live after the fixes: `!seq 1 20000000` ended in 0.4 s and `!seq 1 50000000` in 1.0 s, each
+  with its last number shown. During `!yes` a typed `W` landed at once and the clock counted;
+  Ctrl-G gave "exit 143 · 6.2s".
+
+Final count: 1185 tests + 107 doctests, green twice.
+
+**Not tested:**
+- macOS: the process group rests on the same `erl_child_setup` code, but this was checked on Linux
+  only;
+- the mouse in the output pane, live;
+- the installed release.

@@ -90,6 +90,17 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, :delete_file}
     },
     %Entry{
+      name: "!",
+      description:
+        "Run a shell command in the project root; its output shows below (`!!` again).",
+      invoke: {:typed, "!"}
+    },
+    %Entry{
+      name: "|",
+      description: "Pipe the selection through a shell command and replace it with the output.",
+      invoke: {:typed, "|"}
+    },
+    %Entry{
       name: "tree",
       description: "Show or hide the file tree (Alt+T; Alt+P moves into it).",
       invoke: {:action, :toggle_tree}
