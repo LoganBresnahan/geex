@@ -20,8 +20,8 @@ defmodule Geex.Loop.Verbs do
     * `fast-forward` — take in the file's change on disk (= `Alt+J`, ADR-0034, ADR-0037).
     * `edits` / `tree` — show or hide the edits pane / the file tree (= `Alt+L` / `Alt+T`;
       `Alt+P` moves between the panes). ADR-0034, ADR-0037.
-    * `open PATH` — show a file, opening it if needed; a relative `PATH` is from the current
-      file's directory, and keeps its case. `open` alone or `find` — the file finder (= `Alt+O`,
+    * `open PATH` — show a file, opening it if needed; a relative `PATH` is from the project
+      root (and may not leave it), and keeps its case. `open` alone or `find` — the file finder (= `Alt+O`,
       ADR-0037). `buffers` — pick an open buffer. `close` — close this buffer (= `Alt+K`;
       refused while it has unsaved edits). ADR-0034.
     * `new PATH` — create a file and open it (asking y/n before making a missing directory);

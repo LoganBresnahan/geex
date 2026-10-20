@@ -176,6 +176,48 @@ defmodule Geex.Loop.FileOpsTest do
       refute File.exists?(Path.join(Path.dirname(root), "escape.ex"))
     end
 
+    test "`open PATH` from a file in a subdirectory is from the root, and may not leave it",
+         %{root: root} do
+      File.write!(at(root, "README.md"), "top\n")
+      File.write!(at(root, "lib/README.md"), "not this one\n")
+      state = editing(at(root, "lib/a.ex"))
+
+      state = key(state, {:alt, ?m}) |> type("open README.md") |> key({:key, :enter})
+      assert {:ok, pid} = Geex.BufferSupervisor.whereis(at(root, "README.md"))
+      assert Session.active_buffer() == {:ok, pid}
+      assert Geex.BufferSupervisor.whereis(at(root, "lib/README.md")) == :error
+
+      state = key(state, {:alt, ?m}) |> type("open ../README.md") |> key({:key, :enter})
+      assert state.notice =~ "is outside the project root"
+      assert Session.active_buffer() == {:ok, pid}
+
+      state = key(state, {:alt, ?m}) |> type("open #{at(root, "lib/README.md")}")
+      key(state, {:key, :enter})
+      assert {:ok, _} = Geex.BufferSupervisor.whereis(at(root, "lib/README.md"))
+    end
+
+    test "Alt+O from a file in a subdirectory lists and opens paths from the root",
+         %{root: root} do
+      File.write!(at(root, "README.md"), "top\n")
+      state = editing(at(root, "lib/a.ex")) |> key({:alt, ?o}) |> tree_read()
+      assert state.minibuffer.mode == :files
+      assert Enum.sort(state.finder.matches) == ["README.md", "lib/a.ex"]
+
+      state = type(state, "readme")
+
+      state =
+        if state.finder.matching do
+          assert_receive {:geex_matches, _pid, _} = answer, 5_000
+          elem(Loop.handle_info(answer, state), 1)
+        else
+          state
+        end
+
+      key(state, {:key, :enter})
+      assert {:ok, pid} = Geex.BufferSupervisor.whereis(at(root, "README.md"))
+      assert Session.active_buffer() == {:ok, pid}
+    end
+
     test "the directories `new` made stay in the tree once the file in them is gone",
          %{root: root} do
       state = editing(at(root, "lib/a.ex"))

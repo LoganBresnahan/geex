@@ -108,9 +108,10 @@ coordinator session.
    - `d` deletes the highlighted entry, with the same y/n question. A directory is deleted
      only when it is empty; one with anything in it is refused, before any question.
    - `r` renames the highlighted file or directory, asking for the new path.
-3. **Paths.** A relative path is from the project root (the tree's root), not from the current
-   file as `open PATH` is: the tree names paths from the root, and its keys type them that way.
-   One that leaves the root (`../x`) is refused. An absolute path (`/…`, `~`, `~/…`) goes where
+3. **Paths.** A relative path is from the project root (the tree's root): the tree names paths
+   from the root, and its keys type them that way. `open PATH` does the same since the same day
+   ([ADR-0037](0037-pane-and-file-keys.md)'s second 2026-10-19 amendment). One that leaves the
+   root (`../x`) is refused. An absolute path (`/…`, `~`, `~/…`) goes where
    it says.
 4. **Nothing is deleted, and no missing directory is made, without a y.** The question is a
    minibuffer mode (`:confirm`): `y` runs the step; `n`, Enter, Esc and Alt+N cancel ("nothing
@@ -142,8 +143,8 @@ coordinator session.
 
 - A person can manage files without leaving geex, and every operation either finishes with a
   notice or says why it didn't.
-- Two kinds of relative path now exist: `open` is from the current file, the file operations from
-  the root. Folding `open` onto the root is left for the maintainer to decide.
+- Every path a person types is from the root: the maintainer settled `open` the same day, so
+  there is one kind of relative path.
 - An empty directory shows in the tree only if this run made it
   ([ADR-0034](0034-panes-tree-edits-hold.md)'s 2026-10-19 amendment), since the tree is built
   from a list of files.

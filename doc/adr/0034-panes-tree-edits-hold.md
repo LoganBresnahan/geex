@@ -244,8 +244,9 @@ the hold.
   step 3 with the edits pane: with one pane on screen they would have nothing to switch to (the
   named-consumer rule).
 - `open PATH` (verb and palette): a relative path is resolved from the **current file's
-  directory**, since the working directory is geex's own checkout. A directory is refused with a
-  notice. The path keeps its case (the verb parser lowercases everything else).
+  directory**, since the working directory is geex's own checkout. (Since 2026-10-19 it is from
+  the project root: [ADR-0037](0037-pane-and-file-keys.md)'s amendment.) A directory is refused
+  with a notice. The path keeps its case (the verb parser lowercases everything else).
 - `buffers`: the palette's popup over the open buffers, most recent first, with the **previous**
   one highlighted, so `buffers` + Enter goes back. It is fuzzy-filtered by name and path.
 - `close`: refuses a buffer with unsaved edits, then shows the previous buffer, or a new empty

@@ -556,8 +556,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    and `rename PATH` / `mv PATH` (the buffer, history and cursor move with it; never overwrites).
    In the tree: `a`, `d` (an empty directory only) and `r`. Paths are from the project root,
    and every step runs off the key loop. For the next release.
-   - **Open, for the maintainer:** `open PATH` still resolves from the current file's directory,
-     while these resolve from the root.
+   - **Done the same day** (the maintainer's answer): `open PATH` resolves from the project root
+     too, as the finder (`Alt+O`) already did ([adr/0037](adr/0037-pane-and-file-keys.md)'s
+     amendment).
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the

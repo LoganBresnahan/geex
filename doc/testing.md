@@ -4332,3 +4332,24 @@ inotify tree watcher:
   `session_test` only);
 - the tree without inotify-tools, where it shows an operation's result on the next `Alt+T`/`Alt+O`;
 - the installed release (this is `mix run`); it goes out with the next release.
+
+### 2026-10-19 — `open PATH` is from the project root, as the finder (ADR-0037's amendment)
+
+The maintainer's answer to the question the entry above left open, relayed by the coordinator
+session. `open PATH` now resolves a relative path from the project root (through
+`FileOps.resolve/2`, as the file operations do); one that leaves the root is refused, and
+absolute and `~` paths go anywhere. The finder was already rooted, so its code didn't change.
+
+**Tests** (1158 + 98 doctests, green twice; compile warnings-clean): `file_ops_test` gains two
+loop tests, both from `lib/a.ex` with a `README.md` at the root and another in `lib/`. One checks
+that `open README.md` opens the root's, `open ../README.md` is refused, and an absolute path opens
+lib's. The other checks that `Alt+O` lists `README.md` and `lib/a.ex` from the root and Enter
+on "readme" opens the root's.
+
+**Live, in tmux** (`mix run` on `lib/a.ex` in the scratch repository, `README.md` at the root and
+in `lib/`):
+- `Alt+O` listed `README.md` and `README.md  lib` (name, then directory); Enter on the top match
+  opened the root's.
+- From `a.ex`, `open lib/README.md` opened lib's; `open ../x` was refused with the
+  outside-the-root notice.
+- It quit cleanly; the log had no errors.

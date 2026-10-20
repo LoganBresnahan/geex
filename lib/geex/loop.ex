@@ -3383,10 +3383,11 @@ defmodule Geex.Loop do
   end
 
   # Show `path`, opening it if needed (`open PATH`, ADR-0034). A relative path is from the
-  # current file's directory (the working directory is geex's own checkout, never yours).
-  defp do_open(path, state) do
-    full = resolve_path(path)
+  # project root, as for the file operations and the finder, and may not leave it; an absolute
+  # one goes anywhere (ADR-0037's 2026-10-19 amendment).
+  defp do_open(path, state), do: with_path(state, path, &open_full(path, &1, state))
 
+  defp open_full(path, full, state) do
     cond do
       File.dir?(full) ->
         %{state | notice: "#{path} is a directory"}
@@ -3402,20 +3403,6 @@ defmodule Geex.Loop do
             %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
         end
     end
-  end
-
-  defp resolve_path("~" <> _ = path), do: Path.expand(path)
-
-  defp resolve_path(path) do
-    # The current file's directory; for a pathless buffer, where geex was started (never the
-    # working directory, which is geex's own checkout).
-    base =
-      case safe_session_snapshot() do
-        {:ok, %{path: current}} when is_binary(current) -> Path.dirname(current)
-        _ -> safe_start().dir || File.cwd!()
-      end
-
-    Path.expand(path, base)
   end
 
   # Alt+K / `close` (ADR-0038): close the current tab. A buffer still in another tab or pane stays

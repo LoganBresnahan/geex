@@ -5,7 +5,8 @@
   [ADR-0028](0028-editor-shell-and-minibuffer.md) §3 (the palette moves off `Alt+P`) and
   [ADR-0034](0034-panes-tree-edits-hold.md) §7 (`Alt+O` and `Alt+L` change meaning).
   **Amended 2026-10-18:** `Alt+Y` opens the settings view (ADR-0040 §7). **Amended
-  2026-10-19:** `a`, `d` and `r` in the tree (ADR-0019's amendment).
+  2026-10-19:** `a`, `d` and `r` in the tree (ADR-0019's amendment); `open PATH` is from the
+  project root, as the finder is.
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0026](0026-terminal-input-model.md) (Alt is a secondary, remappable
   namespace; every Alt key has a typed twin), [ADR-0028](0028-editor-shell-and-minibuffer.md)
@@ -74,6 +75,17 @@ letters, not Alt chords: the tree takes no text, so no letter typed there edits 
 `Alt+A`/`Alt+D` already move it. Upper case works too. The tree's title shows `a d r · Enter`
 while it has focus. Their typed twins are `new`, `mkdir`, `delete` and `rename` (`mv`), which act
 on the current file.
+
+## Amendment — 2026-10-19: every path is from the project root
+
+The maintainer's answer, relayed by the coordinator session: `open PATH` resolves a relative
+path from the project root, as the file operations do, no longer from the current file's
+directory ([ADR-0034](0034-panes-tree-edits-hold.md)'s step 2). That was the intent from the
+start. A relative path that leaves the root (`../x`) is refused, and `/…`, `~` and `~/…` still go
+anywhere. `Alt+O`'s finder already was rooted: it lists the root's files as paths from it (the
+name, then its directory) and opens the one picked from the root, wherever the current file is.
+So the tree, the finder, `open`, `new`, `mkdir` and `rename` all name paths the same way
+(`Geex.Loop.FileOps.resolve/2`).
 
 ## See
 
