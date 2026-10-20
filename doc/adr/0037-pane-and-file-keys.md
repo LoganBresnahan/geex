@@ -4,7 +4,8 @@
   built autonomously at the maintainer's word). **Amends** the keys of
   [ADR-0028](0028-editor-shell-and-minibuffer.md) §3 (the palette moves off `Alt+P`) and
   [ADR-0034](0034-panes-tree-edits-hold.md) §7 (`Alt+O` and `Alt+L` change meaning).
-  **Amended 2026-10-18:** `Alt+Y` opens the settings view (ADR-0040 §7).
+  **Amended 2026-10-18:** `Alt+Y` opens the settings view (ADR-0040 §7). **Amended
+  2026-10-19:** `a`, `d` and `r` in the tree (ADR-0019's amendment).
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0026](0026-terminal-input-model.md) (Alt is a secondary, remappable
   namespace; every Alt key has a typed twin), [ADR-0028](0028-editor-shell-and-minibuffer.md)
@@ -62,6 +63,17 @@ motion keys move: `Alt+A`/`Alt+D` (or ←/→, or Tab) change tabs, and `Alt+W`/
 move the highlight. An Alt chord is never typed into the Keys tab's search. Its typed twins are
 the verbs it
 stands over (`theme`, `mouse`, `tree`, `edits`) and `geex install` in the terminal.
+
+## Amendment — 2026-10-19: `a`, `d` and `r` in the tree
+
+With the tree focused, three plain letters act on the highlighted entry
+([ADR-0019](0019-file-lifecycle-and-operation-tools.md)'s 2026-10-19 amendment): `a` adds a file
+(the minibuffer opens with `new DIR/` typed; a trailing `/` makes a directory), `d` deletes after a
+y/n (a directory only when empty), and `r` renames, asking for the new path. They are plain
+letters, not Alt chords: the tree takes no text, so no letter typed there edits anything, and
+`Alt+A`/`Alt+D` already move it. Upper case works too. The tree's title shows `a d r · Enter`
+while it has focus. Their typed twins are `new`, `mkdir`, `delete` and `rename` (`mv`), which act
+on the current file.
 
 ## See
 

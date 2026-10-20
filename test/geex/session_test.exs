@@ -456,6 +456,69 @@ defmodule Geex.SessionTest do
       assert File.read!(to) == "x\n"
       assert log =~ "could not re-key its buffer"
     end
+
+    test "the cursor stays with the buffer, and undo still takes the edit back" do
+      from = tmp_path()
+      to = tmp_path()
+      File.write!(from, "one\ntwo\n")
+      pid = open(from)
+      {:ok, _} = Dispatch.run(insert(1, 0, "2", Meta.human()))
+      Session.set_cursor({1, 2})
+
+      assert {:ok, _} = Session.rename_file(from, to)
+      assert {:ok, %{path: path, cursor: {1, 2}}} = Session.snapshot()
+      assert path == Path.expand(to)
+
+      assert {:ok, %{text: "one\ntwo\n"}, _undone} = Buffer.undo(pid)
+    end
+
+    test "a directory: every buffer open under it moves with it, and nothing else does" do
+      root = Path.join(System.tmp_dir!(), "geex_sess_dir_#{Geex.Fixtures.uniq()}")
+      on_exit(fn -> File.rm_rf(root) end)
+      File.mkdir_p!(Path.join(root, "a/sub"))
+      File.write!(Path.join(root, "a/sub/x.txt"), "x\n")
+      File.write!(Path.join(root, "a.txt"), "beside\n")
+      inner = open(Path.join(root, "a/sub/x.txt"))
+      beside = open(Path.join(root, "a.txt"))
+      {:ok, _} = Dispatch.run(insert(0, 0, "edited ", Meta.human()))
+
+      assert {:ok, _} = Session.rename_file(Path.join(root, "a"), Path.join(root, "b"))
+
+      assert Geex.BufferSupervisor.whereis(Path.join(root, "b/sub/x.txt")) == {:ok, inner}
+      assert Geex.BufferSupervisor.whereis(Path.join(root, "a.txt")) == {:ok, beside}
+      assert Buffer.get_text(beside) == "edited beside\n"
+      assert File.read!(Path.join(root, "b/sub/x.txt")) == "x\n"
+    end
+  end
+
+  describe "make_dir/1 and remove_dir/1 (the TUI's mkdir and tree delete — ADR-0019)" do
+    setup do
+      root = Path.join(System.tmp_dir!(), "geex_sess_mk_#{Geex.Fixtures.uniq()}")
+      on_exit(fn -> File.rm_rf(root) end)
+      %{root: root}
+    end
+
+    test "make_dir makes the parents too, and refuses what exists", %{root: root} do
+      dir = Path.join(root, "x/y")
+      assert Session.make_dir(dir) == {:ok, dir}
+      assert File.dir?(dir)
+      assert Session.make_dir(dir) == {:error, :eexist}
+      File.write!(Path.join(root, "f"), "")
+      assert Session.make_dir(Path.join(root, "f")) == {:error, :eexist}
+    end
+
+    test "remove_dir removes an empty directory and refuses one with anything in it",
+         %{root: root} do
+      File.mkdir_p!(Path.join(root, "full"))
+      File.write!(Path.join(root, "full/keep.txt"), "kept")
+      File.mkdir_p!(Path.join(root, "empty"))
+
+      assert {:error, reason} = Session.remove_dir(Path.join(root, "full"))
+      assert reason in [:eexist, :enotempty]
+      assert File.read!(Path.join(root, "full/keep.txt")) == "kept"
+      assert Session.remove_dir(Path.join(root, "empty")) == {:ok, Path.join(root, "empty")}
+      refute File.exists?(Path.join(root, "empty"))
+    end
   end
 
   describe "close_file/1 (buffer lifecycle — ADR-0019)" do

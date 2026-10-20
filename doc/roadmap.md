@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Since the
+**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14). Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -548,6 +548,16 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    7. **Open:**
       - where the shared pipeline lives (its own repository, or a workflow in each app);
       - how the ERTS is built (from source in CI, or from a trusted precompiled source).
+14. **Create, delete and rename files from the TUI** — the maintainer's ask, relayed by the
+   coordinator session 2026-10-19. **Built 2026-10-19** ([adr/0019](adr/0019-file-lifecycle-and-operation-tools.md)'s
+   amendment; tree keys in [adr/0037](adr/0037-pane-and-file-keys.md)'s, the tree in
+   [adr/0034](adr/0034-panes-tree-edits-hold.md)'s). The typed `new PATH` (asks y/n before
+   making a missing directory), `new DIR/` and `mkdir DIR`, `delete` (y/n, naming unsaved edits)
+   and `rename PATH` / `mv PATH` (the buffer, history and cursor move with it; never overwrites).
+   In the tree: `a`, `d` (an empty directory only) and `r`. Paths are from the project root,
+   and every step runs off the key loop. For the next release.
+   - **Open, for the maintainer:** `open PATH` still resolves from the current file's directory,
+     while these resolve from the root.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the

@@ -4279,3 +4279,56 @@ doesn't exist.
 **Not tested yet:**
 - the v0.3.3 tag's release run and post-release smoke;
 - the first real `geex self update`, from 0.3.2 on the maintainer's machine.
+
+**Later the same day, the coordinator's report:**
+- Release run 39337142108: four builds, then publish, then the post-release smoke on all 7
+  runners, all succeeded. All 11 logs have exactly one "smoke: geex … passed" line and no FAIL,
+  macos-15-intel included.
+- The first real `geex self update`, on the maintainer's machine from 0.3.2: it downloaded
+  geex-0.3.3-linux-x64, installed `versions/0.3.3` and relinked; it removed 0.3.1 and kept
+  0.3.2 (previous) and 0.3.3 (current). `geex --version` → `geex 0.3.3`.
+
+### 2026-10-19 — create, delete and rename files from the TUI (ADR-0019's amendment)
+
+The maintainer's ask, relayed by the coordinator session: typed `new`, `mkdir`, `delete`,
+`rename`/`mv`, and the tree's `a`, `d` and `r` (ADR-0019's, ADR-0034's and ADR-0037's 2026-10-19
+amendments).
+
+**Tests** (1156 + 98 doctests, green twice; compile warnings-clean):
+- `verbs_test`: the new verbs parse, paths keep case and spaces, a trailing `/` on `new` makes a
+  directory, bare `new`/`mkdir` are unknown.
+- `file_ops_test`: `resolve/2` (the root, `..` refused, absolute and `~` allowed); each step
+  against a scratch root (exists refused, a missing parent asked about first, a dirty buffer
+  named in the question, a non-empty directory refused, rename never overwrites); and the same
+  through `Loop.handle_info/2` with each step's answer delivered: typed `new`, `delete` with n
+  then y, `mv` keeping buffer, history and cursor, the tree's `a` (a directory), `d` and `r` (a
+  directory with a file open under it), and the parents `new` made staying in the tree.
+- `session_test`: rename keeps the cursor and undo; a directory rename re-keys the buffers under
+  it and nothing else; `make_dir/1` and `remove_dir/1`.
+
+**Live, in tmux** (`mix run`, a scratch git repository, scratch `XDG_*` dirs), with the real
+inotify tree watcher:
+- Tree `a` on `lib/` showed `geex:new lib/`; `util/` made an empty `lib/util/`, which showed in
+  the tree. `a` there and `x.ex` created the file and opened it in a tab; typing and Ctrl-O saved
+  it.
+- With an unsaved edit, tree `r` asked `rename lib/util/x.ex to:` pre-filled. `y.ex` renamed it:
+  the tab read `y.ex [+]`, the cursor stayed at 1:12, the tree showed `y.ex` (the watcher's
+  read), and `Alt+Z` undid the last typed character.
+- Tree `d` on `lib/util/` (not empty) said "not deleted: lib/util/ isn't empty". `d` on the dirty
+  `y.ex` asked "delete lib/util/y.ex? Its unsaved edits go with it. (y/n)"; `n` said "nothing
+  done" and kept it; `d` then `y` deleted it and closed its tab. `d` on the now-empty `util/`
+  then `y` removed it.
+- Typed: `new ../escape.ex` was refused (outside the root; nothing written); `new README.md` said
+  it exists; `new deep/er/Z.ex` asked "deep/er/ doesn't exist; create it? (y/n)" and `y` made and
+  opened it; `mkdir docs`; `rename deep/Y.ex` moved it; `delete` and `y` deleted it.
+- Found live and fixed: the directories `new` made dropped out of the tree once their file was
+  deleted (now kept, as `mkdir`'s are; checked again in a second run with `new p/q/r.ex` then
+  `delete`). The outside-root notice named the whole root and was cut off; it now says "outside
+  the project root".
+- Both runs quit cleanly with Ctrl-X; the log had no errors, and the discovery file was gone.
+
+**Not tested:**
+- a directory rename with an unsaved buffer under it, live (tested in `file_ops_test` and
+  `session_test` only);
+- the tree without inotify-tools, where it shows an operation's result on the next `Alt+T`/`Alt+O`;
+- the installed release (this is `mix run`); it goes out with the next release.

@@ -24,6 +24,12 @@ defmodule Geex.Loop.Verbs do
       file's directory, and keeps its case. `open` alone or `find` — the file finder (= `Alt+O`,
       ADR-0037). `buffers` — pick an open buffer. `close` — close this buffer (= `Alt+K`;
       refused while it has unsaved edits). ADR-0034.
+    * `new PATH` — create a file and open it (asking y/n before making a missing directory);
+      `new DIR/` or `mkdir DIR` — make a directory; `delete` — delete this file, after a y/n;
+      `rename PATH` / `mv PATH` — move this file, keeping its buffer, history and cursor
+      (`rename` alone asks for the path). Their paths are from the project root and keep their
+      case; one that leaves the root is refused unless it is absolute (`/…`, `~/…`). ADR-0019's
+      2026-10-19 amendment.
     * `split` / `vsplit` — split the pane top and bottom / side by side (= `Alt+-` / `Alt+=`);
       `tab next` / `tab prev` / `tab N` — switch the pane's tab (= `Alt+.` / `Alt+,` /
       `Alt+N`). ADR-0038.
@@ -48,6 +54,7 @@ defmodule Geex.Loop.Verbs do
           {:line, non_neg_integer()}
           | {:action, atom() | {:tab, non_neg_integer()}}
           | {:open, String.t()}
+          | {:new | :mkdir | :rename, String.t()}
           | :cancel
           | :unknown
 
@@ -58,21 +65,46 @@ defmodule Geex.Loop.Verbs do
           | :cancel
           | :unknown
 
-  @doc "Parse one minibuffer input line into a verb. Pure."
+  @doc """
+  Parse one minibuffer input line into a verb. Pure.
+
+      iex> Geex.Loop.Verbs.parse("new lib/New.ex")
+      {:new, "lib/New.ex"}
+      iex> Geex.Loop.Verbs.parse("new lib/util/")
+      {:mkdir, "lib/util"}
+      iex> Geex.Loop.Verbs.parse("mv b.ex")
+      {:rename, "b.ex"}
+  """
   @spec parse(String.t()) :: verb()
   def parse(input) when is_binary(input) do
     trimmed = String.trim(input)
 
-    # `open PATH` before the rest is lowercased: a path keeps its case.
+    # A verb that takes a path, before the rest is lowercased: a path keeps its case.
     case String.split(trimmed, ~r/\s+/, parts: 2) do
-      [verb, path] -> if String.downcase(verb) == "open", do: {:open, path}, else: :lower
+      [verb, path] -> path_verb(String.downcase(verb), path)
       _ -> :lower
     end
     |> case do
       :lower -> trimmed |> String.downcase() |> do_parse()
-      open -> open
+      parsed -> parsed
     end
   end
+
+  defp path_verb("open", path), do: {:open, path}
+  # `new DIR/` makes a directory, as the tree's `a` does with a trailing `/` (ADR-0019).
+  defp path_verb("new", path), do: new_or_mkdir(path)
+  defp path_verb("mkdir", path), do: {:mkdir, trim_slash(path)}
+  defp path_verb(verb, path) when verb in ["rename", "mv"], do: {:rename, path}
+  defp path_verb(_verb, _path), do: :lower
+
+  defp new_or_mkdir(path) do
+    if String.ends_with?(path, "/") and trim_slash(path) != "",
+      do: {:mkdir, trim_slash(path)},
+      else: {:new, path}
+  end
+
+  defp trim_slash("/"), do: "/"
+  defp trim_slash(path), do: String.trim_trailing(path, "/")
 
   @doc """
   Parse a `:grid`-mode line (ADR-0027): `copy`/`cut` over a coordinate **range**, `goto`
@@ -128,6 +160,10 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("select all"), do: {:action, :select_all}
   defp do_parse("save"), do: {:action, :save}
   defp do_parse("fast-forward"), do: {:action, :fast_forward}
+  # The file operations on the current file (ADR-0019's 2026-10-19 amendment): `delete` asks
+  # y/n first; `rename` alone asks for the new path.
+  defp do_parse("delete"), do: {:action, :delete_file}
+  defp do_parse(verb) when verb in ["rename", "mv"], do: {:action, :rename_file}
   defp do_parse("buffers"), do: {:action, :buffers}
   defp do_parse("close"), do: {:action, :close}
   defp do_parse("edits"), do: {:action, :toggle_edits}

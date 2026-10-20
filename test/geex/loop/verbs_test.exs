@@ -113,4 +113,30 @@ defmodule Geex.Loop.VerbsTest do
       assert Verbs.parse("copy that") == :unknown
     end
   end
+
+  describe "parse/1 — the file operations (ADR-0019's 2026-10-19 amendment)" do
+    doctest Geex.Loop.Verbs
+
+    test "new, mkdir and rename/mv take a path, which keeps its case and spaces" do
+      assert Verbs.parse("new lib/My File.ex") == {:new, "lib/My File.ex"}
+      assert Verbs.parse("NEW  README.md ") == {:new, "README.md"}
+      assert Verbs.parse("mkdir Docs/") == {:mkdir, "Docs"}
+      assert Verbs.parse("rename lib/B.ex") == {:rename, "lib/B.ex"}
+      assert Verbs.parse("mv ~/x.txt") == {:rename, "~/x.txt"}
+    end
+
+    test "new with a trailing / makes a directory; / alone is still a path" do
+      assert Verbs.parse("new a/b/") == {:mkdir, "a/b"}
+      assert Verbs.parse("new /") == {:mkdir, "/"}
+    end
+
+    test "delete and a bare rename/mv act on the current file; a bare new or mkdir is unknown" do
+      assert Verbs.parse("delete") == {:action, :delete_file}
+      assert Verbs.parse("rename") == {:action, :rename_file}
+      assert Verbs.parse("mv") == {:action, :rename_file}
+      assert Verbs.parse("new") == :unknown
+      assert Verbs.parse("mkdir") == :unknown
+      assert Verbs.parse("delete it") == :unknown
+    end
+  end
 end

@@ -114,10 +114,29 @@ defmodule Geex.Session do
   buffer surfaces `{:error, :enoent}`; but a buffer opened on a not-yet-saved path is re-keyed
   in memory (a later `save_file` writes it to `to`). Not a recorded edit. Returns
   `{:ok, {from_expanded, to_expanded}}`.
+
+  `from` can be a directory: every buffer open under it is re-keyed to the same place under
+  `to`, the same way (the TUI's tree `r`, ADR-0019's 2026-10-19 amendment).
   """
   @spec rename_file(String.t(), String.t()) :: {:ok, {String.t(), String.t()}} | {:error, term()}
   def rename_file(from, to) when is_binary(from) and is_binary(to),
     do: GenServer.call(__MODULE__, {:rename_file, from, to})
+
+  @doc """
+  Make the directory `path`, and any parents missing (ADR-0019's 2026-10-19 amendment: the TUI's
+  `mkdir`, and `new` once you've said yes to its parents). Refuses one that already exists, as a
+  directory or anything else (`{:error, :eexist}`). Returns `{:ok, expanded_path}`.
+  """
+  @spec make_dir(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def make_dir(path) when is_binary(path), do: GenServer.call(__MODULE__, {:make_dir, path})
+
+  @doc """
+  Remove the directory `path`, only while it is empty: one with anything in it is refused with
+  the posix reason (`{:error, :eexist}` or `:enotempty`, by platform), and nothing under it is
+  touched. Returns `{:ok, expanded_path}`.
+  """
+  @spec remove_dir(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def remove_dir(path) when is_binary(path), do: GenServer.call(__MODULE__, {:remove_dir, path})
 
   @doc """
   Close an open buffer, freeing it — the file on disk is left untouched (ADR-0019).
@@ -314,7 +333,12 @@ defmodule Geex.Session do
         true ->
           case File.rename(f, t) do
             :ok ->
-              {{:ok, {f, t}}, rekey_buffer(f, t, state)}
+              state =
+                Enum.reduce(buffers_under(f), rekey_buffer(f, t, state), fn path, state ->
+                  rekey_buffer(path, String.replace_prefix(path, f, t), state)
+                end)
+
+              {{:ok, {f, t}}, state}
 
             # A never-saved buffer has no file on disk yet (`open_file` on a missing path is
             # a valid empty buffer, created on first save — ADR-0019), so `File.rename` fails
@@ -333,6 +357,22 @@ defmodule Geex.Session do
       end
 
     {:reply, reply, state}
+  end
+
+  def handle_call({:make_dir, path}, _from, state) do
+    full = Path.expand(path)
+
+    reply =
+      if File.exists?(full),
+        do: {:error, :eexist},
+        else: with(:ok <- File.mkdir_p(full), do: {:ok, full})
+
+    {:reply, reply, state}
+  end
+
+  def handle_call({:remove_dir, path}, _from, state) do
+    full = Path.expand(path)
+    {:reply, with(:ok <- File.rmdir(full), do: {:ok, full}), state}
   end
 
   def handle_call({:close_file, path}, _from, state) do
@@ -498,6 +538,13 @@ defmodule Geex.Session do
     end
 
     state
+  end
+
+  # The paths of the buffers open under the directory `dir` (none when `dir` was a file).
+  defp buffers_under(dir) do
+    Geex.Registry
+    |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+    |> Enum.filter(&(is_binary(&1) and String.starts_with?(&1, dir <> "/")))
   end
 
   # The buffer can die between the `whereis` and this call (it is `:temporary`); the disk

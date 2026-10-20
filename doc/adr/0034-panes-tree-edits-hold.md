@@ -10,6 +10,8 @@
   follows files coming and going (`Geex.Tree.Watcher`), and reconcile's watch isn't recursive.
   Rewritten the same day after the maintainer's redirect: the first draft's follow pane is dropped.
   **Amended** 2026-10-18 again: the edits list is kept across restarts (`edits.jsonl`).
+  **Amended** 2026-10-19: the tree's file operations (empty directories made here show; what an
+  operation made is highlighted; edits rows keep a renamed file's old path).
 - **Date:** 2026-10-15
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell; it deferred tabs and
   the file tree "behind the pane system"), [ADR-0014](0014-editor-state-and-dispatch-ownership.md)
@@ -438,6 +440,26 @@ coordinator session proposed the design.
 - **The gap.** Edits made while no geex runs aren't in the list: captAInHook's POSTs have
   nowhere to go. (The payload spools attestations for the ledgers, ADR-0033, but not rows for
   this list.) A backfill from captAInHook's own log could come later; it is out of scope here.
+
+### Amended 2026-10-19: the tree's file operations
+
+[ADR-0019](0019-file-lifecycle-and-operation-tools.md)'s 2026-10-19 amendment gives the tree
+`a`, `d` and `r` (add, delete, rename) and the minibuffer `new`, `mkdir`, `delete` and `rename`.
+For the tree and the edits list:
+
+- **An empty directory made here shows.** The tree is built from a list of files, so a directory
+  with none never had a row. The loop keeps the directories this run made (`mkdir`, a trailing
+  `/`, or the parents `new` made), and each read adds the ones that still exist
+  (`Geex.Tree.put_dirs/2`). Deleting one is how an empty directory leaves the tree. A directory
+  that was empty before geex started still doesn't show.
+- **What an operation made is highlighted** once the next read lists it, with the directories
+  above it opened. A renamed directory stays open under its new name.
+- **The tree follows by itself.** The operation doesn't read the tree again: the watcher (the
+  2026-10-18 amendment) sees the create, delete or move and the read follows, as for a change
+  made outside geex. Checked live (testing.md, 2026-10-19).
+- **The edits list keeps old paths.** A rename doesn't rewrite rows: they record what happened
+  to that path then, and `edits.jsonl` is append-only. Enter on one says the file no longer
+  exists.
 
 ## Consequences
 

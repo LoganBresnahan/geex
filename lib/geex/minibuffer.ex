@@ -15,22 +15,25 @@ defmodule Geex.Minibuffer do
   display column), and `:palette` (the command palette, [ADR-0028](../../doc/adr/0028-editor-shell-and-minibuffer.md)
   §3 — the `input` is a fuzzy filter over `Geex.Command.Catalog` and `sel` is the highlighted
   candidate row), `:buffers` (the open buffers, the same way), and `:files` (the fuzzy file
-  finder, `Alt+O` — the input filters the root's files through `Geex.Finder`). Incremental search
-  is the next mode.
+  finder, `Alt+O` — the input filters the root's files through `Geex.Finder`), `:confirm` (a y/n
+  question, before a file operation deletes something or makes a missing directory) and `:ask` (a
+  path typed under a question, the tree's `r`; ADR-0019's 2026-10-19 amendment). Both carry their
+  question in `ask`, shown as the prompt. Incremental search is the next mode.
 
   `sel` is the only non-text state: the palette's highlighted-candidate index. Editing the input
   resets it to `0` (the top match) — the loop owns moving it (it knows the candidate count to
   clamp against), the struct just carries and resets it.
   """
 
-  defstruct mode: :inactive, input: "", cursor: 0, sel: 0
+  defstruct mode: :inactive, input: "", cursor: 0, sel: 0, ask: nil
 
-  @type mode :: :inactive | :command | :grid | :palette | :buffers | :files
+  @type mode :: :inactive | :command | :grid | :palette | :buffers | :files | :confirm | :ask
   @type t :: %__MODULE__{
           mode: mode(),
           input: String.t(),
           cursor: non_neg_integer(),
-          sel: non_neg_integer()
+          sel: non_neg_integer(),
+          ask: String.t() | nil
         }
 
   @doc "A closed (inactive) minibuffer."
@@ -45,6 +48,18 @@ defmodule Geex.Minibuffer do
   @spec open(mode(), String.t()) :: t()
   def open(mode \\ :command, input \\ "") when mode != :inactive and is_binary(input),
     do: %__MODULE__{mode: mode, input: input, cursor: length(String.graphemes(input))}
+
+  @doc """
+  Open the minibuffer to ask `question`: `:confirm` (y/n) or `:ask` (a typed answer, pre-filled
+  with `input`). The question is the prompt.
+
+      iex> mb = Geex.Minibuffer.ask(:confirm, "delete a.ex? (y/n) ")
+      iex> Geex.Minibuffer.prompt(mb)
+      "delete a.ex? (y/n) "
+  """
+  @spec ask(:confirm | :ask, String.t(), String.t()) :: t()
+  def ask(mode, question, input \\ "") when mode in [:confirm, :ask] and is_binary(question),
+    do: %{open(mode, input) | ask: question}
 
   @doc "Whether the minibuffer is capturing input."
   @spec active?(t()) :: boolean()
@@ -66,6 +81,7 @@ defmodule Geex.Minibuffer do
   def prompt(%__MODULE__{mode: :palette}), do: "palette:"
   def prompt(%__MODULE__{mode: :buffers}), do: "buffer:"
   def prompt(%__MODULE__{mode: :files}), do: "open:"
+  def prompt(%__MODULE__{mode: mode, ask: ask}) when mode in [:confirm, :ask], do: ask
   def prompt(%__MODULE__{}), do: ""
 
   @doc """

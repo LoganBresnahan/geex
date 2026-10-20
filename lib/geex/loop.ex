@@ -65,7 +65,7 @@ defmodule Geex.Loop do
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
-  alias Geex.Loop.{EditsPane, Keymap, Mouse, Panes, ScrollBar, Settings, TabBar, Verbs}
+  alias Geex.Loop.{EditsPane, FileOps, Keymap, Mouse, Panes, ScrollBar, Settings, TabBar, Verbs}
   alias Geex.MCP.ViewActions
 
   # Rows of context kept between the cursor and the top/bottom of the viewport
@@ -306,6 +306,12 @@ defmodule Geex.Loop do
       # Ctrl-O was just refused over a leftover conflict block: the next key, if it is
       # Ctrl-O again, saves anyway (ADR-0034 §3).
       save_armed: false,
+      # The file operations under way (`new`, `delete`, `rename`, the tree's a/d/r; ADR-0019's
+      # 2026-10-19 amendment), each in a process of its own: `%{pid => monitor}`. `asking` is the
+      # step to run when the minibuffer's `:confirm` gets a yes, or `{:rename, from}` while its
+      # `:ask` waits for the new path.
+      file_ops: %{},
+      asking: nil,
       # The edits pane (ADR-0034 §6): shown at start when the terminal has 20 rows; `edits`
       # toggles it (Alt+L). `focus` is where keys go (`Alt+P`); `edits_sel` its highlighted entry.
       edits_shown: h >= 20,
@@ -322,6 +328,9 @@ defmodule Geex.Loop do
       # (`settle_lists/3`, ADR-0039).
       # `again` when the files changed on disk while a read ran (`Geex.Tree.Watcher`), so it
       # reads once more when that one answers.
+      # `made` the directories made here (`mkdir`, the tree's `a`), shown while they exist even
+      # empty, which a list of files can't show; `want` the path to highlight once a read
+      # lists it (what `new`, `mkdir` or `rename` just made).
       tree: %{
         index: nil,
         files: nil,
@@ -331,7 +340,9 @@ defmodule Geex.Loop do
         rows: [],
         sel: 0,
         top: 0,
-        hold: nil
+        hold: nil,
+        made: MapSet.new(),
+        want: nil
       },
       # The file finder (Alt+O, `:files` minibuffer mode): the best paths for the typed query;
       # `matching` the search's `{pid, monitor}` until they arrive; `submit` when Enter came
@@ -632,17 +643,34 @@ defmodule Geex.Loop do
       ) do
     Process.demonitor(ref, [:flush])
     rows = Tree.rows(index, tree.open)
-    # The highlight stays on its row's path when rows come or go above it.
+    wanted = tree.want && Enum.find_index(rows, &(&1.path == tree.want))
+
+    # What a file operation just made, once listed; else the highlight stays on its row's path
+    # when rows come or go above it.
     sel =
-      with %{path: path} <- Enum.at(tree.rows, tree.sel),
+      with nil <- wanted,
+           %{path: path} <- Enum.at(tree.rows, tree.sel),
            i when is_integer(i) <- Enum.find_index(rows, &(&1.path == path)) do
         i
       else
+        i when is_integer(i) -> i
         _ -> min(tree.sel, max(length(rows) - 1, 0))
       end
 
     again = tree.again
-    tree = %{tree | index: index, files: files, reading: nil, again: false, rows: rows, sel: sel}
+    want = if wanted, do: nil, else: tree.want
+
+    tree = %{
+      tree
+      | index: index,
+        files: files,
+        reading: nil,
+        again: false,
+        rows: rows,
+        sel: sel,
+        want: want
+    }
+
     # An open finder searches the new list; if Enter is waiting and no search is needed (a blank
     # query), it opens the first file now.
     state = refresh_matches(%{state | tree: tree})
@@ -709,6 +737,23 @@ defmodule Geex.Loop do
     finder = %{state.finder | matching: nil, submit: false}
     notice = "the file search failed (see #{Geex.log_file()})"
     {:noreply, schedule_repaint(%{state | finder: finder, notice: notice})}
+  end
+
+  # A file operation's step answered (`start_file_op/2`).
+  def handle_info({:geex_file_op, pid, answer}, %{file_ops: ops} = state)
+      when is_map_key(ops, pid) do
+    Process.demonitor(Map.fetch!(ops, pid), [:flush])
+    state = %{state | file_ops: Map.delete(ops, pid)}
+    {:noreply, schedule_repaint(file_op_done(answer, state))}
+  end
+
+  # A file operation's step died before answering: say so.
+  def handle_info({:DOWN, _ref, :process, pid, reason}, %{file_ops: ops} = state)
+      when is_map_key(ops, pid) do
+    Logger.warning("geex files: a file operation failed: #{inspect(reason)}")
+    state = %{state | file_ops: Map.delete(ops, pid)}
+    notice = "the file operation failed (see #{Geex.log_file()})"
+    {:noreply, schedule_repaint(%{state | notice: notice})}
   end
 
   # An install the settings view started died without answering; any other `:DOWN` is nothing.
@@ -1983,7 +2028,7 @@ defmodule Geex.Loop do
   defp draw_tree(screen, %Geex.Rect{w: w, h: h}, %{theme: %Theme{palette: pal}} = state) do
     focused? = state.focus == :tree
     inner = max(w - 1, 0)
-    hint = if focused?, do: " Enter ", else: ""
+    hint = if focused?, do: " a d r · Enter ", else: ""
     title = "── files " <> String.duplicate("─", max(inner - 9 - String.length(hint), 0)) <> hint
 
     screen =
@@ -2316,16 +2361,22 @@ defmodule Geex.Loop do
 
       root ->
         loop = self()
-        reader = spawn_monitor(fn -> send(loop, {:geex_tree, self(), read_tree(root, loop)}) end)
+        made = MapSet.to_list(state.tree.made)
+
+        reader =
+          spawn_monitor(fn -> send(loop, {:geex_tree, self(), read_tree(root, made, loop)}) end)
+
         put_in(state.tree.reading, reader)
     end
   end
 
-  # The read also hands the watcher the directories it found, so new files there are seen.
-  defp read_tree(root, loop) do
+  # The read also hands the watcher the directories it found, so new files there are seen. The
+  # directories made here that still exist are listed too, empty or not.
+  defp read_tree(root, made, loop) do
     files = Tree.list(root)
     Tree.Watcher.watch(root, Tree.Watcher.dirs_of(files), loop)
-    {Finder.pack(files), Tree.index(files)}
+    made = Enum.filter(made, &File.dir?(Path.join(root, &1)))
+    {Finder.pack(files), Tree.put_dirs(Tree.index(files), made)}
   end
 
   # Search the files for the finder's query (Alt+O), in a process of its own: the list can be
@@ -2461,9 +2512,156 @@ defmodule Geex.Loop do
       e when e in [{:key, :esc}] ->
         schedule_repaint(%{state | focus: :editor})
 
+      # Add, delete, rename (ADR-0019's 2026-10-19 amendment): the typed verbs' twins, through
+      # the same steps.
+      {:char, c} when c in ["a", "A"] ->
+        dir = if(is_map(row), do: if(row.dir?, do: row.path, else: Path.dirname(row.path)))
+        prefix = if dir in [nil, "."], do: "new ", else: "new #{dir}/"
+        schedule_repaint(%{state | minibuffer: Minibuffer.open(:command, prefix)})
+
+      {:char, c} when c in ["d", "D"] and is_map(row) ->
+        start_file_op(state, {:delete, Path.join(file_root(), row.path)})
+
+      {:char, c} when c in ["r", "R"] and is_map(row) ->
+        shown = if row.dir?, do: row.path <> "/", else: row.path
+        ask_rename(state, Path.join(file_root(), row.path), shown, row.path)
+
       _ ->
         panel_chord(event, state)
     end
+  end
+
+  ## File operations (ADR-0019's 2026-10-19 amendment): `new`, `mkdir`, `delete`, `rename`, and
+  ## the tree's a/d/r. Each step touches the disk, so it runs in a process of its own (ADR-0035)
+  ## and the loop acts on its answer (`Geex.Loop.FileOps`).
+
+  # Where a typed path is from: the project root (the tree's root), else where geex started.
+  defp file_root do
+    start = safe_start()
+    start.root || start.dir || File.cwd!()
+  end
+
+  defp start_file_op(state, op) do
+    loop = self()
+    root = file_root()
+
+    {pid, ref} =
+      spawn_monitor(fn -> send(loop, {:geex_file_op, self(), FileOps.step(op, root)}) end)
+
+    %{state | file_ops: Map.put(state.file_ops, pid, ref)}
+  end
+
+  # A typed path to an absolute one, then `fun` on it; a relative one that leaves the root is
+  # refused.
+  defp with_path(state, path, fun) do
+    case FileOps.resolve(path, file_root()) do
+      {:ok, full} ->
+        fun.(full)
+
+      {:error, :outside_root} ->
+        notice = "#{path} is outside the project root; type an absolute path to go there"
+        %{state | notice: notice}
+    end
+  end
+
+  # The current tab's file, or a notice for a buffer with none.
+  defp with_current_file(state, verb, fun) do
+    case current_buffer(state) && safe_status(current_buffer(state)) do
+      %{path: path} when is_binary(path) -> fun.(path)
+      _ -> %{state | notice: "nothing to #{verb}: this buffer has no file"}
+    end
+  end
+
+  # Ask for the new path of `from`, pre-filled with `input`.
+  defp ask_rename(state, from, shown, input) do
+    mb = Minibuffer.ask(:ask, "rename #{shown} to: ", input)
+    schedule_repaint(%{state | minibuffer: mb, asking: {:rename, from}})
+  end
+
+  defp file_op_done({:done, notice}, state), do: %{state | notice: notice}
+
+  defp file_op_done({:confirm, question, op}, state),
+    do: %{state | minibuffer: Minibuffer.ask(:confirm, question), asking: op}
+
+  # The directories above a new file count as made here (`new` may have made them): they stay
+  # listed while they exist, even once the file is gone.
+  defp file_op_done({:open, full, notice}, state) do
+    state =
+      case tree_path(full) do
+        nil -> state
+        rel -> update_in(state.tree.made, &Enum.into(ancestors(Path.dirname(rel)), &1))
+      end
+
+    state = want_in_tree(state, full)
+    state = do_open(full, state)
+    %{state | notice: state.notice || notice}
+  end
+
+  defp file_op_done({:made_dir, full, notice}, state) do
+    state =
+      case tree_path(full) do
+        nil -> state
+        rel -> update_in(state.tree.made, &MapSet.put(&1, rel))
+      end
+
+    %{want_in_tree(state, full) | notice: notice}
+  end
+
+  # A moved directory keeps its place in the tree: open, or made here, under its new name.
+  defp file_op_done({:renamed, from, to, notice}, state) do
+    state =
+      case {tree_path(from), tree_path(to)} do
+        {from_rel, to_rel} when is_binary(from_rel) and is_binary(to_rel) ->
+          move = fn set -> MapSet.new(set, &moved(&1, from_rel, to_rel)) end
+          state = update_in(state.tree.open, move)
+          update_in(state.tree.made, move)
+
+        _ ->
+          state
+      end
+
+    %{want_in_tree(state, to) | notice: notice}
+  end
+
+  defp moved(path, from, to) do
+    cond do
+      path == from -> to
+      String.starts_with?(path, from <> "/") -> String.replace_prefix(path, from, to)
+      true -> path
+    end
+  end
+
+  # The tree's path for `full` (relative to the root), or nil outside it.
+  defp tree_path(full) do
+    root = safe_start().root
+    if root && String.starts_with?(full, root <> "/"), do: Path.relative_to(full, root)
+  end
+
+  # Highlight `full` in the tree once a read lists it, with the directories above it open.
+  defp want_in_tree(state, full) do
+    case tree_path(full) do
+      nil ->
+        state
+
+      rel ->
+        open =
+          rel
+          |> Path.dirname()
+          |> ancestors()
+          |> Enum.reduce(state.tree.open, &MapSet.put(&2, &1))
+
+        rows = Tree.rows(state.tree.index || %{}, open)
+        %{state | tree: %{state.tree | open: open, rows: rows, want: rel}}
+    end
+  end
+
+  # "a/b" → ["a", "a/b"]; "." → [].
+  defp ancestors("."), do: []
+
+  defp ancestors(dir) do
+    dir
+    |> Path.split()
+    |> Enum.scan(&Path.join(&2, &1))
   end
 
   # The chords that work from either panel (ADR-0037): the minibuffer, the palette, the next
@@ -3530,7 +3728,30 @@ defmodule Geex.Loop do
   defp close_minibuffer(state) do
     state = stop_matching(state)
     finder = %{state.finder | matches: [], submit: false}
-    schedule_repaint(%{state | minibuffer: Minibuffer.new(), finder: finder})
+    schedule_repaint(%{state | minibuffer: Minibuffer.new(), finder: finder, asking: nil})
+  end
+
+  # A y/n question before a file operation (`Geex.Loop.FileOps`): `y` runs it; `n`, Enter, Esc
+  # and Alt+N don't. Other keys wait for an answer; the quit keys still quit.
+  defp apply_minibuffer_key(event, %{minibuffer: %Minibuffer{mode: :confirm}} = state) do
+    case event do
+      {:char, c} when c in ["y", "Y"] ->
+        op = state.asking
+        start_file_op(close_minibuffer(state), op)
+
+      e when e in [{:char, "n"}, {:char, "N"}, {:key, :enter}, {:key, :esc}] ->
+        %{close_minibuffer(state) | notice: "nothing done"}
+
+      {:alt, c} when c in [?n, ?N] ->
+        %{close_minibuffer(state) | notice: "nothing done"}
+
+      {:ctrl, c} when c in [?x, ?q, ?c] ->
+        Geex.stop()
+        state
+
+      _ ->
+        state
+    end
   end
 
   # Keys while the minibuffer is open go to its input; Enter submits, Alt+N / Esc cancels,
@@ -3624,6 +3845,18 @@ defmodule Geex.Loop do
     end
   end
 
+  # The new path for a rename (`rename` alone, the tree's `r`); an empty one changes nothing.
+  defp submit_minibuffer(
+         %{minibuffer: %Minibuffer{mode: :ask} = mb, asking: {:rename, from}} = state
+       ) do
+    state = close_minibuffer(state)
+
+    case String.trim(Minibuffer.value(mb)) do
+      "" -> state
+      to -> with_path(state, to, &start_file_op(state, {:rename, from, &1}))
+    end
+  end
+
   # Close first, then act: an action may open the minibuffer again (`buffers` opens its picker).
   defp submit_minibuffer(state) do
     input = Minibuffer.value(state.minibuffer)
@@ -3632,10 +3865,19 @@ defmodule Geex.Loop do
     case Verbs.parse(input) do
       {:line, n} -> jump_to_line(n, state)
       {:open, path} -> do_open(path, state)
+      {:new, path} -> with_path(state, path, &start_file_op(state, {:new, &1}))
+      {:mkdir, path} -> with_path(state, path, &start_file_op(state, {:mkdir, &1}))
+      {:rename, path} -> rename_current(state, path)
       {:action, action} -> apply_verb(action, state)
       :cancel -> state
       :unknown -> state
     end
+  end
+
+  defp rename_current(state, path) do
+    with_current_file(state, "rename", fn from ->
+      with_path(state, path, &start_file_op(state, {:rename, from, &1}))
+    end)
   end
 
   # Run a picker's candidate, by Enter or a click (ADR-0039): a file opens, a buffer shows, a
@@ -3753,6 +3995,19 @@ defmodule Geex.Loop do
   # A typed verb needs the same cursor + text context a keystroke has — fetch it fresh.
   # :quit must work with no buffer open (you can always type `quit`); the rest no-op.
   defp apply_verb(:quit, state), do: apply_action(:quit, {0, 0}, "", state)
+
+  # `delete` checks what's there and asks y/n (`Geex.Loop.FileOps`); `rename` alone asks for
+  # the path.
+  defp apply_verb(:delete_file, state),
+    do: with_current_file(state, "delete", &start_file_op(state, {:delete, &1}))
+
+  defp apply_verb(:rename_file, state) do
+    with_current_file(state, "rename", fn from ->
+      shown = FileOps.name(from, file_root())
+      ask_rename(state, from, shown, shown)
+    end)
+  end
+
   # Switching and closing buffers need no text either (and work with none active).
   defp apply_verb(action, state)
        when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane, :find_file] or

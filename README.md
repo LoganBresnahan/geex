@@ -56,6 +56,19 @@ geex --help             # every command
 In the editor, `Ctrl-X` quits. `Alt+Y` opens the settings: languages, themes, every key, and
 general options such as the mouse.
 
+Files are made, deleted and renamed from the editor. `Alt+M` opens the command line:
+
+```text
+new lib/thing.ex        # create a file and open it (asks before making a missing directory)
+new lib/util/           # a trailing / makes a directory; so does `mkdir lib/util`
+rename lib/other.ex     # move this file, keeping its unsaved edits and undo history (also `mv`)
+delete                  # delete this file, after a y/n
+```
+
+Paths are from the project root; an absolute path (`/…`, `~/…`) goes anywhere. In the file tree
+(`Alt+T` shows it, `Alt+P` moves into it), `a` adds a file or directory where the highlight is,
+`d` deletes the highlighted entry (a directory only when it's empty), and `r` renames it.
+
 ## Languages and themes
 
 geex ships with no grammar and no theme: out of the box it draws in your terminal's own colours

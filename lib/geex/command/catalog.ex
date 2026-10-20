@@ -14,9 +14,9 @@ defmodule Geex.Command.Catalog do
   **Scope (ADR-0028 §3, decision "A").** v1 lists the **human command vocabulary that exists
   today** — the clipboard / history / selection verbs, `save`, `quit`, and `line`. It deliberately
   does **not** yet union the agent-only MCP tool descriptors (`tools/list`): the raw edit
-  primitives (`insert`/`delete`/`replace`) are not human "commands" (you type to edit), and the
-  file-path operations (`open`/`close`/`create`/…) need the **fuzzy finder** to supply a path —
-  both arrive later. Exposing these verbs as agent-visible tools is the **grid-agent-parity** work
+  primitives (`insert`/`delete`/`replace`) are not human "commands" (you type to edit). The
+  file operations arrived as the human's own: `open` is the fuzzy finder, `new`/`mkdir` take a
+  typed path, and `rename`/`delete` act on the current file (ADR-0019's 2026-10-19 amendment). Exposing these verbs as agent-visible tools is the **grid-agent-parity** work
   that follows; when it lands, those descriptors fold into this catalog and `Verbs` can resolve
   against it too. One catalog, many surfaces — the same instinct as ADR-0003.
   """
@@ -67,6 +67,27 @@ defmodule Geex.Command.Catalog do
       name: "close",
       description: "Close this tab; the buffer too, unless it has unsaved changes (Alt+K).",
       invoke: {:action, :close}
+    },
+    %Entry{
+      name: "new",
+      description:
+        "Create a file, from the project root, and open it (`new DIR/` makes a directory).",
+      invoke: {:typed, "new"}
+    },
+    %Entry{
+      name: "mkdir",
+      description: "Make a directory, from the project root.",
+      invoke: {:typed, "mkdir"}
+    },
+    %Entry{
+      name: "rename",
+      description: "Rename or move this file, keeping its undo history (also `mv PATH`).",
+      invoke: {:action, :rename_file}
+    },
+    %Entry{
+      name: "delete",
+      description: "Delete this file from disk, after a y/n.",
+      invoke: {:action, :delete_file}
     },
     %Entry{
       name: "tree",

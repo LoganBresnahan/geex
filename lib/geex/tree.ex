@@ -56,6 +56,26 @@ defmodule Geex.Tree do
     |> Map.new(fn {:ok, entry} -> entry end)
   end
 
+  @doc """
+  `index` with each of `dirs` (relative paths) in it as a directory, empty unless files are
+  already there: a directory just made shows before anything is in it (ADR-0019's 2026-10-19
+  amendment). A path a file already holds is left alone.
+
+      iex> Geex.Tree.index(["lib/a.ex"]) |> Geex.Tree.put_dirs(["lib/new", "doc"])
+      %{"doc" => %{}, "lib" => %{"a.ex" => :file, "new" => %{}}}
+  """
+  @spec put_dirs(index(), [String.t()]) :: index()
+  def put_dirs(index, dirs), do: Enum.reduce(dirs, index, &put_dir(Path.split(&1), &2))
+
+  defp put_dir([], index), do: index
+
+  defp put_dir([name | rest], index) do
+    case Map.get(index, name, %{}) do
+      :file -> index
+      sub -> Map.put(index, name, put_dir(rest, sub))
+    end
+  end
+
   defp top(path), do: path |> :binary.split("/") |> hd()
 
   defp rest(path) do

@@ -3,6 +3,18 @@ defmodule Geex.MinibufferTest do
 
   alias Geex.Minibuffer
 
+  doctest Geex.Minibuffer
+
+  test "ask/3 opens :confirm or :ask with its question as the prompt; close forgets it" do
+    mb = Minibuffer.ask(:ask, "rename a.ex to: ", "a.ex")
+    assert Minibuffer.active?(mb)
+
+    assert {Minibuffer.prompt(mb), Minibuffer.value(mb), mb.cursor} ==
+             {"rename a.ex to: ", "a.ex", 4}
+
+    assert Minibuffer.close(mb).ask == nil
+  end
+
   test "new/0 is inactive; open/1 activates it empty" do
     assert Minibuffer.active?(Minibuffer.new()) == false
     mb = Minibuffer.open(:command)
