@@ -37,7 +37,7 @@ printf 'hello world\nx中yz hello\n' > "$SB/t.txt"   # include a wide glyph — 
 ## Handle 1 — the TUI through a tmux pty
 
 The loop needs raw-mode `:prim_tty`, which an agent shell lacks ("not a tty");
-tmux supplies the pty. The launcher bakes `PATH` in (asdf shims) and the flags:
+tmux supplies the pty. The launcher bakes `PATH` in (mise shims) and the flags:
 
 ```sh
 cat > "$SB/launch.sh" <<EOF

@@ -6,7 +6,7 @@ description: Build this checkout into geex's release tarball and install it as ~
 # /deploy — build and install `geex`
 
 `mix geex.deploy` does the build and the install. This skill adds the bar before it and the live
-check after it. The build carries the OTP that runs Mix (asdf's, here), so it runs on this
+check after it. The build carries the OTP that runs Mix (mise's, here), so it runs on this
 machine; a portable build is CI's, with the runtime `rel/build-runtime.sh` makes
 ([ADR-0041](../../../doc/adr/0041-release-without-burrito.md)).
 
