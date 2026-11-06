@@ -591,6 +591,11 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      with Page Up/Down in the parser and `Geex.Cell`'s `:strike`; (6) the ADR amendments and the
      docs. The maintainer looks at it once it's built; merging to main and releasing wait for
      that.
+   - **Built so far:** (1) 2026-11-06: `markdown_inline` in the catalog (`for: "markdown"`), the
+     render queries checked by `mix geex.catalog`, the fixtures, the cached render handles.
+   - **Before merging:** publish the `catalog-v3` release (`_build/catalog/dist/*`, not-latest,
+     ADR-0041 §5). `catalog_release` names it, so until it exists every install from the built-in
+     catalog fails on this branch.
    - **Later, if wanted:** included ranges in the NIF (faster inline parsing, and injections for
      source highlighting); marking the blocks the last write changed, by who wrote them.
 

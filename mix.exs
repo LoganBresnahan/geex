@@ -5,7 +5,7 @@ defmodule Geex.MixProject do
   # The GitHub release the embedded catalog's packages are on (ADR-0040 §2). Bumped only when the
   # catalog changes, not with every version: a catalog release holds the full set of packages, and
   # a geex build names the release of the catalog it embeds.
-  @catalog_release "v0.2.0"
+  @catalog_release "catalog-v3"
 
   def project do
     [

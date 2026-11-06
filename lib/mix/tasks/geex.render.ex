@@ -1,10 +1,10 @@
 defmodule Mix.Tasks.Geex.Render do
-  @shortdoc "Spike: print a markdown file as the read-only preview would draw it"
+  @shortdoc "Print a markdown file as the read-only preview draws it"
   @moduledoc """
-  **Spike** for the read-only markdown preview (ADR-0043 to come): parse a markdown file with
-  the installed tree-sitter grammars (`Geex.Markdown.Parse`), lay it out at a width
-  (`Geex.Markdown.Layout`) and print it in a theme's colours (`Geex.Markdown.Style`), so the
-  preview's look can be judged before any UI.
+  The markdown preview's development tool ([ADR-0043](../../../doc/adr/0043-markdown-preview.md)
+  §8), as `mix geex.highlight` is highlighting's: parse a markdown file with the installed
+  Markdown and Markdown inline grammars (`Geex.Markdown.Parse`), lay it out at a width
+  (`Geex.Markdown.Layout`) and print it in a theme's colours (`Geex.Markdown.Style`).
 
       mix geex.render README.md
       mix geex.render doc/vision.md --width 72 --map --stats
@@ -15,9 +15,8 @@ defmodule Mix.Tasks.Geex.Render do
     would keep its place by)
   - `--stats`: sizes and timings on stderr
   - `--plain`: no colour
-  - `--inline-wasm PATH`: the inline grammar, not packaged yet (default
-    `_build/markdown_inline/parser.wasm`; build it with `tree-sitter build --wasm -o PATH
-    <tree-sitter-markdown>/tree-sitter-markdown-inline`)
+
+  Both grammars must be installed (`geex install markdown markdown_inline`).
 
   Fenced code is highlighted by the installed grammar for its language. Loads the app without
   starting it, like `mix geex.highlight`.
@@ -32,8 +31,7 @@ defmodule Mix.Tasks.Geex.Render do
     theme: :string,
     map: :boolean,
     stats: :boolean,
-    plain: :boolean,
-    inline_wasm: :string
+    plain: :boolean
   ]
   @gutter 6
   @aliases %{
@@ -77,9 +75,15 @@ defmodule Mix.Tasks.Geex.Render do
 
     {load_us, grammars} =
       :timer.tc(fn ->
-        case Parse.load(inline_wasm: opts[:inline_wasm]) do
-          {:ok, grammars} -> grammars
-          {:error, message} -> Mix.raise("geex render: #{message}")
+        case Geex.Markdown.handles() do
+          {:ok, grammars} ->
+            grammars
+
+          {:error, {:missing, names}} ->
+            Mix.raise("geex render: geex install #{Enum.join(names, " ")}")
+
+          {:error, :update} ->
+            Mix.raise("geex render: the Markdown grammars need an update")
         end
       end)
 

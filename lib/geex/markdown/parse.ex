@@ -1,7 +1,8 @@
 defmodule Geex.Markdown.Parse do
   @moduledoc """
-  **Spike** for the read-only markdown preview (ADR-0043 to come): a markdown document as a tree
-  of byte-ranged nodes, from the installed tree-sitter markdown grammars.
+  The markdown preview's parser ([ADR-0043](../../../doc/adr/0043-markdown-preview.md) §4): a
+  markdown document as a tree of byte-ranged nodes, from the installed tree-sitter markdown
+  grammars, loaded with geex's own queries (`Geex.Markdown.handles/0`).
 
   It adds no NIF surface. `TreeSitterWasm.highlight/3` returns every capture of the query a
   grammar was loaded with, so the block grammar loaded with `@block_query` (structure, not
@@ -95,8 +96,6 @@ defmodule Geex.Markdown.Parse do
             hard_break html_tag entity latex)a
          |> Map.new(&{Atom.to_string(&1), &1})
 
-  @default_inline_wasm "_build/markdown_inline/parser.wasm"
-
   @type tree :: %{
           type: atom(),
           s: non_neg_integer(),
@@ -106,48 +105,19 @@ defmodule Geex.Markdown.Parse do
   @type grammars :: %{block: TreeSitterWasm.grammar(), inline: TreeSitterWasm.grammar()}
 
   @doc """
-  The two grammars loaded with the render queries: the installed Markdown (block) grammar, and
-  the inline grammar from `:inline_wasm` (default `#{@default_inline_wasm}`, not packaged yet).
+  geex's render query for a grammar: the block query for `markdown`, the inline query for
+  `markdown_inline`, otherwise nil. They ship with geex, not in the packages, so `mix
+  geex.catalog` compiles them against the grammars it builds (ADR-0043 §7).
+
+      iex> Geex.Markdown.Parse.query("markdown") =~ "(pipe_table) @table"
+      true
+      iex> Geex.Markdown.Parse.query("json")
+      nil
   """
-  @spec load(keyword()) :: {:ok, grammars()} | {:error, String.t()}
-  def load(opts \\ []) do
-    inline_path = Keyword.get(opts, :inline_wasm) || @default_inline_wasm
-
-    with {:ok, dir} <- markdown_dir(),
-         {:ok, block_wasm} <- read(Path.join(dir, "parser.wasm")),
-         {:ok, inline_wasm} <- read(inline_path),
-         {:ok, block} <- compile(block_wasm, "markdown", @block_query),
-         {:ok, inline} <- compile(inline_wasm, "markdown_inline", @inline_query) do
-      {:ok, %{block: block, inline: inline}}
-    end
-  end
-
-  defp markdown_dir do
-    case Geex.Installed.grammar("markdown") do
-      %{"dir" => dir} -> {:ok, dir}
-      _ -> {:error, "the Markdown grammar isn't installed (geex install markdown)"}
-    end
-  end
-
-  defp read(path) do
-    case File.read(path) do
-      {:ok, bytes} -> {:ok, bytes}
-      {:error, posix} -> {:error, "#{path}: #{:file.format_error(posix)}"}
-    end
-  end
-
-  defp compile(wasm, name, query) do
-    opts =
-      case Geex.Highlight.Grammars.cache_dir() do
-        nil -> []
-        dir -> [cache_dir: dir]
-      end
-
-    case TreeSitterWasm.load_grammar(wasm, name, query, opts) do
-      {:ok, grammar} -> {:ok, grammar}
-      {:error, reason} -> {:error, "#{name}: #{reason}"}
-    end
-  end
+  @spec query(String.t()) :: String.t() | nil
+  def query("markdown"), do: @block_query
+  def query("markdown_inline"), do: @inline_query
+  def query(_name), do: nil
 
   @doc """
   Parse `text` into a tree. The stats count the block captures and the inline calls, with the

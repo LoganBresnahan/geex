@@ -552,13 +552,20 @@ defmodule Geex.Loop do
         end
       end)
 
-    display =
+    notice =
       case Geex.Installed.grammar(name) do
-        %{"display" => display} when is_binary(display) -> display
-        _ -> name
+        # Markdown's companion highlights nothing: it is what the preview needs (ADR-0043 §7).
+        %{"display" => display, "for" => "markdown"} when is_binary(display) ->
+          "#{display} installed: the Markdown preview is available"
+
+        %{"display" => display} when is_binary(display) ->
+          "#{display} highlighting installed"
+
+        _ ->
+          "#{name} highlighting installed"
       end
 
-    {:noreply, schedule_repaint(%{state | notice: "#{display} highlighting installed"})}
+    {:noreply, schedule_repaint(%{state | notice: notice})}
   end
 
   # An install the settings view started has finished: say how it went there, and do what was

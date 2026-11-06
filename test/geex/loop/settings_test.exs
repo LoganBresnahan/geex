@@ -112,6 +112,27 @@ defmodule Geex.Loop.SettingsTest do
       assert {_, :quit} = Settings.key(view, {:ctrl, ?x}, [], 30)
     end
 
+    test "Markdown's companion is listed after it as the preview's, not as a language" do
+      # ADR-0043 §7: markdown_inline highlights no file; it is what the Markdown preview needs.
+      rows = Settings.rows(Settings.open(), %{})
+      names = Enum.map(rows, & &1.name)
+      at = Enum.find_index(names, &(&1 == "markdown"))
+      assert Enum.at(names, at + 1) == "markdown_inline"
+      assert [label | _] = Enum.at(rows, at + 1).cells
+      assert label == "Markdown inline (preview)"
+      assert hd(Enum.at(rows, at).cells) == "Markdown"
+    end
+
+    test "geex install --list labels the companion too" do
+      import ExUnit.CaptureIO
+      out = capture_io(fn -> assert Geex.CLI.install(["--list"]) == 0 end)
+
+      [line] =
+        out |> String.split("\n") |> Enum.filter(&String.starts_with?(&1, "markdown_inline "))
+
+      assert line =~ "Markdown inline (preview)"
+    end
+
     test "installed rows draw in the palette's accent, highlighted or not" do
       pal = %{Geex.Fixtures.birds().palette | accent: {:rgb, 1, 2, 3}}
       fg_at = fn screen, y -> Screen.get_cell(screen, 1, y).fg end

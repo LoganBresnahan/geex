@@ -86,7 +86,7 @@ defmodule Geex.Loop.Settings do
 
       %{
         name: e["name"],
-        cells: [e["display"], kb(e["size"]), status],
+        cells: [Geex.Markdown.label(e), kb(e["size"]), status],
         status: status,
         installed: status in ["installed", "update available"]
       }

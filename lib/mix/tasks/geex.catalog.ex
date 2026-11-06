@@ -18,7 +18,9 @@ defmodule Mix.Tasks.Geex.Catalog do
      `PATH`, else `~/.cargo/bin`.
   3. **Merge** the recipe's highlights, an inherited grammar's included, into one
      `highlights.scm`, each part headed by where it came from.
-  4. **Check** it loads: `TreeSitterWasm.load_grammar/3` must accept the wasm and the query.
+  4. **Check** it loads: `TreeSitterWasm.load_grammar/3` must accept the wasm and the query, and
+     for markdown and markdown_inline also geex's own render query (`Geex.Markdown.Parse`,
+     ADR-0043 §7), so a grammar change that breaks the preview stops the build.
   5. **Pack** `parser.wasm`, `highlights.scm`, `manifest.json` and the upstream licence files
      into a deterministic zip (`Geex.Catalog.Package`), named by its hash, in
      `_build/catalog/dist/`.
@@ -38,7 +40,7 @@ defmodule Mix.Tasks.Geex.Catalog do
   alias Geex.Catalog.Package
 
   @cli_version "0.26.9"
-  # The release the assets go on: mix.exs's `catalog_release` (`v0.2.0`). It holds the whole
+  # The release the assets go on: mix.exs's `catalog_release` (`catalog-v3`). It holds the whole
   # catalog, and is bumped only when the catalog changes (ADR-0040 §2).
   @releases "https://github.com/LoganBresnahan/geex/releases/download/"
   @catalog "catalog/catalog.json"
@@ -110,6 +112,8 @@ defmodule Mix.Tasks.Geex.Catalog do
       {:error, reason} -> Mix.raise("geex catalog: #{recipe.name} doesn't load: #{reason}")
     end
 
+    check_render_query!(recipe.name, wasm)
+
     abi =
       case Package.abi(File.read!(Path.join([gdir, "src", "parser.c"]))) do
         {:ok, abi} -> abi
@@ -128,6 +132,8 @@ defmodule Mix.Tasks.Geex.Catalog do
       "tree_sitter_cli" => @cli_version
     }
 
+    manifest = if for = recipe[:for], do: Map.put(manifest, "for", for), else: manifest
+
     licenses = for f <- recipe.license_files, do: {f, File.read!(Path.join(dir, f))}
 
     files =
@@ -138,6 +144,31 @@ defmodule Mix.Tasks.Geex.Catalog do
       ] ++ licenses
 
     entry(:grammar, manifest, Package.zip(files), base)
+  end
+
+  @doc """
+  Check geex's render query for grammar `name` (`Geex.Markdown.Parse.query/1`, none for most)
+  against the `wasm` just built, and stop the build if it doesn't compile. The render queries
+  ship with geex, not in the packages (ADR-0043 §7), so this is where a grammar change that
+  breaks them is caught.
+  """
+  @spec check_render_query!(String.t(), binary(), String.t() | nil) :: :ok
+  def check_render_query!(name, wasm, query \\ :geex) do
+    query = if query == :geex, do: Geex.Markdown.Parse.query(name), else: query
+
+    case query do
+      nil ->
+        :ok
+
+      query ->
+        case TreeSitterWasm.load_grammar(wasm, name, query) do
+          {:ok, _grammar} ->
+            :ok
+
+          {:error, reason} ->
+            Mix.raise("geex catalog: #{name} doesn't load geex's render query: #{reason}")
+        end
+    end
   end
 
   # The recipe's query files, in order, each headed by where it came from. A file from another

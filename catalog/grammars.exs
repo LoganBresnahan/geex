@@ -6,6 +6,8 @@
 #   path        the grammar's directory in the repository
 #   extensions  file-name endings it highlights (".app.src" works as well as ".rs")
 #   filenames   whole file names it highlights
+#   for         (optional) the grammar this one is a companion of: it highlights no file itself,
+#               names no file endings, and is listed beside that grammar (ADR-0043 §7)
 #   license     SPDX id; `license_files` are copied into the package from the repository root
 #   highlights  the query files merged into one highlights.scm, as {grammar, path}: a query
 #               inherited from another grammar names that grammar's recipe, so every package
@@ -148,6 +150,23 @@
     license: "MIT",
     license_files: ["LICENSE"],
     highlights: [{"markdown", "tree-sitter-markdown/queries/highlights.scm"}]
+  },
+  # Markdown's companion (ADR-0043 §7): the inline grammar the preview runs over each paragraph,
+  # heading and table cell. It highlights no file of its own, so it names no file endings, and
+  # `for` says whose companion it is.
+  %{
+    name: "markdown_inline",
+    display: "Markdown inline",
+    for: "markdown",
+    repo: "https://github.com/tree-sitter-grammars/tree-sitter-markdown",
+    tag: "v0.5.3",
+    commit: "f969cd3ae3f9fbd4e43205431d0ae286014c05b5",
+    path: "tree-sitter-markdown-inline",
+    extensions: [],
+    filenames: [],
+    license: "MIT",
+    license_files: ["LICENSE"],
+    highlights: [{"markdown_inline", "tree-sitter-markdown-inline/queries/highlights.scm"}]
   },
   %{
     name: "python",

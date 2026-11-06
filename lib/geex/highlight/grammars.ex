@@ -67,19 +67,47 @@ defmodule Geex.Highlight.Grammars do
   defp build(%{"dir" => dir}), do: dir
   defp build(nil), do: nil
 
-  @doc "Drop `language`'s cached handle, so the next use compiles the package now installed."
+  @doc """
+  A cached handle for `language` loaded with `query`, geex's own query instead of the package's
+  `highlights.scm`: the markdown preview's render handles ([ADR-0043](../../../doc/adr/0043-markdown-preview.md)
+  §4). Cached as `handle/1` caches, under its own key, tagged with the install's sha256 and the
+  query, checked against `abi/0` first, and dropped by `forget/1`. Errors as `handle/1`'s.
+  """
+  @spec render_handle(String.t(), String.t()) ::
+          {:ok, TreeSitterWasm.grammar()} | {:error, term()}
+  def render_handle(language, query) when is_binary(language) and is_binary(query) do
+    tag = {build(Installed.grammar(language)), :erlang.phash2(query)}
+    key = {__MODULE__, :render, language}
+
+    case :persistent_term.get(key, :miss) do
+      {^tag, grammar} ->
+        {:ok, grammar}
+
+      _miss_or_stale ->
+        with {:ok, grammar} <- compile(language, fn _dir -> {:ok, query} end) do
+          :persistent_term.put(key, {tag, grammar})
+          {:ok, grammar}
+        end
+    end
+  end
+
+  @doc """
+  Drop `language`'s cached handles (the highlight handle and the render handle), so the next use
+  compiles the package now installed.
+  """
   @spec forget(String.t()) :: :ok
   def forget(language) do
     _ = :persistent_term.erase({__MODULE__, language})
+    _ = :persistent_term.erase({__MODULE__, :render, language})
     :ok
   end
 
-  defp compile(language) do
+  defp compile(language, query \\ &File.read(Path.join(&1, "highlights.scm"))) do
     with %{"dir" => dir} = manifest <-
            Installed.grammar(language) || {:error, {:unknown_language, language}},
          :ok <- check_abi(manifest),
          {:ok, wasm} <- File.read(Path.join(dir, "parser.wasm")),
-         {:ok, scm} <- File.read(Path.join(dir, "highlights.scm")) do
+         {:ok, scm} <- query.(dir) do
       load_grammar(wasm, language, scm)
     else
       {:error, posix} when is_atom(posix) -> {:error, {:grammar_read, posix}}

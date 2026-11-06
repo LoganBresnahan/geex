@@ -2,7 +2,8 @@ defmodule Geex.Fixtures do
   @moduledoc """
   The grammars and the theme the tests use ([ADR-0040](../../doc/adr/0040-bare-geex-and-the-catalog.md)
   §1: geex ships none). `test/fixtures/grammars/{elixir,json}` are tree-sitter builds with their
-  queries and manifests, and `test/fixtures/themes/birds-of-paradise.json` the native theme; NOTICE
+  queries and manifests; `markdown` and `markdown_inline` are the catalog's own packages (the
+  markdown preview's grammars, ADR-0043 §7), rebuilt whenever their recipe's commit moves, and `test/fixtures/themes/birds-of-paradise.json` the native theme; NOTICE
   says where each came from.
 
   `test_helper.exs` installs them (`install/1`) into the test data directory before the suite,
@@ -19,6 +20,10 @@ defmodule Geex.Fixtures do
   """
   @spec uniq() :: String.t()
   def uniq, do: "#{System.pid()}_#{System.unique_integer([:positive])}"
+
+  @doc "The fixture grammars' names."
+  @spec grammars() :: [String.t()]
+  def grammars, do: ["elixir", "json", "markdown", "markdown_inline"]
 
   @doc "A fixture grammar's directory: `parser.wasm`, `highlights.scm`, `manifest.json`."
   @spec grammar_dir(String.t()) :: Path.t()
@@ -41,7 +46,7 @@ defmodule Geex.Fixtures do
   """
   @spec install(Path.t()) :: :ok
   def install(data_dir) do
-    for name <- ["elixir", "json"] do
+    for name <- grammars() do
       dir = Path.join([data_dir, "grammars", name])
       File.mkdir_p!(dir)
 

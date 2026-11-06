@@ -33,13 +33,28 @@ defmodule Geex.CatalogTest do
 
   test "each grammar names its file endings, an ABI the NIF loads, and its upstream commit" do
     for g <- Catalog.grammars() do
-      assert g["extensions"] != [] or g["filenames"] != [], g["name"]
+      # A companion (ADR-0043 §7) highlights no file of its own.
+      if g["for"], do: :ok, else: assert(g["extensions"] != [] or g["filenames"] != [], g["name"])
       assert g["abi"] in 13..15, g["name"]
       assert g["upstream"]["commit"] =~ ~r/\A[0-9a-f]{40}\z/
     end
 
     endings = Enum.flat_map(Catalog.grammars(), & &1["extensions"])
     assert length(endings) == length(Enum.uniq(endings)), "an ending claimed twice"
+  end
+
+  test "a companion grammar names a catalog grammar, and no file endings (ADR-0043 §7)" do
+    companions = Enum.filter(Catalog.grammars(), & &1["for"])
+    names = Enum.map(Catalog.grammars(), & &1["name"])
+
+    assert Enum.map(companions, &{&1["name"], &1["for"]}) == [{"markdown_inline", "markdown"}]
+
+    for g <- companions do
+      assert g["for"] in names and g["for"] != g["name"], g["name"]
+      assert g["extensions"] == [] and g["filenames"] == [], g["name"]
+      # It is built from its grammar's repository and commit.
+      assert g["upstream"] == Catalog.grammar(g["for"])["upstream"]
+    end
   end
 
   test "file names match the right grammar" do

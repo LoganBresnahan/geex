@@ -4648,3 +4648,52 @@ parser, and `$…$` is math only by GitHub's rule.
 No code changed, so the suite is as it was.
 
 **Not tested:** all of it is design; none of the preview is built.
+
+### 2026-11-06 — the markdown preview, slice 1: the companion package, fixtures, render handles (ADR-0043 §4, §7)
+
+The first of roadmap item 16's six slices, on the branch `markdown-preview`. Nothing in the
+editor's UI changed except three labels.
+
+**Built:**
+- **`markdown_inline` in the catalog**, Markdown's companion: markdown's repository, tag and
+  commit at `tree-sitter-markdown-inline`, no file endings, its own highlights, and a new recipe
+  key carried into the manifest, `for: "markdown"`. `catalog_release` is now `catalog-v3` and the
+  whole catalog was rebuilt: every other package zipped to the same bytes (same sha256 and asset
+  name), so only their URLs moved. Alt+Y's Languages tab and `geex install --list` label it
+  "Markdown inline (preview)" (it sorts right after Markdown), and installing it says "the
+  Markdown preview is available" instead of "… highlighting installed".
+- **The render queries are checked by the catalog build**: `mix geex.catalog` compiles
+  `Geex.Markdown.Parse.query/1`'s block and inline queries against the markdown and
+  markdown_inline it builds, and stops if either fails (it passed for v0.5.3).
+- **Fixtures**: `test/fixtures/grammars/{markdown,markdown_inline}`, the catalog packages'
+  `parser.wasm`, `highlights.scm` and `manifest.json`, installed by `Geex.Fixtures` with the
+  others and listed in `NOTICE`. A test pins their upstream to the recipe's repository, tag and
+  commit, so a recipe bump that leaves them behind fails the suite.
+- **The render handles**: `Grammars.render_handle/2` loads a grammar with geex's own query,
+  cached under `{Grammars, :render, name}` and tagged with the install's sha256 and the query's
+  hash, behind the same ABI gate as `handle/1`; `forget/1` drops it with the highlight handle.
+  `Geex.Markdown.handles/1` gives both or why not: `{:missing, names}`, or `:update` for an ABI
+  geex doesn't load or a query that doesn't compile, described as "Markdown preview needs an
+  update (Alt+Y)", never the engine's message. `mix geex.render` now reads both from the install;
+  `_build/markdown_inline` is no longer used.
+
+**Tests for the review's failure cases (F31, F32):** the catalog test's file-endings rule exempts a
+grammar with `for` and checks it names a catalog grammar; an ABI-12 companion gives `:update`
+without reaching the engine; a query naming an unknown node gives `{:engine, _}` from the handle,
+is not cached, and `:update` from `handles/1`; a replaced package (another sha256) is compiled
+again; `forget/1` drops both handles; the catalog's check raises on a broken query; the three
+labels. The label and notice tests were written first and seen failing; the handle tests were
+written after the code.
+
+**Checked by hand:** `mix geex.catalog` (17 grammars, 15 themes), its catalog.json diffed against
+the previous one (one new entry; every other entry differs only in `url`); in a scratch
+`data_dir`, `mix geex.render README.md` first fails with "geex install markdown markdown_inline",
+then both install from `GEEX_CATALOG_URL=file://…/_build/catalog/dist` (the zips pass `Install`'s
+checks with `for` and no endings), `--list` shows the label, and README renders.
+
+1204 tests + 111 doctests green twice; compile warnings-clean.
+
+**Not tested:** installing from the public catalog. **Merge blocker:** `catalog-v3` isn't published,
+so on this branch every install from the built-in catalog fails until it is. Publishing it is a
+release and waits for the maintainer; until then dogfood with `GEEX_CATALOG_URL` pointed at
+`_build/catalog/dist`.

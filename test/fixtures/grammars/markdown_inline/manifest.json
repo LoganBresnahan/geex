@@ -1,0 +1,1 @@
+{"abi":15,"display":"Markdown inline","extensions":[],"filenames":[],"for":"markdown","kind":"grammar","license":"MIT","name":"markdown_inline","tree_sitter_cli":"0.26.9","upstream":{"commit":"f969cd3ae3f9fbd4e43205431d0ae286014c05b5","repo":"https://github.com/tree-sitter-grammars/tree-sitter-markdown","tag":"v0.5.3"}}

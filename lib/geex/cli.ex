@@ -291,7 +291,8 @@ defmodule Geex.CLI do
             pkg -> if Geex.Installed.update?(pkg), do: "update", else: "installed"
           end
 
-        [e["name"], kind, e["display"], "#{div(e["size"] + 1023, 1024)} KB", status]
+        display = if kind == "grammar", do: Geex.Markdown.label(e), else: e["display"]
+        [e["name"], kind, display, "#{div(e["size"] + 1023, 1024)} KB", status]
       end
 
     widths = for i <- 0..3, do: rows |> Enum.map(&String.length(Enum.at(&1, i))) |> Enum.max()
