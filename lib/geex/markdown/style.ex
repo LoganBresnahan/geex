@@ -1,18 +1,34 @@
 defmodule Geex.Markdown.Style do
   @moduledoc """
-  **Spike** for the read-only markdown preview (ADR-0043 to come): the colours and attributes a
-  run's roles (`Geex.Markdown.Layout`) get under a theme.
+  The colours and attributes a markdown preview run's roles (`Geex.Markdown.Layout`) get under
+  a theme ([ADR-0043](../../../doc/adr/0043-markdown-preview.md) §5), resolved when drawing.
 
   Themes style tree-sitter captures, and few of them style markdown's, so each role tries the
   captures a theme might style for it and falls back to the palette: headings and links to
   `accent`, code's tint to `active_line_bg`, borders and rules to `line_number`. Roles apply in
-  order, outermost first, so a link inside a heading is the link's colour, bold.
+  order, outermost first, so a link inside a heading is the link's colour, bold. A code run's
+  `{:captures, names}` takes the first capture the theme styles, the colour the editor gives the
+  same byte (`Geex.Highlight.Paint`). When the palette has no tint for code (`active_line_bg` is
+  `:default`: the terminal theme with no OSC 11 answer), a code row's gutter is drawn as a `▏`
+  bar in `line_number`, so a block with no language still reads as code.
 
-  `:strike` is one attribute `Geex.Cell` doesn't have yet; the spike's printer writes it.
+  `:strike` is one attribute `Geex.Cell` doesn't have yet; `mix geex.render` writes it.
   """
 
   alias Geex.Theme
   alias Geex.Theme.Style
+
+  @doc """
+  A run as drawn under `theme`: its text and its style.
+  """
+  @spec run(Theme.t(), {String.t(), [term()]}) :: {String.t(), Style.t()}
+  def run(%Theme{} = theme, {text, roles}) do
+    style = resolve(theme, roles)
+
+    if :code_gutter in roles and not tinted?(theme),
+      do: {"▏", %{style | fg: muted(theme)}},
+      else: {text, style}
+  end
 
   @doc "The style for `roles` under `theme`."
   @spec resolve(Theme.t(), [term()]) :: Style.t()
@@ -53,9 +69,15 @@ defmodule Geex.Markdown.Style do
   defp role(role, st, t) when role in [:html, :meta],
     do: %{st | fg: pick(t, ["comment"], muted(t))}
 
-  defp role({:style, %Style{} = s}, st, _t) do
-    fg = if s.fg == :default, do: st.fg, else: s.fg
-    %{st | fg: fg, attrs: Enum.uniq(st.attrs ++ s.attrs)}
+  defp role({:captures, names}, st, t) do
+    case Enum.find_value(names, &Theme.style_for(t, &1)) do
+      nil ->
+        st
+
+      %Style{} = s ->
+        fg = if s.fg == :default, do: st.fg, else: s.fg
+        %{st | fg: fg, attrs: Enum.uniq(st.attrs ++ s.attrs)}
+    end
   end
 
   defp role(_role, st, _t), do: st
@@ -74,6 +96,8 @@ defmodule Geex.Markdown.Style do
 
   defp tint(%Theme{palette: %{active_line_bg: bg}}, _base) when bg not in [nil, :default], do: bg
   defp tint(_theme, base), do: base
+
+  defp tinted?(%Theme{palette: %{active_line_bg: bg}}), do: bg not in [nil, :default]
 
   defp muted(%Theme{palette: %{line_number: c}}) when c not in [nil, :default], do: c
   defp muted(%Theme{palette: p}), do: p.fg

@@ -66,6 +66,11 @@ defmodule Geex.CLITest do
         ExUnit.CaptureIO.capture_io(:stderr, fn -> assert CLI.highlight([path]) == 1 end)
 
       assert err =~ "no installed grammar"
+      # It lists the languages installed: Markdown's companion highlights no file, so it isn't
+      # one (ADR-0043 §7).
+      [_, listed] = Regex.run(~r/installed: ([^;]*);/, err)
+      assert "markdown" in String.split(listed, ", ")
+      refute "markdown_inline" in String.split(listed, ", ")
 
       err =
         ExUnit.CaptureIO.capture_io(:stderr, fn ->

@@ -424,7 +424,7 @@ defmodule Geex.CLI do
         {:ok, lang}
 
       :error ->
-        have = Geex.Highlight.Grammars.available()
+        have = Geex.Highlight.Grammars.languages()
 
         {:error,
          "no installed grammar for it (installed: " <>

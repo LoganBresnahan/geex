@@ -1,13 +1,23 @@
 defmodule Geex.Markdown.Layout do
   @moduledoc """
-  **Spike** for the read-only markdown preview (ADR-0043 to come): lay a parsed markdown tree
-  (`Geex.Markdown.Parse`) out as rows, `width` columns wide. Pure.
+  The markdown preview's layout ([ADR-0043](../../../doc/adr/0043-markdown-preview.md) §5): a
+  parsed markdown tree (`Geex.Markdown.Parse`) as rows, `width` columns wide. Pure.
 
   A row is `%{runs: [{text, roles}], src: byte}`. `roles` name what a run is (`:heading`,
-  `:strong`, `:link`, `:code`, a table `:border` …) and `Geex.Markdown.Style` turns them into
-  colours against a theme, so the layout never sees one. `src` is where the row's block starts
-  in the text: the block-level map the preview keeps its place by. Widths are `Geex.Width`
-  display widths, a rendering concern only.
+  `:strong`, `:link`, `:code`, a table `:border` …); a code run also carries the highlight
+  captures covering it, `{:captures, names}`, narrowest first. `Geex.Markdown.Style` turns roles
+  into colours against a theme when drawing, so the layout never sees one, and a theme change
+  only redraws. Widths are `Geex.Width` display widths, a rendering concern only.
+
+  `src` is a byte of the source line the row draws, where it draws one (§6): each table row
+  (a border takes the row beside it), each line of code (the label takes the fence line), each
+  line of raw HTML or front matter. A paragraph's or heading's wrapped rows keep the block's
+  start, and list and quote rows the starts of the blocks inside them. `Geex.Markdown.Place`
+  keeps the reader's place by them.
+
+  It corrects the grammars' gaps it can (§4): a table cell's column comes from the pipes before
+  it, a heading drops its closing `#`s, an ordered list counts up from its first number, and
+  `$…$` is math only where GitHub reads it so.
 
   Paragraphs and headings wrap at the width; code, raw HTML and front matter are cut with `…`;
   a table too wide for the width shrinks its widest columns and wraps their cells.
@@ -54,21 +64,27 @@ defmodule Geex.Markdown.Layout do
         }
 
   @doc """
-  The rows of `tree` (parsed from `text`) at `width` columns. Option `:code` is
-  `fn code, language -> %{byte => Geex.Theme.Style.t()} | nil end`, the colours for a fenced
-  block's code; without it code is plain.
+  The rows of `tree` (parsed from `text`) at `width` columns. Option `:spans` is
+  `fn code, info_word -> [Geex.Highlight.Span.t()] | nil end`, a fenced block's highlight spans
+  (`Geex.Markdown.parse/2` keeps them); without it code is plain.
   """
   @spec rows(Geex.Markdown.Parse.tree(), String.t(), pos_integer(), keyword()) :: [row()]
   def rows(tree, text, width, opts \\ []) do
     ctx = %{
       text: text,
       defs: definitions(tree, text),
-      code: Keyword.get(opts, :code, fn _code, _language -> nil end),
+      code: Keyword.get(opts, :spans, fn _code, _language -> nil end),
       depth: 0,
       loose: true
     }
 
-    blocks(tree.children, max(width, 1), ctx)
+    width = max(width, 1)
+
+    # Containers indent what they hold, so nesting deeper than the width allows would spill;
+    # every row is cut to fit instead, since a preview has no horizontal scroll (§1).
+    tree.children
+    |> blocks(width, ctx)
+    |> Enum.map(&%{&1 | runs: clip(&1.runs, width, [:muted])})
   end
 
   ## Blocks
@@ -101,7 +117,7 @@ defmodule Geex.Markdown.Layout do
 
   defp block(%{type: :atx_heading} = n, width, ctx) do
     level = Enum.find_value(n.children, 1, &heading_level/1)
-    heading(child(n, :inline), level, n.s, width, ctx)
+    heading(n |> child(:inline) |> without_closing(ctx.text), level, n.s, width, ctx)
   end
 
   defp block(%{type: :setext_heading} = n, width, ctx) do
@@ -122,7 +138,8 @@ defmodule Geex.Markdown.Layout do
   defp block(%{type: :list} = n, width, ctx) do
     items = Enum.filter(n.children, &(&1.type == :list_item))
     loose = loose?(items, ctx.text)
-    marks = Enum.map(items, &mark(&1, ctx))
+    start = start_number(items, ctx.text)
+    marks = items |> Enum.with_index() |> Enum.map(fn {item, i} -> mark(item, start + i, ctx) end)
     mw = marks |> Enum.map(fn {m, _roles} -> Width.string(m) end) |> Enum.max(fn -> 1 end)
     inner = %{ctx | depth: ctx.depth + 1, loose: loose}
     indent = String.duplicate(" ", mw + 1)
@@ -147,18 +164,15 @@ defmodule Geex.Markdown.Layout do
   end
 
   defp block(%{type: :fenced_code} = n, width, ctx) do
-    lang =
-      with %{} = node <- find(n, [:language, :info]),
-           [word | _] <- String.split(slice(ctx.text, node)),
-           do: word
+    {code, lang} = fenced(n, ctx.text)
 
-    code =
+    starts =
       case child(n, :code) do
-        nil -> ""
-        c -> c |> plain(ctx.text) |> String.trim_trailing("\n")
+        nil -> [n.s]
+        c -> line_starts(ctx.text, c.s, c.e)
       end
 
-    code_rows(code, lang, n.s, width, ctx)
+    code_rows(code, lang, n.s, starts, width, ctx)
   end
 
   defp block(%{type: :indented_code} = n, width, ctx) do
@@ -169,7 +183,7 @@ defmodule Geex.Markdown.Layout do
       |> String.split("\n")
       |> Enum.map_join("\n", &dedent/1)
 
-    code_rows(code, nil, n.s, width, ctx)
+    code_rows(code, nil, n.s, line_starts(ctx.text, n.s, n.e), width, ctx)
   end
 
   defp block(%{type: :rule} = n, width, _ctx),
@@ -182,7 +196,9 @@ defmodule Geex.Markdown.Layout do
     |> plain(ctx.text)
     |> String.trim_trailing("\n")
     |> String.split("\n")
-    |> Enum.map(&%{runs: clip([{expand(&1), [role]}], width, [:muted]), src: n.s})
+    |> Enum.zip_with(line_starts(ctx.text, n.s, n.e) |> pad_list(), fn line, src ->
+      %{runs: clip([{expand(line), [role]}], width, [:muted]), src: src}
+    end)
   end
 
   defp block(%{type: :table} = n, width, ctx), do: table(n, width, ctx)
@@ -194,6 +210,22 @@ defmodule Geex.Markdown.Layout do
 
   defp heading_level(_node), do: nil
 
+  # An ATX heading's closing sequence (CommonMark): a run of `#` at the end, after a space or
+  # tab or alone, is no part of its text. The grammar keeps it in the inline node. An escaped
+  # `\#` isn't one, since a backslash, not a space, comes before the run.
+  defp without_closing(nil, _text), do: nil
+
+  defp without_closing(inline, text) do
+    case Regex.run(~r/(?:^|[ \t])#+[ \t]*$/, slice(text, inline), return: :index) do
+      [{at, _len}] ->
+        e = inline.s + at
+        %{inline | e: e, children: Enum.filter(inline.children, &(&1.s < e))}
+
+      nil ->
+        inline
+    end
+  end
+
   defp heading(content, level, src, width, ctx) do
     rows =
       content
@@ -202,6 +234,8 @@ defmodule Geex.Markdown.Layout do
       |> wrap(width)
       |> to_rows(src)
 
+    # An empty heading (`#`) is still a heading: one empty row, and its rule.
+    rows = if rows == [], do: [%{runs: [], src: src}], else: rows
     rows ++ heading_rule(level, src, width)
   end
 
@@ -215,16 +249,30 @@ defmodule Geex.Markdown.Layout do
 
   ## Lists
 
-  defp mark(item, ctx) do
+  defp mark(item, n, ctx) do
     cond do
       child(item, :task_done) -> {"☑", [:task_done]}
       child(item, :task_open) -> {"☐", [:task_open]}
-      true -> number_or_bullet(child(item, :number), ctx)
+      true -> number_or_bullet(child(item, :number), n, ctx)
     end
   end
 
-  defp number_or_bullet(nil, ctx), do: {Enum.at(@bullets, rem(ctx.depth, 3)), [:bullet]}
-  defp number_or_bullet(number, ctx), do: {String.trim(slice(ctx.text, number)), [:bullet]}
+  # An ordered list counts up from its first item's number (CommonMark's start), each item
+  # keeping its own delimiter.
+  defp number_or_bullet(nil, _n, ctx), do: {Enum.at(@bullets, rem(ctx.depth, 3)), [:bullet]}
+
+  defp number_or_bullet(number, n, ctx),
+    do: {"#{n}#{ctx.text |> slice(number) |> String.trim() |> String.last()}", [:bullet]}
+
+  defp start_number(items, text) do
+    with [first | _] <- items,
+         %{} = number <- child(first, :number),
+         {start, _rest} <- Integer.parse(String.trim(slice(text, number))) do
+      start
+    else
+      _ -> 1
+    end
+  end
 
   # Loose (CommonMark): items, or blocks inside an item, parted by a blank line.
   defp loose?(items, text) do
@@ -239,14 +287,45 @@ defmodule Geex.Markdown.Layout do
 
   ## Code
 
-  defp code_rows(code, lang, src, width, ctx) do
-    styles = if lang, do: ctx.code.(code, lang)
+  @doc """
+  The fenced blocks of `tree` that name a language, as `{code, info word}`: what the preview
+  highlights once per read (`Geex.Markdown.parse/2`), the same code the layout draws.
+  """
+  @spec code_blocks(Geex.Markdown.Parse.tree(), String.t()) :: [{String.t(), String.t()}]
+  def code_blocks(tree, text) do
+    for n <- all(tree, :fenced_code),
+        {code, lang} = fenced(n, text),
+        lang != nil,
+        do: {code, lang}
+  end
+
+  defp fenced(n, text) do
+    lang =
+      with %{} = node <- find(n, [:language, :info]),
+           [word | _] <- String.split(slice(text, node)),
+           do: word
+
+    code =
+      case child(n, :code) do
+        nil -> ""
+        c -> c |> plain(text) |> String.trim_trailing("\n")
+      end
+
+    {code, lang}
+  end
+
+  # Every row starts with a gutter column (`:code_gutter`), which `Geex.Markdown.Style` draws as
+  # a bar when the theme has no tint for code (§5).
+  @gutter {" ", [:code_block, :code_gutter]}
+
+  defp code_rows(code, lang, src, starts, width, ctx) do
+    captures = if lang, do: captures(ctx.code.(code, lang))
 
     label =
       if lang,
         do: [
           %{
-            runs: pad([{" " <> lang, [:code_block, :code_label]}], width, [:code_block]),
+            runs: pad([@gutter, {lang, [:code_block, :code_label]}], width, [:code_block]),
             src: src
           }
         ],
@@ -256,32 +335,64 @@ defmodule Geex.Markdown.Layout do
       code
       |> String.split("\n")
       |> Enum.map_reduce(0, fn line, offset ->
-        {line_runs(String.trim_trailing(line, "\r"), offset, styles),
+        {line_runs(String.trim_trailing(line, "\r"), offset, captures),
          offset + byte_size(line) + 1}
       end)
 
     label ++
-      Enum.map(lines, fn runs ->
-        row = clip([{" ", [:code_block]} | runs], width, [:code_block, :muted])
-        %{runs: pad(row, width, [:code_block]), src: src}
+      Enum.zip_with(lines, pad_list(starts), fn runs, line_src ->
+        row = clip([@gutter | runs], width, [:code_block, :muted])
+        %{runs: pad(row, width, [:code_block]), src: line_src}
       end)
   end
 
-  defp line_runs("", _offset, _styles), do: []
+  # `byte => [capture]`, narrowest first and, at equal width, the most dotted first: the order
+  # `Geex.Highlight.Paint` decides a byte's colour in, so drawing takes the first one the theme
+  # styles.
+  defp captures(nil), do: nil
+  defp captures([]), do: nil
+
+  defp captures(spans) do
+    spans
+    |> Enum.sort_by(&{-(&1.end_byte - &1.start_byte), dots(&1.capture)})
+    |> Enum.reduce(%{}, fn span, acc ->
+      Enum.reduce(span.start_byte..(span.end_byte - 1)//1, acc, fn b, acc ->
+        Map.update(acc, b, [span.capture], &[span.capture | List.delete(&1, span.capture)])
+      end)
+    end)
+  end
+
+  defp dots(capture), do: capture |> :binary.matches(".") |> length()
+
+  defp line_runs("", _offset, _captures), do: []
   defp line_runs(line, _offset, nil), do: [{expand(line), [:code_block]}]
 
-  defp line_runs(line, offset, styles) do
+  defp line_runs(line, offset, captures) do
     0..(byte_size(line) - 1)//1
-    |> Enum.chunk_by(&Map.get(styles, offset + &1))
+    |> Enum.chunk_by(&Map.get(captures, offset + &1))
     |> Enum.map(fn [first | _] = bytes ->
       seg = expand(binary_part(line, first, length(bytes)))
 
-      case Map.get(styles, offset + first) do
+      case Map.get(captures, offset + first) do
         nil -> {seg, [:code_block]}
-        style -> {seg, [:code_block, {:style, style}]}
+        names -> {seg, [:code_block, {:captures, names}]}
       end
     end)
   end
+
+  # The bytes the lines in `[s, e)` start at, the first at `s` (which may be mid-line, after a
+  # list's indent): the source line each row of a block draws.
+  defp line_starts(text, s, e) do
+    rest =
+      for {at, 1} <- :binary.matches(text, "\n", scope: {s, max(e - s, 0)}),
+          at + 1 < e,
+          do: at + 1
+
+    [s | rest]
+  end
+
+  # A list of row sources long enough for any count of rows: the last repeats.
+  defp pad_list(list), do: Stream.concat(list, Stream.repeatedly(fn -> List.last(list) end))
 
   defp dedent("    " <> rest), do: rest
   defp dedent("\t" <> rest), do: rest
@@ -301,16 +412,20 @@ defmodule Geex.Markdown.Layout do
           row.children |> Enum.filter(&(&1.type == :table_delimiter_cell)) |> Enum.map(&align/1)
       end
 
-    header = cells(child(n, :table_header))
+    header_node = child(n, :table_header)
+    header = cells(header_node, ctx.text)
     cols = max(length(header), 1)
+    body_nodes = Enum.filter(n.children, &(&1.type == :table_row))
 
     grid =
-      [header | n.children |> Enum.filter(&(&1.type == :table_row)) |> Enum.map(&cells/1)]
+      [header | Enum.map(body_nodes, &cells(&1, ctx.text))]
       |> Enum.map(fn row ->
-        row
-        |> Enum.map(&(&1 |> segments(ctx) |> trim() |> unescape_pipes()))
-        |> Kernel.++(List.duplicate([], cols))
-        |> Enum.take(cols)
+        for c <- 0..(cols - 1)//1 do
+          case List.keyfind(row, c, 0) do
+            {^c, cell} -> cell |> segments(ctx) |> trim() |> unescape_pipes()
+            nil -> []
+          end
+        end
       end)
 
     columns = for c <- 0..(cols - 1)//1, do: Enum.map(grid, &cell_text(Enum.at(&1, c)))
@@ -321,12 +436,18 @@ defmodule Geex.Markdown.Layout do
     else
       widths = fit_columns(columns, room)
       [head | body] = grid
+      # Each row names its own line; a border takes the row beside it.
+      head_src = if header_node, do: header_node.s, else: n.s
+      srcs = Enum.map(body_nodes, & &1.s)
+      last_src = List.last(srcs) || head_src
 
-      [border("┌", "┬", "┐", widths, n.s)] ++
-        table_row(head, widths, aligns, [:table_header], n.s) ++
-        [border("├", "┼", "┤", widths, n.s)] ++
-        Enum.flat_map(body, &table_row(&1, widths, aligns, [], n.s)) ++
-        [border("└", "┴", "┘", widths, n.s)]
+      [border("┌", "┬", "┐", widths, head_src)] ++
+        table_row(head, widths, aligns, [:table_header], head_src) ++
+        [border("├", "┼", "┤", widths, head_src)] ++
+        Enum.flat_map(Enum.zip(body, srcs), fn {row, src} ->
+          table_row(row, widths, aligns, [], src)
+        end) ++
+        [border("└", "┴", "┘", widths, last_src)]
     end
   end
 
@@ -339,8 +460,23 @@ defmodule Geex.Markdown.Layout do
     end)
   end
 
-  defp cells(nil), do: []
-  defp cells(row), do: Enum.filter(row.children, &(&1.type == :table_cell))
+  # A row's cells as `{column, cell}`. GFM places a cell by the unescaped pipes before it in the
+  # row (a pipe inside a code span counting too), less one when the row starts with a pipe; the
+  # grammar gives an empty `||` no cell, so its position among the cells would shift the rest.
+  defp cells(nil, _text), do: []
+
+  defp cells(row, text) do
+    lead = if String.starts_with?(String.trim_leading(slice(text, row)), "|"), do: 1, else: 0
+
+    for cell <- row.children, cell.type == :table_cell do
+      {pipes(binary_part(text, row.s, cell.s - row.s), 0) - lead, cell}
+    end
+  end
+
+  defp pipes(<<?\\, _escaped, rest::binary>>, n), do: pipes(rest, n)
+  defp pipes(<<?|, rest::binary>>, n), do: pipes(rest, n + 1)
+  defp pipes(<<_byte, rest::binary>>, n), do: pipes(rest, n)
+  defp pipes(<<>>, n), do: n
 
   defp align(cell) do
     case {child(cell, :align_left), child(cell, :align_right)} do
@@ -527,8 +663,28 @@ defmodule Geex.Markdown.Layout do
   defp inline(%{type: :hard_break}, _roles, _ctx), do: [:break]
   defp inline(%{type: :entity} = n, roles, ctx), do: [{entity(slice(ctx.text, n)), roles}]
   defp inline(%{type: :html_tag} = n, roles, ctx), do: [{slice(ctx.text, n), roles ++ [:html]}]
-  defp inline(%{type: :latex} = n, roles, ctx), do: [{slice(ctx.text, n), roles ++ [:code]}]
+
+  defp inline(%{type: :latex} = n, roles, ctx) do
+    raw = slice(ctx.text, n)
+    if math?(raw, ctx.text, n.e), do: [{raw, roles ++ [:code]}], else: [{raw, roles}]
+  end
+
   defp inline(n, roles, ctx), do: walk(n.s, n.e, n.children, roles, ctx)
+
+  # GitHub's rule for inline math: the opening `$` not followed by whitespace, and the closing
+  # `$` neither preceded by whitespace nor followed by a letter or digit. Otherwise the span is
+  # text, so prices and shell variables in prose stay prose. `$$…$$` is display math.
+  defp math?("$$" <> _ = raw, _text, _e), do: byte_size(raw) > 4
+
+  defp math?(raw, text, e) when byte_size(raw) >= 3 do
+    inner = binary_part(raw, 1, byte_size(raw) - 2)
+    after_ = String.first(binary_part(text, e, byte_size(text) - e)) || ""
+
+    String.starts_with?(raw, "$") and String.ends_with?(raw, "$") and
+      not String.match?(inner, ~r/\A\s|\s\z/u) and not String.match?(after_, ~r/\A[\p{L}\p{N}]/u)
+  end
+
+  defp math?(_raw, _text, _e), do: false
 
   defp link(n, roles, ctx) do
     case child(n, :link_text) do

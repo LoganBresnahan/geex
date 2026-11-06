@@ -4697,3 +4697,53 @@ checks with `for` and no endings), `--list` shows the label, and README renders.
 so on this branch every install from the built-in catalog fails until it is. Publishing it is a
 release and waits for the maintainer; until then dogfood with `GEEX_CATALOG_URL` pointed at
 `_build/catalog/dist`.
+
+### 2026-11-06 — the markdown preview, slice 2: the layout for real (ADR-0043 §4's corrections, §5, §6)
+
+The spike's layout made the preview's. Still no UI.
+
+**Built:**
+- **`Geex.Markdown.parse/2`**: `\r\n` → `\n`, the tree, and each fenced block highlighted once
+  by the installed grammar for its info word, kept as spans (capture names) by `{code, word}`,
+  with the languages the blocks name (for slice 3: an install re-renders). `Geex.Markdown.rows/2`
+  lays one out. The info-word alias table moved here from `mix geex.render` (`language/1`).
+- **Code colours are resolved when drawing**: a code run carries `{:captures, names}`, narrowest
+  first and the most dotted first at equal width; `Style` takes the first one the theme styles,
+  which is `Paint`'s choice for the byte. `Style.run/2` draws a run (text and style); a code
+  row's gutter column is `▏` in `line_number` when the palette has no tint.
+- **The grammars' gaps**: a table cell's column comes from the unescaped pipes before it, less
+  one for a leading pipe; a heading drops its closing `#`s (not `\#`, not `foo#`); an ordered list
+  counts up from its first number, each item keeping its delimiter; `$…$` is code only by
+  GitHub's rule (`$$…$$` too), otherwise plain text.
+- **Rows name their source lines**: each table row (borders take the row beside them), code line
+  (the label takes the fence line), HTML and front-matter line. `Geex.Markdown.Place` (pure):
+  `lines/2` (0-based, `nil` for a blank row), `anchor/2` and `scroll/2` (the first row of the
+  line or the nearest earlier one, plus the offset, clamped to the line's run).
+- **Every row fits the width**: rows are cut to it at the end, so lists nested deeper than a
+  narrow pane allows no longer spill (found by the sweep below: 532 rows of roadmap.md at 8).
+- The verifier's slice-1 findings: `geex highlight`'s "installed: …" lists only languages
+  (`Grammars.languages/0` leaves out a grammar with `for`); `check_render_query!/3`'s spec takes
+  `:geex`.
+
+**Tests first (F29, F30/F18, F33–F36):** `test/geex/markdown/layout_test.exs`, each review case a
+`describe`, written against a thin API over the spike's layout and seen failing (12 of 17) before
+the fixes: the empty `||` cell, no-leading-pipe rows, a pipe in a code span, `\|`, extra cells;
+closing `#`s; `1. 1. 1.`, `3)`, `9.`/`10.`; `$5 and $10`, `$HOME`, `$x^2$`, `$x $`, `$ x$`, `$x$5`,
+`$x$b`, `$5 and 10$`; a CRLF file against its LF twin (rows and lines); the `▏` bar under the
+terminal theme with no OSC 11 answer, and the tint under Birds of Paradise; per-byte colours equal
+to `Paint.styles/2` under two themes, from one layout; aliases; per-line sources in a 40-row
+table, code and HTML; a re-render after an appended row keeping line 30; a wrapped row's offset,
+clamped when wider; a line with no rows. Also the fits-the-width test and the `geex highlight`
+list, both seen failing first. Two expectations were mine to fix: a table's column widths, and
+`[x]: http://x`, which the grammar reads as a paragraph (`[foo]: /url "title"` is a definition).
+
+**Checked by hand:** the seven docs of §8 at 100, 60, 40, 20, 8 and 3 columns, no errors and (after
+the fix) no row wider than its width; at 100 columns, parse + layout: README 20 + 4 ms (first
+highlight compiling), vision 7 + 1, roadmap 57 + 11, testing 324 + 113, the ADR index 12 + 6,
+ADR-0042 7 + 1, ADR-0043 35 + 8. The `--plain` search for surviving `**` and `](` finds only the
+docs' own, as in the spike.
+
+1222 tests + 114 doctests green twice; compile warnings-clean.
+
+**Not tested:** colours on screen (the preview isn't drawn yet; `Style.run/2` is tested by value);
+place-keeping in the loop (slice 4); `Geex.Cell`'s `:strike` (slice 5).

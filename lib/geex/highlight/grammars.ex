@@ -32,6 +32,14 @@ defmodule Geex.Highlight.Grammars do
   def available, do: Enum.map(Installed.grammars(), & &1["name"])
 
   @doc """
+  The installed grammars that are file languages: `available/0` without a companion such as
+  `markdown_inline`, which highlights no file of its own (ADR-0043 §7). For lists shown as
+  languages.
+  """
+  @spec languages() :: [String.t()]
+  def languages, do: for(g <- Installed.grammars(), !g["for"], do: g["name"])
+
+  @doc """
   A cached, compiled grammar handle for `language`. Compiles + memoizes on first
   use; later calls return the same handle.
 

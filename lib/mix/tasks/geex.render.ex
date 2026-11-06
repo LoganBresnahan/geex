@@ -11,8 +11,8 @@ defmodule Mix.Tasks.Geex.Render do
 
   - `--width N`: columns (default: the terminal's, else 80)
   - `--theme NAME`: an installed theme (default: the settings view's, else the terminal's)
-  - `--map`: a gutter with the source line each block came from (the block map the preview
-    would keep its place by)
+  - `--map`: a gutter with the source line each row draws (what the preview keeps its place
+    by, ADR-0043 §6)
   - `--stats`: sizes and timings on stderr
   - `--plain`: no colour
 
@@ -23,7 +23,7 @@ defmodule Mix.Tasks.Geex.Render do
   """
   use Mix.Task
 
-  alias Geex.Markdown.{Layout, Parse, Style}
+  alias Geex.Markdown.{Layout, Style}
   alias Geex.{Sgr, Theme}
 
   @switches [
@@ -34,23 +34,6 @@ defmodule Mix.Tasks.Geex.Render do
     plain: :boolean
   ]
   @gutter 6
-  @aliases %{
-    "sh" => "bash",
-    "shell" => "bash",
-    "console" => "bash",
-    "zsh" => "bash",
-    "js" => "javascript",
-    "ts" => "typescript",
-    "py" => "python",
-    "ex" => "elixir",
-    "exs" => "elixir",
-    "iex" => "elixir",
-    "md" => "markdown",
-    "jsonc" => "json",
-    "yml" => "yaml",
-    "erl" => "erlang",
-    "rs" => "rust"
-  }
 
   @impl true
   def run(args) do
@@ -87,54 +70,29 @@ defmodule Mix.Tasks.Geex.Render do
         end
       end)
 
-    {parse_us, {tree, pstats}} =
+    {parse_us, parsed} =
       :timer.tc(fn ->
-        case Parse.parse(text, grammars) do
-          {:ok, tree, stats} -> {tree, stats}
+        case Geex.Markdown.parse(text, grammars) do
+          {:ok, parsed} -> parsed
           {:error, reason} -> Mix.raise("geex render: parse failed: #{inspect(reason)}")
         end
       end)
 
-    Process.put(:geex_render_code, {0, 0})
+    {layout_us, rows} = :timer.tc(fn -> Geex.Markdown.rows(parsed, width) end)
 
-    {layout_us, rows} =
-      :timer.tc(fn -> Layout.rows(tree, text, width, code: highlighter(theme)) end)
-
-    IO.write(print(rows, text, theme, width, opts))
+    IO.write(print(rows, parsed.text, theme, width, opts))
 
     if opts[:stats] do
-      {blocks, code_us} = Process.get(:geex_render_code)
+      st = parsed.stats
 
       IO.puts(:stderr, """
       geex render #{path}: #{byte_size(text)} bytes, #{line_count(text)} lines → #{length(rows)} rows at #{width} columns
         grammars loaded   #{ms(load_us)}
-        block parse       #{ms(parse_us - pstats.inline_us)}  (#{pstats.block_captures} captures, one call)
-        inline parse      #{ms(pstats.inline_us)}  (#{pstats.inline_calls} calls, one per paragraph, heading or cell)
-        code highlighting #{ms(code_us)}  (#{blocks} fenced blocks)
-        layout            #{ms(layout_us - code_us)}\
+        block parse       #{ms(parse_us - st.inline_us - st.code_us)}  (#{st.block_captures} captures, one call)
+        inline parse      #{ms(st.inline_us)}  (#{st.inline_calls} calls, one per paragraph, heading or cell)
+        code highlighting #{ms(st.code_us)}  (#{st.code_blocks} fenced blocks)
+        layout            #{ms(layout_us)}\
       """)
-    end
-  end
-
-  defp highlighter(theme) do
-    available = MapSet.new(Geex.Highlight.Grammars.available())
-
-    fn code, lang ->
-      language = Map.get(@aliases, String.downcase(lang), String.downcase(lang))
-
-      {us, styles} =
-        :timer.tc(fn ->
-          with true <- MapSet.member?(available, language),
-               {:ok, spans} <- Geex.Highlight.spans(code, language) do
-            Geex.Highlight.Paint.styles(theme, spans)
-          else
-            _ -> nil
-          end
-        end)
-
-      {n, total} = Process.get(:geex_render_code)
-      Process.put(:geex_render_code, {n + 1, total + us})
-      styles
     end
   end
 
@@ -154,26 +112,26 @@ defmodule Mix.Tasks.Geex.Render do
             true -> {gutter(row.src, last, lines, theme, opts), row.src}
           end
 
-        body = Enum.map(row.runs, fn {t, roles} -> paint(t, roles, theme, opts) end)
+        body = Enum.map(row.runs, &paint(&1, theme, opts))
         fill = String.duplicate(" ", max(width - Layout.runs_width(row.runs), 0))
-        {[gutter, body, paint(fill, [], theme, opts), "\n"], last}
+        {[gutter, body, paint({fill, []}, theme, opts), "\n"], last}
       end)
 
     out
   end
 
   defp gutter(src, src, _lines, theme, opts),
-    do: paint(String.duplicate(" ", @gutter), [:muted], theme, opts)
+    do: paint({String.duplicate(" ", @gutter), [:muted]}, theme, opts)
 
   defp gutter(src, _last, lines, theme, opts) do
     label = src |> line_of(lines) |> Integer.to_string() |> String.pad_leading(@gutter - 2)
-    paint(label <> "  ", [:muted], theme, opts)
+    paint({label <> "  ", [:muted]}, theme, opts)
   end
 
-  defp paint(text, _roles, _theme, %{plain: true}), do: text
+  defp paint({text, _roles}, _theme, %{plain: true}), do: text
 
-  defp paint(text, roles, theme, _opts) do
-    %{fg: fg, bg: bg, attrs: attrs} = Style.resolve(theme, roles)
+  defp paint(run, theme, _opts) do
+    {text, %{fg: fg, bg: bg, attrs: attrs}} = Style.run(theme, run)
     strike = if :strike in attrs, do: "\e[9m", else: ""
     [Sgr.escape(fg, bg, attrs -- [:strike]), strike, text, Sgr.reset()]
   end

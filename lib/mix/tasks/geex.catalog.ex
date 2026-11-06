@@ -152,7 +152,7 @@ defmodule Mix.Tasks.Geex.Catalog do
   ship with geex, not in the packages (ADR-0043 §7), so this is where a grammar change that
   breaks them is caught.
   """
-  @spec check_render_query!(String.t(), binary(), String.t() | nil) :: :ok
+  @spec check_render_query!(String.t(), binary(), String.t() | nil | :geex) :: :ok
   def check_render_query!(name, wasm, query \\ :geex) do
     query = if query == :geex, do: Geex.Markdown.Parse.query(name), else: query
 

@@ -50,6 +50,92 @@ defmodule Geex.Markdown do
     end
   end
 
+  @aliases %{
+    "sh" => "bash",
+    "shell" => "bash",
+    "console" => "bash",
+    "zsh" => "bash",
+    "js" => "javascript",
+    "ts" => "typescript",
+    "py" => "python",
+    "ex" => "elixir",
+    "exs" => "elixir",
+    "iex" => "elixir",
+    "md" => "markdown",
+    "jsonc" => "json",
+    "yml" => "yaml",
+    "erl" => "erlang",
+    "rs" => "rust"
+  }
+
+  @doc """
+  The grammar a fenced block's info string names (its first word): the one alias table, shared
+  by the preview and `mix geex.render` (ADR-0043 §4).
+
+      iex> Geex.Markdown.language("sh")
+      "bash"
+      iex> Geex.Markdown.language("Rust")
+      "rust"
+  """
+  @spec language(String.t()) :: String.t()
+  def language(info) do
+    word = String.downcase(info)
+    Map.get(@aliases, word, word)
+  end
+
+  @typedoc """
+  One read of a document, what the preview keeps between layouts (ADR-0043 §2, §3): the text
+  (each `\r\n` turned to `\n`), its tree, each fenced block's highlight spans by `{code, info
+  word}` (capture names, not colours, §5), the grammars its code blocks name (whether installed
+  or not: installing one re-renders), and the parse's stats.
+  """
+  @type parsed :: %{
+          text: String.t(),
+          tree: Parse.tree(),
+          code: %{{String.t(), String.t()} => [Geex.Highlight.Span.t()]},
+          languages: [String.t()],
+          stats: map()
+        }
+
+  @doc """
+  Parse `text` with the render handles: line endings normalised, the tree built, and each
+  fenced block highlighted once by the installed grammar for its language.
+  """
+  @spec parse(String.t(), Parse.grammars()) :: {:ok, parsed()} | {:error, term()}
+  def parse(text, grammars) when is_binary(text) do
+    text = String.replace(text, "\r\n", "\n")
+
+    with {:ok, tree, stats} <- Parse.parse(text, grammars) do
+      blocks = Geex.Markdown.Layout.code_blocks(tree, text)
+      installed = MapSet.new(Grammars.available())
+      {us, code} = :timer.tc(fn -> highlight(blocks, installed) end)
+
+      {:ok,
+       %{
+         text: text,
+         tree: tree,
+         code: code,
+         languages: blocks |> Enum.map(&language(elem(&1, 1))) |> Enum.uniq(),
+         stats: Map.merge(stats, %{code_blocks: length(blocks), code_us: us})
+       }}
+    end
+  end
+
+  defp highlight(blocks, installed) do
+    for {code, info} <- Enum.uniq(blocks),
+        lang = language(info),
+        lang in installed,
+        {:ok, spans} <- [Geex.Highlight.spans(code, lang)],
+        into: %{},
+        do: {{code, info}, spans}
+  end
+
+  @doc "The rows of a parsed document at `width` columns (`Geex.Markdown.Layout.rows/4`)."
+  @spec rows(parsed(), pos_integer()) :: [Geex.Markdown.Layout.row()]
+  def rows(%{tree: tree, text: text, code: code}, width) do
+    Geex.Markdown.Layout.rows(tree, text, width, spans: &Map.get(code, {&1, &2}))
+  end
+
   @doc """
   Whether `path` is a markdown file: its installed grammar is Markdown. Says nothing about the
   companion; `handles/0` does.
