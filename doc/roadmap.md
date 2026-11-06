@@ -581,9 +581,11 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    maintainer's ask 2026-11-06: `Alt+Shift+P` opens a markdown file's preview beside it, the file
    on disk re-rendered whole on each save or disk change. **Spike built 2026-11-06:**
    `mix geex.render FILE` prints a file as the preview would draw it, and the installed
-   tree-sitter grammars render geex's docs well enough (ADR-0043 §8).
-   - **Next, once the ADR is accepted:** `markdown_inline` in the catalog and the test fixtures,
-     the buffer's saved message, the preview tab and its process, `Geex.Cell`'s `:strike`.
+   tree-sitter grammars render geex's docs well enough (ADR-0043 §8). **Reviewed 2026-11-06:** an
+   adversarial review against the code revised the ADR before any of it was built (ADR-0043 §9).
+   - **Next, once the ADR is accepted:** `markdown_inline` in the catalog (as Markdown's
+     companion) and the test fixtures, the buffer's synced message, Page Up/Down in the parser,
+     the preview tab with its gate and its process, `Geex.Cell`'s `:strike`.
    - **Later, if wanted:** included ranges in the NIF (faster inline parsing, and injections for
      source highlighting); marking the blocks the last write changed, by who wrote them.
 

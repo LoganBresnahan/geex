@@ -4624,3 +4624,27 @@ warnings-clean.
 **Not tested:** the preview itself (not built); parsing under `mix test` (the fixtures carry no
 markdown grammars); the colours on screen (checked here only as escape sequences: the heading
 bold in Birds of Paradise's accent on its background); any theme but Birds of Paradise.
+
+### 2026-11-06 — ADR-0043 reviewed against the code before building (adversarial review)
+
+**Adversarial review.** An 8-agent workflow checked ADR-0043 (Proposed) against the code before
+any of the preview was built: four reviewers (focus and the cursor model; buffer messages and the
+process; keys, the tab bar and the mouse; packaging and the renderer), each followed by a skeptic
+who opened every cited line and tried to refute each finding. 36 findings survived and none were
+refuted, about 28 once the ones two reviewers found independently are merged; the skeptics
+corrected several of the proposed amendments. Spot-checked here: `do_close/1` tests
+`Panes.elsewhere?/2` before the unsaved-edits refusal, and `Panes.show/3` finds a tab by its
+buffer alone.
+
+The design changes it forced are in ADR-0043, revised and still Proposed: a preview isn't one of
+its buffer's views; one predicate gates what reaches the active buffer while a preview is current;
+the trigger is the buffer's synced text moving (`{:geex_buffer_synced, …}`), not a save; and rows
+name their source lines, so a tall table keeps the reader's place. Its probes also found five
+differences from GitHub that geex's docs don't contain (an empty `||` cell, `$5 and $10` as math,
+a heading's closing `#`s, `1. 1. 1.` lists, stray rows in CRLF files), which the ADR now
+corrects. The maintainer chose: save and take-in work from a preview, Page Up/Down join the
+parser, and `$…$` is math only by GitHub's rule.
+
+No code changed, so the suite is as it was.
+
+**Not tested:** all of it is design; none of the preview is built.
