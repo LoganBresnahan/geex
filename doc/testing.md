@@ -4574,3 +4574,46 @@ Since 0.3.5:
   coordinator dispatches;
 - that the v0.3.6 tag starts no ci.yml run;
 - the maintainer's `geex self update` from 0.3.5.
+
+### 2026-11-06 — the markdown preview's spike, `mix geex.render` (ADR-0043)
+
+The maintainer asked for a markdown preview: read-only, the whole of it re-rendered on save,
+toggled by `Alt+Shift+P`. ADR-0043 (Proposed) plans it. The spike answers its open question,
+whether the installed tree-sitter grammars render well enough. Nothing in the editor changed.
+
+**Built:** `Geex.Markdown.Parse` (the Markdown grammar loaded a second time with a structural
+query, `markdown_inline` run once per paragraph, heading and table cell, the nested captures
+rebuilt as a byte-ranged tree), `Geex.Markdown.Layout` (pure: rows of `{text, roles}` runs, each
+tagged with its block's source byte), `Geex.Markdown.Style` (roles to theme colours, falling back
+to the palette) and `mix geex.render FILE` (`--width`, `--theme`, `--map`, `--stats`, `--plain`).
+The inline grammar was built from the catalog's clone with `tree-sitter build --wasm` into
+`_build/markdown_inline/parser.wasm`; it isn't packaged yet.
+
+**Checked:**
+- Seven docs (README, vision.md, roadmap.md, testing.md, the ADR index, ADR-0042 and ADR-0043),
+  about 6,100 rows at 100 columns, searched in `--plain` output for markup that survived (`**`,
+  backticks, `](`, raw `#` or `>`, escapes). Two hits are the docs' own, and GitHub renders them
+  the same way: this file's line 2999 starts with `+ `, a list item, so its `**` never closes;
+  and the ADR index's ADR-0041 row had bare `|` inside a code span, which splits the cell
+  (escaped in the next commit). One is the grammar's: a two-backtick code span holding a
+  three-backtick run closes on the run's first two backticks.
+- By eye, in `--plain` output: headings and their rules, wrapped paragraphs, loose and tight
+  lists with hanging indents, quotes, tables (wrapped cells, a right-aligned column), code fenced
+  inside a list item with the list's indent removed, the `--map` gutter.
+- A sample of inline cases: both kinds of hard break, defined and undefined reference links
+  (`[+]` stays text), images, entities, escapes, autolinks, a bold link, and `\|` in a table
+  cell's code span (shown as `|`, as GFM does).
+- Widths of 40, 20, 8 and 3 columns render every doc without an error.
+- Timings: README (4 KB, 7 highlighted code blocks) ~30 ms; ADR-0042 (8 KB) ~15 ms; roadmap.md
+  (46 KB) ~90 ms; this file (300 KB) 0.45–0.7 s, of which 1,918 inline calls 185–235 ms.
+
+Fixed on the way: a crash on docs with autolinks or escapes (swapped arguments), the `--map`
+gutter labelling the blank row before a block, table columns narrower than their longest word,
+and `\|` in a table cell's code span keeping its backslash.
+
+1190 tests + 108 doctests green twice (the new doctest is the tree builder's); compile
+warnings-clean.
+
+**Not tested:** the preview itself (not built); parsing under `mix test` (the fixtures carry no
+markdown grammars); the colours on screen (checked here only as escape sequences: the heading
+bold in Birds of Paradise's accent on its background); any theme but Birds of Paradise.

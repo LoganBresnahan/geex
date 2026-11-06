@@ -1,0 +1,224 @@
+defmodule Mix.Tasks.Geex.Render do
+  @shortdoc "Spike: print a markdown file as the read-only preview would draw it"
+  @moduledoc """
+  **Spike** for the read-only markdown preview (ADR-0043 to come): parse a markdown file with
+  the installed tree-sitter grammars (`Geex.Markdown.Parse`), lay it out at a width
+  (`Geex.Markdown.Layout`) and print it in a theme's colours (`Geex.Markdown.Style`), so the
+  preview's look can be judged before any UI.
+
+      mix geex.render README.md
+      mix geex.render doc/vision.md --width 72 --map --stats
+
+  - `--width N`: columns (default: the terminal's, else 80)
+  - `--theme NAME`: an installed theme (default: the settings view's, else the terminal's)
+  - `--map`: a gutter with the source line each block came from (the block map the preview
+    would keep its place by)
+  - `--stats`: sizes and timings on stderr
+  - `--plain`: no colour
+  - `--inline-wasm PATH`: the inline grammar, not packaged yet (default
+    `_build/markdown_inline/parser.wasm`; build it with `tree-sitter build --wasm -o PATH
+    <tree-sitter-markdown>/tree-sitter-markdown-inline`)
+
+  Fenced code is highlighted by the installed grammar for its language. Loads the app without
+  starting it, like `mix geex.highlight`.
+  """
+  use Mix.Task
+
+  alias Geex.Markdown.{Layout, Parse, Style}
+  alias Geex.{Sgr, Theme}
+
+  @switches [
+    width: :integer,
+    theme: :string,
+    map: :boolean,
+    stats: :boolean,
+    plain: :boolean,
+    inline_wasm: :string
+  ]
+  @gutter 6
+  @aliases %{
+    "sh" => "bash",
+    "shell" => "bash",
+    "console" => "bash",
+    "zsh" => "bash",
+    "js" => "javascript",
+    "ts" => "typescript",
+    "py" => "python",
+    "ex" => "elixir",
+    "exs" => "elixir",
+    "iex" => "elixir",
+    "md" => "markdown",
+    "jsonc" => "json",
+    "yml" => "yaml",
+    "erl" => "erlang",
+    "rs" => "rust"
+  }
+
+  @impl true
+  def run(args) do
+    Mix.Task.run("app.config")
+    {opts, paths, _invalid} = OptionParser.parse(args, strict: @switches)
+    opts = Map.new(opts)
+
+    path =
+      case paths do
+        [path] ->
+          path
+
+        _ ->
+          Mix.raise(
+            "usage: mix geex.render FILE [--width N] [--theme NAME] [--map] [--stats] [--plain]"
+          )
+      end
+
+    text = File.read!(path)
+    theme = theme(opts[:theme])
+    width = (opts[:width] || columns()) - if(opts[:map], do: @gutter, else: 0)
+
+    {load_us, grammars} =
+      :timer.tc(fn ->
+        case Parse.load(inline_wasm: opts[:inline_wasm]) do
+          {:ok, grammars} -> grammars
+          {:error, message} -> Mix.raise("geex render: #{message}")
+        end
+      end)
+
+    {parse_us, {tree, pstats}} =
+      :timer.tc(fn ->
+        case Parse.parse(text, grammars) do
+          {:ok, tree, stats} -> {tree, stats}
+          {:error, reason} -> Mix.raise("geex render: parse failed: #{inspect(reason)}")
+        end
+      end)
+
+    Process.put(:geex_render_code, {0, 0})
+
+    {layout_us, rows} =
+      :timer.tc(fn -> Layout.rows(tree, text, width, code: highlighter(theme)) end)
+
+    IO.write(print(rows, text, theme, width, opts))
+
+    if opts[:stats] do
+      {blocks, code_us} = Process.get(:geex_render_code)
+
+      IO.puts(:stderr, """
+      geex render #{path}: #{byte_size(text)} bytes, #{line_count(text)} lines → #{length(rows)} rows at #{width} columns
+        grammars loaded   #{ms(load_us)}
+        block parse       #{ms(parse_us - pstats.inline_us)}  (#{pstats.block_captures} captures, one call)
+        inline parse      #{ms(pstats.inline_us)}  (#{pstats.inline_calls} calls, one per paragraph, heading or cell)
+        code highlighting #{ms(code_us)}  (#{blocks} fenced blocks)
+        layout            #{ms(layout_us - code_us)}\
+      """)
+    end
+  end
+
+  defp highlighter(theme) do
+    available = MapSet.new(Geex.Highlight.Grammars.available())
+
+    fn code, lang ->
+      language = Map.get(@aliases, String.downcase(lang), String.downcase(lang))
+
+      {us, styles} =
+        :timer.tc(fn ->
+          with true <- MapSet.member?(available, language),
+               {:ok, spans} <- Geex.Highlight.spans(code, language) do
+            Geex.Highlight.Paint.styles(theme, spans)
+          else
+            _ -> nil
+          end
+        end)
+
+      {n, total} = Process.get(:geex_render_code)
+      Process.put(:geex_render_code, {n + 1, total + us})
+      styles
+    end
+  end
+
+  ## Printing
+
+  defp print(rows, text, theme, width, opts) do
+    lines = newlines(text)
+
+    {out, _last} =
+      Enum.map_reduce(rows, nil, fn row, last ->
+        # A blank row between blocks belongs to the block after it, but the label goes on that
+        # block's first drawn row.
+        {gutter, last} =
+          cond do
+            not Map.get(opts, :map, false) -> {[], last}
+            Map.get(row, :blank, false) -> {gutter(last, last, lines, theme, opts), last}
+            true -> {gutter(row.src, last, lines, theme, opts), row.src}
+          end
+
+        body = Enum.map(row.runs, fn {t, roles} -> paint(t, roles, theme, opts) end)
+        fill = String.duplicate(" ", max(width - Layout.runs_width(row.runs), 0))
+        {[gutter, body, paint(fill, [], theme, opts), "\n"], last}
+      end)
+
+    out
+  end
+
+  defp gutter(src, src, _lines, theme, opts),
+    do: paint(String.duplicate(" ", @gutter), [:muted], theme, opts)
+
+  defp gutter(src, _last, lines, theme, opts) do
+    label = src |> line_of(lines) |> Integer.to_string() |> String.pad_leading(@gutter - 2)
+    paint(label <> "  ", [:muted], theme, opts)
+  end
+
+  defp paint(text, _roles, _theme, %{plain: true}), do: text
+
+  defp paint(text, roles, theme, _opts) do
+    %{fg: fg, bg: bg, attrs: attrs} = Style.resolve(theme, roles)
+    strike = if :strike in attrs, do: "\e[9m", else: ""
+    [Sgr.escape(fg, bg, attrs -- [:strike]), strike, text, Sgr.reset()]
+  end
+
+  # The 1-based line of byte `at`, by binary search over the newlines' offsets.
+  defp newlines(text),
+    do: text |> :binary.matches("\n") |> Enum.map(&elem(&1, 0)) |> List.to_tuple()
+
+  defp line_of(at, offsets), do: count_below(offsets, at, 0, tuple_size(offsets)) + 1
+
+  defp count_below(_offsets, _at, lo, hi) when lo >= hi, do: lo
+
+  defp count_below(offsets, at, lo, hi) do
+    mid = div(lo + hi, 2)
+
+    if elem(offsets, mid) < at,
+      do: count_below(offsets, at, mid + 1, hi),
+      else: count_below(offsets, at, lo, mid)
+  end
+
+  defp line_count(text), do: tuple_size(newlines(text))
+
+  defp theme(nil) do
+    with name when is_binary(name) <- Geex.Settings.load()["theme"],
+         {:ok, theme} <- Theme.named(name) do
+      theme
+    else
+      _ -> Theme.default()
+    end
+  end
+
+  defp theme(name) do
+    case Theme.named(name) do
+      {:ok, theme} ->
+        theme
+
+      _ ->
+        Mix.raise(
+          "geex render: no installed theme #{name} (installed: #{Enum.join(Theme.names(), ", ")})"
+        )
+    end
+  end
+
+  defp columns do
+    case :io.columns() do
+      {:ok, n} -> n
+      _ -> 80
+    end
+  end
+
+  defp ms(us), do: :io_lib.format("~.1f ms", [us / 1000]) |> IO.iodata_to_binary()
+end
