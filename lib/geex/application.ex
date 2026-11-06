@@ -36,6 +36,8 @@ defmodule Geex.Application do
           # Per-buffer highlight reactors (ADR-0022) are started on demand under
           # this supervisor; cheap when empty, always present.
           Geex.Highlight.ReactorSupervisor,
+          # Per-buffer markdown previews (ADR-0043 §3), started when a preview tab opens.
+          Geex.Markdown.PreviewSupervisor,
           Geex.Session,
           # The edits list behind the edits pane (ADR-0034 §6): bounded, always on, and kept in
           # its file across restarts unless the `edits_log` gate is off.

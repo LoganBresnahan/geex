@@ -9,6 +9,11 @@ defmodule Geex.Markdown.Place do
   row of that line, or of the nearest earlier line that has rows, plus the offset, clamped to
   that run (`scroll/2`). After the user's save the anchor is `{cursor line, 0}`.
 
+  An anchor taken in one text is carried into the next by `remap/2` through `line_map/2`, a line
+  diff the preview process computes on each re-read, so an edit above the reader (an agent
+  writing an earlier section) leaves them on the same row. The save anchor is already a line in
+  the new text and isn't remapped.
+
   Lines are 0-based, as the buffer's cursor is. They are counted in each render's own text, so
   a CRLF file and its LF twin name the same lines.
   """
@@ -101,6 +106,70 @@ defmodule Geex.Markdown.Place do
       first ->
         run = list |> Enum.drop(first) |> Enum.take_while(&(&1 == target)) |> length()
         first + min(offset, run - 1)
+    end
+  end
+
+  @doc """
+  Where each line of `old` went in `new`: a tuple indexed by old line, holding its new line, or
+  `nil` for a line removed. The common prefix and suffix are matched directly and the middle by
+  `List.myers_difference/2`.
+
+      iex> Geex.Markdown.Place.line_map("a\\nb\\nc", "a\\nnew\\nb\\nc")
+      {0, 2, 3}
+  """
+  @spec line_map(String.t(), String.t()) :: tuple()
+  def line_map(old_text, new_text) do
+    old = String.split(old_text, "\n")
+    new = String.split(new_text, "\n")
+    {prefix, old, new} = common_prefix(old, new, 0)
+    {suffix, old_mid, new_mid} = common_suffix(old, new)
+
+    {middle, _at} =
+      old_mid
+      |> List.myers_difference(new_mid)
+      |> Enum.reduce({[], prefix}, fn
+        {:eq, lines}, {acc, at} ->
+          {Enum.reverse(Enum.to_list(at..(at + length(lines) - 1)//1), acc), at + length(lines)}
+
+        {:del, lines}, {acc, at} ->
+          {List.duplicate(nil, length(lines)) ++ acc, at}
+
+        {:ins, lines}, {acc, at} ->
+          {acc, at + length(lines)}
+      end)
+
+    tail_from = prefix + length(new_mid)
+
+    (Enum.to_list(0..(prefix - 1)//1) ++
+       Enum.reverse(middle) ++ Enum.to_list(tail_from..(tail_from + suffix - 1)//1))
+    |> List.to_tuple()
+  end
+
+  defp common_prefix([x | old], [x | new], n), do: common_prefix(old, new, n + 1)
+  defp common_prefix(old, new, n), do: {n, old, new}
+
+  defp common_suffix(old, new) do
+    {n, old_r, new_r} = common_prefix(Enum.reverse(old), Enum.reverse(new), 0)
+    {n, Enum.reverse(old_r), Enum.reverse(new_r)}
+  end
+
+  @doc """
+  `anchor` carried through a `line_map/2` (`nil`: the text didn't change). A removed line's
+  anchor goes to the nearest earlier kept line, at its first row.
+  """
+  @spec remap(tuple() | nil, anchor()) :: anchor()
+  def remap(nil, anchor), do: anchor
+
+  def remap(map, {line, offset}) do
+    if line < tuple_size(map) and elem(map, line) != nil do
+      {elem(map, line), offset}
+    else
+      start = min(line, tuple_size(map)) - 1
+
+      case Enum.find(start..0//-1, &(&1 >= 0 and elem(map, &1) != nil)) do
+        nil -> {0, 0}
+        i -> {elem(map, i), 0}
+      end
     end
   end
 end

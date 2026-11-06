@@ -4747,3 +4747,49 @@ docs' own, as in the spike.
 
 **Not tested:** colours on screen (the preview isn't drawn yet; `Style.run/2` is tested by value);
 place-keeping in the loop (slice 4); `Geex.Cell`'s `:strike` (slice 5).
+
+### 2026-11-06 — the markdown preview, slice 3: the buffer's synced message and the preview process (ADR-0043 §2, §3)
+
+No UI yet: the process renders for whoever subscribes.
+
+**Built:**
+- **`{:geex_buffer_synced, buffer, sha256}`**, sent wherever the synced baseline moves: a save,
+  `mark_synced/1`, and every group with a `:baseline` (each fast-forward, conflicted or not, and
+  one with no commands). `Buffer.status/1` gains `synced`, the hash, computed once per baseline.
+- **`Geex.Markdown.Preview`**, a `:temporary` child of the new `Geex.Markdown.PreviewSupervisor`
+  (beside `ReactorSupervisor`), registered `{:markdown_preview, buffer}`; `attach/2` starts it
+  idempotently and subscribes (starting again if the one found is stopping). Its init reads
+  nothing. It monitors the buffer and its subscribers and unregisters before it stops. Work runs
+  in a spawned, monitored worker: read, check the hash against the buffer's (behind's, else
+  synced's), parse, lay out each wanted width, `Place.lines/2` per width. Pending work merges (a
+  re-read, the new widths, the save anchor), nothing runs while no width is wanted, a same-hash
+  read lays out only new widths, a mismatched read retries after 50 ms and the third is drawn as
+  `:changing`, a missing file is `{:read, :enoent}` with no rows, a crash is `{:failed, _}` with
+  the rows kept. Each render carries the old→new line map.
+- **`Place.line_map/2` and `remap/2`** (the verifier's slice-2 finding: by line number alone an
+  edit above the reader moved them): common prefix and suffix, `List.myers_difference/2` on the
+  middle; a removed line's anchor goes to the nearest earlier kept line. To be recorded as an
+  ADR-0043 §6 amendment in slice 6.
+- **Captures built once per read** (the verifier's advisory): `parse/2` keeps
+  `Layout.captures/1` per block; a width change no longer walks the spans.
+
+**Tests first:** `test/geex/buffer/synced_test.exs` (status's hash; save, mark_synced, F15's
+fast-forward with no disk_changed, an empty fast-forward; none for an edit, an undo or behind),
+4 of 5 seen failing; `test/geex/markdown/preview_test.exs` (F11 not on disk then saved; F12
+supervisor, idempotent attach, stops with the last subscriber and with the buffer, reads nothing at
+init, a crashed render keeps the process; F13 a save and a width arriving mid-render both run;
+F15 the disk moving ahead renders before a take-in; F16 three mismatched reads then `:changing`;
+a same-hash synced message renders nothing, nor does a keystroke; F17 the anchor rides a render;
+F19 a rename reads the new path; the remap), written before the module (they failed on its
+absence); the remap tests in `layout_test.exs`, failing first on `line_map/2`. The F13 test was
+mine to fix once: the worker took the hash before the save and read after it, and rightly
+retried. A mutation (a width change clearing the pending re-read) fails it.
+
+**Checked by hand:** `doc/testing.md` copied to a scratch file, through a real buffer and
+`attach/2`: first render at two widths 685 ms, a third width 136 ms, an agent's write above (a
+heading prepended, `disk_changed`) 1.05 s with line 100 remapped to 102.
+
+1242 tests + 116 doctests green twice; compile warnings-clean.
+
+**Not tested:** the loop's side (subscribing, widths on resize, the anchor on its save, drawing,
+re-rendering on an install, monitoring the process: slices 4 and 5).

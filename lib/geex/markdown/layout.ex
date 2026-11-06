@@ -64,16 +64,16 @@ defmodule Geex.Markdown.Layout do
         }
 
   @doc """
-  The rows of `tree` (parsed from `text`) at `width` columns. Option `:spans` is
-  `fn code, info_word -> [Geex.Highlight.Span.t()] | nil end`, a fenced block's highlight spans
-  (`Geex.Markdown.parse/2` keeps them); without it code is plain.
+  The rows of `tree` (parsed from `text`) at `width` columns. Option `:captures` is
+  `fn code, info_word -> captures | nil end`, a fenced block's `captures/1` (`Geex.Markdown.parse/2`
+  keeps them, built once per read); without it code is plain.
   """
   @spec rows(Geex.Markdown.Parse.tree(), String.t(), pos_integer(), keyword()) :: [row()]
   def rows(tree, text, width, opts \\ []) do
     ctx = %{
       text: text,
       defs: definitions(tree, text),
-      code: Keyword.get(opts, :spans, fn _code, _language -> nil end),
+      code: Keyword.get(opts, :captures, fn _code, _language -> nil end),
       depth: 0,
       loose: true
     }
@@ -319,7 +319,7 @@ defmodule Geex.Markdown.Layout do
   @gutter {" ", [:code_block, :code_gutter]}
 
   defp code_rows(code, lang, src, starts, width, ctx) do
-    captures = if lang, do: captures(ctx.code.(code, lang))
+    captures = if lang, do: ctx.code.(code, lang)
 
     label =
       if lang,
@@ -346,13 +346,16 @@ defmodule Geex.Markdown.Layout do
       end)
   end
 
-  # `byte => [capture]`, narrowest first and, at equal width, the most dotted first: the order
-  # `Geex.Highlight.Paint` decides a byte's colour in, so drawing takes the first one the theme
-  # styles.
-  defp captures(nil), do: nil
-  defp captures([]), do: nil
+  @doc """
+  A fenced block's highlight spans as `byte => [capture]`, narrowest first and, at equal width,
+  the most dotted first: the order `Geex.Highlight.Paint` decides a byte's colour in, so drawing
+  takes the first one the theme styles. `nil` for no spans.
+  """
+  @spec captures([Geex.Highlight.Span.t()] | nil) :: %{non_neg_integer() => [String.t()]} | nil
+  def captures(nil), do: nil
+  def captures([]), do: nil
 
-  defp captures(spans) do
+  def captures(spans) do
     spans
     |> Enum.sort_by(&{-(&1.end_byte - &1.start_byte), dots(&1.capture)})
     |> Enum.reduce(%{}, fn span, acc ->

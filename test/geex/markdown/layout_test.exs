@@ -234,6 +234,34 @@ defmodule Geex.Markdown.LayoutTest do
       assert elem(lines, i) == 2 and elem(lines, i + 1) != 2
     end
 
+    test "an edit above the reader keeps them on their row: the anchor follows the line map" do
+      # The verifier's slice-2 finding: by line number alone, a row inserted above the reader
+      # moves them a row up.
+      old = @table
+      new = String.replace(old, "| 3 | row 3 |\n", "| 3 | row 3 |\n| 3b | inserted |\n")
+      {parsed, rows} = render(old)
+      lines = Place.lines(rows, parsed.text)
+      anchor = Place.anchor(lines, Enum.find_index(Tuple.to_list(lines), &(&1 == 30)))
+      row_text = rows |> Enum.at(Place.scroll(lines, anchor)) |> text()
+
+      {parsed2, rows2} = render(new)
+      lines2 = Place.lines(rows2, parsed2.text)
+      moved = Place.remap(Place.line_map(old, new), anchor)
+      assert moved == {31, 0}
+      squash = &String.replace(&1, ~r/\s+/, " ")
+      assert squash.(rows2 |> Enum.at(Place.scroll(lines2, moved)) |> text()) == squash.(row_text)
+    end
+
+    test "the line map: kept lines map across, removed ones to nil" do
+      map = Place.line_map("a\nb\nc\nd\n", "a\nX\nc\nd\ne\n")
+      assert map == {0, nil, 2, 3, 5}
+      # A removed line's anchor goes to the nearest earlier kept line, at its first row.
+      assert Place.remap(map, {1, 3}) == {0, 0}
+      assert Place.remap(map, {3, 2}) == {3, 2}
+      assert Place.remap(nil, {7, 1}) == {7, 1}
+      assert Place.remap(Place.line_map("a\nb\n", "b\n"), {0, 1}) == {0, 0}
+    end
+
     test "a line with no rows goes to the nearest earlier line that has some" do
       # A link definition draws nothing.
       {parsed, rows} = render("one\n\n[foo]: /url \"title\"\n\nthree\n")

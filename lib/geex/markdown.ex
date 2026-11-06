@@ -86,13 +86,15 @@ defmodule Geex.Markdown do
   @typedoc """
   One read of a document, what the preview keeps between layouts (ADR-0043 §2, §3): the text
   (each `\r\n` turned to `\n`), its tree, each fenced block's highlight spans by `{code, info
-  word}` (capture names, not colours, §5), the grammars its code blocks name (whether installed
+  word}` (capture names, not colours, §5) and, built from them once, the captures covering each
+  byte (`Geex.Markdown.Layout.captures/1`), the grammars its code blocks name (whether installed
   or not: installing one re-renders), and the parse's stats.
   """
   @type parsed :: %{
           text: String.t(),
           tree: Parse.tree(),
           code: %{{String.t(), String.t()} => [Geex.Highlight.Span.t()]},
+          captures: %{{String.t(), String.t()} => map()},
           languages: [String.t()],
           stats: map()
         }
@@ -115,6 +117,8 @@ defmodule Geex.Markdown do
          text: text,
          tree: tree,
          code: code,
+         captures:
+           Map.new(code, fn {key, spans} -> {key, Geex.Markdown.Layout.captures(spans)} end),
          languages: blocks |> Enum.map(&language(elem(&1, 1))) |> Enum.uniq(),
          stats: Map.merge(stats, %{code_blocks: length(blocks), code_us: us})
        }}
@@ -132,8 +136,8 @@ defmodule Geex.Markdown do
 
   @doc "The rows of a parsed document at `width` columns (`Geex.Markdown.Layout.rows/4`)."
   @spec rows(parsed(), pos_integer()) :: [Geex.Markdown.Layout.row()]
-  def rows(%{tree: tree, text: text, code: code}, width) do
-    Geex.Markdown.Layout.rows(tree, text, width, spans: &Map.get(code, {&1, &2}))
+  def rows(%{tree: tree, text: text, captures: captures}, width) do
+    Geex.Markdown.Layout.rows(tree, text, width, captures: &Map.get(captures, {&1, &2}))
   end
 
   @doc """

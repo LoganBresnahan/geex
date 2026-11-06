@@ -595,6 +595,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      render queries checked by `mix geex.catalog`, the fixtures, the cached render handles.
      (2) 2026-11-06: the layout: `Geex.Markdown.parse/2` and `rows/2`, code colours resolved when
      drawn, the grammars' gaps corrected, per-line sources and `Geex.Markdown.Place`.
+     (3) 2026-11-06: `{:geex_buffer_synced, …}` and `status/1`'s hash; `Geex.Markdown.Preview`
+     under `PreviewSupervisor`; the anchor remapped through a line diff.
    - **Before merging:** publish the `catalog-v3` release (`_build/catalog/dist/*`, not-latest,
      ADR-0041 §5). `catalog_release` names it, so until it exists every install from the built-in
      catalog fails on this branch.

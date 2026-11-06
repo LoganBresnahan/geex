@@ -223,13 +223,16 @@ defmodule Geex.Buffer do
   def snapshot(server), do: GenServer.call(server, :snapshot)
 
   @doc """
-  The cheap status: `%{path, dirty, behind}`, without the text or history `snapshot/1` builds.
-  For lists drawn on every repaint (the buffer picker, the edits pane, ADR-0034).
+  The cheap status: `%{path, dirty, behind, synced}`, without the text or history `snapshot/1`
+  builds. For lists drawn on every repaint (the buffer picker, the edits pane, ADR-0034).
+  `synced` is the sha256 of the synced disk text, what the markdown preview checks a read
+  against (ADR-0043 §2); it is hashed once per baseline, not per call.
   """
   @spec status(GenServer.server()) :: %{
           path: String.t() | nil,
           dirty: boolean(),
-          behind: map() | nil
+          behind: map() | nil,
+          synced: String.t()
         }
   def status(server), do: GenServer.call(server, :status)
 
@@ -310,6 +313,8 @@ defmodule Geex.Buffer do
           # Attestations (ADR-0032) for writes not taken in yet, newest first (ADR-0034). The
           # next fast-forward credits its group from them by the chain rule, then clears them.
           held: [],
+          # `{synced text, its sha256}`, computed when first asked for after the baseline moves.
+          synced_sha256: nil,
           # `nil`, or `%{sha256, at}`: the disk differs from `synced` (ADR-0034 §1).
           behind: nil
         }
@@ -429,8 +434,12 @@ defmodule Geex.Buffer do
 
   def handle_call(:snapshot, _from, state), do: {:reply, build_snapshot(state), state}
 
-  def handle_call(:status, _from, state),
-    do: {:reply, %{path: state.path, dirty: state.history.dirty, behind: state.behind}, state}
+  def handle_call(:status, _from, state) do
+    {sha, state} = synced_sha256(state)
+
+    {:reply, %{path: state.path, dirty: state.history.dirty, behind: state.behind, synced: sha},
+     state}
+  end
 
   def handle_call(:get_text, _from, state), do: {:reply, History.text(state.history), state}
 
@@ -438,7 +447,7 @@ defmodule Geex.Buffer do
     do: {:reply, History.commands_oldest_first(state.history), state}
 
   def handle_call(:mark_synced, _from, state) do
-    state = %{state | history: History.sync(state.history)} |> record_sync()
+    state = %{state | history: History.sync(state.history)} |> record_sync() |> notify_synced()
     {:reply, build_snapshot(state), state}
   end
 
@@ -468,7 +477,7 @@ defmodule Geex.Buffer do
          :ok <- File.write(state.path, History.text(state.history)) do
       # disk now equals the written text — that is the new in-sync baseline.
       state = %{state | history: History.sync(state.history)} |> record_sync()
-      state = set_behind(state, nil)
+      state = state |> set_behind(nil) |> notify_synced()
       # A save is a natural durability point: don't wait for the timer.
       {:reply, {:ok, state.path}, %{state | ledger: state.ledger && Ledger.sync(state.ledger)}}
     else
@@ -548,6 +557,7 @@ defmodule Geex.Buffer do
         entry = group_entry(:group, history, length(commands), Keyword.get(opts, :baseline))
         new_state = record(%{state | history: history}, entry)
         notify_change(new_state, footprint)
+        new_state = if baseline, do: notify_synced(new_state), else: new_state
         if notice = opts[:notice], do: notify_notice(new_state, notice)
         {:reply, {:ok, build_snapshot(new_state)}, new_state}
 
@@ -613,6 +623,24 @@ defmodule Geex.Buffer do
   defp set_behind(state, behind) do
     for {_ref, pid} <- state.subscribers, do: send(pid, {:geex_buffer_behind, self(), behind})
     %{state | behind: behind}
+  end
+
+  # The synced baseline moved (a save, a fast-forward, mark_synced): the markdown preview reads
+  # the file again on this (ADR-0043 §2), since "on save" alone would miss a fast-forward that
+  # takes in a write the watcher hasn't reported.
+  defp notify_synced(state) do
+    {sha, state} = synced_sha256(state)
+    for {_ref, pid} <- state.subscribers, do: send(pid, {:geex_buffer_synced, self(), sha})
+    state
+  end
+
+  # The synced text's sha256, kept with the text it hashed so it is computed once per baseline.
+  defp synced_sha256(%{synced_sha256: {text, sha}} = state) when text == state.history.synced,
+    do: {sha, state}
+
+  defp synced_sha256(state) do
+    sha = Restore.sha256(state.history.synced)
+    {sha, %{state | synced_sha256: {state.history.synced, sha}}}
   end
 
   defp notify_attested(state, group, actor) do
