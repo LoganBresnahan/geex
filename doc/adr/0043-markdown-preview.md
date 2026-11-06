@@ -185,14 +185,14 @@ is packaged (until then from `_build/markdown_inline/parser.wasm`, built from th
   ADR index, ADR-0042 and this ADR), about 6,100 rendered rows, were searched for markup that
   survived rendering. Two hits are the docs' own, and GitHub renders them the same way: in
   `doc/testing.md` line 2999 starts with `+ `, which CommonMark reads as a list item, so its `**`
-  never closes; and the index's ADR-0041 row writes `|` inside a code span, which GFM splits the
-  table cell on, so its status reads "rollback". One is the grammar's: a code span opened by two
-  backticks and holding a run of three (the Context's "typing … turns the rest of the file into
-  code") closes on the first two backticks of that run, where CommonMark closes only on a run of
-  the same length, so the span shows one backtick instead of three. Hard breaks, entities,
-  escapes, images, autolinks, reference links with and without definitions, and code fenced
-  inside a list item rendered right. Widths of 40, 20, 8 and 3 columns rendered every doc
-  without an error.
+  never closes; and the index's ADR-0041 row wrote bare `|` inside a code span, which GFM splits
+  the table cell on, so its status read "rollback" (escaped since). One is the grammar's: a code
+  span opened by two backticks and holding a run of three (the Context's "typing … turns the
+  rest of the file into code") closes on the first two backticks of that run, where CommonMark
+  closes only on a run of the same length, so the span shows one backtick instead of three. Hard
+  breaks, entities, escapes, images, autolinks, reference links with and without definitions,
+  and code fenced inside a list item rendered right. Widths of 40, 20, 8 and 3 columns rendered
+  every doc without an error.
 - **Time** for a whole render on the maintainer's machine (block parse, inline calls, code
   highlighting, layout):
 

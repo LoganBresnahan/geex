@@ -4575,6 +4575,13 @@ Since 0.3.5:
 - that the v0.3.6 tag starts no ci.yml run;
 - the maintainer's `geex self update` from 0.3.5.
 
+**Later the same day, the coordinator's report:** the v0.3.6 tag on `387aac9` started
+release.yml only, no ci.yml run, so the branch-only trigger from `2dca0e5` holds (that entry's
+"Not tested yet"). Release run 39365443242: the 4 builds each smoke green, the publish
+succeeded, and all 7 post-release smoke runners say "geex 0.3.6 … passed", FAIL=0. On the
+maintainer's machine `geex self update` installed 0.3.6, kept 0.3.5 as previous and removed
+0.3.4. Still not run: the release dry run.
+
 ### 2026-11-06 — the markdown preview's spike, `mix geex.render` (ADR-0043)
 
 The maintainer asked for a markdown preview: read-only, the whole of it re-rendered on save,
