@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14); shell commands run from the minibuffer (`!`, `!!`, `|`, item 15); both ship in 0.3.4. From 0.3.5 the captAInHook payload ships in each release, linked at `~/.local/share/geex/integrations/geex-attest.sh` (ADR-0041's amendment). **2026-11-06:** a read-only markdown preview is planned (item 16, [adr/0043](adr/0043-markdown-preview.md), proposed); its spike, `mix geex.render`, prints a file as the preview would draw it. Since the
+**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14); shell commands run from the minibuffer (`!`, `!!`, `|`, item 15); both ship in 0.3.4. From 0.3.5 the captAInHook payload ships in each release, linked at `~/.local/share/geex/integrations/geex-attest.sh` (ADR-0041's amendment). **2026-11-06:** a read-only markdown preview is planned (item 16, [adr/0043](adr/0043-markdown-preview.md), accepted); its spike, `mix geex.render`, prints a file as the preview would draw it. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -577,15 +577,20 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    `history.json`. For the next release.
    - **Later, if wanted:** colours in the output pane (SGR into cells); a status-line mark for a
      `|` still running.
-16. **A read-only markdown preview** ([adr/0043](adr/0043-markdown-preview.md), proposed) — the
+16. **A read-only markdown preview** ([adr/0043](adr/0043-markdown-preview.md), accepted) — the
    maintainer's ask 2026-11-06: `Alt+Shift+P` opens a markdown file's preview beside it, the file
    on disk re-rendered whole on each save or disk change. **Spike built 2026-11-06:**
    `mix geex.render FILE` prints a file as the preview would draw it, and the installed
    tree-sitter grammars render geex's docs well enough (ADR-0043 §8). **Reviewed 2026-11-06:** an
    adversarial review against the code revised the ADR before any of it was built (ADR-0043 §9).
-   - **Next, once the ADR is accepted:** `markdown_inline` in the catalog (as Markdown's
-     companion) and the test fixtures, the buffer's synced message, Page Up/Down in the parser,
-     the preview tab with its gate and its process, `Geex.Cell`'s `:strike`.
+   - **Next (accepted 2026-11-06), on the branch `markdown-preview`,** in six slices, each
+     verified before the next: (1) the `markdown_inline` companion package, the fixture grammars
+     and the render handles; (2) the layout for real (ADR-0043 §4's corrections, §5, §6); (3) the
+     buffer's synced message and the preview process, with no UI; (4) preview tabs and the gate on
+     the active buffer, not reachable from the UI yet; (5) the UI: keys, glyph, mouse, drawing,
+     with Page Up/Down in the parser and `Geex.Cell`'s `:strike`; (6) the ADR amendments and the
+     docs. The maintainer looks at it once it's built; merging to main and releasing wait for
+     that.
    - **Later, if wanted:** included ranges in the NIF (faster inline parsing, and injections for
      source highlighting); marking the blocks the last write changed, by who wrote them.
 

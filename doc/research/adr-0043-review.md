@@ -1,0 +1,952 @@
+# ADR-0043 — the adversarial review of the proposed design
+
+_Eight agents checked [ADR-0043](../adr/0043-markdown-preview.md) (the read-only markdown preview), as proposed, against the code before any of it was built._
+
+> Workflow run `wf_50c463ae-18b`, 2026-11-06. It reviewed the tree at `38c39f3`; the code is the same at `464bd3b`, so line numbers refer to either. Raw findings alongside this file as `adr-0043-review.json`. Probes named `scratch/…` were throwaway scripts and aren't kept.
+
+## How to read it
+
+Four reviewers each took one dimension: focus and the cursor model; buffer messages and the preview process; keys, the tab bar and the mouse; packaging and the renderer. Each reported findings with file:line evidence and an amendment to the ADR. A skeptic per dimension then opened every cited line and tried to refute each finding, judging it confirmed, partly right (overstated, or with a wrong amendment, which it corrected) or refuted.
+
+36 findings survived and none were refuted; about 28 remain once the ones two reviewers found independently are merged. Each section below gives the reviewer's finding and evidence, then the skeptic's check and the amendment as checked (the reviewers' own amendments are in the JSON). All of them were folded into ADR-0043 §1–7 in `464bd3b`. **ADR-0043 is the authority**: where it and a finding differ, the ADR's later wording wins.
+
+## Index
+
+| # | Dimension | Finding | Severity | Check |
+|---|---|---|---|---|
+| F1 | focus-cursor | With a preview current, its markdown buffer is Session's active buffer, and most editing paths miss a key-level gate | high | partly |
+| F2 | focus-cursor | A preview counts as another view of its buffer, so closing the last source tab skips the unsaved-edits refusal and leaves the preview behind | high | confirmed |
+| F3 | focus-cursor | Opening the file from the preview's pane shows the preview, and a jump to a line lands where there is no cursor | high | partly |
+| F4 | focus-cursor | "No cursor" conflicts with a tab type, and loop code, that require and pass along cursor, hscroll and hold | medium | partly |
+| F5 | focus-cursor | §6's scroll to the saving tab's cursor needs a cursor, but the save message carries only the buffer, and the buffer never sees a cursor | medium | partly |
+| F6 | focus-cursor | The wheel, scroll bar, press and drag paths work in source lines and place a caret | medium | partly |
+| F7 | focus-cursor | A current preview's status line, hardware cursor and tab label are the source's | low | confirmed |
+| F8 | focus-cursor | "The other pane", "the source pane" and which preview the toggle closes are undefined beyond two panes and one preview | low | confirmed |
+| F9 | focus-cursor | A rename re-keys the buffer without telling its subscribers, so the preview's path and whether it applies go stale | low | confirmed |
+| F10 | focus-cursor | Page Up/Down, two of the preview's scroll keys, never reach the loop | low | confirmed |
+| F11 | messages-lifecycle | Nothing defines what the preview shows when the file isn't on disk (never saved, or deleted), and a deletion sends no message | medium | partly |
+| F12 | messages-lifecycle | Who owns, supervises and stops the preview process is left open, and the obvious choices break 'a crash costs a frame' | medium | partly |
+| F13 | messages-lifecycle | 'Keeps only the latest request' would let a width change replace a pending save's re-read | medium | confirmed |
+| F14 | messages-lifecycle | §2's width re-layout says neither where it runs nor how widths reach a per-buffer process; laying out testing.md measures about 100 ms | medium | partly |
+| F15 | messages-lifecycle | A fast-forward that takes in a change before the watcher reports it sends nothing the preview hears | low | confirmed |
+| F16 | messages-lifecycle | The preview's read can catch the buffer's in-place write half done, and a rewrite with identical bytes never corrects it | low | partly |
+| F17 | messages-lifecycle | `{:geex_buffer_saved, buffer}` can't tell §6 that the user saved, or where their cursor was | low | partly |
+| F18 | messages-lifecycle | Rows carry code colours already resolved against the theme, so a theme change is a trigger §2–3 leave out | low | partly |
+| F19 | messages-lifecycle | A rename tells subscribers nothing, so a preview that keeps its path (as the reactor keeps its language) reads the old file | low | confirmed |
+| F20 | keys-tabbar-mouse | A preview tab on the file's buffer keeps the buffer open: Alt+K, a tab's × and a pane's × no longer close the file or refuse its unsaved edits | high | confirmed |
+| F21 | keys-tabbar-mouse | "The other pane" isn't defined beyond one pane, and Panes.split/2 neither takes the preview tab nor leaves focus on the source | medium | partly |
+| F22 | keys-tabbar-mouse | The "keys that would edit show a hint" rule misses typed verbs and the palette, which edit the previewed file through Session | medium | partly |
+| F23 | keys-tabbar-mouse | Every file-pane mouse path works in source lines, so a preview tab needs a rule for presses, drags, double-clicks and both scroll bars | medium | partly |
+| F24 | keys-tabbar-mouse | Page Up/Down can't scroll the preview: the parser drops them, and a test pins it | medium | confirmed |
+| F25 | keys-tabbar-mouse | Alt+Shift+P (and Alt+P with Caps Lock) stops moving between panes from the tree, edits and output panes, against ADR-0037, and the ADR doesn't say what it does there | low | partly |
+| F26 | keys-tabbar-mouse | TabBar.layout/5 has no way to place or find the glyph, and a preview tab's label is undefined | low | partly |
+| F27 | keys-tabbar-mouse | The placeholder ¶ fails the width check §1 sets for the glyph | low | partly |
+| F28 | keys-tabbar-mouse | Key help and the settings view's Keys tab aren't named as places to list the chord and the glyph | low | partly |
+| F29 | packaging-renderer | §6's place-keeping by block loses the reader inside tall tables and code blocks (the ADR index is one 446-row block) | medium | confirmed |
+| F30 | packaging-renderer | Code-block highlighting puts theme colours into Layout's rows, so §5's theme-free layout and §2's cheap re-layout don't hold | medium | partly |
+| F31 | packaging-renderer | Every consumer of the catalog treats a grammar as a file language: the catalog test fails on markdown_inline, and Alt+Y, --list and the install notice show it as one | medium | partly |
+| F32 | packaging-renderer | The preview's own queries and handles bypass ADR-0040's grammar checks: no ABI gate, no cache or forget, and no catalog check that they still compile | medium | confirmed |
+| F33 | packaging-renderer | An empty `\|\|` cell is dropped, so the rest of the row draws under the wrong headers | low | confirmed |
+| F34 | packaging-renderer | In CRLF files, html blocks, front matter and indented code each gain a stray row and keep `\r` in their runs | low | partly |
+| F35 | packaging-renderer | Three common constructs render unlike GitHub: closing `#`s show, list numbers are copied, and `$…$` in prose becomes code | low | confirmed |
+| F36 | packaging-renderer | With the default terminal theme and no OSC 11 answer, code has no tint, so fenced code draws as plain indented text | low | partly |
+
+## Findings
+
+### F1. With a preview current, its markdown buffer is Session's active buffer, and most editing paths miss a key-level gate
+
+`focus-cursor` · `preview-current-acts-on-buffer` · high · gap · §1 The tab · check: **partly**
+
+**Finding.** ADR-0043 doesn't say what Session's active buffer is while a preview tab is current. Under ADR-0038 §2 and `enter/1` it becomes the preview's buffer. So everything that acts on "the active buffer" reaches a buffer the user can only see as the rendered file on disk. "Keys that would edit show a hint" doesn't say where that check sits or what counts as an edit.
+
+The check can't live only in `apply_editor_key/2`. The typed verbs and the palette reach `apply_action/4` through `apply_verb/2` without passing through it, and paste, cut, undo, redo, revert, revert-call, select, select all, fast-forward and save are all palette entries. Grid's `cut` reaches `do_cut/2` through `do_grid/2`. `replace_selection/3` applies a running `|cmd` whenever the active buffer is still the one the command started on, which stays true while that buffer's preview is current.
+
+It can't live only in `apply_action/4` either. `apply_key/4` dispatches `{:edit, …}` and opens `:grid` before it ever reaches `apply_action/4`.
+
+The code's own vocabulary also leaves gaps. Undo/redo are "history operations, not edits" and save is "an operation, not an edit". A gate on edits alone would let Alt+Z / Alt+Shift+Z change the buffer where the user can't see it. It would also let Alt+U / `revert-call` take back the change on Session's cursor line, a line the preview neither shows nor marks.
+
+The Consequences say "the editing path doesn't change" and "the preview never edits". Neither holds without a check placed in that path.
+
+**Evidence.**
+
+- lib/geex/loop.ex:954-958 — enter/1: `%{buffer: pid, cursor: cursor} -> safe_set_active(pid); set_cursor(cursor)` for whatever tab becomes current
+- doc/adr/0038-split-panes-and-tabs.md:40-44 — the active buffer is the current pane's shown tab, so 'the keymap, the typed verbs, saving, undo, fast-forward … act on what you are looking at'
+- lib/geex/loop.ex:3545-3589 — apply_key/4 dispatches `{:edit, cmd, _}` via safe_dispatch and opens `:grid`/`:palette` itself, before apply_action/4
+- lib/geex/loop.ex:4419-4424 — apply_verb/2 → apply_action(action, cursor, text, state) from Session's snapshot; reached from submit_minibuffer/1 (4271) and dispatch_palette/2 (4318)
+- lib/geex/command/catalog.ex:41-54,151-171 — palette entries {:action, :paste | :undo | :redo | :revert_hunk | :revert_call | :fast_forward | :select_start | :select_all | :save}
+- lib/geex/loop.ex:4344-4358 — grid_clip → do_cut → apply_clipboard_edit → safe_dispatch
+- lib/geex/loop.ex:2934-2944 — replace_selection: 'Only while the buffer is the one shown': `same? = safe_active_buffer() == {:ok, shell.buffer} and …`
+- lib/geex/loop.ex:3622-3626, 4018-4020 — :revert_hunk → do_revert(state, cursor, :hunk) → Buffer.revert(pid, line, scope) at Session's cursor line
+- lib/geex/loop/keymap.ex:121 — undo/redo: 'History operations, not edits'; keymap.ex:166 — save: 'An operation, not an edit'; loop.ex:3969 — 'not recorded edits'
+- doc/adr/0043-markdown-preview.md:212-214 — 'The editing path doesn't change. The preview never edits'
+
+**Check (partly).** The gap is real. enter/1 (loop.ex:954-958) makes the current tab's buffer Session's active buffer, whatever kind of tab it is. ADR-0038 §2 (lines 40-44) keeps it that way, and ADR-0043 §1 doesn't override it. apply_key/4 handles {:edit,…}, :grid and :palette itself, before apply_action/4 (loop.ex:3545-3589). Typed verbs and the palette reach apply_action/4 through apply_verb/2 (4271, 4318, 4419) and never pass apply_editor_key/2. The palette offers paste, undo, redo, revert, revert-call, fast-forward, highlight, select all and save (catalog.ex:38-55, 148-172). do_revert/3 acts on Session's cursor line (4018-4020). replace_selection/3 checks only the active buffer and its text (2937-2944). keymap.ex:121 and :166 call undo/redo and save 'not edits'. So 'keys that would edit show a hint' leaves the palette and the verbs open, and doesn't classify undo, redo or revert.
+
+Overstated in three ways:
+- The ADR opens the preview beside its source, so the buffer's text is normally visible in the other pane. It is not 'only the rendered file'.
+- The Consequences' 'editing path' means the shared path, provenance, undo and replay. A gate in the loop doesn't touch them; only 'the preview never edits' depends on the gate.
+- High is closer to medium.
+
+The amendment is wrong in two places. First, its gate points miss two paths: `line N` (submit_minibuffer's {:line, n} → jump_to_line/2, loop.ex:4262 and 4377, which doesn't go through apply_verb/2) and the mouse press (press/4 → select_to/5 sets Session's cursor and a selection, 1159-1210). Second, its allowed verbs leave out quit/exit, tree, edits and no (verbs.ex:166, 189-190, 203-204). 'Everything else shows the hint' would then refuse `quit`, which loop.ex:4396 says must always work.
+
+**Amendment, as checked.** Add to §1, and amend ADR-0038 §2:
+
+"While a preview is current, its buffer is still Session's active buffer, so the loop gates what reaches it. One predicate, 'the current tab is a preview', is checked where actions come in:
+- in `apply_editor_key/2` before `Keymap.resolve/3`, where a preview's keys go to a handler of their own, as the output pane's do;
+- in `submit_minibuffer/1`'s `line N` branch, and in `apply_verb/2` after its `:quit` clause (the typed verbs and the palette);
+- in `run_pipe/2` and `replace_selection/3`;
+- in the mouse press (see the mouse amendment).
+
+Allowed in a preview:
+- keys: the scroll keys (arrows, Alt+W/S, Home/End, Page Up/Down), Esc and Alt+N, Alt+M, Alt+I, Alt+P/O/K/T/L/Y, Alt+1–9 / , / . / - / =, Alt+Shift+P, Ctrl-O, Alt+J and Ctrl-X/Q/C;
+- verbs: open, find, buffers, close, preview, tab, split, vsplit, tree, edits, theme, mouse, new, mkdir, rename, delete, save, fast-forward, `!`, `!!`, no, quit and exit.
+
+Ctrl-O and Alt+J need no cursor. A save re-renders the preview, and a fast-forward takes in the disk the preview already shows.
+
+Everything else shows the hint: typing and every edit key, paste, cut, copy, selection, undo, redo, revert, revert-call, Alt+G and its verbs, `line N`, and `|`."
+
+### F2. A preview counts as another view of its buffer, so closing the last source tab skips the unsaved-edits refusal and leaves the preview behind
+
+`focus-cursor` · `preview-counts-as-open-elsewhere` · high · contradiction · §1 The tab · check: **confirmed**
+
+**Finding.** "On the file's buffer, so closing the file closes its previews" holds only when the buffer process ends (`:DOWN` → `Panes.drop_buffer/2`). The loop's own close paths ask whether the buffer has another tab, and a preview is one:
+- `do_close/1` takes the `Panes.elsewhere?/2` branch before its unsaved-edits check.
+- The tab × refuses only when the buffer is dirty `and not Panes.in_other_pane?/3`.
+- The pane × leaves any buffer that is `in_other_pane?` out of its own-buffers set, so neither its dirty check nor `safe_close_buffer` sees it.
+
+So Alt+K, the source tab's ×, or the source pane's × all close the last source tab with "still open in another pane". They skip ADR-0038 §4's refusal over unsaved edits and leave the preview as the buffer's only tab.
+
+Alt+K on that preview then runs the buffer path. It either closes the buffer (`close_active`/`safe_close_buffer`) or refuses over unsaved edits the preview can't show, and with the editing gate the user can't save or undo them from there. Reopening the file from that pane lands on the preview again (see open-reuses-preview).
+
+Closing a preview from its source (the toggle) has no `Panes` call. `close_tab/1` closes only the current pane's shown tab, and the tab-× path first moves focus into the preview's pane and runs `do_close/1`.
+
+**Evidence.**
+
+- lib/geex/loop/panes.ex:190-198 — elsewhere?/2: any tab of the buffer other than the current one
+- lib/geex/loop/panes.ex:154-160 — in_other_pane?/3: any tab of the buffer in another pane
+- lib/geex/loop.ex:3786-3792 — do_close/1: `Panes.elsewhere?(state.panes, pid) -> … "closed the tab; #{name} is still open in another pane"` is checked before `match?(%{dirty: true}, …)`
+- lib/geex/loop.ex:1507-1521 — tab ×: refused only when dirty `and not Panes.in_other_pane?(state.panes, buf, id)`, else enter_pane + switch + do_close
+- lib/geex/loop.ex:1534-1555 — close_pane/2: `own` rejects buffers in other panes; dirty check and safe_close_buffer run over `own` only
+- lib/geex/loop.ex:3796-3808 — a buffer's last tab closing closes the buffer (close_active / safe_close_buffer), refused while dirty
+- lib/geex/loop.ex:745-758 — only the buffer's :DOWN drops all its tabs (Panes.drop_buffer)
+- lib/geex/loop/panes.ex:131-143 — close_tab/1 closes the current pane's shown tab only
+- doc/adr/0038-split-panes-and-tabs.md:80-82 — 'otherwise the buffer closes too, refused while it has unsaved edits'
+
+**Check (confirmed).** The close paths all count the preview as another view of the buffer:
+- do_close/1 takes the Panes.elsewhere?/2 branch before its dirty check (loop.ex:3786-3792), and elsewhere?/2 counts any other tab of the buffer (panes.ex:190-198).
+- The tab × refuses only when the buffer is dirty and not in_other_pane?/3 (loop.ex:1507-1521; panes.ex:154-160).
+- close_pane/2's `own` set drops buffers that are in other panes before its dirty check and before safe_close_buffer (loop.ex:1531-1555).
+- Only the buffer's :DOWN drops all its tabs (loop.ex:745-758).
+
+So with the preview as a plain Panes tab on the buffer, Alt+K, the source tab's × or its pane's × closes the last source tab with 'still open in another pane'. The preview becomes the buffer's only tab. §1's 'closing the file closes its previews' therefore holds only when the buffer process ends.
+
+The skipped refusal loses no edits by itself, since the buffer stays open. The harm is the orphaned preview. Alt+K on it runs the last-tab path (loop.ex:3796-3808) and refuses over unsaved edits the preview can't show. Opens from its pane land on it (open-reuses-preview). Whether the user is fully stuck depends on whether Ctrl-O is allowed in a preview.
+
+Panes.close_tab/1 closes only the current pane's shown tab (panes.ex:131-143), so the toggle from the source tab needs a new call. The amendment is right.
+
+**Amendment, as checked.** Add to §1, recorded as an amendment to ADR-0038 §4:
+
+"Only source tabs count as a buffer's views. `Panes.elsewhere?/2`, `Panes.in_other_pane?/3` and `close_pane/2`'s own-buffers set ignore previews.
+
+Closing a buffer's last source tab (Alt+K, its ×, or its pane's ×) closes the buffer and its previews with it. It is refused while the buffer has unsaved edits, as in ADR-0038 §4.
+
+Closing a preview (Alt+K, its ×, or the toggle from either tab) removes only that tab. It goes through a new `Panes` call that closes a given pane's tab without changing the current pane. It never closes the buffer and never asks about unsaved edits."
+
+### F3. Opening the file from the preview's pane shows the preview, and a jump to a line lands where there is no cursor
+
+`focus-cursor` · `open-reuses-preview` · high · gap · §1 The tab · check: **partly**
+
+**Finding.** `Panes.show/3` picks a pane's tab by buffer alone, and `adopt_active/2` returns early when the current tab's buffer is the one being opened. So in a pane where the file's tab is its preview, every open of that file shows the preview: Alt+O, the tree, `open PATH`, the buffers picker, the output pane's path:line and the edits pane's entry.
+
+`open_entry/2` and `open_location/2` then `set_cursor` the target line into Session while the preview is current. On the next switch, `leave/1` copies that cursor into the preview tab and `enter/1` gives the source tab its old cursor back, so the jump is lost.
+
+This is the ordinary path after reading a preview. The current pane stays the last file pane while the tree or the edits pane has focus, and the preview has to take focus to be scrolled with keys. No source tab can be added to that pane at all.
+
+The early return can't simply be narrowed to source tabs. Entering a preview whose buffer wasn't active makes Session send `{:geex_active_buffer, pid}` to every subscriber, the loop included. That echo relies on the early return to change nothing; narrowed, it would open a source tab over the preview just entered.
+
+**Evidence.**
+
+- lib/geex/loop/panes.ex:79-90 — show/3: `Enum.find_index(tabs, &(&1.buffer == buffer))` → `{…, :existing}`
+- lib/geex/loop.ex:882-885 — adopt_active/2: `current_buffer(state) == pid -> state`
+- lib/geex/loop.ex:897-899 — `Panes.show(state.panes, pid, cursor)`; `if kind == :existing, do: set_cursor(Panes.current(panes).cursor)`
+- lib/geex/loop.ex:931-938 — open_tab/2 → leave → safe_open_file → adopt_active
+- lib/geex/loop.ex:3106-3115 — open_entry/2: open_tab, then `set_cursor({line, 0})`
+- lib/geex/loop.ex:3009-3014 — open_location/2: do_open, then `set_cursor({line - 1, (col || 1) - 1})`
+- lib/geex/loop.ex:4288-4292 — pick({:buffer, pid}) → leave, set_active, adopt_active
+- lib/geex/loop/panes.ex:10-11 — the current pane 'stays current while the tree or the edits pane has focus'
+- lib/geex/session.ex:585-586 — put_active sends {:geex_active_buffer, pid} to every subscriber, the caller included; loop.ex:414-415 handles it with adopt_active/2
+
+**Check (partly).** The finding is real:
+- Panes.show/3 picks a pane's tab by buffer alone (panes.ex:79-90).
+- adopt_active/2 returns early when the current tab's buffer is the pid (loop.ex:882-885). Otherwise it shows the existing tab and restores that tab's cursor (891-899).
+- open_tab/2 (931-938), pick/2 for a buffer (4288-4292), open_entry/2 (3106-3115) and open_location/2 (3004-3014) all show through adopt_active/2. The last two then set_cursor into Session.
+- leave/1 copies Session's cursor into the current tab (942-946), and enter/1 restores the other tab's cursor (954-962), so the jump is lost.
+- The current pane stays the preview's pane while the tree or the edits pane has focus (panes.ex:10-11).
+
+The echo argument also holds. put_active/2 sends {:geex_active_buffer, pid} to every subscriber (session.ex:577-588), and the loop handles it with adopt_active/2 (loop.ex:414-415). Narrowing the early return would open a source tab over a preview just entered.
+
+The amendment, though, is inconsistent as written. It keeps adopt_active/2's any-tab early return, yet it names open_tab/2 and pick/2, which reach the show step only through adopt_active/2. In the main case, where the preview is the current tab, that early return fires and the open still lands on the preview. The opens have to show the source tab themselves.
+
+**Amendment, as checked.** Add to §1:
+
+"The loop's own opens show the file's source tab. `open_tab/2` (and with it `do_open`, the tree, the finder, `open_entry/2` and `open_location/2`) and `pick/2` for a buffer show it themselves, through a `Panes.show/3` that matches source tabs only. They don't go through `adopt_active/2`, whose early return fires exactly when the file's preview is the current tab.
+
+In a pane where the file has only a preview, a source tab is added at the end of the pane's tabs and shown, so a jump from the edits pane or the output pane lands on text.
+
+`adopt_active/2` handles Session's `{:geex_active_buffer, pid}`. It keeps its early return for any tab on that buffer, so Session's echo of a preview becoming current changes nothing."
+
+### F4. "No cursor" conflicts with a tab type, and loop code, that require and pass along cursor, hscroll and hold
+
+`focus-cursor` · `preview-tab-shape-cursor` · medium · gap · §1 The tab · check: **partly**
+
+**Finding.** A `Panes` tab is `%{buffer, cursor, scroll, hscroll, hold}`, and the loop reads or updates those fields on every tab it shows or makes current.
+
+If a preview lacks the fields, the loop crashes on the first frame after the preview opens. `pane_view/5` reads `tab.cursor` for the non-current pane, a KeyError. `enter/1`'s `case` has no clause for a map without `:cursor`. `leave/1`, `apply_editor_key/2` and `hold_scroll/5` update with `%{tab | …}`. The loop is a permanent child, so after the crash it restarts with `new_state/2`'s single fresh pane.
+
+If a preview keeps the fields, they hold source coordinates that leak. `enter/1` sets Session's cursor to the preview's, and `leave/1` and `draw_pane/6` write Session's cursor back into it. Session's `put_active/2` stores whatever cursor it holds as the buffer's last cursor, and `adopt_active/2` gives that cursor to the file's next new source tab.
+
+A round trip source → preview → source does keep the source tab's own cursor, because `leave/1` copies it out first. The risk is the preview's value standing in for the file's cursor, not a clobber of the source tab.
+
+**Evidence.**
+
+- lib/geex/loop/panes.ex:23-31, 44-47 — @type tab and tab/2 require cursor, scroll, hscroll, hold
+- lib/geex/loop.ex:1775-1777 — pane_view/5, any non-current tab: `Map.put(snap, :cursor, clamp_cursor(tab.cursor, snap.text))`
+- lib/geex/loop.ex:954-962 — enter/1: `case Panes.current(…) do %{buffer: pid, cursor: cursor} -> …; nil -> :ok end`
+- lib/geex/loop.ex:942-946 — leave/1: `Panes.update_current(state.panes, &%{&1 | cursor: cursor})`
+- lib/geex/loop.ex:849 — apply_editor_key/2: `&%{&1 | hold: nil}`; loop.ex:1263-1270 — hold_scroll/5 reads tab.cursor and sets hold
+- lib/geex/loop.ex:1854-1857 — draw_pane/6 writes `cursor: cursor, hold: hold, hscroll: hscroll` back into the tab each frame
+- lib/geex/session.ex:577-594 — put_active/2 → remember_cursor/1 stores the view cursor as cursors[old], popped when that buffer is next made active
+- lib/geex/loop.ex:891-897 — adopt_active/2 opens a new tab at Session's snapshot cursor; loop.ex:252-262 — the restarted loop starts from new_state/2
+
+**Check (partly).** The code is as cited:
+- The Panes tab type and tab/2 carry cursor, scroll, hscroll and hold (panes.ex:23-31, 44-47).
+- pane_view/5 reads tab.cursor (loop.ex:1775-1777).
+- enter/1's case matches only a map with :cursor (954-962).
+- leave/1, apply_editor_key/2 and hold_scroll/5 update with %{tab | …} (942-946, 849, 1262-1270).
+- draw_pane/6 writes cursor, hold and hscroll back every frame (1854-1857).
+- put_active/2 remembers the view cursor as the old buffer's (session.ex:577-594), and adopt_active/2 starts a new tab from Session's cursor (loop.ex:887-897).
+
+But the ADR does say the preview's scroll is over rendered rows and that it has no cursor. A map without those fields crashing is a build hazard the first test would catch, not a conflict in the design.
+
+What the ADR really leaves open is what enter/1 and leave/1 do with Session's cursor for a preview. Keeping the fields leaks only cosmetically: the file's next new source tab opens at the preview's placeholder cursor instead of where the user last was. The finding itself concedes the source tab isn't clobbered. Medium is closer to low.
+
+**Amendment, as checked.** Add to §1:
+
+"A preview tab is `%{buffer, view: :preview, scroll}`, where `scroll` counts rendered rows. It has no `cursor`, `hscroll` or `hold`. A source tab is today's tab with `view: :source`.
+
+`enter/1` makes a preview's buffer active and leaves Session's cursor as it is (the file's remembered cursor). `leave/1` copies nothing into a preview. So Session never keeps a preview's position as the file's cursor.
+
+Every loop path that reads or writes a tab's `cursor`, `hscroll` or `hold` handles a preview first: `pane_view/5`, `draw_pane/6`, `enter/1`, `leave/1`, `adopt_active/2`, `apply_editor_key/2`, `press/4`, `select_to/5`, `wheel/4`, `scrolled/4`, `hold_scroll/5`, the scroll-bar and drag paths, and the tab copy in `Panes.split/2`."
+
+### F5. §6's scroll to the saving tab's cursor needs a cursor, but the save message carries only the buffer, and the buffer never sees a cursor
+
+`focus-cursor` · `save-follow-cursor-no-source` · medium · gap · §6 Keeping the reader's place · check: **partly**
+
+**Finding.** §6 has the preview scroll to "the block holding that tab's cursor" after a save from a tab of the same file. §2's trigger is `{:geex_buffer_saved, buffer}` from the buffer's save handler, and the preview process subscribes to the buffer. Neither knows which tab saved or where its cursor was: the cursor is view-local, kept in Session and the loop (ADR-0014 §2), never in the buffer.
+
+Only the loop knows, at `do_save/1`. The rows come back later from a process that coalesces requests, so a reconcile change can fold into the same render.
+
+The ADR also leaves two cases open:
+- A save made from the preview itself, if Ctrl-O is allowed there, where there's no tab cursor.
+- A save where `Reconcile.save` merged the disk's change in first, so the cursor's line no longer names the same text.
+
+**Evidence.**
+
+- doc/adr/0043-markdown-preview.md:82-84 — 'It gains one message to its subscribers, `{:geex_buffer_saved, buffer}`'
+- doc/adr/0043-markdown-preview.md:163-164 — 'the preview scrolls instead to the block holding that tab's cursor'
+- lib/geex/buffer.ex:466-477 — handle_call(:save): writes History.text, replies {:ok, path}; the buffer holds no cursor
+- lib/geex/session.ex:7-9 — the view cursor is view-local, held in Session (ADR-0014 §2)
+- lib/geex/loop.ex:3726-3731 — do_save/1 → Reconcile.save on the active buffer; only the loop knows the cursor here
+- lib/geex/reconcile.ex:194-217 — Reconcile.save fast-forwards (merges the disk in) before Buffer.save
+
+**Check (partly).** Checked: §2's message is {:geex_buffer_saved, buffer} (ADR:82-84). handle_call(:save) writes the file and replies {:ok, path}, with no cursor (buffer.ex:466-477). The cursor is view-local, in Session (session.ex:7-9).
+
+But the ADR never has the preview process do §6's scrolling, and it couldn't. A buffer may have several previews (§3), and each tab's scroll lives in the loop's Panes. The loop runs the save (do_save/1, loop.ex:3726-3746) and subscribes to every watched buffer (4453-4454), so the loop already has the cursor. The ADR also lists 'whether the preview follows the cursor on save by default' under 'To settle when built'.
+
+The merged-first case isn't specific to the preview. The view cursor follows no outside edit anywhere: Session never subscribes to buffers, and the loop ignores the change footprint (loop.ex:434). §3 also gives rendering no correctness contract.
+
+What's left is small: say that the loop applies the rule, and which saves count.
+
+**Amendment, as checked.** Rewrite §6's second rule:
+
+"The loop applies it, since it owns every preview tab's scroll and runs the save. When its own save (Ctrl-O, `save`) succeeds from a source tab, it notes `{buffer, cursor line}`. When that buffer's next rows arrive, each of its preview tabs scrolls to the block holding that line, clamped to the new text, instead of keeping its top block.
+
+A save from a preview, or from outside the loop, keeps the reader's place. `{:geex_buffer_saved, buffer}` stays a render trigger and carries no cursor."
+
+### F6. The wheel, scroll bar, press and drag paths work in source lines and place a caret
+
+`focus-cursor` · `preview-scroll-mouse-source-lines` · medium · gap · §1 The tab · check: **partly**
+
+**Finding.** The ADR gives the preview "a scroll over rendered rows", moved by arrows, Page Up/Down and the wheel, and says a link click opens its target. Every existing mouse path computes against the tab's source text:
+- **Wheel.** `wheel/4` → `scrolled/4` bounds the scroll by the source's line count and widest line. A short file whose paragraphs wrap into more rows than it has lines can't be wheeled to its end. A file whose link definitions render to nothing scrolls past its end. Shift+wheel sets an `hscroll` the preview doesn't have.
+- **Scroll bar.** Its layout, hit test and thumb drag read the source text.
+- **Press.** `press/4` sends the cell through `Mouse.text_pos/4`, which makes a caret on line `tab.scroll + row`, using a rendered-row index as a source line. `select_to/5` then sets Session's cursor and a selection, and `start_drag/3` begins a drag that selects text. A double-click selects a source word; Shift/Alt+press extends the selection.
+- **Drawing.** `draw_pane/6` scrolls to keep the cursor's line in view.
+
+ADR-0039 §3 and §7 (a press places the cursor; the bars are laid out from the text) still govern a preview unless amended. The Consequences' "it addresses nothing" fails while a press turns a cell into a caret.
+
+**Evidence.**
+
+- lib/geex/loop.ex:1253-1271 — wheel/4 → scrolled/4 → hold_scroll/5 (hold built from Session's cursor)
+- lib/geex/loop.ex:1315-1328 — scrolled/4: `bottom = max(lines - rows, 0)` from line_count(text); `right` from max_line_width(text)
+- lib/geex/loop.ex:1278-1310 — bar_or_text_press/4, scroll_bar_to/2 → ScrollBar.layout(text, rect, {tab.scroll, tab.hscroll}); scroll_bar.ex:62-68 counts source lines and the widest line
+- lib/geex/loop.ex:1159-1193 — press/4: Mouse.text_pos(text, rect, {tab.scroll, tab.hscroll}, …), then select_to + start_drag; word_at on a double-click
+- lib/geex/loop/mouse.ex:45-71 — text_pos/4: `line = scroll + row`, cast through the source line's widths
+- lib/geex/loop.ex:1805-1806 — draw_pane/6: `scroll_for(tab.scroll, line, h_text, @scrolloff)` follows the cursor
+- doc/adr/0039-mouse.md:62-82 — 'A press focuses the pane … and places the cursor'; drag, double-click, wheel, hold
+
+**Check (partly).** The code is as cited:
+- wheel/4 → scrolled/4 bounds the scroll by the source's line count and widest line (loop.ex:1253-1328).
+- The scroll bar's layout, hit test and thumb drag read source text (1278-1310; scroll_bar.ex:62-68).
+- press/4 → Mouse.text_pos/4 → select_to/5 sets Session's cursor and a selection, then start_drag/3 begins a drag; a double-click uses word_at (loop.ex:1159-1216; mouse.ex:45-71).
+- draw_pane/6 follows the cursor (1805-1806).
+- ADR-0039 §3 says a press places the cursor.
+
+The gap is real. The ADR covers only the wheel, the scroll keys and a link click. It says nothing of a press off a link, a drag, a double-click, a Shift/Alt+press or the scroll bar, and it records no ADR-0039 amendment.
+
+Overstated: §1 already gives the preview 'a scroll over rendered rows … and no cursor' and has the wheel scroll it. The failures with the wheel's bounds, and 'it addresses nothing fails', describe a build that reuses the source-line paths against the ADR's own words.
+
+**Amendment, as checked.** Add to §1, recorded as an amendment to ADR-0039 §3 and §7:
+
+"In a preview, a press focuses the pane and, on a link, opens it (§1). It places no caret and starts no selection or drag. A double-click or a Shift/Alt+press does no more than a press.
+
+The wheel, the vertical scroll bar and the scroll keys move the preview's row scroll, bounded by the rows the loop holds for that tab's width. There is no horizontal scroll (Shift+wheel does nothing) and no hold, and the scroll never follows a cursor."
+
+### F7. A current preview's status line, hardware cursor and tab label are the source's
+
+`focus-cursor` · `preview-chrome-status-cursor-label` · low · gap · §2 The header · check: **confirmed**
+
+**Finding.** `repaint/1` sends every shown tab through `pane_view/5` → `draw_pane/6`, which draws source text with its gutter, highlight overlay, agent marks, selection and grid ruler. It puts the hardware cursor on the focused current tab.
+
+The status line belongs to the current tab (ADR-0038 §5) and draws Session's `line:col` plus the agent who last wrote that line. `tab_label/1` names a tab by its buffer, so a preview reads exactly like its source ("README.md [+]").
+
+The ADR describes the preview's own header, but not what the status line, the hardware cursor or the tab bar show while a preview is current, so the builder has to choose.
+
+**Evidence.**
+
+- lib/geex/loop.ex:1717-1729 — repaint/1: pane_view → draw_pane for every pane; `cursor = if current? and editing?, do: at`
+- lib/geex/loop.ex:1765-1782 — pane_view/5: the current tab reads Session's snapshot and its cursor
+- lib/geex/loop.ex:3271-3286 — draw_status/3: `position(snap.cursor)` and `author_label(snap.blame, line)`
+- lib/geex/loop.ex:1945-1950 — tab_label/1: `status_label(path) <> if(dirty, do: " [+]", else: "")`
+- doc/adr/0038-split-panes-and-tabs.md:104-107 — the status line is the current tab's; the hardware cursor is the current pane's
+
+**Check (confirmed).** Checked:
+- repaint/1 sends every shown tab through pane_view/5 → draw_pane/6 and puts the hardware cursor on the focused current tab (loop.ex:1700-1735).
+- draw_status/3 draws Session's position and the author of that line (3271-3286).
+- tab_label/1 builds the label from the buffer alone: status_label(path) plus ' [+]' (1945-1950).
+- ADR-0038 §5 gives the status line and the hardware cursor to the current tab.
+
+ADR-0043 §2 specifies only the preview's own header ('To settle' adds its save time). So with a preview current, the status line would show the line:col and author of a cursor the preview doesn't have, and the preview's tab would read exactly like its source's. Low, as rated.
+
+**Amendment, as checked.** Add to §1:
+
+"`repaint/1` draws a preview tab from its rows, with no gutter, highlight overlay, agent marks, selection or grid ruler. It hides the hardware cursor while the preview has focus.
+
+With a preview current, the status line shows the file, `[+]` / behind and 'preview', without line:col or author.
+
+A preview tab's label is its file name after the glyph, e.g. `¶ README.md`."
+
+### F8. "The other pane", "the source pane" and which preview the toggle closes are undefined beyond two panes and one preview
+
+`focus-cursor` · `other-pane-and-source-pane-undefined` · low · gap · §1 Opening it · check: **confirmed**
+
+**Finding.** `Panes` is a split tree of any depth, so with three or more panes "opens its preview as a tab in the other pane" doesn't name a pane.
+
+The open can't reuse `Panes.split/2`, which makes the new pane current and puts a copy of the current tab in it. Doing the change through `switch/2` would run `enter/1`, which drops the source's selection and goal column even though its tab never changed, so "the source keeps focus" needs a new call.
+
+A split from a preview copies the preview, and §3 allows several per buffer. "Pressed again … it closes the preview" then doesn't say which preview, nor where focus goes when the key is pressed in the preview.
+
+"A click on a relative link opens its target in the source pane" is also undefined in places. A preview records no source pane, and the file's source tab may be in two panes or in none. Opening always targets the current pane, so the click has to move focus off the preview, which the ADR doesn't say.
+
+**Evidence.**
+
+- doc/adr/0043-markdown-preview.md:56-58 — 'opens its preview as a tab in the other pane … the source keeps focus'; line 71 — 'opens its target in the source pane'
+- lib/geex/loop/panes.ex:106-129 — split/2: the new pane 'shows the same tab … and becomes current'
+- lib/geex/loop.ex:1030, 964 — switch/2 runs enter/1, which sets `selection: nil, goal: 0, drag: nil`
+- lib/geex/loop/panes.ex:213-215, 234-235 — ids/1, leaves/1: any number of panes in reading order
+- lib/geex/loop/panes.ex:79-85 — show/3 adds a tab only to `ps.pane`, the current pane
+
+**Check (confirmed).** Checked:
+- Panes is a split tree with any number of panes in reading order (panes.ex:213-215, 234-235), so 'the other pane' names a pane only when there are exactly two.
+- split/2 copies the current tab into a new pane and makes that pane current (106-129).
+- switch/2 runs enter/1, which clears the selection, the goal and the drag even when the tab didn't change (loop.ex:964, 1030).
+- show/3 adds tabs only to the current pane (panes.ex:79-85), so a link click has to move focus first.
+- §3 allows several previews per buffer, and a split from a preview copies it, so 'pressed again … closes the preview' doesn't say which one.
+- No source pane is recorded anywhere.
+
+Real, and low as rated. One fix to the amendment: 'the pane after the source's' needs to wrap when the source is in the last pane.
+
+**Amendment, as checked.** Add to §1:
+
+"The preview opens in the pane after the source's in reading order (`Panes.ids/1`, wrapping to the first), or in a new side-by-side split when there is one pane. It goes through a `Panes` call that adds the tab there and leaves `pane`, the selection and the goal as they were. It doesn't use `Panes.split/2` or `switch/2`, which move focus and clear them.
+
+A preview records the pane it was opened from. The toggle closes every preview of the buffer; pressed in a preview, it sends focus to that pane.
+
+A link click focuses that pane if it still exists, otherwise a pane showing the file's source tab, otherwise the preview's own pane, and opens the target there."
+
+Also decide whether a split from a preview copies the preview or opens the source.
+
+### F9. A rename re-keys the buffer without telling its subscribers, so the preview's path and whether it applies go stale
+
+`focus-cursor` · `rename-repoints-preview` · low · gap · §2 The file, not the buffer · check: **confirmed**
+
+**Finding.** With a preview current, `rename` acts on `current_buffer/1`, which is the preview's buffer, so renaming the file from its preview is natural. `Session.rename_file/2` re-keys the buffer through `Buffer.rename/2`, which sends its subscribers nothing, and re-points the highlight reactor with an explicit `Reactor.rewatch/2`.
+
+A preview process "subscribed to the buffer" that kept the path from its start would read the old path at the next save or disk change. A rename to a name that isn't markdown (§1 "Which files") would leave a preview on a file that gets none.
+
+The ADR says the preview reads "the file" but not how it learns the file's current path.
+
+**Evidence.**
+
+- lib/geex/loop.ex:2712-2716 — with_current_file/3 uses current_buffer(state), the shown tab's buffer, preview or not
+- lib/geex/session.ex:523-541 — rekey_buffer/3: Buffer.rename, Reconcile.watch(to), Highlight.Reactor.rewatch(pid, to)
+- lib/geex/buffer.ex:445-457 — handle_call({:rename, …}): re-registers and updates path and ledger; no subscriber message
+- doc/adr/0043-markdown-preview.md:79-81 — 'The preview reads the file … when the preview opens, when the buffer saves, and when reconcile sees the file change'
+
+**Check (confirmed).** Checked:
+- with_current_file/3 uses the current tab's buffer, preview or not (loop.ex:2712-2716).
+- rekey_buffer/3 calls Buffer.rename/2, Reconcile.watch/1 and an explicit Highlight.Reactor.rewatch/2 (session.ex:523-541).
+- Buffer's {:rename, …} handler re-registers and updates the path and ledger, and sends its subscribers nothing (buffer.ex:445-457).
+- The highlight reactor, which the ADR's preview process is 'shaped like', fixes its language from the path at start and needs that rewatch (reactor.ex:141-167).
+
+The ADR says the preview reads 'the file' but not how it learns the file's current path, nor what happens on a rename to a name §1 doesn't cover. Real, and low as rated.
+
+The amendment works, with two refinements. Re-pointing from Session is unnecessary once the path is read at each render. And closing tabs is the loop's job, not Session's. In the TUI the MCP surface isn't served, so renames come from the loop: FileOps reports back with {:geex_file_op, …} (loop.ex:807, 2688; file_ops.ex:168).
+
+**Amendment, as checked.** Add to §3:
+
+"The preview process reads the buffer's path (`Buffer.status/1`) at each render, never a path kept from its start, since `Buffer.rename/2` tells its subscribers nothing.
+
+When the loop's rename finishes (the `rename` verb, the tree's `r`), the loop re-renders the buffer's previews. It closes them with a notice when the new name isn't one §1 covers."
+
+### F10. Page Up/Down, two of the preview's scroll keys, never reach the loop
+
+`focus-cursor` · `page-keys-not-parsed` · low · gap · §1 The tab · check: **confirmed**
+
+**Finding.** §1 lists Page Up/Down among the preview's scroll keys. `Geex.Input.Parser` maps neither `ESC [ 5 ~` nor `ESC [ 6 ~`: `csi_key/2` returns nil, and the parser drops unknown CSI sequences. Neither key reaches the loop, and the parser's event shapes and the keymap have no page keys either. The ADR goes into the parser's handling of `ESC P` but leaves this addition out.
+
+**Evidence.**
+
+- lib/geex/input/parser.ex:164-165 — 'A known one becomes a key; an unknown one is dropped'
+- lib/geex/input/parser.ex:278-288 — csi_key/2 maps A–D, H, F, 1/7/4/8/3 ~ and the mouse; `csi_key(_params, _final), do: nil`
+- lib/geex/input/parser.ex:33-34 — event shapes: no :page_up / :page_down
+- lib/geex/loop/keymap.ex:96-104 — Home/End and the arrows only
+
+**Check (confirmed).** Checked:
+- The parser's moduledoc says Page Up/Down are dropped (parser.ex:17-19).
+- csi_key/2 maps A–D, H, F, the 1/7/4/8/3 ~ forms and the SGR mouse, and returns nil for anything else (278-289). Unknown CSIs are dropped (164-165).
+- The event shapes have no page keys (33-34).
+- The keymap has only Home/End and the arrows (keymap.ex:96-104).
+
+§1 lists Page Up/Down among the preview's scroll keys and discusses the parser's handling of ESC P, but not this addition. Real, and low as rated.
+
+**Amendment, as checked.** Add to §1:
+
+"The parser gains `{:key, :page_up}` and `{:key, :page_down}` (`ESC [ 5 ~`, `ESC [ 6 ~`), which it drops today as unknown CSIs. In a preview they scroll by the pane's text rows less one. In a source tab they stay unbound (`Keymap.resolve/3`'s catch-all `:ignore`) unless decided otherwise."
+
+### F11. Nothing defines what the preview shows when the file isn't on disk (never saved, or deleted), and a deletion sends no message
+
+`messages-lifecycle` · `file-not-on-disk` · medium · gap · §2 It shows the file on disk · check: **partly**
+
+**Finding.** The preview reads the file, but a buffer can have a path with no file behind it. Buffer opens a missing path as an empty buffer and creates the file on the first save, so `geex NEW.md` (or `open NEW.md`) followed by Alt+Shift+P reads `:enoent` when the preview opens. Session also re-keys a never-saved buffer in memory on rename. The glyph rule in §1 (the grammar is picked by file name) makes such a file eligible. §2 never says what a failed read renders. A deletion on disk is also never announced. The watcher skips an `:enoent` read, as ADR-0017 defers deletion handling. So an agent's `rm` or `git mv`, or a `git switch` to a branch without the file, sends subscribers nothing. The preview keeps drawing a file that no longer exists, and the header says nothing, though §2 promises 'what git, an agent and GitHub see'. `fast_forward` answers `:up_to_date` on `:enoent` and leaves any 'behind' mark set. Only geex's own delete is seen, because it kills the buffer and the preview follows it.
+
+**Evidence.**
+
+- lib/geex/buffer.ex:29-31 — "a missing path is a fresh empty buffer — the file is created on first save/1"
+- lib/geex/buffer.ex:333-338 — load_text: a path that isn't a regular file loads as ""
+- lib/geex/session.ex:343-351 — a never-saved buffer is re-keyed in memory when File.rename fails :enoent
+- lib/geex/reconcile.ex:476-485 — on_disk_change: File.read error (incl. :enoent) falls to `_ -> :ignored`; disk_changed is never called
+- lib/geex/session.ex:306-307 — "The watcher sees this deletion, but on_disk_change skips a `:enoent` read, so the eviction below … is what closes the buffer"
+- lib/geex/reconcile.ex:163 — fast_forward: `{:error, :enoent} -> :up_to_date`, the behind mark untouched
+- doc/adr/0017-reconcile-file-watch.md:99-101 — deferred: "deletion handling (a removed file is skipped, not reconciled to empty)"
+
+**Check (partly).** All cited code checks out. buffer.ex:29-31 and 333-338 load a missing path as "", and session.ex:343-351 re-keys a never-saved buffer. reconcile.ex:476-485 sends an :enoent read to `_ -> :ignored`, so disk_changed isn't called and no behind message goes out (session.ex:306-307 says so). reconcile.ex:163 returns :up_to_date on :enoent without calling up_to_date/1, so any mark stays. ADR-0017:99-101 defers deletion handling. ADR-0043 §2 (lines 79-81) never says what a failed read draws, so `geex NEW.md` followed by Alt+Shift+P has no defined preview. Three things are overstated or wrong. (1) Medium is too high: the removal blind spot is ADR-0017's documented deferral, and the editor buffer has it too; the never-saved case is one unhandled read error. (2) The amendment's split between 'not saved yet' and 'not on disk' can't be read off the read, since both are :enoent, nor off Buffer.status, which returns only path, dirty and behind (buffer.ex:432-433). (3) The 'full fix' is incomplete: a 'gone' mark would survive Alt+J, because fast_forward's :enoent branch (reconcile.ex:163) skips up_to_date/1 and only Buffer.save clears the mark (buffer.ex:471). It also belongs to ADR-0017's deferred item, not to this ADR.
+
+**Amendment, as checked.** Add to §2: "When the read fails, the preview draws no rows and its header says why: 'not on disk' for `:enoent` (a buffer not saved yet, or a file removed), otherwise the posix reason. The next save or behind change reads it again. A removal on disk isn't seen: reconcile skips an `:enoent` read (ADR-0017's deferred deletion handling), so the preview keeps its last render until the file comes back or the buffer saves, as the editor does today." Leave reporting a removal to ADR-0017's deferred item. A `disk_changed` for a vanished file would also need `fast_forward`'s `:enoent` branch to clear the mark; today that branch returns `:up_to_date` and leaves the mark set.
+
+### F12. Who owns, supervises and stops the preview process is left open, and the obvious choices break 'a crash costs a frame'
+
+`messages-lifecycle` · `process-ownership-and-crash` · medium · gap · §3 Off the key loop · check: **partly**
+
+**Finding.** The model §3 names, Highlight.Reactor, is started by Session.open_file under ReactorSupervisor. It is registered as {:highlight_reactor, buffer}, monitors its buffer, and lives exactly as long as the buffer; the loop never counts or stops it. The preview instead 'starts with a buffer's first preview and stops with its last'. Only the loop's Panes, which is pure state inside the loop, can keep that count. The loop is a permanent child. If it crashes, it restarts with fresh panes and no preview tabs. A preview process stopped only by the old count then lives until its buffer closes, re-reading and re-parsing on every save (0.45–0.7 s for testing.md) for nobody. The reactor drops a dead subscriber but never stops for lack of one, so copying it doesn't fix this. If a later Alt+Shift+P registers per buffer, it meets {:already_started, pid}. 'In a task' read as Task.async links the task to the process, so one parse or layout crash kills the :temporary preview process for good; the reactor uses spawn plus monitor. The loop doesn't monitor reactors today. A dead preview process would leave its tab frozen on stale rows with no notice, against ADR-0035 §1. The new process is also a buffer subscriber. It receives `{:geex_buffer_change, …}` on every keystroke and the opened notice the moment it subscribes, and the reactor's catch-all exists because lacking one crashed it. Existing subscribers (the loop and the reactor) do tolerate the new message: both have catch-alls.
+
+**Evidence.**
+
+- lib/geex/session.ex:278 — open_file starts the reactor: `Geex.Highlight.Reactor.watch(pid, full)`
+- lib/geex/highlight/reactor_supervisor.ex:26-34 — DynamicSupervisor start, idempotent on {:already_started, pid}
+- lib/geex/highlight/reactor.ex:40-43, 414 — registered in Geex.Registry as {:highlight_reactor, buffer}
+- lib/geex/highlight/reactor.ex:191, 299-302 — monitors the buffer and stops on its DOWN
+- lib/geex/highlight/reactor.ex:310-314 — a dead subscriber is dropped; the reactor keeps running
+- lib/geex/highlight/reactor.ex:387-392 — the pass is `spawn` + `Process.monitor`, not linked
+- lib/geex/highlight/reactor.ex:318-322 — "Without this the first one crashed the reactor, and it is `:temporary`"
+- lib/geex/application.ex:48, 75 — Geex.Loop is a default (permanent) child under one_for_one; lib/geex/loop.ex:497 "alone would just restart it (a permanent child)"
+- lib/geex/loop.ex:252-261 — init builds new panes; no tab survives a restart
+- lib/geex/loop.ex:1050-1065 — watch/2 monitors the buffer only; the reactor is subscribed to, not monitored
+- lib/geex/buffer.ex:426 — subscribe sends the opened notice at once; lib/geex/loop.ex:840 and lib/geex/highlight/reactor.ex:322 — the existing subscribers' catch-alls
+- doc/adr/0035-the-loop-never-waits.md:36 — "Monitored, not linked. If it crashes, the loop logs it, says so in a notice, and carries on."
+
+**Check (partly).** Most of it checks out. session.ex:278 starts the reactor at open, under ReactorSupervisor, which is idempotent (reactor_supervisor.ex:26-34). The reactor registers as {:highlight_reactor, buffer} (reactor.ex:40-43, 414). It monitors its buffer and stops on its DOWN (reactor.ex:191, 299-302). It drops a dead subscriber without stopping (reactor.ex:310-314), and its catch-all exists because a missing one crashed it (reactor.ex:318-322). Geex.Loop is a plain `use GenServer` (loop.ex:36), so a permanent child, under one_for_one (application.ex:48, 75). Its new_state starts from Panes.new() (loop.ex:330), so no preview tab survives a restart. watch/2 monitors the buffer and only subscribes to the reactor (loop.ex:1050-1065). ADR-0043 §3 (98-103) leaves supervision, registration and stopping open. A reactor-shaped preview would outlive a loop restart, re-rendering on each save for nobody, and its own death would freeze the tab with no notice, against ADR-0035:36. One part is overstated: reading 'in a task' as Task.async isn't what §3 says. §3 says 'shaped like Highlight.Reactor', whose moduledoc calls its spawn+monitor a 'throwaway task' (reactor.ex:8, 387-392), and §3 cites ADR-0035, whose rule is 'Monitored, not linked'. Also, the loop does stop reactors through Reactor.rewatch when a grammar is installed (loop.ex:537). The amendment needs one addition: the process should unregister before it stops, as Reactor.stop does (reactor.ex:251-256). Otherwise an idempotent start right after the last tab closes can subscribe to a process that is stopping.
+
+**Amendment, as checked.** Add to §3: "The preview process is a `:temporary` child of a `Geex.Markdown.PreviewSupervisor`, a DynamicSupervisor beside ReactorSupervisor that starts before the loop. It is registered as `{:markdown_preview, buffer}` in `Geex.Registry` and started idempotently: on `{:already_started, pid}` the loop subscribes to it, and if that call exits it starts one again. It monitors its buffer and its subscribers. When the buffer or its last subscriber goes, it unregisters itself first, as `Reactor.stop/1` does, then stops, so a restarted loop leaves no orphan and a quick reopen can't subscribe to a dying process. The loop subscribes when a preview tab for the buffer opens and unsubscribes when the last one closes, in `put_panes`, where buffers are watched. Its init reads nothing. Reading, parsing and layout run in a spawned, monitored worker, like the reactor's pass. It ignores buffer messages it doesn't use. The loop monitors each preview process. When one dies, the tab keeps its rows and its header says the preview stopped. A failed render keeps the last rows and the header names the failure (ADR-0035 §1)."
+
+### F13. 'Keeps only the latest request' would let a width change replace a pending save's re-read
+
+`messages-lifecycle` · `latest-only-drops-reread` · medium · contradiction · §3 Off the key loop · check: **confirmed**
+
+**Finding.** The reactor can keep a single boolean `pending` because it has one kind of request: highlight the newest text. The preview has at least three kinds, which §2 and §6 keep apart: re-read the file (on open, save, or behind), re-lay out the last parse (a width change, 'without reading the file'), and scroll to the saving tab's cursor (§6). Taken literally, 'keeps only the latest request' drops the save. Suppose a save arrives while a long render is running (0.45–0.7 s on testing.md), and a resize or split drag comes before that render ends. The width request replaces the save's re-read, so only the old parse is laid out again. The saved text doesn't show until the next save or behind change, and showing it is what the preview is for.
+
+**Evidence.**
+
+- doc/adr/0043-markdown-preview.md:99-100 — "coalesces, keeps only the latest request"
+- doc/adr/0043-markdown-preview.md:91-92 — width "lays the last parse out again, without reading the file"
+- doc/adr/0043-markdown-preview.md:163-164 — §6: scroll to the saving tab's cursor
+- lib/geex/highlight/reactor.ex:207-208, 264-266, 370-371 — `pending: true` is one boolean; any change sets it; the next pass re-reads the newest text
+
+**Check (confirmed).** The reactor keeps one boolean `pending` (reactor.ex:207-208); any change sets it (264-266) and the next pass re-reads the newest text (370-371, 376-389). That works only because every reactor pass covers every request. ADR-0043 §2 (lines 91-92) makes width a separate request that lays out the last parse 'without reading the file', and §3 (99-100) says 'keeps only the latest request'. Read together, a width change arriving while a render is in flight replaces a pending save's re-read, and the saved text never shows. The header gives no sign either: after a save the buffer is neither dirty nor behind (buffer.ex:470-471). The timing needs a long render (0.45–0.7 s on testing.md, §8) plus a resize or drag in that window (loop.ex:491-494, 1135, 1411-1438), which is plausible. No existing code covers it. The amendment's save anchor fits the loop-sends-anchor design in the save-anchor verdict.
+
+**Amendment, as checked.** Replace §3's "keeps only the latest request" with: "merges pending work into one request: a re-read once any open, save or behind trigger has arrived (a re-read lays out again too), the newest width per preview tab, and the latest save anchor (§6). Each part stays pending until a render started after it arrived has run."
+
+### F14. §2's width re-layout says neither where it runs nor how widths reach a per-buffer process; laying out testing.md measures about 100 ms
+
+`messages-lifecycle` · `relayout-home-and-width` · medium · gap · §2 Width; §3 Off the key loop · check: **partly**
+
+**Finding.** §2 says a changed width 'lays the last parse out again, without reading the file', but not who does it. The last parse lives in the preview process, where the parse ran. The width lives in the loop and changes per pane: on every terminal resize, and on every motion event while a split or the tree is dragged. Measured here with the spike, Layout.rows alone on doc/testing.md takes about 90–113 ms (4,735 rows at 100 columns, 6,866 at 60). The tree it needs is 2.6 MB. Run in the loop, it would stall typing at every resize step (ADR-0035 §1). One process per buffer can also be asked for several widths at once. A tab belongs to one pane, the same buffer can be a tab in two panes of different widths, and §3's 'first preview … last' assumes several previews per buffer. The build has to decide how the loop gives the process each tab's width, whether rows are kept per width, and how arriving rows are matched to a tab, since under ADR-0035 a superseded answer must be ignored. Pushing the whole row list to the loop is not the problem: 1.6 MB of rows for testing.md took about 1 ms to send between processes.
+
+**Evidence.**
+
+- doc/adr/0043-markdown-preview.md:91-92 — "Width … lays the last parse out again, without reading the file" (no owner, no input)
+- doc/adr/0043-markdown-preview.md:98-102 — one process per previewed buffer; "starts with a buffer's first preview and stops with its last"
+- lib/geex/loop/panes.ex:12-17 — a tab is a buffer seen from one pane; "The same buffer in two panes is one buffer … with a cursor and scroll per pane"
+- lib/geex/loop.ex:491-494 — terminal resize; lib/geex/loop.ex:1135, 1411-1430 — split and tree drags resize panes on each motion event
+- lib/geex/markdown/layout.ex:56-59 — rows(tree, text, width, opts) needs the tree and text, which only the process holds
+- Measured with the spike (mix run --no-compile; scratch/measure.exs): doc/testing.md Parse.parse 322 ms; Layout.rows 113 ms at 100 cols (4,735 rows), 87 ms at 60 (6,866 rows); tree 2,604 KB and rows 1,655 KB flat; sending the rows to another process about 1 ms
+- doc/adr/0035-the-loop-never-waits.md:40 — "One answer counts. An answer from a process the loop no longer waits on … is ignored."
+
+**Check (partly).** Layout.rows needs the tree and the text (layout.ex:61-72), and only the preview process holds them. A split copies the shown tab (panes.ex:12-17, 111-129), a preview tab included, so one buffer can be previewed in two panes of different widths. Widths change on resize and on every drag motion (loop.ex:491-494, 1135, 1411-1438). I re-ran the cited measure.exs read-only (mix run --no-compile --no-start, cache pointed at the scratchpad). doc/testing.md: parse 306 ms, layout 106 ms at 100 columns, 4,735 rows, rows 1,655 KB and tree 2,604 KB flat, about 1 ms to send. The finding's numbers hold. Overstated: the claim that §2 says 'neither where it runs'. §3 (line 100) puts reading, parsing and layout in the preview process's task, and only that process can hold 'the last parse', so layout in the loop is a hypothetical the ADR doesn't invite. The real gap is the rest: how each tab's width reaches a per-buffer process, rows kept per width, and matching arriving rows to tabs so a superseded answer is ignored (ADR-0035:40). The amendment fills that gap correctly.
+
+**Amendment, as checked.** Amend §2's Width bullet: "The loop sends the buffer's preview process each preview tab's text width when the tab opens and whenever its pane's width changes (a terminal resize, each motion of a split or tree drag). The process keeps the last tree and text and lays out once per distinct width in its worker, never in the loop. Requests coalesce and the newest width per tab wins. It sends rows tagged {buffer, width, render number}. The loop draws a tab's rows only when the tag matches the tab's current width, and keeps showing the old rows, clipped or padded, until then (ADR-0035 §1, 'one answer counts')."
+
+### F15. A fast-forward that takes in a change before the watcher reports it sends nothing the preview hears
+
+`messages-lifecycle` · `fast-forward-before-watcher` · low · gap · §2 Saves / Agents' writes · check: **confirmed**
+
+**Finding.** Under ADR-0034 §3, Ctrl-O reads the disk and fast-forwards first, 'whether or not the watcher has noticed the change yet'. That fast-forward moves `synced` to the new disk text. Its only announcement is `caught_up` → `set_behind(nil)`, which is silent when no mark was set. If the merge leaves conflicts, a leftover marker block refuses the write, or the write errors, no save follows, so there is no `{:geex_buffer_saved, …}` either. When the watcher reports a moment later, the disk equals the new `synced`, the mark stays nil and `set_behind` skips the repeat. The preview keeps showing the version from before the agent's write while the disk holds the agent's, and the header has no 'behind'. The same happens when Alt+J is pressed before the report. It happens for every agent write when the watcher is degraded (no inotify-tools), because then only the fast-forward and the save ever read the disk.
+
+**Evidence.**
+
+- doc/adr/0034-panes-tree-edits-hold.md:118-121 — "Ctrl-O reads the disk first… the save fast-forwards first, whether or not the watcher has noticed the change yet… Conflicts don't write"
+- lib/geex/reconcile.ex:196-201 — save → fast_forward; `{:fast_forwarded, _snapshot, conflicts} when conflicts > 0 -> {:conflicts, conflicts}` (no write)
+- lib/geex/reconcile.ex:230 — the group is applied with `baseline: disk_text`
+- lib/geex/buffer.ex:544, 604-609 — caught_up: with `behind: nil` the fallback clause returns the state unchanged, so nothing is sent
+- lib/geex/buffer.ex:412-421 — disk_changed: `disk_text == state.history.synced -> nil`
+- lib/geex/buffer.ex:611 — `set_behind(%{behind: same} = state, same), do: state` skips repeats
+- lib/geex/reconcile.ex:505-511 — no watch backend: a logged no-op
+
+**Check (confirmed).** The chain checks out. A save fast-forwards first, and a merge with conflicts returns without writing (reconcile.ex:196-201); a leftover marker block refuses the write (reconcile.ex:204-217). The group is applied with baseline: disk_text (reconcile.ex:230), and History.group sets synced to that baseline (history.ex:151-155). caught_up sends nothing when behind is nil: the fallback clause returns the state (buffer.ex:544, 605-609). When the watcher reports later, the disk equals the new synced, so behind stays nil and set_behind skips the repeat (buffer.ex:412-421, 611). Alt+J (loop.ex:3828) takes the same path. So after a fast-forward that doesn't end in a successful save, the preview never re-reads. It shows the pre-agent text with no 'behind', against §2's promise (85-88). The only message sent is {:geex_buffer_change}, which the preview ignores because it isn't live. A clean merge on Ctrl-O does write, and the save message covers that case, so the gap is conflicts, refusals, write errors and Alt+J. `synced` moves only at three places: save (buffer.ex:470), a group with a baseline, and mark_synced (buffer.ex:441, no caller in lib/). Those are exactly the amendment's three sites.
+
+**Amendment, as checked.** In §2, make the trigger 'the buffer's synced baseline moved' rather than 'it saved'. In place of `{:geex_buffer_saved, buffer}`, the buffer sends `{:geex_buffer_synced, buffer, sha256}`, carrying the sha256 of the new `synced`, wherever `synced` moves: `handle_call(:save)`, `apply_group/3` with a `:baseline` (every fast-forward, conflicted or not), and `mark_synced/1`. The preview re-renders on that message and on `{:geex_buffer_behind, …}`, and skips the read when the hash is the one it last rendered. Consequences can still say the buffer sends one new message.
+
+### F16. The preview's read can catch the buffer's in-place write half done, and a rewrite with identical bytes never corrects it
+
+`messages-lifecycle` · `partial-read` · low · risk · §3 Off the key loop; §2 · check: **partly**
+
+**Finding.** Buffer.save writes with File.write, which truncates the file and rewrites it in place. On Ctrl-O while behind, the fast-forward's `caught_up` sends `{:geex_buffer_behind, buffer, nil}`, and a few calls later Buffer.save truncates and rewrites the file. The render that message starts reads at the same time as the write, so it can parse an empty or truncated file. The save message that follows does re-render. But in the reactor's shape every finished pass is published, even when a newer one is pending, so the truncated render is drawn first. And when §6 isn't anchoring to a cursor, it takes the reader's place from that truncated render. The watcher's 50 ms settle protects only the watcher's own read. A partial read made while some other writer rewrites the file with the same bytes (a formatter, a checkout of the same blob) is never corrected at all: the same sha256 keeps `behind` as it was, a disk equal to `synced` stays nil, and set_behind skips repeats.
+
+**Evidence.**
+
+- lib/geex/buffer.ex:468 — `File.write(state.path, History.text(state.history))` (truncate then write, not temp file + rename)
+- lib/geex/reconcile.ex:196-211 — save → fast_forward (group applied, mark cleared) → write → `Buffer.save(pid)`
+- lib/geex/buffer.ex:544, 604-607, 613-614 — caught_up → set_behind(nil) sends `{:geex_buffer_behind, self(), nil}` before the write
+- lib/geex/highlight/reactor.ex:269-293 — a finished pass is published (`notify`, line 282) before the pending one starts (line 293)
+- lib/geex/reconcile.ex:410-415 — the settle exists so the watcher's read isn't half done; it doesn't cover any other reader
+- lib/geex/buffer.ex:415-416, 611 — the same sha256, or a disk equal to synced, gives no new behind value and so no message
+
+**Check (partly).** The cited code checks out. buffer.ex:468 writes in place with File.write, which truncates and then writes. On Ctrl-O while behind, caught_up sends behind=nil (buffer.ex:605-607, 613-614) before reconcile.ex:205-209 reaches Buffer.save. The reactor publishes a finished pass before starting the pending one (reactor.ex:269-293). The settle covers only the watcher's read (reconcile.ex:410-415). Identical bytes send nothing (buffer.ex:415-416, 611). But the race is narrow. It needs no render in flight and a preview read that lands inside the microseconds of the write. Usually the loop's get_text and marker scan (reconcile.ex:205) let the read finish first, and the save's own re-render follows. The never-corrected case needs a same-bytes rewrite by another writer to coincide with a preview read. §3 already says rendering has no correctness contract. The amendment has two flaws. First, 'a render overtaken by a newer trigger isn't drawn' would freeze the view while an agent writes a large file faster than one render (0.45–0.7 s, §8); the reactor publishes every pass for that reason. Second, a behind=nil message carries no hash, so the synced hash has to come from the save (synced) message or from the buffer.
+
+**Amendment, as checked.** Add to §3: "The preview draws a read only when its sha256 is the hash the buffer last gave for the disk: behind's sha256 while behind, otherwise the synced text's. The synced hash comes from the buffer's save (synced) message, or from the buffer when the preview opens; a behind=nil message carries none. On a mismatch it reads again after the reconcile settle (50 ms). After three tries it draws what it read and the header says the file is changing. Renders that pass the check are drawn as they finish, even with a newer one pending, so an agent writing a large file faster than one render takes can't freeze the view."
+
+### F17. `{:geex_buffer_saved, buffer}` can't tell §6 that the user saved, or where their cursor was
+
+`messages-lifecycle` · `save-anchor-needs-the-loop` · low · gap · §6 Keeping the reader's place; §2 Saves · check: **partly**
+
+**Finding.** §6 scrolls to the saving tab's cursor 'when the user saved from a tab of the same file'. The message names neither who saved nor a cursor, and it reaches the preview process straight from the buffer. Every save sends it: the loop's Ctrl-O (Reconcile.save/2), and an agent's MCP `save_file`, which calls Buffer.save/1 on the active buffer. Built on the message alone, an agent's save would jump the human's preview to the human's cursor. The cursor is view-local: in Session for the current tab, in Panes for every other tab. Only the loop knows its own save succeeded and which tab's cursor applies. And because renders coalesce, the first render to land after a save may have started before it.
+
+**Evidence.**
+
+- doc/adr/0043-markdown-preview.md:83 — the message is `{:geex_buffer_saved, buffer}`
+- doc/adr/0043-markdown-preview.md:163-164 — "When the user saved from a tab of the same file, the preview scrolls instead to the block holding that tab's cursor"
+- lib/geex/mcp/operations.ex:177-187 — MCP save_file: `Buffer.save(pid)` on the active buffer
+- lib/geex/loop.ex:3726-3731 — do_save: `Reconcile.save(&1, …)` returns `{:ok, path}` to the loop
+- lib/geex/buffer.ex:26-27 and lib/geex/loop/panes.ex:12-15 — the cursor is view-local, not in the buffer
+
+**Check (partly).** The gap is real. The message is {:geex_buffer_saved, buffer} (ADR-0043:83), but §6 (163-164) needs the saving tab's cursor. The cursor is view-local, not in the buffer (buffer.ex:26-27, panes.ex:12-15). Only the loop's do_save sees {:ok, path} come back from Reconcile.save (loop.ex:3726-3731). So the message alone can't set §6's anchor; the loop has to supply it. The failure scenario can't happen, though. MCP save_file (operations.ex:177-187) runs only under geex.serve: config/runtime.exs sets start_http_mcp: true and start_terminal: false together, so no loop or preview exists then. Reconcile.save and fast_forward have no caller but the loop (loop.ex:3728, 3828). Every save a preview can see is the loop's own Ctrl-O. The amendment's design is sound: the loop sends the cursor line, and the process attaches it to the first render started afterwards, which also handles coalescing. Only its MCP rationale is wrong.
+
+**Amendment, as checked.** Add to §6: "The anchor comes from the loop, not from the buffer's message. While a preview can be open, the loop's own Ctrl-O is the only save: MCP's save_file runs only under geex.serve, where there is no terminal. When do_save gets {:ok, _}, the loop sends the buffer's preview process the saving tab's cursor line. The process attaches it to the first render it starts afterwards, and the loop scrolls those rows to the block holding that line. The buffer's save message is a plain re-render that keeps the reader's place."
+
+### F18. Rows carry code colours already resolved against the theme, so a theme change is a trigger §2–3 leave out
+
+`messages-lifecycle` · `theme-is-an-input` · low · false-claim · §5 Layout and drawing (Pure); §2–3 triggers · check: **partly**
+
+**Finding.** §5 says Style turns roles into colours at draw time, 'so the layout never sees a theme'. In the spike, fenced code is coloured during layout. Layout.rows's :code callback returns `%{byte => Geex.Theme.Style.t()}`, mix geex.render builds those styles with `Highlight.Paint.styles(theme, spans)`, the runs carry `{:style, style}`, and Style applies them as they are. Built that way, the preview process needs the theme as an input. A theme change leaves fenced code in the old theme's colours while everything else recolours, until the next save or behind change. Theme changes include `theme NAME`, picking or merely previewing a theme in Alt+Y, a theme update, and the terminal theme's answer to OSC 11. None of these is among §2's triggers.
+
+**Evidence.**
+
+- doc/adr/0043-markdown-preview.md:134-135 — "turns them into colours against the theme when drawing, so the layout never sees a theme"
+- lib/geex/markdown/layout.ex:57-59 — ":code is fn code, language -> %{byte => Geex.Theme.Style.t()} | nil"
+- lib/geex/markdown/layout.ex:273-281 — code runs become `{seg, [:code_block, {:style, style}]}`
+- lib/mix/tasks/geex.render.ex:97, 117-128 — `Layout.rows(tree, text, width, code: highlighter(theme))`; the highlighter returns `Geex.Highlight.Paint.styles(theme, spans)` (line 125)
+- lib/geex/markdown/style.ex:56 — `role({:style, %Style{} = s}, …)` applies the pre-resolved style
+- lib/geex/loop.ex:629, 2376, 3711 — the loop changes theme on the OSC 11 answer, on a settings preview, and on `theme NAME`
+
+**Check (partly).** The gap is real. Layout's :code callback returns %{byte => Theme.Style} (layout.ex:57-59), and code runs become {seg, [:code_block, {:style, style}]} (layout.ex:273-281). mix geex.render's callback closes over the theme through Paint.styles (geex.render.ex:97, 115-128), and Style applies the resolved style as given (style.ex:56). The loop changes theme on the OSC 11 answer (loop.ex:629), the Alt+Y preview (2376), `theme NAME` (3711) and a theme update (617-618). Built like the spike, the preview leaves fenced code in the old theme's colours after any of these, and §2–3 list no such trigger. §4 itself says code goes 'through the same NIF and theme as the editor'. Calling it a 'false claim' is overstated: Layout.rows never receives a theme, only a callback. What's false is that the rows it returns are theme-free. The main amendment is also lossy, because which capture wins a byte depends on the theme. Paint.styles drops spans the theme doesn't style, then lets the narrowest win (paint.ex:27-40), and Theme.style_for falls back by prefix and returns nil when nothing matches (theme.ex:56-67). With one {:capture, name} per run, a run whose narrowest capture the theme doesn't style would show the default colour where a wider styled capture should show.
+
+**Amendment, as checked.** Amend §4's code-block bullet and §5: "A fenced block's runs carry the highlight captures covering them, narrowest first and, at equal width, the most dotted first (`{:captures, [name]}`), not resolved styles. At draw time `Geex.Markdown.Style` takes the first one the theme styles, which matches `Highlight.Paint.styles/2`. So neither the layout nor the preview process sees a theme, and a theme change needs no re-render." If the spike's `{:style, s}` runs are kept instead, add a theme change to §2's triggers, as a re-layout of the last parse: `theme NAME`, the Alt+Y preview or choice, a theme update, or the terminal theme's OSC 11 answer.
+
+### F19. A rename tells subscribers nothing, so a preview that keeps its path (as the reactor keeps its language) reads the old file
+
+`messages-lifecycle` · `rename-path` · low · gap · §1 Which files; §3 Off the key loop · check: **confirmed**
+
+**Finding.** Buffer.rename changes the buffer's path and sends no message. The reactor, the model §3 names, takes its language from the path once at start, and Session.rekey_buffer restarts it through Reactor.rewatch. Nothing does the same for a preview. A preview process handed the path at start would read the old path (`:enoent`) on every render after a rename. Renames come from the `rename` verb, the tree's `r`, and an agent's MCP `rename_file`, all through Session.rename_file. §1 also doesn't say whether a preview stays open when the file is renamed to a name that isn't markdown.
+
+**Evidence.**
+
+- lib/geex/buffer.ex:445-457 — handle_call({:rename, …}) updates the path and notifies no subscriber
+- lib/geex/session.ex:523-530 — rekey_buffer: `Geex.Reconcile.watch(to)`, `Geex.Highlight.Reactor.rewatch(pid, to)`
+- lib/geex/highlight/reactor.ex:141-150, 186-188 — the language comes from the path once, at start
+- lib/geex/mcp/operations.ex:212-213 and lib/geex/loop/file_ops.ex:167-168 — agents and the TUI both rename through Session.rename_file
+
+**Check (confirmed).** buffer.ex:445-457 changes the path and notifies no subscriber. session.ex:523-530 restarts only the reactor (Reactor.rewatch). The reactor fixes its language from the path at start (reactor.ex:141-150, 186-188). The `rename` verb and the tree's `r` go through Session.rename_file (file_ops.ex:167-168), and so does MCP rename_file (operations.ex:212-213), though MCP runs only headless. ADR-0043 never says how the preview process learns the path. Unlike the reactor, which reads text from the buffer (reactor.ex:407-412), the preview reads the file. A path kept from start would therefore read the old, moved-away path (:enoent) after every rename, and nothing in existing code would tell it. Buffer.status/1 is a cheap call (buffer.ex:432-433) that also returns dirty and behind, which §2's header needs. The amendment is cheap and correct.
+
+**Amendment, as checked.** Add to §3: "The preview process asks the buffer for its path (Buffer.status/1, which also gives the dirty and behind flags the header needs) at each render and never keeps it, so a rename needs no hook. A preview stays open across a rename whatever the new name, and closes with its buffer or with Alt+Shift+P."
+
+### F20. A preview tab on the file's buffer keeps the buffer open: Alt+K, a tab's × and a pane's × no longer close the file or refuse its unsaved edits
+
+`keys-tabbar-mouse` · `preview-tab-counts-as-buffer-tab` · high · false-claim · §1 The tab · check: **confirmed**
+
+**Finding.** §1 says a preview is a tab "on the file's buffer, so closing the file closes its previews". To Loop.Panes a preview is then just another tab of that buffer, and every close path asks Panes whether the buffer is in another tab. do_close/1 (Alt+K, and a tab's × after it switches to the tab) closes only the tab and keeps the buffer "still open in another pane" whenever Panes.elsewhere?/2 is true, a branch taken before the unsaved-edits refusal. A tab's × refuses unsaved edits only when the buffer is not in another pane (Panes.in_other_pane?/3). A pane's × leaves out of `own` every buffer another pane has, so it neither refuses nor closes that buffer. So closing the source tab or the source pane leaves the buffer, unsaved edits included, behind a read-only tab that shows the disk. Previews close only when the buffer process ends (the :DOWN handler's Panes.drop_buffer/2), which none of these paths causes. It gets worse. Panes.show/3 finds a pane's tab by buffer alone, adopt_active/2 returns early when the current tab's buffer is the one opened, and Session.open_file/1 returns the buffer already open. So opening the file again from the preview's pane (Alt+O, the tree, the edits list, `open PATH`, an agent's open_file) shows the preview instead of an editing tab, and the only way back to editing is to close the preview first. ADR-0038 §4's "a buffer still in another tab or pane stays open" is the rule doing this.
+
+**Evidence.**
+
+- lib/geex/loop/panes.ex:82 — show/3: `Enum.find_index(tabs, &(&1.buffer == buffer))`, finds a tab by buffer alone
+- lib/geex/loop/panes.ex:154-160 — in_other_pane?/3: any tab of the buffer in another pane counts
+- lib/geex/loop/panes.ex:190-198 — elsewhere?/2: any other tab of the buffer, in any pane, counts
+- lib/geex/loop.ex:3786-3792 — do_close/1: `Panes.elsewhere?(state.panes, pid) ->` closes only the tab ("still open in another pane"), checked before the `dirty: true` refusal
+- lib/geex/loop.ex:1507-1521 — a tab's ×: refused only `if dirty and not Panes.in_other_pane?(state.panes, buf, id)`, else switch to the tab and do_close()
+- lib/geex/loop.ex:1534-1538, 1544, 1555 — close_pane/2: `own` leaves out buffers `Panes.in_other_pane?`; only `own` is checked for unsaved edits and closed
+- lib/geex/loop.ex:745-758 — tabs are dropped only by the buffer's :DOWN → Panes.drop_buffer/2
+- lib/geex/loop.ex:884-885, 897 — adopt_active/2: `current_buffer(state) == pid -> state`, otherwise Panes.show/3
+- lib/geex/session.ex:271-279 — open_file: find_or_start_buffer returns the open buffer and makes it active
+- doc/adr/0038-split-panes-and-tabs.md:80-82 — "a buffer still in another tab or pane stays open"
+- doc/adr/0043-markdown-preview.md:68-69 — "on the file's buffer, so closing the file closes its previews"
+
+**Check (confirmed).** Every cited line says what the finding claims. Panes.show/3 finds a tab by its buffer alone (lib/geex/loop/panes.ex:82). in_other_pane?/3 (panes.ex:154-160) and elsewhere?/2 (panes.ex:190-198) count any tab of the buffer. do_close/1 tests Panes.elsewhere? before the unsaved-edits check (lib/geex/loop.ex:3786-3792), so Alt+K on the source, with a preview tab of the same buffer in another pane, closes only the tab ("still open in another pane") and never refuses. A tab's x refuses only when the buffer is in no other pane, then calls do_close (loop.ex:1507-1521). close_pane leaves out of `own` every buffer another pane holds, so it neither refuses nor closes it (loop.ex:1534-1555). safe_close_buffer runs only in do_close's last branch, which is never reached while another tab holds the buffer. Tabs are otherwise dropped only on the buffer's :DOWN (loop.ex:745-758). Session.open_file returns the buffer already open, and put_active does nothing when that buffer is already active (lib/geex/session.ex:271-279, 488-500, 577-589). adopt_active returns early when the current tab's buffer is that pid (loop.ex:884-885), and otherwise calls Panes.show (897), which would find the preview tab. So under ADR-0038 §4 (0038:80-82), §1's "on the file's buffer, so closing the file closes its previews" (0043:68-69) gets it backwards: the preview keeps the buffer open behind a read-only tab, unsaved edits included, and opening the file from the preview's pane shows the preview again. If the buffer is dirty and only the preview is left, Alt+K on the preview is refused too. ADR-0043 changes none of these rules.
+
+**Amendment, as checked.** In §1 The tab, replace "on the file's buffer, so closing the file closes its previews" with: "A preview is a `Loop.Panes` tab marked `view: :preview` on the file's buffer, and it never counts as one of that buffer's tabs. `Panes.show/3`, `elsewhere?/2` and `in_other_pane?/3` look only at editing tabs. `buffers/1` and `drop_buffer/2` still include previews, so the loop keeps watching the buffer, and a buffer that ends takes its previews with it. `adopt_active/2` compares the current editing tab, so opening the file from a preview's pane (Alt+O, the tree, the edits list, `open`, an agent's `open_file`) adds an editing tab there. Alt+K, a tab's × and a pane's × on a buffer's last editing tab refuse unsaved edits as today. When they close the buffer, its previews in every pane close in the same step. Closing a preview (Alt+K, its ×, Alt+Shift+P) closes only that tab, never the buffer, and is never refused for unsaved edits." Record it as an amendment to ADR-0038 §4: "a buffer still in another tab or pane stays open" counts editing tabs only.
+
+### F21. "The other pane" isn't defined beyond one pane, and Panes.split/2 neither takes the preview tab nor leaves focus on the source
+
+`keys-tabbar-mouse` · `other-pane-undefined` · medium · gap · §1 Opening it · check: **partly**
+
+**Finding.** Panes.split/2 gives the new pane a copy of the current tab and makes that pane current (the loop's split/2 then enters it). Opening a preview tab in a new pane while the source keeps focus therefore needs a split call that takes the new pane's tab and doesn't move focus. Panes has no idea of an "other" pane, only reading order (ids/1), so with three or more panes, or two stacked, the build has to choose where the preview goes. The loop refuses a split whose half would be under 12 columns ("no room to split this pane"), so the Consequences' "on a narrow terminal the preview takes the other half like any split" doesn't always hold, and the ADR doesn't say what the key does then. When the preview closes, its pane shows the tab before it in the list (Panes.close_tab/1), not the tab it showed before the preview: a pane that showed A of [A, B, C] comes back showing C. Alt+-/Alt+= on a preview tab copies it into a second preview of the file, and "pressed again … it closes the preview" doesn't say which one. Finally, "a click on a relative link opens its target in the source pane" needs the preview to know its source pane, and no Panes tab records one.
+
+**Evidence.**
+
+- lib/geex/loop/panes.ex:106-129 — split/2: "The new pane, after it, shows the same tab (a copy…) and becomes current"; `Map.put(ps.panes, id, %{tabs: [tab], at: 0})`, `pane: id`
+- lib/geex/loop.ex:1010-1027 — split/2: refused with "no room to split this pane" unless `div(w - 1, 2) >= @min_pane_w`; otherwise switch(&Panes.split(&1, dir)) enters the new pane
+- lib/geex/layout.ex:92 — `@min_pane_w 12`
+- lib/geex/loop/panes.ex:213-215 — ids/1: reading order is the only ordering of panes
+- lib/geex/loop/panes.ex:131-143 — close_tab/1: the pane then shows `max(at - 1, 0)`, the tab before it in the list
+- doc/adr/0043-markdown-preview.md:56-58 — "in the other pane, splitting the editor side by side when there is one pane; the source keeps focus"
+- doc/adr/0043-markdown-preview.md:70-71 — "a click on a relative link opens its target in the source pane"
+- doc/adr/0043-markdown-preview.md:218-219 — "on a narrow terminal the preview takes the other half like any split"
+
+**Check (partly).** The code matches the finding. Panes.split/2 copies the current tab into the new pane and makes that pane current (panes.ex:106-129). The loop's split/2 enters the new pane, and refuses with "no room to split this pane" when div(w-1,2) < 12 (loop.ex:1011-1027, layout.ex:92). Panes are ordered only by reading order (panes.ex:213-215). A tab is %{buffer, cursor, scroll, hscroll, hold}, with no source pane (panes.ex:23-31). close_tab shows the tab at max(at-1,0) (panes.ex:131-143). Four gaps are real. "The other pane" has no meaning with three or more panes. The ADR doesn't say what the key does when the split is refused, and the Consequences assume it always succeeds (0043:218-219). A split from a preview tab copies it, which leaves two previews, and "pressed again … closes the preview" doesn't say which. A link click's "source pane" (0043:70-71) needs a recorded pane. Three parts are overstated. With two panes, stacked or side by side, "the other pane" is already defined. A split call that keeps focus is how the build delivers "the source keeps focus", which the ADR states. And showing the tab before after a close is ADR-0038 §4's rule for every tab. Inserting the preview after the tab its pane shows gives back the previous tab under that same rule, with no extra state.
+
+**Amendment, as checked.** In §1 Opening it: "With one pane, the editor splits side by side, the preview is the new pane's only tab, and the source pane stays current (Alt+= still enters the new pane). Where that split is refused for room (a half under 12 columns), the preview opens in the source's own pane, after the source tab, and is shown there. With two or more panes, it opens in the next pane after the source's in reading order (`Panes.ids/1`), wrapping, whether beside or below. It goes in after the tab that pane shows, so closing it shows that tab again (ADR-0038 §4). The preview tab records the pane it was opened from. A link click opens its target there, or in the current file pane once that pane is gone. A split from a preview tab copies it, as a split copies any tab. From a source, Alt+Shift+P closes every preview of its file; from a preview, it closes that preview." In Consequences, replace "on a narrow terminal the preview takes the other half like any split" with "where there's no room to split, the preview opens as a tab in the source's pane".
+
+### F22. The "keys that would edit show a hint" rule misses typed verbs and the palette, which edit the previewed file through Session
+
+`keys-tabbar-mouse` · `verbs-bypass-edit-hint` · medium · gap · §1 The tab · check: **partly**
+
+**Finding.** Session's active buffer is the current pane's shown tab (ADR-0038 §2). With a preview current, that is the previewed file, at whatever cursor the preview tab carries. Typed verbs and palette picks don't go through the keymap: submit_minibuffer/1 and dispatch_palette/2 call apply_verb/2, which runs apply_action/4 with Session's snapshot. So `paste`, `cut`, `undo`, `redo`, `revert`, `revert-call`, `highlight`, `select all`, `| cmd` and `line N` act on the file from a tab that shows neither a cursor nor the change, while the same chords show the hint. That breaks the ADR-0028 parity the loop is built on ("copy and Alt+C converge on one code path"). Typed edits arrive from the keymap as {:edit, …} and grid mode as :grid; both are handled in apply_key/4, outside apply_action/4, so a refusal placed in only one of the two misses the other door. The ADR also doesn't say whether save (Ctrl-O) and fast-forward (Alt+J) work from the preview, though §2 points the reader to Alt+J when the header says "behind".
+
+**Evidence.**
+
+- lib/geex/loop.ex:865-867 — "Session's active buffer is the current pane's shown tab, so the keymap, the verbs and the MCP surface act on what you are looking at"
+- lib/geex/loop.ex:954-965 — enter/1: `safe_set_active(pid)` and `set_cursor(cursor)` from the current tab
+- lib/geex/loop.ex:4257-4275 — submit_minibuffer/1: `{:action, action} -> apply_verb(action, state)`, `{:pipe, cmd} -> run_pipe`, `{:line, n} -> jump_to_line`
+- lib/geex/loop.ex:4318 — dispatch_palette({:action, action}, …) → apply_verb
+- lib/geex/loop.ex:4419-4424 — apply_verb/2: `apply_action(action, cursor, text, state)` with Session's snapshot
+- lib/geex/loop.ex:3540-3544 — "copy and Alt+C converge on one code path (the ADR-0028 parity principle)"
+- lib/geex/loop.ex:3553-3557, 3568-3585 — :grid and {:edit, …} are handled in apply_key/4, not apply_action/4
+- lib/geex/command/catalog.ex:28-55, 98-102, 153-167 — palette entries copy, cut, paste, undo, redo, revert, revert-call, |, highlight, select all, line
+- doc/adr/0038-split-panes-and-tabs.md:40-42 — "the keymap, the typed verbs, saving, undo, fast-forward and the frozen MCP surface act on what you are looking at"
+- doc/adr/0043-markdown-preview.md:70, 85-87 — "Keys that would edit show a hint instead"; "before Alt+J takes it in"
+
+**Check (partly).** The gap is real. Session's active buffer is the current pane's shown tab (loop.ex:865-867), and enter/1 sets it from that tab (954-965). Typed verbs and palette picks run submit_minibuffer, then apply_verb, then apply_action with Session's snapshot (loop.ex:4257-4275, 4318, 4419-4424). Typed edits ({:edit, …}) and :grid are handled in apply_key/4 and never reach apply_action/4 (3553-3557, 3568-3585). §1 says only "Keys that would edit show a hint" (0043:70), while ADR-0038 §2 sends the verbs to the same buffer (0038:40-42). The proposed placement, though, is incomplete. `line N` runs submit_minibuffer → jump_to_line → ViewActions.line (loop.ex:4262, 4377-4384), outside apply_action/4. So the amendment says `line` shows the hint, but its placement wouldn't do that. `| cmd` (4270 → run_pipe, 2835-2862) also skips apply_action/4. It needs a selection, though (2836-2837), and enter/1 clears the selection (965), so refusing selection in a preview covers it. Copy with no selection does nothing (3879). Save and fast-forward from a preview would act on the file's buffer, which is reasonable, and §2's "before Alt+J takes it in" (0043:86-87) is consistent with that.
+
+**Amendment, as checked.** In §1 The tab: "While the current tab is a preview, anything that would edit the file or place a cursor in it shows the hint instead, whichever door it comes through: typed edits ({:edit, …}) and grid mode in `apply_key/4`; cut, paste, undo, redo, revert, revert-call, highlight and select all in `apply_action/4`, which chords, typed verbs and palette picks all reach; and `line N`, which `submit_minibuffer/1` runs without `apply_action/4`. (`| cmd` needs a selection, which a preview never has, and copy without one does nothing.) Pane, tab, split, open, close, the palette, the minibuffer, settings and quit work as anywhere. So do save and fast-forward, on the previewed file's buffer."
+
+### F23. Every file-pane mouse path works in source lines, so a preview tab needs a rule for presses, drags, double-clicks and both scroll bars
+
+`keys-tabbar-mouse` · `mouse-paths-use-source-lines` · medium · gap · §1 The tab · check: **partly**
+
+**Finding.** §1 names only the wheel and link clicks. Today a press in a file pane places Session's caret from Mouse.text_pos/4 over the buffer's text and gutter, then starts a drag selection; a double-click selects a source word; Shift+click or Alt+click extends the selection. The wheel's scrolled/4 caps the scroll at the text's line count and widest line, and the scroll bars are laid out from the text (bar_or_text_press/4, scroll_bar_to/2). draw_pane/6 re-derives each shown tab's scroll from its cursor every frame unless the mouse is holding it. Left unbranched, a plain click in a preview moves the file's cursor to a meaningless source position and selects text that isn't drawn. The wheel also stops short on a preview with more rows than source lines (wrapped paragraphs, bordered tables) and overshoots on one with fewer.
+
+**Evidence.**
+
+- lib/geex/loop.ex:1159-1193 — press/4: caret from `Mouse.text_pos(text, rect, {tab.scroll, tab.hscroll}, …)`, `Mouse.word_at` on a double-click, select_to and start_drag
+- lib/geex/loop/mouse.ex:45-71 — text_pos/4: source lines, and a gutter sized from the line count
+- lib/geex/loop.ex:1253-1258, 1315-1328 — wheel/4 → scrolled/4: `bottom = max(lines - rows, 0)`, `right = max(max_line_width(text) - cols, 0)`
+- lib/geex/loop.ex:1278-1310 — bar_or_text_press/4 and scroll_bar_to/2: `ScrollBar.layout(text, rect, …)`
+- lib/geex/loop.ex:1679-1686 — pane_text/2: the shown tab and its buffer's text
+- lib/geex/loop.ex:1805-1806, 1857, 1728 — draw_pane/6: `scroll_for(tab.scroll, line, h_text, @scrolloff)` unless held, written back into the tab
+- doc/adr/0043-markdown-preview.md:69-71 — "arrows, Page Up/Down and the wheel scroll; a click on a relative link opens its target"
+
+**Check (partly).** The code paths are as the finding describes. press/4 places a caret with Mouse.text_pos over source lines, and handles double-click words, Shift/Alt extend and drag (loop.ex:1159-1193; lib/geex/loop/mouse.ex:45-71). wheel/4 and scrolled/4 cap at the source line count and the widest line (loop.ex:1253-1258, 1315-1328). The scroll bars come from ScrollBar.layout(text, …) (1278-1310). draw_pane re-derives the scroll from the cursor unless the mouse holds it (1805-1806, 1857). But §1 already says the preview has "a scroll over rendered rows, which aren't source rows, and no cursor" and that the wheel scrolls (0043:68-71). That already rules out a caret, selection, double-click word, extend and drag, and it caps the wheel at rendered rows. The "left unbranched" failures assume the build ignores that sentence. What §1 really leaves open is the scroll bars and what a press off a link does. The spike's layout wraps paragraphs, breaking a long word between graphemes, and cuts code with … (lib/geex/markdown/layout.ex:12-13, 620-700), so no row is wider than the pane and no horizontal bar is needed.
+
+**Amendment, as checked.** In §1 The tab: "With the mouse, a press in a preview focuses its pane and follows a relative link under it, and does nothing else: no caret, no selection, no double-click word, no Shift/Alt extend, no drag. The wheel and the vertical scroll bar move the scroll over rendered rows, capped by their count; the bar is laid out from the rows, not the source text. There is no horizontal bar or sideways scroll, since §5 wraps or cuts every row to the width. A frame never derives a preview's scroll from a cursor."
+
+### F24. Page Up/Down can't scroll the preview: the parser drops them, and a test pins it
+
+`keys-tabbar-mouse` · `page-keys-dropped-by-parser` · medium · false-claim · §1 The tab · check: **confirmed**
+
+**Finding.** §1 says "arrows, Page Up/Down and the wheel scroll". Geex.Input.Parser drops ESC [ 5 ~ and ESC [ 6 ~: its moduledoc lists Page Up/Down among the sequences that are dropped, never typed into the buffer, and csi_key/2 maps `~` only for 1/7, 4/8 and 3. parser_test.exs asserts both come back as no events. Building §1 therefore needs a parser change the ADR doesn't record: new key events, two tests rewritten, and a decision on what those keys do in the editor, the tree, the edits pane and the output pane, where they do nothing today. The ADR reasons about the parser for ESC P but misses this. It also lists only the arrows, while the tree, the edits pane, the output pane and the settings view all take Alt+W/Alt+S as Up/Down (ADR-0026 §6's cluster for keyboards without arrows). A preview without them can't be scrolled from such a keyboard.
+
+**Evidence.**
+
+- lib/geex/input/parser.ex:18-20 — moduledoc: "every other one (Page Up/Down, modified arrows, F-keys…) is **dropped**"
+- lib/geex/input/parser.ex:284-288 — csi_key/2 maps `~` only for 1/7, 4/8 and 3; `csi_key(_params, _final), do: nil`
+- test/geex/input/parser_test.exs:146-162 — "unsupported keys are dropped, never typed": "\e[5~" and "\e[6~" → {[], ""}
+- test/geex/input/parser_test.exs:164-167 — "text around a dropped sequence survives" uses \e[5~
+- lib/geex/loop.ex:2630-2634, 3059-3065, 2963-2967 and lib/geex/loop/settings.ex:222-226 — the tree, the edits pane, the output pane and the settings view take {:alt, ?w}/{:alt, ?s} as Up/Down
+- doc/adr/0026-terminal-input-model.md:78-82 — Alt+W/A/S/D are "an arrow-key alternative for keyboards without arrows"
+
+**Check (confirmed).** The parser's moduledoc lists Page Up/Down among the sequences it drops (lib/geex/input/parser.ex:18-20). csi_key/2 maps `~` only for 1/7, 4/8 and 3, and returns nil for everything else (parser.ex:279-288). No Page Up/Down handling exists anywhere in lib or test (grep). parser_test asserts that "\e[5~" and "\e[6~" produce no events (test/geex/input/parser_test.exs:146-162), and the next test uses \e[5~ as its dropped sequence (164-167). §1 says "arrows, Page Up/Down and the wheel scroll" (0043:70), but the ADR discusses the parser only for ESC P (0043:65-67), so the parser change isn't recorded. Once the parser emits them, {:key, :page_up} falls through to Keymap.resolve's :ignore (keymap.ex:173) and to the catch-all clauses in the panels, minibuffer and settings view, so "ignored elsewhere" costs nothing. The tree, output pane, edits pane and settings view all take Alt+W/Alt+S as Up/Down (loop.ex:2630-2634, 2963-2967, 3059-3065; settings.ex:222-226), as ADR-0026 §6 sets for keyboards without arrows (0026:78-82). §1 names only the arrows.
+
+**Amendment, as checked.** In §1 The tab: "The parser reads `ESC [ 5 ~` and `ESC [ 6 ~` as `{:key, :page_up}` and `{:key, :page_down}` instead of dropping them. Its moduledoc and parser_test's two dropped-key tests change; modified forms such as `ESC [ 5 ; 5 ~` stay dropped. The two keys scroll a preview a page and resolve to `:ignore` everywhere else, as today. Alt+W and Alt+S scroll a preview a row, as Up and Down do (ADR-0026 §6)." If the parser change isn't wanted, drop Page Up/Down from §1 instead.
+
+### F25. Alt+Shift+P (and Alt+P with Caps Lock) stops moving between panes from the tree, edits and output panes, against ADR-0037, and the ADR doesn't say what it does there
+
+`keys-tabbar-mouse` · `shift-p-in-panels` · low · contradiction · §1 The key · check: **partly**
+
+**Finding.** The tree, the edits pane and the output pane pass any chord they don't handle to Keymap.resolve/3 and run it only if it's in @panel_actions. Today {:alt, ?P} resolves to :next_pane, so Alt+Shift+P (and Alt+P with Caps Lock) moves on from a panel, as ADR-0037 decides: "Every letter is case-insensitive" and "From the tree and the edits pane these work too: Alt+P". Once {:alt, ?P} resolves to the preview, it does nothing in a panel unless the build adds it to @panel_actions, and the ADR doesn't say which. With Caps Lock on, Alt+P then no longer leaves a panel (Esc still does). The minibuffer and the settings view already ignore {:alt, ?P}, so nothing changes there. The ADR also records no amendment to ADR-0037, or to ADR-0031's "one case-sensitive Alt chord" (echoed in the keymap's comment), and keymap_test.exs asserts that ?P resolves to :next_pane.
+
+**Evidence.**
+
+- lib/geex/loop.ex:3030-3043 — panel_chord/2: `Keymap.resolve(event, {0, 0}, "")`, runs only `@panel_actions [:next_pane, :find_file, :toggle_tree, :toggle_edits, :quit]`, otherwise `_ -> state`
+- lib/geex/loop.ex:2673-2674, 2991-2992, 3076-3077 — the tree, output and edits keys fall through to panel_chord/2
+- lib/geex/loop/keymap.ex:135 — `when c in [?p, ?P], do: :next_pane`
+- doc/adr/0037-pane-and-file-keys.md:37-41 — "Every letter is case-insensitive"; "From the tree and the edits pane these work too: Alt+P … Alt+K and Alt+J … stay the editor's"
+- lib/geex/loop.ex:4193-4194 and lib/geex/loop/settings.ex:237-238 — the minibuffer and the settings view drop unhandled chords
+- test/geex/loop/keymap_test.exs:216-228 — `{?p, :next_pane}` asserted for `c <- [letter, letter - 32]`
+- lib/geex/loop/keymap.ex:119-121 — "the one Alt chord where shift means something other than the same action"
+
+**Check (partly).** panel_chord/2 runs only the actions in @panel_actions (loop.ex:3034-3043), and the tree, output and edits keys fall through to it (2674, 2992, 3077). Today {:alt, ?P} resolves to :next_pane (keymap.ex:135), and keymap_test asserts both cases (test/geex/loop/keymap_test.exs:216-228). Once Alt+Shift+P means preview, it does nothing in a panel unless the build adds it. With Caps Lock on, Alt+P then no longer leaves a panel, against ADR-0037's "From the tree and the edits pane these work too: Alt+P" (0037:37-41). The ADR does know about the case change itself: its Relates-to reads "Alt+P, which stops answering to Shift" (0043:15-16), and §1 has the Caps Lock sentence (0043:65). What's missing is the panels' behaviour and the amendment records. ADR-0031 still says "The one case-sensitive Alt chord" (0031:90), yet ADR-0043 records an amendment only for ADR-0040 (§7). The proposed wording "as they ignore every chord" is wrong. The minibuffer handles Alt+N and, in pickers, Alt+W/S (loop.ex:4155-4158, 4185). The settings view handles Alt+Y/A/D/W/S (settings.ex:193-226). They ignore Alt+P only because no clause matches it (loop.ex:4193-4194; settings.ex:237-238).
+
+**Amendment, as checked.** In §1 The key: "From the tree, the edits pane and the output pane, Alt+Shift+P does nothing. It acts on the file you're editing, so it stays the editor's, as Alt+K and Alt+J do (ADR-0037). With Caps Lock on, Alt+P therefore no longer leaves a panel; Esc still does. `preview` typed or picked from a panel acts on the current file pane's shown tab, as `close` does. The minibuffer and the settings view have no clause for Alt+P or Alt+Shift+P, so they ignore both." Record amendments to ADR-0037 ("Every letter is case-insensitive" no longer holds for P) and to ADR-0031 (Alt+Shift+Z is no longer the one case-sensitive Alt chord). keymap_test's case loop drops ?P.
+
+### F26. TabBar.layout/5 has no way to place or find the glyph, and a preview tab's label is undefined
+
+`keys-tabbar-mouse` · `tab-glyph-layout-and-label` · low · gap · §1 Opening it · check: **partly**
+
+**Finding.** TabBar.layout/5 takes plain name strings and builds each label as " N name × ", and hit/2 treats a label's last two columns as its ×. For hit/2 to return {:toggle_preview, i}, the layout has to know which tabs carry the glyph and in which column. A glyph folded into the name string can't be told apart from the name, and one placed after the × would take over the ×'s click zone. drop_until_fits and the stacked split's handle aren't affected, since they work only on label widths and on the room left before the handle. Clicks on the tab bar are dispatched in tab_bar_press/4, whose catch-all would treat an unhandled {:toggle_preview, i} as a plain focus. The ADR doesn't say whether a glyph click on a tab that isn't shown, or is in another pane, first shows that tab, as a tab's × does. A preview tab's own label isn't defined either: tab_bar/3 labels every tab from its buffer's path and dirty flag, so a preview reads exactly like its source, " [+]" and glyph included. The callers and tests pass plain strings: loop.ex tab_bar/3, the TabBar doctest and mouse_click_test's tab_x/5.
+
+**Evidence.**
+
+- lib/geex/loop/tab_bar.ex:45-54 — layout/5 takes `names` (strings) and builds the label `" #{i + 1} " <> name <> " × "`
+- lib/geex/loop/tab_bar.ex:85-96 — hit/2: `x >= tx + lw - 2 -> {:close_tab, i}`, otherwise `{:tab, i}`
+- lib/geex/loop/tab_bar.ex:47-49, 56-57, 65, 117-121 — the room, the handle and drop_until_fits work on label widths only
+- lib/geex/loop.ex:1491-1526 — tab_bar_press/4: `{:close_tab, i}` switches to the tab first (1520); catch-all `_nothing_or_handle -> enter_pane` (1523-1524)
+- lib/geex/loop.ex:1939-1950 — tab_bar/3 names every tab by `tab_label(&1.buffer)`: its path, plus ` [+]` when dirty
+- lib/geex/loop/tab_bar.ex:37-43 and test/geex/loop/mouse_click_test.exs:63-74 — the doctest and tab_x/5 call layout/5 with plain strings
+- lib/geex/loop.ex:1898-1910 — draw_tab_bar/5 draws each label in one style
+
+**Check (partly).** TabBar.layout/5 takes plain name strings and builds " N name × " (lib/geex/loop/tab_bar.ex:45-54). hit/2 treats a label's last two columns as its × (tab_bar.ex:85-96). tab_bar_press's catch-all only focuses the pane (loop.ex:1523-1524), and a tab's × shows its tab before closing it (1520). tab_bar/3 labels every tab from its buffer's path and dirty flag (loop.ex:1939-1950). The real design gap is the label: a preview tab would read exactly like its source, same name and same [+], in the same pane or another, and §1 doesn't say how to tell them apart. The rest is what §1's "TabBar.hit/2 gains {:toggle_preview, i}" (0043:59) already asks of the build: layout learning which tabs carry the glyph, a hit clause, and a press clause. Where the glyph sits is still worth one line, because the × owns the label's last two columns.
+
+**Amendment, as checked.** In §1 Opening it: "The glyph sits between a tab's name and its ×, ` N name ¶ × `, so the × keeps the label's last two columns. `TabBar.layout` learns which tabs carry the glyph, and `hit/2` answers `{:toggle_preview, i}` on its column. A click on it focuses that pane, shows that tab and then toggles, as a tab's × shows its tab before closing it. A preview tab's label says it is the preview (its glyph drawn lit, for instance), so it can't be taken for its source tab, in the same pane or another."
+
+### F27. The placeholder ¶ fails the width check §1 sets for the glyph
+
+`keys-tabbar-mouse` · `pilcrow-ambiguous-width` · low · risk · §1 Opening it · check: **partly**
+
+**Finding.** §1 requires a glyph that is one column in any font, "checked as the split handles' braille was (ADR-0038 §6)". ADR-0038 §6 and TabBar's own comment define that check as "not East Asian ambiguous width". U+00B6 PILCROW SIGN has East Asian Width A (ambiguous), like the tab's existing × (U+00D7), while the braille handles U+28FF and U+281B are N. Geex.Width counts ¶ as one column, so on a terminal set to draw ambiguous characters wide, each markdown tab would draw a column wider than it is laid out, and clicks on the tabs after it, and on their ×, would land a column off. Since ¶ "holds its place until it's drawn", it would ship until the real glyph is chosen.
+
+**Evidence.**
+
+- doc/adr/0038-split-panes-and-tabs.md:120 — "one column in any font; not East Asian ambiguous width"
+- lib/geex/loop/tab_bar.ex:19-23 — "Each braille cell is one column in any font (not East Asian ambiguous width)"
+- Python unicodedata.east_asian_width: U+00B6 ¶ 'A'; U+00D7 × 'A'; U+28FF ⣿ and U+281B ⠛ 'N'
+- lib/geex/width.ex:16-23 — width `1` for everything not wide or zero-width; Geex.Width.string("¶") == 1 (checked with mix run)
+- doc/adr/0043-markdown-preview.md:60-61 — "`¶` holds its place until it's drawn"
+
+**Check (partly).** U+00B6 ¶ has East Asian Width A (checked with Python's unicodedata, Unicode 16.0), while the handles ⣿ U+28FF and ⠛ U+281B are N. ADR-0038 §6's check is "one column in any font; not East Asian ambiguous width" (0038:120; tab_bar.ex:19-21). Geex.Width.string("¶") returns 1 (checked with mix run; width.ex:16-23). So the placeholder fails the check §1 itself names (0043:60-61). The harm is overstated, though. The check §1 makes binding would reject ¶ before it shipped, and the glyph is "to settle when built" (0043:230). Every tab's × (U+00D7) is already Ambiguous too, so on a terminal that draws ambiguous characters wide the bar already drifts a column per tab. ¶ would add one column per markdown tab rather than create the problem. The suggested ⁋ U+204B and ⧉ U+29C9 are N (checked), but font coverage is the other half of the check, and neither is common in terminal fonts.
+
+**Amendment, as checked.** In §1 Opening it: "`¶` (U+00B6) is East Asian Ambiguous and fails that check, so it holds the glyph's place in this text only. Whatever the build draws, a stand-in included, passes the check from the first build: Neutral width (⁋ U+204B, for example) and present in common terminal fonts."
+
+### F28. Key help and the settings view's Keys tab aren't named as places to list the chord and the glyph
+
+`keys-tabbar-mouse` · `key-help-entries` · low · gap · §1 The key · check: **partly**
+
+**Finding.** The settings view's Keys tab is drawn from Geex.Loop.KeyHelp's single list. The ADR cites key_help.ex only to show every Alt letter is taken and adds none of its own entries: the chord (the Panes group, where Alt+P is listed), the glyph click (the Mouse group, where "click ×" is listed) or the verb. The keymap's comment still calls Alt+Shift+Z "the one Alt chord where shift means something other than the same action". The palette's descriptions name their keys (open "(Alt+O)", close "(Alt+K)", vsplit "(Alt+=)"), so `preview`'s should too.
+
+**Evidence.**
+
+- lib/geex/loop/settings.ex:125-127 — the Keys tab's rows are `KeyHelp.search(query)`
+- lib/geex/loop/key_help.ex:30 — `{"Panes", "Alt+P", "the next pane: tree, editor, edits"}`
+- lib/geex/loop/key_help.ex:46-54 — the Mouse group, including `{"Mouse", "click ×", "close a tab, or a pane"}`
+- lib/geex/loop/keymap.ex:119-121 — "the one Alt chord where shift means something other than the same action"
+- lib/geex/command/catalog.ex:58, 68, 120 — descriptions name their keys: "(Alt+O)", "(Alt+K)", "(Alt+=)"
+- doc/adr/0043-markdown-preview.md:62 — cites key_help.ex only for "Every Alt+letter is taken"
+
+**Check (partly).** The settings view's Keys tab shows KeyHelp.search (settings.ex:125-127). KeyHelp lists Alt+P under Panes and "click ×" under Mouse (key_help.ex:30, 46-54). The keymap comment calls Alt+Shift+Z "the one Alt chord where shift means something other than the same action" (keymap.ex:119-121). Palette descriptions name their keys (catalog.ex:58, 68, 120). No test ties KeyHelp to the keymap: the only coverage is a doctest and a search for "alt+a" (settings_test.exs:11, 87), so nothing would make the build add the rows. ADR-0037 records its own hint updates ("The hints follow", 0037:46-47), so naming these is house practice. Still, this is a build checklist item, not a design flaw, and the comment is a one-line fix.
+
+**Amendment, as checked.** In §1 The key: "KeyHelp, which the settings view's Keys tab shows, gains a Panes row for Alt+Shift+P (preview a markdown file beside it; pressed again, close the preview) and a Mouse row for a click on the glyph. The palette's `preview` description names Alt+Shift+P, as the others name their keys (ADR-0037's 'the hints follow'). The keymap's comment stops calling Alt+Shift+Z the one case-sensitive Alt chord."
+
+### F29. §6's place-keeping by block loses the reader inside tall tables and code blocks (the ADR index is one 446-row block)
+
+`packaging-renderer` · `place-lost-in-tall-blocks` · medium · false-claim · §6 Keeping the reader's place · check: **confirmed**
+
+**Finding.** §6 says every row carries the byte its block starts at, and that 'block granularity is enough'. In the spike every table row and border carries the table's start byte, and every code line carries the fence's start byte. So a table or a code block counts as one place, however tall it is. I measured this with the spike's Parse and Layout. doc/adr/README.md is one of §8's seven docs, and every new ADR appends a row to it. At 100 columns it lays out as 266 rows, and 242 of them are one block: the index table from line 17. At 60 columns (a side-by-side split) it is 446 of 476 rows. testing.md's contrast table is a 53-row block at 60 columns. Suppose a reader is at row 300 of the index. If they save, or an agent appends a row and reconcile re-renders, the preview scrolls back to the table's first row. After a save from the source tab, 'the block holding that tab's cursor' is again the table's top, so the edited row is not in view. That defeats the purpose §6 states.
+
+**Evidence.**
+
+- doc/adr/0043-markdown-preview.md:161-165: 'Every row carries src, the byte its block starts at … Block granularity is enough'
+- lib/geex/markdown/layout.ex:325-329: every border and table_row call is given n.s, the table's start
+- lib/geex/markdown/layout.ex:434: table_row/5 builds each row as %{runs: …, src: src}
+- lib/geex/markdown/layout.ex:263-267: every code line's row gets src, the fence's start
+- Probe scratch/blocks.exs on doc/adr/README.md: 100 cols → 266 rows, 242 share src (line 17); 60 cols → 446 of 476; doc/testing.md at 60 cols → a 53-row block (line 3553)
+
+**Check (confirmed).** ADR-0043:161-165 says every row carries the byte its block starts at, and that block granularity is enough. In the spike, every border and table row gets the table's start, n.s (layout.ex:325-329, row built at 434), and every code line gets the fence's start (layout.ex:263-267). Html and front-matter lines work the same way (layout.ex:178-186). I re-ran blocks.exs. doc/adr/README.md lays out as 266 rows at 100 columns, 242 of them from line 17 (the index table). At 60 columns it is 446 of 476. doc/testing.md at 60 columns has a 53-row block from line 3553 (the contrast table). Under §6, a re-render scrolls to 'the row of the block holding that line', and nothing keeps an offset inside the block. So a reader deep in the index goes back to the table's first row, and a save from the source tab scrolls to that same row. One correction to the amendment: list and quote rows already carry the starts of the blocks inside them (layout.ex:113-120 and 135-143; in my probe an item's row had src = its paragraph's start). So 'a list item's rows get the item' would make them coarser.
+
+**Amendment, as checked.** Amend §6. A row's src is the byte of the source line it draws, where it draws one. That covers each table row, header and body (a border takes the row beside it); each line of fenced or indented code (the label row takes the fence line); and each line of raw HTML or front matter. A paragraph's or heading's wrapped rows keep the block's start. List and quote rows keep the starts of the blocks inside them, as now. Before a re-render, the preview notes its top row's source line and that row's offset among the consecutive rows sharing that line. Afterwards it scrolls to the first row of that line (or of the nearest earlier line that has rows), plus the offset, clamped to that run of rows. After a save from a tab of the same file, it scrolls the same way to the cursor's line. Drop 'Block granularity is enough': §8's ADR index is one table, 242 of its 266 rows at 100 columns and 446 of 476 at 60.
+
+### F30. Code-block highlighting puts theme colours into Layout's rows, so §5's theme-free layout and §2's cheap re-layout don't hold
+
+`packaging-renderer` · `code-colours-baked-into-layout` · medium · false-claim · §5 Layout and drawing (with §2 Width, §4 Code blocks) · check: **partly**
+
+**Finding.** §5 says Style turns roles into colours when drawing, 'so the layout never sees a theme'. §2 says a width change lays the last parse out again without reading the file. In the spike, fenced code is highlighted inside Layout.rows through the :code callback, which mix geex.render builds from Highlight.spans and Paint.styles(theme, spans). Layout receives %{byte => %Style{}} already resolved against one theme, and stores {:style, %Style{}} roles in its rows. If the preview is built this way, four things follow. (1) A theme change (the theme verb, or a choice in Alt+Y) recolours every preview run except code blocks. Those keep the old theme until the next save, reconcile or resize, while the editor repaints its spans with the current theme every frame. (2) Every width change (a resize, or each step of a split drag) runs the NIF again on every fenced block. Code highlighting was 16.7 ms of README's ~30 ms render. (3) Paint decides which capture wins by dropping the captures the theme doesn't style, so baked styles can't simply be resolved again later. (4) The info-string aliases (sh→bash, js→javascript, ex→elixir …) live only in the mix task, and §4 doesn't say where the preview gets them.
+
+**Evidence.**
+
+- lib/mix/tasks/geex.render.ex:97: Layout.rows(tree, text, width, code: highlighter(theme))
+- lib/mix/tasks/geex.render.ex:115-135: the callback returns Geex.Highlight.Paint.styles(theme, spans)
+- lib/geex/markdown/layout.ex:56-59: ':code is fn code, language -> %{byte => Geex.Theme.Style.t()}'; layout.ex:243 calls it from code_rows; layout.ex:281 emits {:style, style} roles
+- lib/geex/markdown/style.ex:56-59: role({:style, %Style{}}) copies the baked fg and attrs
+- lib/geex/highlight/paint.ex:27-40: each capture is resolved with Theme.style_for, and unstyled ones are dropped before the winner is picked
+- lib/mix/tasks/geex.render.ex:39-55: @aliases sh/shell/console/zsh→bash, js→javascript, ex/exs/iex→elixir …
+- scratch/md/README.md.stats (the spike's run behind §8's README row): code highlighting 16.7 ms of block 1.8 + inline 1.4 + layout 10.2
+
+**Check (partly).** The flow is as described. mix geex.render passes code: highlighter(theme) (geex.render.ex:97). That callback returns Paint.styles(theme, spans) (geex.render.ex:115-135). Layout calls it (layout.ex:243) and stores {:style, %Style{}} roles (layout.ex:281). Style copies the baked fg (style.ex:56-59). Paint drops the captures the theme doesn't style before choosing a winner (paint.ex:30-31), so a byte=>Style map can't be resolved again against another theme. The editor resolves its spans against the current theme every frame (loop.ex:181). §2 lists no theme-change trigger, so code colours would stay stale after a theme change. The alias table exists only in geex.render.ex:39-55. The cost claim is overstated, though. Measured warm, re-highlighting README's 7 blocks takes 0.2-0.3 ms, and a full re-layout with highlighting takes 1.5-2.7 ms. In a fresh VM the first layout took 45 ms and the next ones 2.7 and 1.7 ms. So the 16.7 ms in README.md.stats was the first call compiling the grammars, which Grammars.handle caches per VM. A width change is not a real cost. The case for the change is the theme and §5's own claim, not speed. Also, §2 claims 'without reading the file', not 'no NIF call'.
+
+**Amendment, as checked.** Amend §4/§5. The preview's task highlights each fenced block once per read and keeps the spans with the parse, as capture names rather than styles. Layout gives each code run the captures that cover it, narrowest first, which is Highlight.Paint's order. Drawing takes the first of them the current theme styles, as the editor resolves its spans every frame. A theme change then only redraws, and a width change lays out from the kept spans. An info string reaches a grammar through one alias table in Geex.Markdown (sh→bash, js→javascript, ex→elixir …, moved out of mix geex.render, which uses it too). Add a trigger to §2: installing a grammar that a code block names re-renders the preview (ADR-0040 §4: an install takes effect without a restart).
+
+### F31. Every consumer of the catalog treats a grammar as a file language: the catalog test fails on markdown_inline, and Alt+Y, --list and the install notice show it as one
+
+`packaging-renderer` · `inline-grammar-in-language-surfaces` · medium · gap · §7 Packaging · check: **partly**
+
+**Finding.** Most of the install path accepts extensions: [] and filenames: []: the recipe format, mix geex.catalog, Geex.Catalog.match, Geex.Install (names? accepts []), Geex.Installed and Highlight.language_for_path all do, and such a grammar simply matches no file. Two parts don't fit. First, test/geex/catalog_test.exs asserts that every catalog grammar names a file ending or a file name, so adding the recipe fails the suite, and green twice is the ship bar. ADR-0043 doesn't say how its promised amendment to ADR-0040 relaxes that rule. A package must also carry a highlights.scm (Install rejects one without it, and geex.catalog reads recipe.highlights), and §7 doesn't say which one. Second, every user-facing surface assumes a grammar is a language. Alt+Y's Languages tab lists every catalog grammar, so markdown_inline becomes a 17th installable 'language' that highlights nothing. geex install --list lists it the same way. Installing it shows '<display> highlighting installed', and geex highlight's error lists it among the installed languages. ADR-0040's hint (grammar_notice, then Alt+Y opened on the language) is driven by file names. So a user who installs Markdown from the hint gets highlighting, the preview glyph silently never appears, and nothing points them to the second package.
+
+**Evidence.**
+
+- test/geex/catalog_test.exs:34-36: assert g["extensions"] != [] or g["filenames"] != []
+- lib/mix/tasks/geex.catalog.ex:146: Enum.map_join(recipe.highlights, …), so a recipe without highlights raises
+- lib/geex/install.ex:548-549: a grammar package without highlights.scm is {:missing, …}; install.ex:529-536: names? accepts []
+- lib/geex/loop/settings.ex:79-93: one Languages row per Catalog.grammars() entry; Enter installs it
+- lib/geex/cli.ex:283-295: --list builds its rows from Catalog.grammars()
+- lib/geex/loop.ex:561: notice "#{display} highlighting installed"
+- lib/geex/loop.ex:911-924: grammar_notice keys on Catalog.for_path/Installed.for_path of the opened file
+- lib/geex/cli.ex:426: geex highlight's 'installed: …' list comes from Grammars.available()
+- _build/catalog/src/tree-sitter-markdown-f969cd3ae3f9/tree-sitter.json: markdown_inline has "file-types": null and highlights at tree-sitter-markdown-inline/queries/highlights.scm
+
+**Check (partly).** The code facts hold. catalog_test.exs:36 asserts that every catalog grammar has extensions or filenames, so adding the recipe fails the suite. Install's names? accepts [] (install.ex:529-536) and requires a highlights.scm (install.ex:548-549). Alt+Y builds one Languages row per Catalog.grammars() entry (settings.ex:79-93); there are 16 today, so this would be a 17th 'language'. --list is built the same way (cli.ex:283-295). Every grammar install shows '<display> highlighting installed' (loop.ex:526-561). The hint is driven by the file's path (loop.ex:911-924). Two parts are overstated. First, which highlights.scm is moot: upstream's tree-sitter.json lists tree-sitter-markdown-inline/queries/highlights.scm, and the file is there. Second, 'nothing points them to the second package' contradicts ADR §1 (lines 73-75: 'the verb says what to install') and §7 (line 172: 'the preview names both when one is missing'). The real gap is narrower. The catalog test's rule and every surface that lists catalog grammars treat markdown_inline as a file language, and the ADR doesn't say how its promised ADR-0040 amendment changes that.
+
+**Amendment, as checked.** Amend §7 and the ADR-0040 amendment it promises. markdown_inline's recipe uses markdown's repo, tag and commit, with path tree-sitter-markdown-inline, extensions [], filenames [] and its own tree-sitter-markdown-inline/queries/highlights.scm. It adds a key carried into the manifest, e.g. for: "markdown". The catalog test's 'names its file endings' rule exempts a grammar with that key, and checks that the key names a catalog grammar. Surfaces that list grammars as languages show it as Markdown's companion, not as a language. Alt+Y's Languages tab and geex install --list label it e.g. 'Markdown inline (preview)', beside Markdown. Its install notice says the Markdown preview is available, not '… highlighting installed'. The preview's missing-grammar message (§1) opens Alt+Y on the missing row, as ADR-0040's hint does.
+
+### F32. The preview's own queries and handles bypass ADR-0040's grammar checks: no ABI gate, no cache or forget, and no catalog check that they still compile
+
+`packaging-renderer` · `render-queries-outside-grammar-machinery` · medium · risk · §4 Parsing (with §7 Packaging) · check: **confirmed**
+
+**Finding.** ADR-0040 builds four safeguards around grammars. Each grammar's query travels in its package, so the package stands alone. Loading is gated on the manifest's ABI (§5: a grammar of another ABI is not loaded, and the user is told it needs an update). Compiled handles are cached by the install's sha256 and dropped on update (Grammars.forget/1, which Install and the watcher call). The catalog build checks each package by loading its highlights.scm. The preview's structural queries (Parse's @block_query and @inline_query) live in geex instead, and the spike loads them outside all of that. Parse.load reads parser.wasm from the install and compiles both grammars on every call, with no ABI check and no cache. That measured 210–223 ms per call with wasm_cache off (as under mix test, or with an unwritable cache dir) and 6 ms with the disk cache. Nothing checks the queries against the packages: mix geex.catalog and Install validate only highlights.scm. Several things could then break every preview with a raw engine error: a markdown recipe bump that renames or drops a node the queries name, a stale or hand-installed package, or geex self rollback against a newer installed package. The queries also name extension nodes such as minus_metadata, pipe_table_cell and task_list_marker_*. The test fixtures are pinned separately, so they wouldn't notice. The ADR doesn't say where the two handles live or how they are checked.
+
+**Evidence.**
+
+- lib/geex/markdown/parse.ex:113-123: load/1 reads both wasm files and compiles both grammars on every call
+- lib/geex/markdown/parse.ex:125-130: markdown_dir/0 takes the installed dir with no check of the manifest's ABI
+- lib/geex/highlight/grammars.ex:45-64,77-92: handle/1 caches by build and runs check_abi; grammars.ex:70-75: forget/1 erases only {Grammars, language}
+- lib/mix/tasks/geex.catalog.ex:106-111: the catalog's load check uses only the recipe's highlights
+- lib/geex/install.ex:554-559: install validation loads parser.wasm with highlights.scm only
+- lib/geex/markdown/parse.ex:17-60: @block_query names minus_metadata, plus_metadata, pipe_table_*, task_list_marker_*; one unknown node fails the whole query
+- Probe: Parse.load/0 took 210, 213 and 223 ms with :wasm_cache false, and 6 ms with the cache
+
+**Check (confirmed).** Parse.load reads both wasm files and compiles both grammars on every call (parse.ex:113-123). It does pass the disk compile cache (parse.ex:139-144), so 'no cache' means no in-memory handle cache. markdown_dir doesn't look at the manifest's ABI (parse.ex:125-130). By contrast, Grammars.handle caches by the install's sha256 and runs check_abi (grammars.ex:45-64, 90-92). forget erases only {Grammars, language} (grammars.ex:70-75), and Install and the watcher call it (install.ex:682, installed/watcher.ex:76). The catalog build and install validation load only highlights.scm (geex.catalog.ex:106-109, install.ex:553-560). Measured: Parse.load took 231, 222 and 208 ms with wasm_cache false, and 5 ms with the cache. Loading the markdown grammar with a query that names one unknown node returns {:error, "query: QueryError { … kind: NodeType }"}, so the preview would show the engine's raw string. ADR-0040 §5 (lines 147-153) promises 'needs an update' for version skew, and ADR-0043 §4/§7 say nothing about it. The catalog is fixed per release (ADR-0040 §2), so the exposure is hand-installed or stale packages, rollbacks, and recipe bumps the catalog build doesn't check.
+
+**Amendment, as checked.** Amend §4. The two render handles are cached as Grammars.handle/1 caches its handles: under their own keys, tagged with each install's sha256, so a replaced package is never used. They are dropped when Grammars.forget/1 runs; it gains those keys, since today it erases only {Grammars, language}. They are loaded only when both manifests' ABIs are in Grammars.abi(). If one isn't, or a render query doesn't compile against the installed package, the preview isn't offered and the verb says '<Markdown> preview needs an update (Alt+Y)', as ADR-0040 §5 does for highlighting. It never shows the engine's string. Amend §7. The render queries ship with geex, not in the package. So mix geex.catalog's load check also compiles them against the markdown and markdown_inline it builds, and the test fixtures are rebuilt from the recipe's commit whenever the recipe is bumped. A grammar change that breaks the queries then stops the catalog build instead of reaching users.
+
+### F33. An empty `||` cell is dropped, so the rest of the row draws under the wrong headers
+
+`packaging-renderer` · `empty-table-cell-shifts-row` · low · gap · §5 Layout and drawing (table row) · check: **confirmed**
+
+**Finding.** Layout treats a row's cells as its table_cell children, by position, padded or cut to the header's count. The block grammar has no cell for an empty `||`. In `|x||z|` it puts the second `|` in an ERROR node and yields only cells x and z. So z draws under the second header, and the third column is blank. GitHub (GFM) reads three cells, with the middle one empty. A cell holding a space (`| |`) does get a node and renders right. Header-only tables also render right, and so do rows with more cells than the header (the extras are dropped, as GFM does).
+
+**Evidence.**
+
+- lib/geex/markdown/layout.ex:342-343: cells/1 is the row's :table_cell children
+- lib/geex/markdown/layout.ex:307-314: cells are placed by index, padded with [] and cut to the header's count
+- Probe scratch/q.exs, block grammar on '| a | b | c |\n|---|---|---|\n|x||z|': row 28..34 gives "|" 28..29, cell "x", "|" 30..31, ERROR "|" 31..32, cell "z", "|" 33..34; the spike draws │ x │ z │   │
+
+**Check (confirmed).** Probed '| a | b | c |\n|---|---|---|\n|x||z|\n| p | | r |'. The row gives table_cell 29..30 'x' and 32..33 'z'. With pipes.scm, the middle '|' at 31..32 is an ERROR node. Layout takes the row's :table_cell children (layout.ex:342-343) and places them by index, padded and cut to the header's count (layout.ex:307-314). The spike draws '│ x │ z │   │'. GitHub's markdown API (gh api markdown, mode gfm) renders the same row as <td>x</td><td></td><td>z</td>. '| p | | r |' renders correctly. §8's correctness search doesn't mention this case.
+
+**Amendment, as checked.** Amend §5's table row. A cell's column comes from counting the unescaped '|'s before it in the row's source (GFM's rule: a '|' inside a code span counts too), less one when the row starts with '|'. It doesn't come from the cell's position among the grammar's cells. The grammar gives '||' no cell, so '|x||z|' drew z under the second header; GitHub renders x, an empty cell, then z. List this in §8 next to the code span, as a second grammar gap.
+
+### F34. In CRLF files, html blocks, front matter and indented code each gain a stray row and keep `\r` in their runs
+
+`packaging-renderer` · `crlf-stray-rows` · low · gap · §5 Layout and drawing (with §2: the preview reads the file) · check: **partly**
+
+**Finding.** geex reads and writes a CRLF file's bytes unchanged (reconcile changes CRLF only when computing hashes), and the preview reads the file itself, so CRLF markdown reaches the preview. Paragraphs, headings, tables, fenced code and code spans all handle \r: it becomes a whitespace token, or is trimmed by trim or trim_trailing("\r"). Html blocks, front matter and indented code trim only \n before splitting. In a CRLF file each of their lines keeps a trailing \r, and the block's trailing blank line survives as one more row: an extra `\r` row after an html block, and an extra empty code row after indented code. Screen drops a lone \r (it has width 0), so the preview itself shows only the stray rows. mix geex.render, the development tool §8 keeps, prints the \r raw, and the fill spaces printed after it blank the line in a terminal. Neither §2 nor §5 says how line endings are handled.
+
+**Evidence.**
+
+- lib/geex/markdown/layout.ex:164-172: indented code: plain |> String.trim_trailing("\n") |> String.split("\n")
+- lib/geex/markdown/layout.ex:178-186: html and metadata: the same; each line becomes a row as it is
+- lib/geex/markdown/layout.ex:259: code_rows trims \r from each line, so fenced code is fine
+- Probe crlf.md: html rows {"<div>\r"}, {"html\r"}, {"</div>\r"}, {"\r"}; crlf2.md: front matter rows "---\r", "title: x\r", and indented code gains a trailing empty row
+- lib/mix/tasks/geex.render.ex:153-155: runs are printed raw, then the fill
+- lib/geex/reconcile.ex:350-353: CRLF bytes are kept; only hashes normalise
+
+**Check (partly).** Indented code (layout.ex:164-172) and html and front matter (layout.ex:178-186) trim only '\n' before splitting. code_rows strips '\r' from each line (layout.ex:259). Probe of a CRLF file: the html node (7..30) includes the trailing blank line and draws '<div>\r', 'html\r', '</div>\r', '\r'. Indented code gains an empty trailing row. The LF twin has neither. The title overstates. Front matter keeps '\r' on each line but gains no stray row: the metadata node, 0..20, ends at the closing fence. Indented code's runs keep no '\r', because code_rows strips it. Width.cells("\r") is 0 and Screen.put_grapheme places nothing for width 0 (screen.ex:97-100). So the preview shows only the two kinds of stray row. Width.string("<div>\r") is 5, so mix geex.render prints the '\r' raw and then 95 fill spaces, which blank the line (geex.render.ex:153-155). Reconcile keeps CRLF bytes and normalises only the hash (reconcile.ex:350-353).
+
+**Amendment, as checked.** Amend §2. The preview turns each \r\n into \n before parsing; rows still map to the same source lines. Alternatively, Layout trims a trailing \r from every line it splits. Either way a CRLF file renders like its LF twin. Today an html block keeps \r on each line and gains a trailing '\r' row, indented code gains an empty trailing row, and front matter keeps \r on each line. Screen hides the \r, but mix geex.render prints it and blanks the line.
+
+### F35. Three common constructs render unlike GitHub: closing `#`s show, list numbers are copied, and `$…$` in prose becomes code
+
+`packaging-renderer` · `github-differences-in-markers-numbers-math` · low · false-claim · §5 Layout and drawing (table: heading, list) · check: **confirmed**
+
+**Finding.** (1) §5 says heading markers are hidden, but the block grammar's inline node keeps an ATX heading's closing sequence. So '# Title ##' draws 'Title ##', where CommonMark gives 'Title'. (2) §5 says 'numbers aligned right', and the spike copies each item's marker as written. So the common lazy numbering '1.' '1.' '1.' draws 1. 1. 1., where CommonMark and GitHub count 1, 2, 3 from the first item's number. (3) The inline grammar's latex extension parses `$5 and $` and `$HOME or $` as latex_block, and the spike draws those as code. GitHub's math rule (no space just inside either `$`) leaves both as text, so prices and shell variables in prose get code styling. None of geex's own docs hit these three: they have no closing hashes, number lists in sequence, and keep every `$` inside code spans. That is why §8's search didn't find them.
+
+**Evidence.**
+
+- lib/geex/markdown/layout.ex:102-105: heading content is child(n, :inline) unchanged; probe '# Title ##' → inline 2..10 "Title ##" → row "Title ##"
+- lib/geex/markdown/layout.ex:226-227: number_or_bullet copies String.trim(slice(text, number)); probe '1. one\n1. two\n1. three' → 1. 1. 1.
+- lib/geex/markdown/parse.ex:86: (latex_block) @latex; layout.ex:530: drawn with :code; probe 'It costs $5 and $10 … $HOME or $PATH' → code runs "$5 and $" and "$HOME or $"
+
+**Check (confirmed).** Probed all three in the spike. '# Title ##' has inline 2..10 'Title ##' and draws 'Title ##' (layout.ex:102-105). Three '1.' items draw '1. 1. 1.', because number_or_bullet copies the marker (layout.ex:227). 'It costs $5 and $10 …, and $HOME or $PATH' yields latex nodes '$5 and $' and '$HOME or $', drawn with :code (parse.ex:86, layout.ex:530). GitHub's markdown API gives <h1>Title</h1>, an <ol> (numbered 1-3), and that sentence as plain text, while '$x^2$' becomes math. Further API probes: '$x $', '$ x$', '$x$5' and '$x$b' stay text, and '$5 and 10$' is math. None of the seven docs has a closing-hash heading or a repeated list number. Dropping latex_block, as the reviewer proposes, also draws real math as plain source. That is acceptable, but a filter on GitHub's rule keeps it marked.
+
+**Amendment, as checked.** Amend §5's table. A heading drops its closing sequence: an unescaped run of '#' after a space or tab (CommonMark), so '\#' stays. An ordered list numbers its items counting up from the first item's number (CommonMark's start), right-aligned, keeping each item's delimiter. A latex span is drawn as code only where GitHub reads math: the opening '$' not followed by whitespace, and the closing '$' not preceded by whitespace nor followed by a letter or digit. Otherwise its text is drawn plain. (Dropping latex_block from the inline query is the simpler alternative, at the cost of real math drawn plain.)
+
+### F36. With the default terminal theme and no OSC 11 answer, code has no tint, so fenced code draws as plain indented text
+
+`packaging-renderer` · `no-code-tint-under-default-theme` · low · gap · §5 Theme fallbacks · check: **partly**
+
+**Finding.** §5 takes code's tint from active_line_bg. The built-in terminal theme has been the default since ADR-0040 step 7, and its active_line_bg stays :default until the terminal answers OSC 11. In that case Style's tint falls back to the run's own background. A fenced block with no language, or with no installed grammar for it, then looks like an unwrapped paragraph indented one space. Inline code differs from text only by the literal colour. ADR-0040 met the same gap for the selection with the palette's mark (reverse video); §5 has nothing equivalent.
+
+**Evidence.**
+
+- lib/geex/markdown/style.ex:31-32,49: :code and :code_block take tint(t, st.bg)
+- lib/geex/markdown/style.ex:75-76: tint/2 returns the base when active_line_bg is nil or :default
+- lib/geex/theme/terminal.ex:105-118: palette(nil) has active_line_bg: :default and mark: [:reverse] (no OSC 11 answer)
+- doc/adr/0040-bare-geex-and-the-catalog.md:399-400: the default theme is the built-in terminal theme
+
+**Check (partly).** Code and code_block take tint(t, st.bg) (style.ex:31-32, 49). tint returns the base when active_line_bg is nil or :default (style.ex:75-76). The terminal theme's palette(nil) has active_line_bg :default and mark [:reverse] (terminal.ex:105-118; the doctest shows {:default, :default, [:reverse]}). It is the default theme (ADR-0040:399-400). So with no OSC 11 answer, code blocks have no background. One part is overstated. A block that names a language still gets its label row in ANSI 8: comment's fg is :default in the terminal theme, so it falls back to line_number. If the grammar is installed, the block also gets syntax colours. Only a block with no language reads as one-space-indented text. Inline code stays green (markup.raw = ANSI 2). The amendment's second option, the mark on the label row, misses exactly that case, because a block with no language has no label row.
+
+**Amendment, as checked.** Amend §5's fallbacks. When the palette has no tint (active_line_bg is :default: the terminal theme with no OSC 11 answer, which ADR-0040 makes the default), every row of a code block starts with a bar in line_number, in a glyph unlike the quote's '▌' (e.g. '▏'). A block with no language, which has neither a label row nor highlighting, then still reads as code. Marking only the label row isn't enough, because such a block has none.

@@ -1,12 +1,13 @@
 # ADR-0043: A read-only markdown preview, re-rendered on save
 
-- **Status:** Proposed 2026-11-06. The maintainer decided the preview is read-only, re-rendered
+- **Status:** Accepted 2026-11-06. The maintainer decided the preview is read-only, re-rendered
   whole on save, and toggled by `Alt+Shift+P`. The rest (the trigger being the file on disk,
   opening beside the file, the parser, keeping the reader's place) was proposed in the same
-  conversation, and the maintainer asked for it drafted here after a spike (§8). Revised the same
-  day after an adversarial review against the code (§9), with three more of the maintainer's
+  conversation and drafted here at the maintainer's request after a spike (§8), then revised the
+  same day after an adversarial review against the code (§9), with three more of the maintainer's
   choices: save and take-in work from a preview, Page Up/Down join the parser, and `$…$` is math
-  only by GitHub's rule. The preview itself isn't built.
+  only by GitHub's rule. The maintainer accepted it the same day. Not built yet; the build plan is
+  roadmap item 16.
 - **Date:** 2026-11-06
 - **Relates to:** [ADR-0038](0038-split-panes-and-tabs.md) (the preview is a tab in a pane),
   [ADR-0039](0039-mouse.md) (the tab's glyph), [ADR-0040](0040-bare-geex-and-the-catalog.md)
@@ -398,8 +399,9 @@ Before anything was built, an adversarial review checked this ADR against the co
 reviewers (focus and the cursor model; buffer messages and the process; keys, the tab bar and the
 mouse; packaging and the renderer), each followed by a skeptic who opened every cited line and
 tried to refute each finding. 36 findings survived and none were refuted; about 28 remain once
-the ones two reviewers found independently are merged. All are folded into §1–7. The ones that
-changed the design:
+the ones two reviewers found independently are merged. All are folded into §1–7, and the findings
+themselves, with their evidence, are kept in
+[research/adr-0043-review.md](../research/adr-0043-review.md). The ones that changed the design:
 
 - **A preview counted as one of its buffer's tabs.** Under ADR-0038 §4, closing the file's last
   source tab then skipped the unsaved-edits refusal ("still open in another pane") and left the
@@ -447,4 +449,6 @@ The spike: `lib/geex/markdown/parse.ex`, `lib/geex/markdown/layout.ex`,
 `lib/geex/markdown/style.ex`, `lib/mix/tasks/geex.render.ex`, `test/geex/markdown/parse_test.exs`.
 tree-sitter-markdown's README (its correctness note, and included ranges for the inline grammar);
 [notes.md](../notes.md) (the 2026-06 frontend trade-off this narrows); [roadmap.md](../roadmap.md)
-(injections); [testing.md](../testing.md) 2026-11-06 (the spike and the review).
+(injections); [testing.md](../testing.md) 2026-11-06 (the spike and the review);
+[research/adr-0043-review.md](../research/adr-0043-review.md) (the review's findings and
+evidence).
