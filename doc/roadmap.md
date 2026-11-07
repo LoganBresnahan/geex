@@ -607,9 +607,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the
-tty) is **FIXED** (2026-10-16), and BUG-4 (a deploy removed a running geex's unpack) is **FIXED** (2026-10-18); BUG-5 and BUG-6 are **FIXED** (2026-10-18). **Open:** BUG-7, stale text after a terminal
-resize (the renderer's model is reset to a blank screen of the new size, so no `\e[2J`), found
-2026-11-06 while dogfooding the markdown preview; it predates it.
+tty) is **FIXED** (2026-10-16), and BUG-4 (a deploy removed a running geex's unpack) is **FIXED** (2026-10-18); BUG-5 and BUG-6 are **FIXED** (2026-10-18). BUG-7 (stale text after a terminal resize, found
+while dogfooding the markdown preview) is **FIXED** (2026-11-06); the shelf is clear again.
 
 ---
 

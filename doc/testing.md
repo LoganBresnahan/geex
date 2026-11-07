@@ -5027,3 +5027,27 @@ tests): 0 failures. 1313 tests + 116 doctests green twice; compile warnings-clea
 
 **Not tested:** the fixes live in tmux (the verifier's final pass dogfoods them); 6's race itself
 (the fix removes the second call).
+
+### 2026-11-06 — BUG-7: a resize redraws the whole screen
+
+At the maintainer's word ("yeah fix bug 7 too", relayed by the verifying session), on the branch
+`markdown-preview`, in its own commit.
+
+**Fixed:** `Geex.Renderer.handle_cast({:resize, w, h}, …)` set the model of the terminal to a blank
+screen of the new size, so the next flush diffed cell by cell (no `\e[2J`) and left the old text,
+which tmux had reflowed, wherever the new frame is blank. It now resets the model to
+`Screen.new(0, 0)`, as `init/1` does: the next flush takes the dimension-change path the moduledoc
+describes, clearing the screen and drawing every non-blank cell.
+
+**Test first:** `renderer_test.exs`: after `{:resize, w, h}` (to a new size and to the same one),
+the next diff starts with `\e[2J` and draws the new frame's text, and the model kept can't pass for
+a frame of that size. It failed first (the diff was `\e[2;1Hab` alone).
+
+**Checked by hand** in tmux (private socket, the scratch project, a preview open): `resize-window`
+120 → 100 → 22 → 120 draws a clean frame at each size, both panes; no stale text anywhere on the
+120-column screen afterwards (before: `1 Agent intro line. line.`); the log is clean.
+
+1314 tests + 116 doctests green twice; compile warnings-clean.
+
+**Not tested:** a real terminal emulator's own resize (tmux only); a resize in the middle of a
+frame being written.

@@ -70,9 +70,9 @@ defmodule Geex.Renderer do
   def flush(%Screen{} = next, cursor), do: GenServer.cast(__MODULE__, {:flush, next, cursor})
 
   @doc """
-  Reset the renderer's model of the terminal to a blank screen of the
-  given size. Use on terminal resize — the *next* flush will then
-  draw everything against a known-blank baseline.
+  Forget the renderer's model of the terminal: on a terminal resize the screen
+  isn't blank (tmux reflows it), so the *next* flush clears it and draws
+  everything (BUG-7).
   """
   @spec resize(non_neg_integer(), non_neg_integer()) :: :ok
   def resize(w, h) when w >= 0 and h >= 0,
@@ -218,13 +218,22 @@ defmodule Geex.Renderer do
   # remembered cursor is now unknown (`nil`) — the next flush/2 will reposition it.
   def handle_cast({:flush, %Screen{} = next}, %{current: current} = state) do
     case diff(current, next) do
-      [] -> {:noreply, %{state | current: next}}
-      d -> TerminalIO.write([@bsu, d, @esu]); {:noreply, %{state | current: next, cursor: nil}}
+      [] ->
+        {:noreply, %{state | current: next}}
+
+      d ->
+        TerminalIO.write([@bsu, d, @esu])
+        {:noreply, %{state | current: next, cursor: nil}}
     end
   end
 
-  def handle_cast({:resize, w, h}, state) do
-    {:noreply, %{state | current: Screen.new(w, h)}}
+  # The terminal isn't blank after a resize (tmux reflows what was there; BUG-7), so the model
+  # becomes one no frame can match: the next flush takes the dimension-change path, clearing the
+  # screen and drawing every cell. (A blank screen of the new size made it diff cell by cell and
+  # leave the old text wherever the new frame is blank.) `w` and `h` are the terminal's; the
+  # frame that comes next carries them.
+  def handle_cast({:resize, _w, _h}, state) do
+    {:noreply, %{state | current: Screen.new(0, 0)}}
   end
 
   @impl true

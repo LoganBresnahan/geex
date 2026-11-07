@@ -7,11 +7,13 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-7 — After a terminal resize, stale text stays in the cells the new frame leaves blank
+## BUG-7 — After a terminal resize, stale text stays in the cells the new frame leaves blank  ✅ FIXED (2026-11-06)
 
-- **Status:** open, found 2026-11-06 while dogfooding the markdown preview (ADR-0043 slice 5);
-  not the preview's: main (`464bd3b`) does the same. Not fixed on the preview's branch (outside its
-  scope); waiting for the maintainer.
+- **Status:** **FIXED** 2026-11-06 on the branch `markdown-preview`, at the maintainer's word
+  ("yeah fix bug 7 too"): `Renderer.handle_cast({:resize, …})` now resets the model to
+  `Screen.new(0, 0)`. Verification is in the [testing.md](testing.md) 2026-11-06 entry "BUG-7:
+  a resize redraws the whole screen". Found 2026-11-06 while dogfooding the markdown preview
+  (ADR-0043 slice 5); not the preview's: main (`464bd3b`) did the same.
 - **Symptom:** in tmux, `resize-window` from 120 to 96 columns leaves the old text in every cell
   the new frame draws blank, so rows read like `1 Agent intro line. line.` and
   `3 # Previewrtestw##est ##`. It stays until something draws over those cells; Esc or another

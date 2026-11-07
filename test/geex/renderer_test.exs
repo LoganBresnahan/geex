@@ -18,6 +18,24 @@ defmodule Geex.RendererTest do
     end
   end
 
+  describe "a terminal resize (BUG-7)" do
+    # The terminal isn't blank after a resize (tmux reflows what was there), so the flush after
+    # one must clear the screen and draw every non-blank cell, as the moduledoc says.
+    test "the next flush clears and redraws, whether the size changed or not" do
+      old = Screen.new(6, 2) |> Screen.draw_text(0, 0, "hello")
+
+      for {w, h} <- [{4, 2}, {6, 2}] do
+        {:noreply, state} = Renderer.handle_cast({:resize, w, h}, %{current: old, cursor: nil})
+        next = Screen.new(w, h) |> Screen.draw_text(0, 1, "ab")
+        out = render(Renderer.diff(state.current, next))
+        assert String.starts_with?(out, "\e[2J"), inspect({w, h, out})
+        assert out =~ "\e[2;1Hab"
+        # The model it keeps can't pass for any frame, so nothing is diffed against a guess.
+        refute {state.current.w, state.current.h} == {w, h}
+      end
+    end
+  end
+
   describe "diff/2 — dimension change" do
     test "first flush (current is 0x0) clears and draws non-blank cells" do
       current = Screen.new(0, 0)
