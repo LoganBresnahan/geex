@@ -5125,3 +5125,16 @@ pass over it, and `@version` 0.4.0. Since 0.3.6:
 **Not tested yet:** the v0.4.0 tag's release run, its four builds' smoke, the publish and the
 post-release smoke (followed below when they run); `geex self update` from 0.3.6 on the
 maintainer's machine.
+
+**0.4.0, later the same day: released.** The first v0.4.0 tag (on `a5df88f`) started release run
+42335717543; its darwin-arm64 job was cancelled before its first step ("The configuration
+'macos-14-arm64-us-default' is not supported": GitHub retired macos-14), so nothing was published,
+and the run was cancelled. With the maintainer's choices (build on macos-15 and accept that macOS 15
+may be required; move the unpublished tag), `251245a` moved darwin-arm64 to macos-15 and dropped
+macos-14 from smoke.yml (ADR-0041's amendment), main CI on it went green, and the tag was moved
+there after checking no release existed. Release run 42336195006: the four builds each smoke
+"geex 0.4.0 passed", the publish succeeded, and all six post-release smoke runners (ubuntu-22.04,
+24.04, both arm, macos-15, macos-15-intel) say "geex 0.4.0 passed". "Latest" is geex 0.4.0;
+`releases/latest` redirects to `tag/v0.4.0` and `latest/download/install.sh` to v0.4.0's asset;
+`catalog-v3` is still a pre-release. The release notes gained a "What's new" section. Still not
+run: the maintainer's `geex self update` from 0.3.6.
