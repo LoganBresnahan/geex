@@ -88,6 +88,43 @@ defmodule Geex.Markdown.PreviewTest do
       assert Preview.lookup(ctx.buf) == :error
     end
 
+    test "a render under way stops with the preview: no orphan worker", ctx do
+      test = self()
+
+      read = fn path ->
+        send(test, {:reading, self()})
+        receive do: (:go -> File.read(path))
+      end
+
+      {:ok, pid} = start_preview(ctx.buf, read: read)
+      :ok = Preview.subscribe(pid, self())
+      Preview.widths(pid, [30])
+      assert_receive {:reading, worker}
+      wref = Process.monitor(worker)
+      Preview.unsubscribe(pid, self())
+      assert_receive {:DOWN, ^wref, :process, ^worker, _}
+    end
+
+    test "and when its supervisor shuts it down", ctx do
+      test = self()
+
+      read = fn path ->
+        send(test, {:reading, self()})
+        receive do: (:go -> File.read(path))
+      end
+
+      {:ok, _pid} =
+        start_supervised({Preview, buffer: ctx.buf, read: read}, id: :shut_down_preview)
+
+      {:ok, pid} = Preview.lookup(ctx.buf)
+      :ok = Preview.subscribe(pid, self())
+      Preview.widths(pid, [30])
+      assert_receive {:reading, worker}
+      wref = Process.monitor(worker)
+      stop_supervised!(:shut_down_preview)
+      assert_receive {:DOWN, ^wref, :process, ^worker, _}
+    end
+
     test "its init reads nothing, and a crashed render costs a frame, not the process", ctx do
       test = self()
       read = fn path -> send(test, {:read, path}) && File.read(path) end

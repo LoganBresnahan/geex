@@ -171,6 +171,8 @@ defmodule Geex.Markdown.Preview do
       render: 0
     }
 
+    # A shutdown from the supervisor reaches terminate/2, which kills a render under way.
+    Process.flag(:trap_exit, true)
     # Nothing is read here: the first subscriber's arrival is the first trigger.
     {:ok, state, {:continue, :watch}}
   end
@@ -236,14 +238,14 @@ defmodule Geex.Markdown.Preview do
     do: {:noreply, state |> want(:reread) |> run()}
 
   # A render finished.
-  def handle_info({:rendered, ref, result}, %{worker: {ref, job}} = state) do
+  def handle_info({:rendered, ref, result}, %{worker: {ref, _pid, job}} = state) do
     Process.demonitor(ref, [:flush])
     state = %{state | worker: nil}
     {:noreply, state |> finish(job, result) |> run()}
   end
 
   # A render crashed: the rows stay, the status says so (a crash costs a frame).
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{worker: {ref, job}} = state) do
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{worker: {ref, _wpid, job}} = state) do
     Logger.warning("geex preview: a render failed: #{inspect(reason)}")
     state = %{state | worker: nil, status: {:failed, reason}, tries: 0}
     {:noreply, state |> broadcast(%{}, job.anchor, nil) |> run()}
@@ -262,6 +264,9 @@ defmodule Geex.Markdown.Preview do
   # Every other buffer message (a keystroke's change, a notice, an attestation).
   def handle_info(_msg, state), do: {:noreply, state}
 
+  @impl true
+  def terminate(_reason, state), do: kill_worker(state)
+
   ## Work
 
   defp want(state, :reread), do: put_in(state.pending.reread, true)
@@ -272,11 +277,16 @@ defmodule Geex.Markdown.Preview do
   end
 
   # Unregister first, so a quick reopen starts a new preview rather than subscribing to this
-  # one while it stops.
+  # one while it stops. A render under way is killed: nobody wants its rows, and it would
+  # otherwise go on parsing (and filling the grammar caches) for a preview that is gone.
   defp stop(state) do
     Registry.unregister(Geex.Registry, {:markdown_preview, state.buffer})
-    {:stop, :normal, state}
+    kill_worker(state)
+    {:stop, :normal, %{state | worker: nil}}
   end
+
+  defp kill_worker(%{worker: {_ref, pid, _job}}), do: Process.exit(pid, :kill)
+  defp kill_worker(_state), do: :ok
 
   defp catch_exit(fun) do
     fun.()
@@ -308,7 +318,11 @@ defmodule Geex.Markdown.Preview do
       ref = Process.monitor(pid)
       send(pid, {:go, ref})
 
-      %{state | worker: {ref, job}, pending: %{reread: false, widths: MapSet.new(), anchor: nil}}
+      %{
+        state
+        | worker: {ref, pid, job},
+          pending: %{reread: false, widths: MapSet.new(), anchor: nil}
+      }
     else
       state
     end

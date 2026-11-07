@@ -29,10 +29,12 @@ defmodule Geex.MarkdownTest do
     end)
   end
 
+  # Rewrite an installed manifest as an install would: read again, cached handles dropped.
   defp manifest(name, changes) do
     path = Path.join(Installed.dir(:grammar, name), "manifest.json")
     File.write!(path, JSON.encode!(Map.merge(JSON.decode!(File.read!(path)), changes)))
     Installed.refresh()
+    Grammars.forget(name)
   end
 
   test "the fixtures are the catalog's packages, at the recipe's commit" do
@@ -122,7 +124,9 @@ defmodule Geex.MarkdownTest do
 
     assert {:error, {:engine, message}} = Grammars.render_handle("markdown", broken.("markdown"))
     assert message =~ "Query"
-    assert :persistent_term.get({Grammars, :render, "markdown"}, :miss) == :miss
+    # The failure isn't cached (the good query's handle may be: anything may have asked for it).
+    tag = :erlang.phash2(broken.("markdown"))
+    refute match?({{_, ^tag}, _}, :persistent_term.get({Grammars, :render, "markdown"}, :miss))
 
     assert Markdown.handles(query: broken) == {:error, :update}
     refute Markdown.describe(:update) =~ "Query"
