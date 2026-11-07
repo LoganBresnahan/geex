@@ -7,6 +7,32 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-7 — After a terminal resize, stale text stays in the cells the new frame leaves blank
+
+- **Status:** open, found 2026-11-06 while dogfooding the markdown preview (ADR-0043 slice 5);
+  not the preview's: main (`464bd3b`) does the same. Not fixed on the preview's branch (outside its
+  scope); waiting for the maintainer.
+- **Symptom:** in tmux, `resize-window` from 120 to 96 columns leaves the old text in every cell
+  the new frame draws blank, so rows read like `1 Agent intro line. line.` and
+  `3 # Previewrtestw##est ##`. It stays until something draws over those cells; Esc or another
+  repaint doesn't clear it. The log is clean.
+- **Verified cause:** `Geex.Renderer.handle_cast({:resize, w, h}, …)` sets the model of the
+  terminal to `Screen.new(w, h)`, a blank screen **of the new size**. The next flush's `diff/2`
+  then sees equal dimensions, so it takes the incremental path: no `\e[2J`, and every cell blank
+  in the new frame matches the blank model and isn't written. But the terminal isn't blank
+  after a resize (tmux reflows what was there), so the old text stays in those cells. The
+  moduledoc's own contract ("Dimension changes (initial flush, terminal resize) emit `\e[2J`") is
+  what breaks.
+- **Recommended fix:** reset the model to `Screen.new(0, 0)` on resize, as `init/1` does, so the
+  next flush sees new dimensions and clears and redraws everything. Tried in a throwaway
+  worktree of main: the same resize then draws a clean frame. A renderer test should assert that
+  the flush after `resize/2` starts with `\e[2J`.
+- **Ruled out:** tmux's window and pane really are 96 wide after the resize (`#{pane_width}`),
+  and geex lays out at 96 (its tab bar's `×` is at the new right edge), so it isn't a missed
+  SIGWINCH.
+
+---
+
 ## BUG-6 — The installed binary carried every earlier geex release, the bundled grammars included  ✅ FIXED (2026-10-18)
 
 - **Status:** **FIXED** 2026-10-18. `mix geex.deploy` removes `_build/prod/rel/geex` before

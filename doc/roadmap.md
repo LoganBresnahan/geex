@@ -597,7 +597,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      drawn, the grammars' gaps corrected, per-line sources and `Geex.Markdown.Place`.
      (3) 2026-11-06: `{:geex_buffer_synced, …}` and `status/1`'s hash; `Geex.Markdown.Preview`
      under `PreviewSupervisor`; the anchor remapped through a line diff. (4) 2026-11-06: preview
-     tabs in `Panes` and the loop, the toggle (no key yet), the close paths, the gate.
+     tabs in `Panes` and the loop, the toggle (no key yet), the close paths, the gate. (5)
+     2026-11-06: `Alt+Shift+P`, the glyph, links, the scroll bar, the status line, Page Up/Down,
+     `:strike`, key help; dogfooded in tmux.
    - **`catalog-v3` published** 2026-11-06 (the maintainer's word): the full catalog with
      `markdown_inline`, a not-latest pre-release (ADR-0041 §5).
    - **Later, if wanted:** included ranges in the NIF (faster inline parsing, and injections for
@@ -605,7 +607,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the
-tty) is **FIXED** (2026-10-16), and BUG-4 (a deploy removed a running geex's unpack) is **FIXED** (2026-10-18); the shelf is currently clear.
+tty) is **FIXED** (2026-10-16), and BUG-4 (a deploy removed a running geex's unpack) is **FIXED** (2026-10-18); BUG-5 and BUG-6 are **FIXED** (2026-10-18). **Open:** BUG-7, stale text after a terminal
+resize (the renderer's model is reset to a blank screen of the new size, so no `\e[2J`), found
+2026-11-06 while dogfooding the markdown preview; it predates it.
 
 ---
 

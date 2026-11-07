@@ -117,8 +117,8 @@ defmodule Geex.Loop.Keymap do
   # own up/down) move the highlight; the loop owns that, not the keymap.
   def resolve({:alt, c}, _cursor, _text) when c in [?i, ?I], do: :palette
   # Undo / redo (ADR-0031): Alt+Z undoes, Alt+Shift+Z redoes — these are case-*sensitive*
-  # (the terminal sends `M-z` vs `M-Z`), the one Alt chord where shift means something other
-  # than the same action. History operations, not edits; the loop runs them on the buffer.
+  # (the terminal sends `M-z` vs `M-Z`), as Alt+P and Alt+Shift+P are (ADR-0043): the two Alt
+  # chords where shift means something other than the same action. History operations, not edits; the loop runs them on the buffer.
   def resolve({:alt, ?z}, _cursor, _text), do: :undo
   def resolve({:alt, ?Z}, _cursor, _text), do: :redo
 
@@ -126,13 +126,15 @@ defmodule Geex.Loop.Keymap do
   # (ADR-0033 §7). `revert-call` (the whole tool call) is typed or picked from the palette.
   def resolve({:alt, c}, _cursor, _text) when c in [?u, ?U], do: :revert_hunk
   # The panes and files (ADR-0037):
-  #   Alt+P — the next pane (tree · editor · edits)
+  #   Alt+P — the next pane (tree · editor · edits); Alt+Shift+P — a markdown file's preview
+  #           (ADR-0043), case-sensitive like Alt+Shift+Z, so Caps Lock with Alt+P gives it too
   #   Alt+O — open a file (Alt+Shift+O can't arrive: it sends `ESC O`, an SS3 prefix)
   #   Alt+K — close the file (refused with unsaved edits)
   #   Alt+T — show or hide the file tree;  Alt+L — show or hide the edits pane
   #   Alt+J — fast-forward: take in the file's change on disk, which an open buffer holds until
   #           you ask (ADR-0034 §1), merging your unsaved edits
-  def resolve({:alt, c}, _cursor, _text) when c in [?p, ?P], do: :next_pane
+  def resolve({:alt, ?p}, _cursor, _text), do: :next_pane
+  def resolve({:alt, ?P}, _cursor, _text), do: :toggle_preview
   def resolve({:alt, c}, _cursor, _text) when c in [?o, ?O], do: :find_file
   def resolve({:alt, c}, _cursor, _text) when c in [?k, ?K], do: :close
   def resolve({:alt, c}, _cursor, _text) when c in [?t, ?T], do: :toggle_tree

@@ -153,7 +153,7 @@ defmodule Geex.Loop.KeymapTest do
   end
 
   describe "resolve/3 — undo/redo (ADR-0031)" do
-    test "Alt+Z undoes, Alt+Shift+Z redoes — case-sensitive (the one shift-distinct Alt chord)" do
+    test "Alt+Z undoes, Alt+Shift+Z redoes — case-sensitive (as Alt+P and Alt+Shift+P are)" do
       assert :undo = Keymap.resolve({:alt, ?z}, {0, 0}, "abc")
       assert :redo = Keymap.resolve({:alt, ?Z}, {0, 0}, "abc")
     end
@@ -215,7 +215,6 @@ defmodule Geex.Loop.KeymapTest do
 
     test "the pane and file keys (ADR-0037)" do
       for {letter, action} <- [
-            {?p, :next_pane},
             {?o, :find_file},
             {?k, :close},
             {?t, :toggle_tree},
@@ -225,6 +224,18 @@ defmodule Geex.Loop.KeymapTest do
           c <- [letter, letter - 32] do
         assert Keymap.resolve({:alt, c}, {0, 0}, "abc") == action, "Alt+#{<<c>>}"
       end
+    end
+  end
+
+  describe "resolve/3 — Alt+P and Alt+Shift+P (ADR-0043 §1)" do
+    test "Alt+P is the next pane; Alt+Shift+P (and Alt+P under Caps Lock) the markdown preview" do
+      assert Keymap.resolve({:alt, ?p}, {0, 0}, "abc") == :next_pane
+      assert Keymap.resolve({:alt, ?P}, {0, 0}, "abc") == :toggle_preview
+    end
+
+    test "Page Up/Down do nothing in the editor" do
+      for k <- [:page_up, :page_down],
+          do: assert(Keymap.resolve({:key, k}, {0, 0}, "a") == :ignore)
     end
   end
 

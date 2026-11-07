@@ -1118,9 +1118,11 @@ defmodule Geex.Loop do
       not Geex.Markdown.file?(path) ->
         %{state | notice: "no preview: not a markdown file"}
 
+      # What to install, and Alt+Y opens on its row, as ADR-0040's hint does.
       match?({:error, _}, Geex.Markdown.available()) ->
         {:error, why} = Geex.Markdown.available()
-        %{state | notice: Geex.Markdown.describe(why)}
+        name = Geex.Markdown.to_install(why)
+        %{state | notice: Geex.Markdown.describe(why), hinted: [name | state.hinted -- [name]]}
 
       true ->
         ps = state.panes
@@ -1175,7 +1177,8 @@ defmodule Geex.Loop do
     :tab_next,
     :save,
     :fast_forward,
-    :quit
+    :quit,
+    :toggle_preview
   ]
 
   defp preview_key(event, state) do
@@ -1674,6 +1677,13 @@ defmodule Geex.Loop do
   ## `Geex.Loop.ScrollBar` (pure), from the same text and scroll the frame drew.
 
   defp bar_or_text_press(state, id, rect, m) do
+    case Panes.shown(state.panes, id) do
+      %{view: :preview} = tab -> preview_press(state, id, rect, tab, m)
+      _ -> source_press(state, id, rect, m)
+    end
+  end
+
+  defp source_press(state, id, rect, m) do
     with {tab, text} <- pane_text(state, id),
          {bar, cell} <-
            ScrollBar.hit(ScrollBar.layout(text, rect, {tab.scroll, tab.hscroll}), {m.x, m.y}) do
@@ -1690,6 +1700,15 @@ defmodule Geex.Loop do
   # The pointer at `{x, y}` with a thumb held: scroll so the thumb's grabbed cell is under it
   # (along the bar; the pointer may wander off it sideways). The drag ends if the pane shows
   # another buffer now, or has lost that bar.
+  defp scroll_bar_to(%{scrolling: %{pane: id, buffer: buffer, axis: :preview}} = state, {_x, y}) do
+    with {^id, rect} <- pane_rect(state, id),
+         %{view: :preview, buffer: ^buffer} = tab <- Panes.shown(state.panes, id) do
+      preview_bar_to(state, id, rect, tab, y)
+    else
+      _ -> stop_drag(state)
+    end
+  end
+
   defp scroll_bar_to(
          %{scrolling: %{pane: id, buffer: buffer, axis: axis, grab: grab}} = state,
          {x, y}
@@ -1901,6 +1920,10 @@ defmodule Geex.Loop do
 
       {:tab, i} ->
         state |> enter_pane({:file, id}) |> switch(&Panes.select(&1, i))
+
+      # The preview's glyph: show that tab, then toggle, as a tab's × shows it before closing.
+      {:toggle_preview, i} ->
+        state |> enter_pane({:file, id}) |> switch(&Panes.select(&1, i)) |> toggle_preview()
 
       {:close_tab, i} ->
         %{buffer: buf} = tab = Enum.at(pane.tabs, i)
@@ -2342,6 +2365,108 @@ defmodule Geex.Loop do
     screen
   end
 
+  # The preview's glyph on tab `i`'s label, lit (the palette's accent) on a preview.
+  defp draw_glyph(screen, rect, bar, i, style, pal) do
+    case Enum.find(bar.tabs, &(&1.i == i)) do
+      %{glyph: %{x: gx, lit: lit}} when gx < bar.w ->
+        fg = if lit, do: pal.accent, else: pal.line_number
+        Screen.draw_text(screen, rect.x + gx, rect.y, TabBar.preview_glyph(), %{style | fg: fg})
+
+      _ ->
+        screen
+    end
+  end
+
+  ## The mouse in a preview (ADR-0043 §1): a press focuses the pane and follows a relative link
+  ## under it; the vertical scroll bar takes a press and a drag. No caret, selection or drag of
+  ## text.
+
+  defp preview_press(state, id, rect, tab, m) do
+    h = preview_text_rows(rect)
+    %{rows: rows} = preview_rows(state, tab)
+
+    state = %{
+      enter_pane({:file, id}, state)
+      | click: {System.monotonic_time(:millisecond), m.x, m.y, :bar}
+    }
+
+    cond do
+      m.x == rect.x + rect.w - 1 and length(rows) > h and m.y >= rect.y + 2 ->
+        state = %{state | scrolling: %{pane: id, buffer: tab.buffer, axis: :preview, grab: 0}}
+        preview_bar_to(state, id, rect, tab, m.y)
+
+      m.y >= rect.y + 2 ->
+        row = Enum.at(rows, tab.scroll + m.y - rect.y - 2)
+        follow_link(state, tab, row && href_at(row.runs, m.x - rect.x))
+
+      true ->
+        state
+    end
+  end
+
+  # The pointer at row `y` on a preview's scroll bar: the scroll whose thumb sits there.
+  defp preview_bar_to(state, id, rect, tab, y) do
+    h = preview_text_rows(rect)
+    %{rows: rows} = preview_rows(state, tab)
+    bottom = max(length(rows) - h, 0)
+    at = (y - rect.y - 2) |> max(0) |> min(max(h - 1, 0))
+    scroll = if h > 1, do: div(at * bottom + div(h - 1, 2), h - 1), else: 0
+
+    schedule_repaint(%{
+      state
+      | panes: Panes.update_shown(state.panes, id, &%{&1 | scroll: scroll})
+    })
+  end
+
+  defp href_at(runs, col) do
+    Enum.reduce_while(runs, 0, fn {text, roles}, x ->
+      w = Geex.Width.string(text)
+
+      cond do
+        col < x + w ->
+          {:halt, Enum.find_value(roles, fn r -> match?({:href, _}, r) && elem(r, 1) end)}
+
+        true ->
+          {:cont, x + w}
+      end
+    end)
+    |> case do
+      href when is_binary(href) -> href
+      _ -> nil
+    end
+  end
+
+  # A relative link to a markdown file opens it in the pane the preview came from (or the current
+  # file pane once that one is gone). Other links aren't followed yet (ADR-0043's Deferred).
+  defp follow_link(state, _tab, nil), do: state
+
+  defp follow_link(state, tab, href) do
+    path = href |> String.split("#") |> hd()
+    from = safe_status(tab.buffer)[:path]
+
+    cond do
+      path == "" or String.match?(href, ~r{\A[a-zA-Z][a-zA-Z0-9+.-]*:}) or
+        String.starts_with?(path, "/") or not is_binary(from) ->
+        state
+
+      not (String.ends_with?(path, ".md") or String.ends_with?(path, ".markdown")) ->
+        %{state | notice: "only links to markdown files are followed: #{href}"}
+
+      true ->
+        full = Path.expand(path, Path.dirname(from))
+
+        if File.regular?(full) do
+          target =
+            if Map.has_key?(state.panes.panes, tab.from), do: tab.from, else: state.panes.pane
+
+          state = switch(state, &Panes.focus(&1, target))
+          open_full(href, full, state)
+        else
+          %{state | notice: "no such file: #{href}"}
+        end
+    end
+  end
+
   # The preview's header: the file, and when the preview isn't the buffer, why: `[+]` while the
   # buffer has unsaved edits, "behind" while the disk is ahead, or what the read or process says.
   defp preview_header(state, buf) do
@@ -2407,7 +2532,8 @@ defmodule Geex.Loop do
             true -> %Cell{fg: pal.line_number, bg: pal.bg}
           end
 
-        Screen.draw_text(acc, rect.x + x, rect.y, palette_clip(label, bar.w - x), style)
+        acc = Screen.draw_text(acc, rect.x + x, rect.y, palette_clip(label, bar.w - x), style)
+        draw_glyph(acc, rect, bar, i, style, pal)
       end)
 
     screen =
@@ -2438,10 +2564,22 @@ defmodule Geex.Loop do
   # A pane below the editor's top row is the lower half of a stacked split: its bar keeps the
   # split's handle (ADR-0038 §6).
   defp tab_bar(state, %{tabs: tabs, at: at}, rect) do
-    names = Enum.map(tabs, &tab_label(&1.buffer))
+    offered? = Geex.Markdown.available() == :ok
+    names = Enum.map(tabs, &tab_name(&1, offered?))
     handle? = rect.y > layout(state).editor.y
     TabBar.layout(names, at, rect.w, map_size(state.panes.panes) > 1, handle?)
   end
+
+  # A tab's name on the bar: a preview's carries the glyph lit, a markdown file's source tab the
+  # glyph, while the preview can be offered (ADR-0043 §1).
+  defp tab_name(%{view: :preview, buffer: pid}, _offered?), do: {tab_label(pid), :preview}
+
+  defp tab_name(%{buffer: pid}, true) do
+    label = tab_label(pid)
+    if Geex.Markdown.file?(safe_status(pid)[:path]), do: {label, :source}, else: label
+  end
+
+  defp tab_name(%{buffer: pid}, false), do: tab_label(pid)
 
   defp tab_label(pid) do
     case safe_status(pid) do
@@ -3789,7 +3927,24 @@ defmodule Geex.Loop do
   # Overlay the status line on the bottom row of `screen`: the buffer label + dirty
   # marker on the left, the 1-based `line:col` flush right, on a reverse-video bar
   # (theme fg/bg swapped — always-readable, theme-faithful chrome).
+  # With a preview current: the file, `[+]` or behind, and "preview"; no line:col or author, since
+  # a preview has no cursor (ADR-0043 §1).
   defp draw_status(screen, %{w: w, h: h, theme: theme} = state, snap) do
+    if preview_current?(state) do
+      left =
+        status_label(snap.path) <>
+          if(snap.dirty, do: " [+]", else: "") <>
+          if(snap[:behind], do: "  " <> @behind, else: "") <>
+          "  preview" <>
+          if(state.notice, do: "  " <> state.notice, else: "")
+
+      Screen.draw_text(screen, 0, h - 1, status_text(left, "", w), status_style(theme))
+    else
+      draw_source_status(screen, state, snap)
+    end
+  end
+
+  defp draw_source_status(screen, %{w: w, h: h, theme: theme} = state, snap) do
     left =
       status_label(snap.path) <>
         if(snap.dirty, do: " [+]", else: "") <>

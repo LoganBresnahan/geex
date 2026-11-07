@@ -31,6 +31,14 @@ defmodule Geex.Markdown.LayoutTest do
     end
   end
 
+  test "a link's runs carry its destination; a reference link's, its definition's" do
+    md = "See [the other](other.md#top) and [ref] and [none].\n\n[ref]: ./ref.md\n"
+    hrefs = for r <- rows(md), {t, roles} <- r.runs, {:href, d} <- roles, do: {t, d}
+    assert {"the other", "other.md#top"} in hrefs
+    assert {"ref", "./ref.md"} in hrefs
+    refute Enum.any?(hrefs, fn {t, _} -> t =~ "none" end)
+  end
+
   describe "F33: a table cell's column comes from the pipes before it" do
     test "an empty || cell keeps the rest of the row under its headers" do
       assert "│ x │   │ z │" in texts("| a | b | c |\n|---|---|---|\n|x||z|\n")

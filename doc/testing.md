@@ -4940,3 +4940,54 @@ glyph's comment.
 
 Under the verifier's load recipe (8 CPU hogs, ten runs of the markdown, preview, buffer and loop
 preview tests): 0 failures. 1292 tests + 116 doctests green twice; compile warnings-clean.
+
+### 2026-11-06 — the markdown preview, slice 5: the UI, dogfooded in tmux (ADR-0043 §1, §5)
+
+**Built:** `Alt+Shift+P` (`{:alt, ?P}` → `:toggle_preview`; `Alt+P` alone is the next pane, so
+both are case-sensitive now, like `Alt+Z`), allowed from a preview and doing nothing from the
+tree, edits or output pane; the glyph drawn on a markdown file's tabs (while the preview can be
+offered), lit in `accent` on a preview, and a click on it showing that tab then toggling; a press
+in a preview following a relative markdown link (`{:href, dest}` on link runs, a reference link
+taking its definition's destination, which the block query now captures) into the pane the
+preview came from; the preview's vertical scroll bar taking a press and a drag; the status line
+with a preview current (the file, `[+]` or behind, "preview", no position); the verb with a
+grammar missing saying what to install and Alt+Y opening on its row (`Markdown.to_install/1`).
+
+**Tests first:** the keymap (Alt+P, Alt+Shift+P, Page keys inert), link destinations in the layout,
+and seven loop tests (the chord both ways and inert from panels; the glyph on the bar, lit, and its
+click; no glyph and the hint with `markdown_inline` missing; a relative link opening in the from
+pane while a web link opens nothing; the scroll bar's press and drag leaving the cursor and
+selection alone; the status line); all failed first. One was mine to fix (it found the link text
+in the source pane's half of the row first).
+
+**Dogfooded** (the /dogfood skill's handle 1: private tmux socket `geexdf`, a scratch project with
+a test doc, `other.md` and a copy of the ADR index, `XDG_STATE_HOME` and geex's `data_dir` (set
+through the app env) in the session scratchpad, grammars installed from the published
+`catalog-v3`, the terminal theme with no OSC 11 answer):
+- `M-P` at 120 columns splits side by side, the cursor staying in the source; the preview shows
+  the heading without its closing `##`, the rule, emphasis, `$5 and $10` as text and `$x^2$` as
+  code, `1. 2. 3.` from `1. 1. 1.`, `☐`/`☑`, the table with its empty middle cell in place, the
+  quote bar, code with the `▏` bar (no tint) and its label.
+- In the preview: Page Down and End scroll, the hardware cursor is hidden, `x` and Delete say "the
+  preview is read-only (Alt+Shift+P closes it)", the status line reads `doc.md  preview`.
+- From the source: `line 60`, typing, Ctrl-O: the preview re-renders with the edit at its top.
+- A write from outside (two lines prepended): the header says `doc.md · behind`, the preview keeps
+  "EDITED Paragraph 14" at its top (line 60 → 62); Alt+J takes it in.
+- An SGR mouse report on "the other file" opens `other.md` in pane 1 (the from pane); on "the web"
+  it only focuses the preview. The scroll bar's press near the bottom and a drag to the top move
+  the rows. A click on the tab's glyph opens the preview; with `-e` the glyph is ANSI 90 on the
+  source tab and 96 (accent) on the preview, the heading bold blue.
+- At 24 columns `M-P` opens the preview in the source's pane (tab 2), and `M-P` there closes it.
+- The log has no errors.
+
+**Found, not the preview's:** BUG-7 (doc/bugs.md): after `resize-window` stale text stays in cells
+the new frame leaves blank. main (`464bd3b`) does the same; the cause is the renderer's model
+reset to a blank screen of the new size (no `\e[2J`), confirmed by trying the one-line fix in a
+throwaway worktree. Left for the maintainer (outside the preview's scope). The preview kept its
+place across that resize (its rows' text was right, the stale cells aside).
+
+1301 tests + 116 doctests green twice; compile warnings-clean.
+
+**Not tested:** a truecolor theme on screen (Birds of Paradise is checked by value only); a real
+terminal's own mouse (tmux injected SGR reports); a split's drag; the install-triggered refresh
+live.

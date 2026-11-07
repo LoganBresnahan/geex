@@ -161,6 +161,19 @@ defmodule Geex.Markdown do
   end
 
   @doc """
+  The package to install or update first for `why` (`available/0`'s error): the missing one, or
+  the first of an ABI this geex doesn't load. Alt+Y opens on its row.
+  """
+  @spec to_install(unavailable()) :: String.t()
+  def to_install({:missing, [name | _]}), do: name
+
+  def to_install(:update) do
+    Enum.find(grammars(), @block, fn name ->
+      Geex.Installed.grammar(name)["abi"] not in Grammars.abi()
+    end)
+  end
+
+  @doc """
   Whether `path` is a markdown file: the grammar for its name, installed or in the catalog, is
   Markdown. Not whether the preview can be offered (`available/0`), so a `.md` file with Markdown
   missing or outdated is told what to install, not that it isn't markdown.

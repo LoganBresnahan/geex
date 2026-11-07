@@ -640,9 +640,10 @@ defmodule Geex.Markdown.Layout do
   # A reference link only links when the document defines its label; tree-sitter can't know,
   # so `[x]` with no definition is text, brackets and all.
   defp inline(%{type: :reference_link} = n, roles, ctx) do
-    if MapSet.member?(ctx.defs, reference_label(n, ctx.text)),
-      do: link(n, roles, ctx),
-      else: walk(n.s, n.e, n.children, roles, ctx)
+    case Map.fetch(ctx.defs, reference_label(n, ctx.text)) do
+      {:ok, dest} -> link(n, roles, ctx, dest)
+      :error -> walk(n.s, n.e, n.children, roles, ctx)
+    end
   end
 
   defp inline(%{type: :image} = n, roles, ctx) do
@@ -689,10 +690,24 @@ defmodule Geex.Markdown.Layout do
 
   defp math?(_raw, _text, _e), do: false
 
+  # A link's text, with its destination as `{:href, dest}` (a click on it follows a relative
+  # link, ADR-0043 §1).
   defp link(n, roles, ctx) do
+    dest =
+      case child(n, :link_destination) do
+        nil -> nil
+        d -> ctx.text |> slice(d) |> String.trim_leading("<") |> String.trim_trailing(">")
+      end
+
+    link(n, roles, ctx, dest)
+  end
+
+  defp link(n, roles, ctx, dest) do
+    href = if dest, do: [{:href, dest}], else: []
+
     case child(n, :link_text) do
       nil -> walk(n.s, n.e, n.children, roles, ctx)
-      t -> walk(t.s, t.e, t.children, roles ++ [:link], ctx)
+      t -> walk(t.s, t.e, t.children, roles ++ [:link | href], ctx)
     end
   end
 
@@ -703,16 +718,26 @@ defmodule Geex.Markdown.Layout do
     end
   end
 
+  # The document's link definitions, label => destination (the first definition of a label wins,
+  # as CommonMark has it).
   defp definitions(tree, text) do
     tree
     |> all(:link_definition)
+    |> Enum.reverse()
     |> Enum.flat_map(fn d ->
-      case child(d, :link_label) do
-        nil -> []
-        label -> [normalize(slice(text, label))]
+      case {child(d, :link_label), child(d, :link_destination)} do
+        {nil, _} ->
+          []
+
+        {label, dest} ->
+          url =
+            if dest,
+              do: text |> slice(dest) |> String.trim_leading("<") |> String.trim_trailing(">")
+
+          [{normalize(slice(text, label)), url}]
       end
     end)
-    |> MapSet.new()
+    |> Map.new()
   end
 
   defp normalize(label) do

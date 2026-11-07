@@ -56,6 +56,7 @@ defmodule Geex.Markdown.Parse do
   (pipe_table_cell) @table_cell
   (link_reference_definition) @link_definition
   (link_label) @link_label
+  (link_destination) @link_destination
   (minus_metadata) @metadata
   (plus_metadata) @metadata
   """

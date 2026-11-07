@@ -437,6 +437,136 @@ defmodule Geex.Loop.PreviewTabsTest do
     end
   end
 
+  describe "slice 5: the keys, the glyph, links, the scroll bar and the status line" do
+    defp mouse(state, action, x, y) do
+      m = %{action: action, button: :left, x: x, y: y, mods: []}
+      {:noreply, state} = Loop.handle_info({:geex_io, {:mouse, m}}, %{state | click: nil})
+      state
+    end
+
+    test "Alt+Shift+P toggles from the source and from the preview; panels leave it alone", ctx do
+      {state, buf} = start(ctx.dir)
+      state = key(state, {:alt, ?P})
+
+      assert Panes.shown(state.panes, 2) |> Map.take([:buffer, :view]) == %{
+               buffer: buf,
+               view: :preview
+             }
+
+      assert state.panes.pane == 1
+
+      state = key(state, {:alt, ?p}) |> key({:alt, ?P})
+      assert Panes.ids(state.panes) == [1]
+      assert state.panes.pane == 1
+
+      for focus <- [:tree, :edits] do
+        s = %{state | tree_shown: true, edits_shown: true, focus: focus}
+        s = key(s, {:alt, ?P})
+        assert s.focus == focus and preview_tab(s) == nil
+      end
+    end
+
+    test "the glyph is on a markdown file's tabs, lit on the preview; a click on it toggles",
+         ctx do
+      {state, buf} = start(ctx.dir)
+      {state, _b} = open(state, ctx.dir, "b.txt")
+      {state, rows} = frame(state)
+      bar = hd(rows)
+      assert bar =~ ~r/ 1 a\.md ◫ × /
+      refute bar =~ ~r/b\.txt ◫/
+
+      # A click on a.md's glyph shows that tab, then toggles its preview.
+      x = :binary.match(bar, "◫") |> elem(0) |> then(&String.length(binary_part(bar, 0, &1)))
+      state = mouse(state, :press, x, 0)
+      assert Panes.current(state.panes).buffer == buf
+      assert %{view: :preview} = Panes.shown(state.panes, 2)
+
+      {_state, rows} = frame(state)
+      assert hd(rows) =~ ~r/│ 1 a\.md ◫ × /
+      screen = Geex.Renderer.current()
+      px = (hd(rows) |> String.split("│") |> hd() |> String.length()) + 1 + 8
+      assert Screen.get_cell(screen, px, 0).char == "◫"
+      assert Screen.get_cell(screen, px, 0).fg == state.theme.palette.accent
+    end
+
+    test "with markdown_inline missing there is no glyph, and the verb says what to install",
+         ctx do
+      dir = Geex.Installed.dir(:grammar, "markdown_inline")
+      File.rename!(dir, dir <> ".aside")
+      Geex.Installed.refresh()
+
+      on_exit(fn ->
+        File.rename(dir <> ".aside", dir)
+        Geex.Installed.refresh()
+      end)
+
+      {state, _buf} = start(ctx.dir)
+      {state, rows} = frame(state)
+      refute hd(rows) =~ "◫"
+      state = type(state, "preview")
+      assert state.notice == "Markdown preview needs Markdown inline installed (Alt+Y)"
+      state = key(state, {:alt, ?y})
+
+      assert Enum.at(Geex.Loop.Settings.rows(state.settings, %{}), state.settings.sel).name ==
+               "markdown_inline"
+    end
+
+    test "a click on a relative markdown link opens it in the pane the preview came from", ctx do
+      File.write!(
+        Path.join(ctx.dir, "a.md"),
+        "# A\n\nSee [the other](b.md) or [web](https://x.y).\n"
+      )
+
+      File.write!(Path.join(ctx.dir, "b.md"), "# B\n")
+      {state, buf} = start(ctx.dir)
+      state = Loop.toggle_preview(state) |> rendered(buf)
+      state = key(state, {:alt, ?p})
+      assert state.panes.pane == 2
+      {state, rows} = frame(state)
+      # The preview's half of each row: right of the divider.
+      right = fn row -> row |> String.split("│", parts: 2) |> List.last() end
+      y = Enum.find_index(rows, &(right.(&1) =~ "the other"))
+      line = Enum.at(rows, y)
+      offset = String.length(hd(String.split(line, "│", parts: 2))) + 1
+      x = offset + String.length(hd(String.split(right.(line), "the other"))) + 2
+
+      # The web link: nothing opens.
+      wx = offset + String.length(hd(String.split(right.(line), "web"))) + 1
+      s = mouse(state, :press, wx, y)
+      assert Panes.current(s.panes).view == :preview
+
+      state = mouse(state, :press, x, y)
+      assert state.panes.pane == 1
+      assert %{view: :source, buffer: b} = Panes.current(state.panes)
+      assert Buffer.status(b).path == Path.join(ctx.dir, "b.md")
+    end
+
+    test "the preview's scroll bar takes a press and a drag", ctx do
+      {state, buf} = start(ctx.dir)
+      state = Loop.toggle_preview(state) |> rendered(buf)
+      {state, rows} = frame(state)
+      x = String.length(hd(rows)) - 1
+      state = mouse(state, :press, x, 22)
+      bottom = Panes.shown(state.panes, 2).scroll
+      assert bottom > 50
+      state = mouse(state, :drag, x, 3)
+      assert Panes.shown(state.panes, 2).scroll < 10
+      # Neither moved the file's cursor nor selected.
+      assert cursor() == {0, 0} and state.selection == nil
+    end
+
+    test "with a preview current the status line names the file and says preview, no position",
+         ctx do
+      {state, _buf} = start(ctx.dir, 24)
+      state = Loop.toggle_preview(state)
+      {_state, rows} = frame(state)
+      status = List.last(rows)
+      assert status =~ "a.md"
+      assert status =~ "preview"
+      refute status =~ ~r/\d+:\d+/
+    end
+  end
+
   defp ran(%{shell: nil} = state), do: state
 
   defp ran(%{shell: %{pid: pid}} = state) do
