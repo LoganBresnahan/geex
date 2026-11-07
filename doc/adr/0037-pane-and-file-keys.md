@@ -6,7 +6,7 @@
   [ADR-0034](0034-panes-tree-edits-hold.md) §7 (`Alt+O` and `Alt+L` change meaning).
   **Amended 2026-10-18:** `Alt+Y` opens the settings view (ADR-0040 §7). **Amended
   2026-10-19:** `a`, `d` and `r` in the tree (ADR-0019's amendment); `open PATH` is from the
-  project root, as the finder is.
+  project root, as the finder is. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** P is case-sensitive, `Alt+Shift+P` the markdown preview.
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0026](0026-terminal-input-model.md) (Alt is a secondary, remappable
   namespace; every Alt key has a typed twin), [ADR-0028](0028-editor-shell-and-minibuffer.md)
@@ -86,6 +86,14 @@ anywhere. `Alt+O`'s finder already was rooted: it lists the root's files as path
 name, then its directory) and opens the one picked from the root, wherever the current file is.
 So the tree, the finder, `open`, `new`, `mkdir` and `rename` all name paths the same way
 (`Geex.Loop.FileOps.resolve/2`).
+
+
+## Amendment — 2026-11-06: P is case-sensitive ([ADR-0043](0043-markdown-preview.md))
+
+`Alt+P` is the next pane; `Alt+Shift+P` toggles a markdown file's preview. The shifted chord acts
+on a file, so it stays the editor's, as `Alt+K` and `Alt+J` do: from the tree, the edits pane and
+the output pane it does nothing. With Caps Lock on, `Alt+P` therefore no longer leaves a panel; Esc
+still does.
 
 ## See
 

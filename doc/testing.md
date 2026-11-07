@@ -5051,3 +5051,29 @@ a frame of that size. It failed first (the diff was `\e[2;1Hab` alone).
 
 **Not tested:** a real terminal emulator's own resize (tmux only); a resize in the middle of a
 frame being written.
+
+### 2026-11-06 — the markdown preview, slice 6: the ADR amendments and the docs (ADR-0043)
+
+Docs only. **Amended:** ADR-0026 (Page Up/Down read for the preview, and dropped everywhere else),
+ADR-0031 (`Alt+Shift+Z` no longer the one case-sensitive chord), ADR-0037 (P case-sensitive,
+`Alt+Shift+P` the editor's), ADR-0038 (preview tabs aren't a buffer's views; closing; what reaches
+the active buffer while one is current; opens land on text), ADR-0039 (the mouse in a preview, the
+tab glyph), ADR-0040 (the `markdown_inline` companion, the render queries in the catalog's load
+check, the render handles, `catalog-v3`), each with a Status note and its index row. ADR-0043's
+status says built; its §1 says Page Up/Down are dropped outside a preview; §4 gains the amendment
+that a query which doesn't compile is found by the worker and remembered per install (the slice-5
+review's finding 4), and the second grammar gap (`[a [b] c](x.md)`, finding 11); §6 gains the
+amendment that the anchor follows the edit (the line map, `rows_w`); the glyph and the header's
+save time are settled; its See lists the code and tests. The roadmap's "Where we are" and item 16
+say built, waiting for the maintainer's look; CLAUDE.md lists `Geex.Markdown.*` and `mix
+geex.render` and the test count.
+
+**What two earlier entries didn't test** (the verifier's finding 13; past entries stay as written):
+"a bounded line map, and catalog-v3 published" didn't test the line map inside a live preview (the
+verifier probed it), nor installing from the public catalog in a real `geex install` (only through
+`Geex.CLI.install/1` under `mix run`); "slice 4's adversarial review, fixed" didn't test the fixes
+live in tmux (slice 5's dogfood covered the resize and the scroll bar's column), nor a split's drag.
+
+1314 tests + 116 doctests green twice; compile warnings-clean.
+
+**Not tested:** the docs render on GitHub (links and tables were read as text only).

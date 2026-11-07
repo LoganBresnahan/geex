@@ -6,7 +6,7 @@
   the screen clickable (§6), and Alt+click extends a selection (§3). **Step 3, 2026-10-17:**
   resizing by drag handles, which amends [ADR-0038](0038-split-panes-and-tabs.md) §6.
   **Amended 2026-10-18:** the scroll bars take the mouse (§7), and the edits pane's handle no
-  longer moves when the pane takes focus.
+  longer moves when the pane takes focus. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** the mouse in a markdown preview, and its glyph on the tab bar.
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0026](0026-terminal-input-model.md) (the terminal input model),
   [ADR-0027](0027-grid-command-addressing.md) (width never addresses), [ADR-0029](0029-selection-primitive.md)
@@ -185,6 +185,18 @@ staying between the name and the hint.
 - Every tab carries `hold`; a frame keeps a tab's scroll while its cursor equals it.
 - A `kill -9` leaves the terminal reporting the mouse: a shell then shows the reports as text
   until `reset`.
+
+
+## Amendment — 2026-11-06: the mouse in a preview ([ADR-0043](0043-markdown-preview.md))
+
+In a preview (§3, §7) a press focuses the pane and follows a relative link to a markdown file under
+it, into the pane the preview came from (or the current file pane once that one is gone); it places
+no caret, starts no selection or drag, and a double-click or Shift/Alt+press does no more. The wheel
+and the vertical scroll bar move the preview's row scroll (the thumb held where it was pressed, as
+here); there is no horizontal scroll and no hold. On the tab bar, a markdown file's tabs carry the
+preview's glyph `◫` between the name and the `×` (lit on a preview, drawn only while the preview
+can be offered); a click on it shows that tab, then toggles the preview, as a `×` shows its tab
+before closing it.
 
 ## See
 

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted 2026-10-18 (the maintainer's decisions, relayed by the coordinator session
   and built autonomously at the maintainer's word). Steps 2–7 build it; each amends this ADR
-  with what it found.
+  with what it found. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** the `markdown_inline` companion and the render queries in the load check; `catalog-v3`.
 - **Date:** 2026-10-18
 - **Amends:** [ADR-0023](0023-theming-and-extension-loading.md) §5 ("geex fetches nothing") and
   §7 ("no marketplace"). §4 (themes are data, grammars are sandboxed `.wasm`, separate load paths)
@@ -523,6 +523,24 @@ One Dark and One Light (Atom's), Tokyo Night, Dracula, Nord and Kanagawa.
   installs. Nothing is fetched that the binary doesn't already name by hash.
 - Two machines on the same geex get byte-identical packages; a newer geex may pin newer ones,
   and "update" means "this geex's version".
+
+
+## Amendment — 2026-11-06: a companion grammar, and the render queries in the load check ([ADR-0043](0043-markdown-preview.md))
+
+- **`markdown_inline`**, Markdown's companion, joins the catalog: markdown's repository, tag and
+  commit at `tree-sitter-markdown-inline`, no file endings, its own highlights, and a recipe key
+  carried into the manifest, `for: "markdown"`. The catalog test's file-endings rule exempts a
+  grammar with `for` and checks that it names a catalog grammar. Alt+Y's Languages tab and `geex
+  install --list` label it "Markdown inline (preview)", after Markdown; installing it says the
+  preview is available (or what is still missing); `geex highlight`'s list of installed languages
+  leaves it out (`Grammars.languages/0`).
+- **The render queries ship with geex**, so `mix geex.catalog`'s load check also compiles them
+  against the markdown and markdown_inline it builds, and the test fixtures are those packages,
+  pinned to the recipe's commit by a test.
+- **The render handles** are cached as `handle/1`'s are (`Grammars.render_handle/2`: by the
+  install's sha256 and the query, ABI-gated, dropped by `forget/1`).
+- Published as **`catalog-v3`** (2026-11-06, a not-latest pre-release, ADR-0041 §5): the full
+  catalog, the 31 earlier packages byte-identical.
 
 ## See
 

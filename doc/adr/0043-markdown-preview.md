@@ -6,8 +6,10 @@
   conversation and drafted here at the maintainer's request after a spike (§8), then revised the
   same day after an adversarial review against the code (§9), with three more of the maintainer's
   choices: save and take-in work from a preview, Page Up/Down join the parser, and `$…$` is math
-  only by GitHub's rule. The maintainer accepted it the same day. Not built yet; the build plan is
-  roadmap item 16.
+  only by GitHub's rule. The maintainer accepted it the same day. **Built 2026-11-06** on the branch
+  `markdown-preview` in roadmap item 16's six slices, each checked by a second session, with an
+  adversarial review after slices 4 and 5 ([testing.md](../testing.md) 2026-11-06); amended below
+  (§4, §6) where building it changed the design. Merging waits for the maintainer's look.
 - **Date:** 2026-11-06
 - **Relates to:** [ADR-0038](0038-split-panes-and-tabs.md) (the preview is a tab in a pane),
   [ADR-0039](0039-mouse.md) (the tab's glyph), [ADR-0040](0040-bare-geex-and-the-catalog.md)
@@ -20,7 +22,7 @@
   case-sensitive Alt chord), [ADR-0027](0027-grid-command-addressing.md) (width renders, never
   addresses), [ADR-0017](0017-reconcile-file-watch.md) (deletions on disk aren't reconciled),
   the invariant "world, not brain"
-- **Amends, when built:** [ADR-0026](0026-terminal-input-model.md) (the parser reads Page
+- **Amends:** [ADR-0026](0026-terminal-input-model.md) (the parser reads Page
   Up/Down); [ADR-0031](0031-undo-redo-history-operations.md) (`Alt+Shift+Z` is no longer the one
   case-sensitive Alt chord); [ADR-0037](0037-pane-and-file-keys.md) (P is no longer
   case-insensitive, and `Alt+Shift+P` stays the editor's); [ADR-0038](0038-split-panes-and-tabs.md)
@@ -146,7 +148,8 @@ docs (§8), and a review checked the whole design against the code before any of
   bottom. The parser reads `ESC [ 5 ~` and `ESC [ 6 ~` as `{:key, :page_up}` and
   `{:key, :page_down}` instead of dropping them; its moduledoc and `parser_test`'s two dropped-key
   tests change, and modified forms such as `ESC [ 5 ; 5 ~` stay dropped. Everywhere but a preview
-  the two keys resolve to `:ignore`, as today.
+  the two keys do nothing at all: the loop drops them before anything a key does (dismissing a
+  notice, ending a mouse hold, disarming a refused save), since a terminal now sends them.
 - **The mouse.** In a preview a press focuses the pane and follows a relative link under it,
   opening the target in the pane the preview came from (or the current file pane once that one
   is gone). It does nothing else: no caret, no selection, no double-click word, no Shift/Alt
@@ -272,6 +275,17 @@ docs (§8), and a review checked the whole design against the code before any of
   letter or digit. Otherwise its text is plain (the maintainer's choice), so prices and shell
   variables in prose stay text. One gap stays: a code span opened by two backticks and holding a
   run of three closes early (§8).
+- **Amended 2026-11-06: a query that doesn't compile is found by the worker, not the loop.**
+  Compiling the render handles takes up to ~200 ms with the wasm cache off, too slow for the key
+  loop (ADR-0035), so the loop asks `Geex.Markdown.available/0`, which reads the manifests (both
+  installed, each of an ABI in `Grammars.abi()`). The query itself is compiled in the preview's
+  worker; when it fails, `handles/1` remembers it for those installs (both sha256s, in a
+  `persistent_term`), `available/0` then answers `:update` (so the glyph goes and the key says
+  "Markdown preview needs an update (Alt+Y)"), the preview's header says so, and Alt+Y opens on
+  the row to update. A new install of either package (or `Grammars.forget/1`) clears it.
+- **A second grammar gap**, found by the slice-5 review: a link whose text holds brackets
+  (`[a [b] c](x.md)`) renders as written and can't be followed, as tree-sitter's inline grammar
+  doesn't nest them. Left as it is, with §8's code span.
 - **Not chosen:** pulldown-cmark (CommonMark-compliant, with byte ranges from `into_offset_iter`,
   but a new native dependency); MDEx (comrak, with positions in `MDEx.Sourcepos`, but a second
   precompiled NIF in every release target); Earmark (HTML-shaped tuples with no source positions,
@@ -334,6 +348,16 @@ docs (§8), and a review checked the whole design against the code before any of
   a preview, a fast-forward, or a change from outside keeps the reader's place. While a preview
   can be open, the loop's own save is the only one: MCP's `save_file` runs only under
   `mix geex.serve`, where there's no terminal.
+- **Amended 2026-11-06: the anchor follows the edit.** By line number alone, a line inserted above
+  the reader moved them a row (the verifier's finding on slice 2). Each render now carries its
+  text's hash, the hash its line map starts from, and the map (`Geex.Markdown.Place.line_map/2`:
+  the common prefix and suffix, Myers on a middle of up to 200 lines, otherwise a patience match on
+  the lines unique to both sides, so a whole-file rewrite of `doc/testing.md` maps in under 10 ms).
+  The loop carries a preview tab's anchor through the map (`Place.remap/2`) only when the tab's
+  rows are of the text the map starts from; a removed line's anchor goes to the nearest earlier
+  kept line. Each tab also keeps `rows_w`, the width of the rows its scroll indexes, and draws
+  those until its own width's arrive, so a resize or a split's drag keeps the place too (the
+  slice-4 review). The save anchor is a line of the new text and isn't remapped.
 
 ### 7. Packaging
 
@@ -440,13 +464,20 @@ Up/Down join the parser, and `$…$` is math only by GitHub's rule.
   attestations know); OSC 8 links the terminal can open; refreshing as you type, as a setting;
   clickable task boxes (the preview is read-only); following links other than to relative
   markdown files; seeing a file removed on disk (ADR-0017's deferred item); images, never.
-- **To settle when built:** the glyph (Neutral width, in common terminal fonts), and whether the
-  header shows the save time.
+- **Settled when built:** the glyph is `◫` (U+25EB, East Asian Width Neutral; in DejaVu Sans Mono
+  and so Menlo, JetBrains Mono, FreeMono, Cascadia Mono and Code; not in Consolas). The header shows
+  no save time: the file, `[+]`, "behind", or what the read or the process says.
 
 ## See
 
-The spike: `lib/geex/markdown/parse.ex`, `lib/geex/markdown/layout.ex`,
-`lib/geex/markdown/style.ex`, `lib/mix/tasks/geex.render.ex`, `test/geex/markdown/parse_test.exs`.
+The code: `lib/geex/markdown.ex` (`handles/1`, `available/0`, `parse/2`, `rows/2`),
+`lib/geex/markdown/{parse,layout,style,place,preview,preview_supervisor}.ex`,
+`lib/geex/highlight/grammars.ex` (`render_handle/2`), `lib/geex/buffer.ex`
+(`{:geex_buffer_synced, …}`), `lib/geex/loop/panes.ex`, `lib/geex/loop/tab_bar.ex` (the glyph),
+`lib/geex/loop.ex` (the preview tabs, the gate, `draw_preview/3`), `lib/mix/tasks/geex.render.ex`,
+`lib/mix/tasks/geex.catalog.ex` (`check_render_query!/3`). The tests: `test/geex/markdown_test.exs`,
+`test/geex/markdown/{layout,preview,parse}_test.exs`, `test/geex/buffer/synced_test.exs`,
+`test/geex/loop/{panes_preview,preview_tabs,tab_bar_glyph}_test.exs`.
 tree-sitter-markdown's README (its correctness note, and included ranges for the inline grammar);
 [notes.md](../notes.md) (the 2026-06 frontend trade-off this narrows); [roadmap.md](../roadmap.md)
 (injections); [testing.md](../testing.md) 2026-11-06 (the spike and the review);

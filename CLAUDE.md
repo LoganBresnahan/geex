@@ -57,7 +57,9 @@ One Mix app, `:geex`, under `lib/geex/`:
 - **Capabilities** — `Geex.Highlight.*` (reactor + tree-sitter-on-wasm via the
   sibling path dep `../tree_sitter_wasm`), `Geex.Theme` (+ `Theme.Terminal`, the terminal's own
   colours), `Geex.Catalog` (the embedded `catalog/catalog.json`), `Geex.Install` /
-  `Geex.Installed` (installing and listing grammars and themes, ADR-0040). geex ships **no**
+  `Geex.Installed` (installing and listing grammars and themes, ADR-0040), `Geex.Markdown.*` (the
+  read-only markdown preview, ADR-0043: geex's own tree-sitter render queries, a pure layout, a
+  per-buffer preview process rendering the file on disk; `Loop.Panes` preview tabs). geex ships **no**
   grammar or theme: tests install `test/fixtures/{grammars,themes}` (`Geex.Fixtures`, from
   `test_helper.exs`), and Birds of Paradise lives in `catalog/themes`.
 
@@ -102,11 +104,12 @@ One Mix app, `:geex`, under `lib/geex/`:
 
 ```sh
 mix compile --warnings-as-errors   # the bar locally; ci.yml runs it and the suite on every push
-mix test                           # ~1100 tests, ~10s; green TWICE is the ship bar
+mix test                           # ~1300 tests, ~13s; green TWICE is the ship bar
 mix test test/geex/mcp/grid_test.exs
 mix geex.serve                     # headless + loopback MCP on a free port (logged)
 mix geex.serve --port 4000         # pin 4000 to match presets/claude-code/.mcp.json
 mix geex.highlight <file>          # one-shot highlighted dump (engine check)
+mix geex.render <file.md>          # a markdown file as the preview draws it (--width, --map, --stats)
 mix geex.ledger list               # the durable ledgers (ADR-0033); also forget / compact
 # every non-test boot also listens on loopback POST /attest (ADR-0032); in TUI
 # mode that is the ONLY route — the frozen MCP surface needs mix geex.serve

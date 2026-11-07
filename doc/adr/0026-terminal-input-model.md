@@ -1,6 +1,6 @@
 # ADR-0026: Terminal input model & keymap (one default, capability-gated extras)
 
-- **Status:** Accepted
+- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview.
 - **Date:** 2026-06-08
 - **Refines:** [ADR-0025](0025-user-config-layer.md) (the keymap is user-config *data*),
   [ADR-0024](0024-tui-core-extractable.md) (the TUI core / `prim_tty`)
@@ -106,6 +106,15 @@ so they never surface as garbage keystrokes.
   detection reports "what's reachable from here" — the honest answer.
 - `TERM`/`COLORTERM` are treated as weak hints; the query/response is the source of truth
   (same probe pattern reused for the truecolor→256/16 degradation, [ADR-0024](0024-tui-core-extractable.md)).
+
+
+## Amendment — 2026-11-06: Page Up and Page Down ([ADR-0043](0043-markdown-preview.md))
+
+The parser reads `ESC [ 5 ~` and `ESC [ 6 ~` as `{:key, :page_up}` and `{:key, :page_down}`,
+which the markdown preview scrolls by a page. Anywhere else they do nothing at all: the loop drops
+them before anything a key does (dismissing a notice, ending a mouse hold, disarming a refused
+save). Modified forms (`ESC [ 5 ; 5 ~`) stay dropped by the parser. `ESC P` is `{:alt, ?P}`
+(Alt+Shift+P), not the start of a DCS string: geex sends no query a terminal answers with one.
 
 ## See
 

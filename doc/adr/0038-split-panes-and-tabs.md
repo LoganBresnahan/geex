@@ -5,7 +5,7 @@
   splits keep a ratio, and the mouse resizes them (§6). **Amended 2026-10-18:** an edge dragged
   up and down shows `⠛⠛` (§6). **Builds** what
   [ADR-0034](0034-panes-tree-edits-hold.md) deferred ("splits and tabs") and
-  [ADR-0028](0028-editor-shell-and-minibuffer.md) put "behind the pane system".
+  [ADR-0028](0028-editor-shell-and-minibuffer.md) put "behind the pane system". **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** preview tabs aren't a buffer's views; what reaches the active buffer while one is current (the 2026-11-06 amendment).
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0014](0014-editor-state-and-dispatch-ownership.md) (the cursor is
   view-local; Session holds the active buffer), [ADR-0034](0034-panes-tree-edits-hold.md) (the
@@ -165,6 +165,29 @@ Built with the mouse's step 3 ([ADR-0039](0039-mouse.md)):
 - `Geex.Loop`'s single-buffer fields (`buffer`, `scroll`, `hscroll`, the per-buffer scroll map)
   are gone; tabs carry scroll, and `watched` holds every tab's monitor and reactor.
 - Session's model is unchanged; one pointer, read by everything that acts on "the" buffer.
+
+
+## Amendment — 2026-11-06: preview tabs ([ADR-0043](0043-markdown-preview.md))
+
+- **A preview isn't one of its buffer's views** (§2, §4). A tab is a source tab (`view: :source`,
+  as before) or a markdown preview, `%{buffer, view: :preview, scroll, from, rows_w}`: its scroll
+  counts rendered rows of width `rows_w`, `from` is the pane it was opened from, and it has no
+  cursor, hscroll or hold. `Panes.show/3`, `elsewhere?/2`, `in_other_pane?/3` and a pane `×`'s
+  own-buffers set look at source tabs only; `buffers/1` and `drop_buffer/2` count previews, so a
+  buffer that ends takes its previews with it.
+- **Closing** (§4): the file's last source tab closes the file and its previews, refused while it
+  has unsaved edits (a preview no longer counts as "open in another pane"); a preview closes alone
+  (Alt+K, its `×`, Alt+Shift+P), never refused, never closing the buffer.
+- **What reaches the active buffer while a preview is current** (§2): its buffer is still Session's
+  active one, so one predicate gates the loop's entry points (a preview's own key handler, the
+  typed verbs and the palette, `line N`, `|` and its result, grid mode's submit, the mouse). Only
+  actions that need no cursor reach it (the panes, the files, save, fast-forward, quit …); the rest
+  say the preview is read-only. Entering a preview leaves Session's cursor as it was; leaving one
+  copies nothing.
+- **Opens land on text:** the loop's own opens show the file's source tab, adding one where the
+  pane has only the preview, not through `adopt_active/2`'s early return.
+- New `Panes` calls that move no focus: `add_tab/3`, `split_beside/3`, `close_tab_at/3`, with
+  `next_pane/2` and `previews/2`.
 
 ## See
 

@@ -1,6 +1,6 @@
 # ADR-0031: Undo/redo — history operations (replay-from-base)
 
-- **Status:** Accepted
+- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** `Alt+Shift+P` is the second case-sensitive chord.
 - **Date:** 2026-06-09 (Accepted 2026-06-09 when built + wired into `Alt+Z` / `Alt+Shift+Z`)
 - **Relates to:** [ADR-0014](0014-editor-state-and-dispatch-ownership.md) (the buffer owns the
   `EditorState` + the one history; the cursor is **view-local**), [ADR-0003](0003-one-shared-path.md)
@@ -104,6 +104,13 @@ an undo/redo can land **exactly on the saved content**, which is genuinely clean
 - **Deferred:** insert coalescing (per-keystroke undo for now); the `O(n)` replay (snapshot-stack if it
   bites); an undo *tree* that preserves the redo branch across a new edit (we discard it — the
   conventional choice).
+
+
+## Amendment — 2026-11-06: not the one case-sensitive chord ([ADR-0043](0043-markdown-preview.md))
+
+`Alt+Shift+Z` is no longer the one case-sensitive Alt chord: `Alt+Shift+P` toggles the markdown
+preview while `Alt+P` stays the next pane. As here, Caps Lock with the plain chord gives the
+shifted one.
 
 ## See
 
