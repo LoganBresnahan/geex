@@ -5109,3 +5109,19 @@ table rows.
 
 **Not tested:** Birds of Paradise or another truecolor theme on screen (the brown came from the
 maintainer's theme; the fix makes the glyph take the tab's style whatever the theme).
+
+### 2026-11-06 — 0.4.0 (ADR-0041)
+
+At the maintainer's word ("merge it into main have the verifier do a pass and create a new release
+for this and publish it"): `markdown-preview` fast-forwarded into main at `f1ef1e7`, the verifier's
+pass over it, and `@version` 0.4.0. Since 0.3.6:
+- the read-only markdown preview (ADR-0043, roadmap item 16), built in six slices with two
+  adversarial reviews and the maintainer's four changes after trying it;
+- `catalog_release` is `catalog-v3` (published 2026-11-06), with the `markdown_inline` companion;
+- BUG-7: a terminal resize redraws the whole screen (`56a8cba`).
+
+1314 tests + 116 doctests green twice; compile warnings-clean.
+
+**Not tested yet:** the v0.4.0 tag's release run, its four builds' smoke, the publish and the
+post-release smoke (followed below when they run); `geex self update` from 0.3.6 on the
+maintainer's machine.
