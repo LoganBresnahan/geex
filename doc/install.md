@@ -1,7 +1,8 @@
 # Installing geex
 
 geex runs on **Linux** (x64 and arm64, glibc 2.35 or newer: Ubuntu 22.04, Debian 12, Fedora 36,
-RHEL 10 and newer; not RHEL 9, whose glibc is 2.34, nor musl systems such as Alpine) and **macOS** (Apple silicon from 0.3.0, Intel from 0.3.1). On Windows, use
+RHEL 10 and newer; not RHEL 9, whose glibc is 2.34, nor musl systems such as Alpine) and **macOS** (Apple silicon from 0.3.0, Intel from 0.3.1; built on macOS 15, which 0.4.0 and later
+may require). On Windows, use
 WSL: geex has no Windows build. Each release is one tarball per platform with its own Erlang
 runtime inside, so you don't need Erlang or Elixir installed. How it's built, and why:
 [ADR-0041](adr/0041-release-without-burrito.md).

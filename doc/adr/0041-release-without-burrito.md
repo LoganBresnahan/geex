@@ -213,7 +213,7 @@ and on a machine with the checkout every edit to it went live in the hook at onc
   smoke-tests it; the tag's own run only repeated the suite (v0.3.5's flaked once, where main's
   passed).
 - **`release.yml`, on a `v*` tag:** for each target (linux-x64 on ubuntu-22.04, linux-arm64 on
-  ubuntu-22.04-arm, darwin-arm64 on macos-14), the cached runtime, a release build
+  ubuntu-22.04-arm, darwin-arm64 on macos-14, on macos-15 since 2026-11-06), the cached runtime, a release build
   (`GEEX_RELEASE=1`), and a smoke test of the tarball on that runner through install.sh. Then
   one job publishes a normal release (not a pre-release, so `releases/latest` is geex) with
   every tarball, one `SHA256SUMS` and `install.sh`. Publishing runs only for a `refs/tags/v*`
@@ -306,6 +306,14 @@ For another BEAM app (pharos), the parts that carry over:
   published, and an install checks the bytes it downloads. But a test may not rebuild a package
   and expect the pinned hash. `SettingsTest` reads the published Birds of Paradise package from
   `test/fixtures/catalog/` instead.
+
+
+**Amended 2026-11-06 (0.4.0): darwin-arm64 builds on macos-15.** GitHub retired the macos-14
+runner: the v0.4.0 tag's darwin-arm64 job was cancelled before its first step with "The
+configuration 'macos-14-arm64-us-default' is not supported". release.yml builds darwin-arm64 on
+macos-15, and smoke.yml drops macos-14 (macos-15 was already there). No macOS deployment target is
+pinned, so from 0.4.0 the Apple silicon build may need macOS 15, as the Intel build (on
+macos-15-intel) already may; the maintainer chose that over pinning 14 (2026-11-06).
 
 ## See
 
