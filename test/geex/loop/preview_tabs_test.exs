@@ -567,6 +567,148 @@ defmodule Geex.Loop.PreviewTabsTest do
     end
   end
 
+  describe "the slice-5 review" do
+    defp press(state, action, x, y) do
+      m = %{action: action, button: :left, x: x, y: y, mods: []}
+      {:noreply, state} = Loop.handle_info({:geex_io, {:mouse, m}}, %{state | click: nil})
+      state
+    end
+
+    test "2: Alt+Shift+P's refusal is drawn: the key queues a repaint", ctx do
+      {state, _a} = start(ctx.dir)
+      {state, _b} = open(state, ctx.dir, "b.txt")
+      {state, _rows} = frame(state)
+      flush_repaints()
+      state = key(state, {:alt, ?P})
+      assert state.notice =~ "markdown"
+      assert_received :repaint
+    end
+
+    test "3: a link to a file with a space in its name opens it (%20 decoded)", ctx do
+      File.write!(Path.join(ctx.dir, "a.md"), "# A\n\nSee [it](my%20file.md).\n")
+      File.write!(Path.join(ctx.dir, "my file.md"), "# Spaced\n")
+      {state, buf} = start(ctx.dir)
+      state = Loop.toggle_preview(state) |> rendered(buf) |> key({:alt, ?p})
+      {state, rows} = frame(state)
+      y = Enum.find_index(rows, &(&1 |> String.split("│", parts: 2) |> List.last() =~ "See it"))
+      line = Enum.at(rows, y)
+      offset = String.length(hd(String.split(line, "│", parts: 2))) + 1
+
+      x =
+        offset +
+          String.length(hd(String.split(List.last(String.split(line, "│", parts: 2)), "it.")))
+
+      state = press(state, :press, x, y)
+      assert %{view: :source, buffer: b} = Panes.current(state.panes)
+      assert Buffer.status(b).path == Path.join(ctx.dir, "my file.md")
+    end
+
+    test "10: a ~/ link is relative to the linking file, not $HOME", ctx do
+      File.mkdir_p!(Path.join(ctx.dir, "~"))
+      File.write!(Path.join(ctx.dir, "~/t.md"), "# Tilde\n")
+      File.write!(Path.join(ctx.dir, "a.md"), "# A\n\nSee [it](~/t.md).\n")
+      {state, buf} = start(ctx.dir)
+      state = Loop.toggle_preview(state) |> rendered(buf) |> key({:alt, ?p})
+      {state, rows} = frame(state)
+      y = Enum.find_index(rows, &(&1 |> String.split("│", parts: 2) |> List.last() =~ "See it"))
+      line = Enum.at(rows, y)
+      offset = String.length(hd(String.split(line, "│", parts: 2))) + 1
+
+      x =
+        offset +
+          String.length(hd(String.split(List.last(String.split(line, "│", parts: 2)), "it.")))
+
+      state = press(state, :press, x, y)
+      assert %{view: :source, buffer: b} = Panes.current(state.panes)
+      assert Buffer.status(b).path == Path.join(ctx.dir, "~/t.md")
+    end
+
+    test "4: a first render that can't parse says what to update, and Alt+Y opens on it", ctx do
+      {state, buf} = start(ctx.dir)
+      state = Loop.toggle_preview(state)
+      assert_receive {:geex_preview, ^buf, _}, 3_000
+
+      msg = %{
+        render: 1,
+        rows: %{},
+        status: {:unavailable, :update},
+        anchor: nil,
+        remap: nil,
+        hash: nil,
+        from: nil,
+        languages: []
+      }
+
+      {:noreply, state} = Loop.handle_info({:geex_preview, buf, msg}, state)
+      assert state.notice == "Markdown preview needs an update (Alt+Y)"
+      assert hd(state.hinted) in Geex.Markdown.grammars()
+    end
+
+    test "5: Page Up/Down outside a preview leave a hold, the notice and an armed save alone",
+         ctx do
+      {state, _buf} = start(ctx.dir)
+      tab = Panes.current(state.panes)
+      held = %{tab | hold: {{0, 0}, {50, 20}}, scroll: 7}
+      state = %{state | panes: Panes.update_current(state.panes, fn _ -> held end)}
+      state = %{state | notice: "a notice", save_armed: true}
+
+      for event <- [{:key, :page_up}, {:key, :page_down}] do
+        s = key(state, event)
+        assert Panes.current(s.panes) == held
+        assert {s.notice, s.save_armed} == {"a notice", true}
+      end
+    end
+
+    test "7: grid mode's submit doesn't reach the buffer behind a preview", ctx do
+      {state, buf} = start(ctx.dir, 24)
+      state = Loop.toggle_preview(state)
+      before = text(buf)
+      state = %{state | minibuffer: Geex.Minibuffer.open(:grid)}
+      state = Enum.reduce(String.graphemes("cut x1 y1 - x3 y1"), state, &key(&2, {:char, &1}))
+      state = key(state, {:key, :enter})
+      assert text(buf) == before
+      assert state.notice =~ "read-only"
+    end
+
+    test "8: a glyph click on the tab already shown keeps the selection", ctx do
+      {state, _buf} = start(ctx.dir)
+      {state, rows} = frame(state)
+      sel = Geex.Selection.new({2, 0}) |> Geex.Selection.extend({2, 3})
+      state = %{state | selection: sel, goal: 3}
+      bar = hd(rows)
+      x = :binary.match(bar, "◫") |> elem(0) |> then(&String.length(binary_part(bar, 0, &1)))
+      state = press(state, :press, x, 0)
+      assert %{view: :preview} = Panes.shown(state.panes, 2)
+      assert {state.selection, state.goal} == {sel, 3}
+    end
+
+    test "9: the preview's bar keeps the grabbed cell under the pointer, as the source bars do",
+         ctx do
+      {state, buf} = start(ctx.dir)
+      state = Loop.toggle_preview(state) |> rendered(buf)
+      {state, rows} = frame(state)
+      x = String.length(hd(rows)) - 1
+      # The thumb is at the top, a few cells long: a press on its second cell doesn't jump.
+      assert Enum.at(rows, 3) |> String.last() == "┃"
+      state = press(state, :press, x, 3)
+      assert Panes.shown(state.panes, 2).scroll == 0
+      # Dragged down a row, the thumb moves a row, the grabbed cell staying under the pointer.
+      state = press(state, :drag, x, 4)
+      s1 = Panes.shown(state.panes, 2).scroll
+      assert s1 > 0
+      state = press(state, :drag, x, 5)
+      assert Panes.shown(state.panes, 2).scroll > s1
+    end
+  end
+
+  defp flush_repaints do
+    receive do
+      :repaint -> flush_repaints()
+    after
+      0 -> :ok
+    end
+  end
+
   defp ran(%{shell: nil} = state), do: state
 
   defp ran(%{shell: %{pid: pid}} = state) do

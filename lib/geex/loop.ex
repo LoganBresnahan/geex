@@ -568,7 +568,10 @@ defmodule Geex.Loop do
       case Geex.Installed.grammar(name) do
         # Markdown's companion highlights nothing: it is what the preview needs (ADR-0043 §7).
         %{"display" => display, "for" => "markdown"} when is_binary(display) ->
-          "#{display} installed: the Markdown preview is available"
+          case Geex.Markdown.available() do
+            :ok -> "#{display} installed: the Markdown preview is available"
+            {:error, why} -> "#{display} installed: " <> Geex.Markdown.describe(why)
+          end
 
         %{"display" => display} when is_binary(display) ->
           "#{display} highlighting installed"
@@ -660,45 +663,13 @@ defmodule Geex.Loop do
   # A key. When the minibuffer is open it captures input; otherwise resolve the key against
   # the current text + cursor (read fresh from Session) and apply via the one shared path
   # (edits) or a view-local cursor move.
-  def handle_info({:geex_io, event}, state) do
-    # Any key dismisses a notice (it has been seen), and any key but Ctrl-O disarms a refused save.
-    # A key ends a drag (ADR-0039): what it does may take the drag's pane or text away.
-    state = if state.notice, do: schedule_repaint(%{state | notice: nil}), else: state
-    state = stop_drag(state)
-    state = %{state | save_armed: state.save_armed and event in [{:ctrl, ?o}, {:ctrl, ?O}]}
-
-    cond do
-      # The settings view, while it is open, takes every key (ADR-0040 §7).
-      state.settings != nil ->
-        {view, action} =
-          Settings.key(state.settings, event, settings_rows(state.settings, state), state.h)
-
-        state = %{state | settings: same_tab_or_reselect(state.settings, view, state)}
-        {:noreply, schedule_repaint(settings_action(action, state))}
-
-      event in [{:alt, ?y}, {:alt, ?Y}] and not Minibuffer.active?(state.minibuffer) ->
-        {:noreply, schedule_repaint(open_settings(state))}
-
-      # Ctrl-G stops the shell command running, from anywhere (ADR-0042).
-      event in [{:ctrl, ?g}, {:ctrl, ?G}] and state.shell != nil ->
-        {:noreply, schedule_repaint(stop_shell(state))}
-
-      Minibuffer.active?(state.minibuffer) ->
-        {:noreply, apply_minibuffer_key(event, state)}
-
-      # A pane can have gone (hidden by a resize); then the keys are the editor's again.
-      state.focus != :editor ->
-        case focused(state, layout(state)) do
-          :output -> {:noreply, apply_output_key(event, state)}
-          :edits -> {:noreply, apply_edits_key(event, state)}
-          :tree -> {:noreply, apply_tree_key(event, state)}
-          :editor -> {:noreply, apply_editor_key(event, %{state | focus: :editor})}
-        end
-
-      true ->
-        {:noreply, apply_editor_key(event, state)}
-    end
+  # Page Up/Down are a preview's keys: anywhere else they do nothing at all, not even what any
+  # key does (dismiss a notice, end a mouse hold, disarm a refused save).
+  def handle_info({:geex_io, {:key, k}}, state) when k in [:page_up, :page_down] do
+    if pages_preview?(state), do: io_event({:key, k}, state), else: {:noreply, state}
   end
+
+  def handle_info({:geex_io, event}, state), do: io_event(event, state)
 
   # The tree's files, from the process reload_tree/1 started. An answer from any other process
   # (a read that was superseded) falls through to the catch-all.
@@ -872,6 +843,47 @@ defmodule Geex.Loop do
   def handle_info(_msg, state), do: {:noreply, state}
 
   ## Internals
+
+  # A key the editor takes.
+  defp io_event(event, state) do
+    # Any key dismisses a notice (it has been seen), and any key but Ctrl-O disarms a refused save.
+    # A key ends a drag (ADR-0039): what it does may take the drag's pane or text away.
+    state = if state.notice, do: schedule_repaint(%{state | notice: nil}), else: state
+    state = stop_drag(state)
+    state = %{state | save_armed: state.save_armed and event in [{:ctrl, ?o}, {:ctrl, ?O}]}
+
+    cond do
+      # The settings view, while it is open, takes every key (ADR-0040 §7).
+      state.settings != nil ->
+        {view, action} =
+          Settings.key(state.settings, event, settings_rows(state.settings, state), state.h)
+
+        state = %{state | settings: same_tab_or_reselect(state.settings, view, state)}
+        {:noreply, schedule_repaint(settings_action(action, state))}
+
+      event in [{:alt, ?y}, {:alt, ?Y}] and not Minibuffer.active?(state.minibuffer) ->
+        {:noreply, schedule_repaint(open_settings(state))}
+
+      # Ctrl-G stops the shell command running, from anywhere (ADR-0042).
+      event in [{:ctrl, ?g}, {:ctrl, ?G}] and state.shell != nil ->
+        {:noreply, schedule_repaint(stop_shell(state))}
+
+      Minibuffer.active?(state.minibuffer) ->
+        {:noreply, apply_minibuffer_key(event, state)}
+
+      # A pane can have gone (hidden by a resize); then the keys are the editor's again.
+      state.focus != :editor ->
+        case focused(state, layout(state)) do
+          :output -> {:noreply, apply_output_key(event, state)}
+          :edits -> {:noreply, apply_edits_key(event, state)}
+          :tree -> {:noreply, apply_tree_key(event, state)}
+          :editor -> {:noreply, apply_editor_key(event, %{state | focus: :editor})}
+        end
+
+      true ->
+        {:noreply, apply_editor_key(event, state)}
+    end
+  end
 
   # A key for the editor: resolve it against the current text + cursor (read fresh from
   # Session).
@@ -1113,16 +1125,16 @@ defmodule Geex.Loop do
   # in the next pane after the source's, after the tab that pane shows.
   defp open_preview(state, buf) do
     path = safe_status(buf)[:path]
+    # Asked once: an install finishing between two asks mustn't change the answer mid-way.
+    available = Geex.Markdown.available()
 
     cond do
       not Geex.Markdown.file?(path) ->
         %{state | notice: "no preview: not a markdown file"}
 
       # What to install, and Alt+Y opens on its row, as ADR-0040's hint does.
-      match?({:error, _}, Geex.Markdown.available()) ->
-        {:error, why} = Geex.Markdown.available()
-        name = Geex.Markdown.to_install(why)
-        %{state | notice: Geex.Markdown.describe(why), hinted: [name | state.hinted -- [name]]}
+      match?({:error, _}, available) ->
+        unavailable(state, elem(available, 1))
 
       true ->
         ps = state.panes
@@ -1143,6 +1155,11 @@ defmodule Geex.Loop do
 
         schedule_repaint(state)
     end
+  end
+
+  defp unavailable(state, why) do
+    name = Geex.Markdown.to_install(why)
+    %{state | notice: Geex.Markdown.describe(why), hinted: [name | state.hinted -- [name]]}
   end
 
   defp close_previews(state, tabs) do
@@ -1398,6 +1415,14 @@ defmodule Geex.Loop do
           into: MapSet.new(),
           do: w
 
+    # A render that finds the queries don't compile against the installed packages says what to
+    # update, as opening one with a package missing does (the glyph goes too: `available/0`).
+    state =
+      case msg.status do
+        {:unavailable, why} when p.status != msg.status -> unavailable(state, why)
+        _ -> state
+      end
+
     p = %{
       p
       | rows: p.rows |> Map.merge(tagged) |> Map.take(MapSet.to_list(keep)),
@@ -1440,6 +1465,12 @@ defmodule Geex.Loop do
   end
 
   defp preview_current?(state), do: Panes.preview?(Panes.current(state.panes))
+
+  # Whether Page Up/Down would reach a preview: it is current and has the keys.
+  defp pages_preview?(state) do
+    state.settings == nil and not Minibuffer.active?(state.minibuffer) and
+      preview_current?(state) and focused(state, layout(state)) == :editor
+  end
 
   defp watch(state, pid) do
     ref = Process.monitor(pid)
@@ -1922,6 +1953,10 @@ defmodule Geex.Loop do
         state |> enter_pane({:file, id}) |> switch(&Panes.select(&1, i))
 
       # The preview's glyph: show that tab, then toggle, as a tab's × shows it before closing.
+      # The tab already shown in the current pane keeps its selection, as Alt+Shift+P does.
+      {:toggle_preview, i} when i == pane.at and id == state.panes.pane ->
+        toggle_preview(%{state | focus: :editor})
+
       {:toggle_preview, i} ->
         state |> enter_pane({:file, id}) |> switch(&Panes.select(&1, i)) |> toggle_preview()
 
@@ -2391,8 +2426,10 @@ defmodule Geex.Loop do
     }
 
     cond do
+      # On the thumb, it is held where it was pressed; on the track, by its middle (ADR-0039 §7).
       m.x == rect.x + rect.w - 1 and length(rows) > h and m.y >= rect.y + 2 ->
-        state = %{state | scrolling: %{pane: id, buffer: tab.buffer, axis: :preview, grab: 0}}
+        grab = ScrollBar.grab(preview_bar(rect, h, rows, tab.scroll), m.y - rect.y - 2)
+        state = %{state | scrolling: %{pane: id, buffer: tab.buffer, axis: :preview, grab: grab}}
         preview_bar_to(state, id, rect, tab, m.y)
 
       m.y >= rect.y + 2 ->
@@ -2404,19 +2441,31 @@ defmodule Geex.Loop do
     end
   end
 
-  # The pointer at row `y` on a preview's scroll bar: the scroll whose thumb sits there.
+  # The pointer at row `y` with a preview's thumb held: the scroll that puts the grabbed cell of
+  # the thumb under it.
   defp preview_bar_to(state, id, rect, tab, y) do
     h = preview_text_rows(rect)
     %{rows: rows} = preview_rows(state, tab)
-    bottom = max(length(rows) - h, 0)
-    at = (y - rect.y - 2) |> max(0) |> min(max(h - 1, 0))
-    scroll = if h > 1, do: div(at * bottom + div(h - 1, 2), h - 1), else: 0
+    grab = (state.scrolling || %{})[:grab] || 0
+    scroll = ScrollBar.offset_at(preview_bar(rect, h, rows, tab.scroll), y - rect.y - 2 - grab)
 
     schedule_repaint(%{
       state
       | panes: Panes.update_shown(state.panes, id, &%{&1 | scroll: scroll})
     })
   end
+
+  # A preview's vertical bar, as `Geex.Loop.ScrollBar` reads one: in the pane's last column, over
+  # its text rows, over the rendered rows.
+  defp preview_bar(rect, h, rows, scroll),
+    do: %ScrollBar{
+      axis: :v,
+      x: rect.x + rect.w - 1,
+      y: rect.y + 2,
+      len: max(h, 1),
+      content: length(rows),
+      offset: scroll
+    }
 
   defp href_at(runs, col) do
     Enum.reduce_while(runs, 0, fn {text, roles}, x ->
@@ -2441,7 +2490,7 @@ defmodule Geex.Loop do
   defp follow_link(state, _tab, nil), do: state
 
   defp follow_link(state, tab, href) do
-    path = href |> String.split("#") |> hd()
+    path = href |> String.split("#") |> hd() |> URI.decode()
     from = safe_status(tab.buffer)[:path]
 
     cond do
@@ -2453,7 +2502,8 @@ defmodule Geex.Loop do
         %{state | notice: "only links to markdown files are followed: #{href}"}
 
       true ->
-        full = Path.expand(path, Path.dirname(from))
+        # Joined first, so a leading `~` names a directory beside the file, not $HOME.
+        full = from |> Path.dirname() |> Path.join(path) |> Path.expand()
 
         if File.regular?(full) do
           target =
@@ -4271,7 +4321,7 @@ defmodule Geex.Loop do
   defp apply_action(action, cursor, text, state) do
     case action do
       :toggle_preview ->
-        toggle_preview(state)
+        schedule_repaint(toggle_preview(state))
 
       :select_start ->
         # Anchor a selection at the cursor; subsequent motion extends it (ADR-0029).
@@ -4902,7 +4952,12 @@ defmodule Geex.Loop do
   # Grid commands (ADR-0027) and the palette (ADR-0028 §3); search and the finder are next.
   defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :grid}} = state) do
     state = remember(state)
-    close_minibuffer(do_grid(Verbs.parse_grid(Minibuffer.value(state.minibuffer)), state))
+
+    # A preview can have become current while grid mode was open (the tab before closed): its
+    # buffer is read-only from here.
+    if preview_current?(state),
+      do: state |> close_minibuffer() |> read_only(),
+      else: close_minibuffer(do_grid(Verbs.parse_grid(Minibuffer.value(state.minibuffer)), state))
   end
 
   # The palette: Enter runs the **highlighted** candidate. Re-derive the candidate list from

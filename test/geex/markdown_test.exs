@@ -26,6 +26,7 @@ defmodule Geex.MarkdownTest do
       end
 
       Installed.refresh()
+      :persistent_term.erase({Markdown, :broken})
     end)
   end
 
@@ -130,6 +131,46 @@ defmodule Geex.MarkdownTest do
 
     assert Markdown.handles(query: broken) == {:error, :update}
     refute Markdown.describe(:update) =~ "Query"
+  end
+
+  test "slice 5 review 4: a render query that failed to compile withdraws the preview, per install" do
+    broken = fn
+      "markdown" -> "(no_such_node) @x"
+      name -> Parse.query(name)
+    end
+
+    assert Markdown.available() == :ok
+    assert Markdown.handles(query: broken) == {:error, :update}
+    # The loop asks the manifests only, and now hears it too, compiling nothing.
+    assert Markdown.available() == {:error, :update}
+    # A good compile (or another install) brings it back.
+    assert {:ok, _} = Markdown.handles()
+    assert Markdown.available() == :ok
+
+    assert Markdown.handles(query: broken) == {:error, :update}
+
+    File.write!(
+      Path.join(Installed.dir(:grammar, "markdown"), "installed.json"),
+      ~s({"source":"local","sha256":"replaced"})
+    )
+
+    Installed.refresh()
+    assert Markdown.available() == :ok
+  end
+
+  test "slice 5 review 12: installing the companion with Markdown missing names what's left" do
+    dir = Installed.dir(:grammar, "markdown")
+    File.rename!(dir, dir <> ".aside")
+    Installed.refresh()
+
+    {:noreply, state} =
+      Geex.Loop.handle_info(
+        {:geex_installed, :grammar, "markdown_inline"},
+        Geex.Loop.new_state(120, 30)
+      )
+
+    assert state.notice ==
+             "Markdown inline installed: Markdown preview needs Markdown installed (Alt+Y)"
   end
 
   test "a missing package is named, so the user knows what to install" do

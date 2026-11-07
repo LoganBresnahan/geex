@@ -15,6 +15,8 @@ defmodule Geex.Markdown do
 
   @block "markdown"
   @inline "markdown_inline"
+  # The installs (their sha256s) a render found geex's queries don't compile against.
+  @broken {__MODULE__, :broken}
 
   @typedoc """
   Why the preview isn't offered: `{:missing, names}` (packages to install, in order), or
@@ -38,6 +40,7 @@ defmodule Geex.Markdown do
 
     case {handle.(@block), handle.(@inline)} do
       {{:ok, block}, {:ok, inline}} ->
+        :persistent_term.erase(@broken)
         {:ok, %{block: block, inline: inline}}
 
       results ->
@@ -46,9 +49,19 @@ defmodule Geex.Markdown do
                 Enum.zip(grammars(), Tuple.to_list(results)),
               do: name
 
-        if missing == [], do: {:error, :update}, else: {:error, {:missing, missing}}
+        if missing == [] do
+          # Remembered for these installs, so `available/0` withdraws the preview (the glyph,
+          # the key) without compiling anything in the key loop.
+          :persistent_term.put(@broken, builds())
+          {:error, :update}
+        else
+          {:error, {:missing, missing}}
+        end
     end
   end
+
+  defp builds,
+    do: Enum.map(grammars(), &get_in(Geex.Installed.grammar(&1) || %{}, ["installed", "sha256"]))
 
   @aliases %{
     "sh" => "bash",
@@ -142,8 +155,9 @@ defmodule Geex.Markdown do
 
   @doc """
   Whether the preview can be offered, from the installed manifests alone: both grammars
-  installed, each of an ABI this geex loads. Cheap enough for the key loop (it compiles nothing);
-  a render query that doesn't compile shows later, as the preview's status.
+  installed, each of an ABI this geex loads, and not these installs that a render found geex's
+  queries don't compile against (`handles/1` remembers that per install sha256). Cheap enough for
+  the key loop: it compiles nothing.
   """
   @spec available() :: :ok | {:error, unavailable()}
   def available do
@@ -151,9 +165,16 @@ defmodule Geex.Markdown do
 
     case for({name, nil} <- manifests, do: name) do
       [] ->
-        if Enum.all?(manifests, fn {_name, m} -> m["abi"] in Grammars.abi() end),
-          do: :ok,
-          else: {:error, :update}
+        cond do
+          not Enum.all?(manifests, fn {_name, m} -> m["abi"] in Grammars.abi() end) ->
+            {:error, :update}
+
+          :persistent_term.get(@broken, nil) == builds() ->
+            {:error, :update}
+
+          true ->
+            :ok
+        end
 
       missing ->
         {:error, {:missing, missing}}
@@ -169,7 +190,7 @@ defmodule Geex.Markdown do
 
   def to_install(:update) do
     Enum.find(grammars(), @block, fn name ->
-      Geex.Installed.grammar(name)["abi"] not in Grammars.abi()
+      (Geex.Installed.grammar(name) || %{})["abi"] not in Grammars.abi()
     end)
   end
 

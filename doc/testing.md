@@ -4991,3 +4991,39 @@ place across that resize (its rows' text was right, the stale cells aside).
 **Not tested:** a truecolor theme on screen (Birds of Paradise is checked by value only); a real
 terminal's own mouse (tmux injected SGR reports); a split's drag; the install-triggered refresh
 live.
+
+### 2026-11-06 — the markdown preview: slice 5's adversarial review, fixed (ADR-0043)
+
+**Adversarial review.** The verifier's second 8-agent workflow against `6c81a3a` (keys; the mouse,
+links and the scroll bar; drawing and the status line; the whole feature against ADR-0043 §1–§7
+and the docs): 17 findings kept, 2 refuted, about 13 distinct. Its own dogfood, from its worktree on
+its own tmux socket and sandbox, passed everything but BUG-7 (front matter, reference links, an
+image, the table's escaped pipe, Alt+K's refusal and the preview's close, a resize keeping the
+place, the 52- and 22-column layouts, a clean exit). Fixed here, each with a test written first and
+seen failing (12 needed no test: a fix in a doc):
+1. A width change reset the status to `:ok`: width-only jobs carry the status they had, and a
+   same-text read reports its own; "needs an update" stands until a parse decides.
+2. Alt+Shift+P's refusals weren't drawn: the action queues a repaint.
+3. Link destinations weren't decoded: escapes and entities come off in the layout, and the opener
+   percent-decodes the path (`my%20file.md` opens `my file.md`).
+4. A render query that didn't compile still offered the preview: `Markdown.handles/1` remembers a
+   failure per install (both sha256s) and `available/0` reads it, so the glyph and the key go with
+   no compile in the loop; an unavailable render says what to update and Alt+Y opens on it.
+   Recorded for ADR-0043 §4's amendment.
+5. Page Up/Down outside a preview acted like any key (a hold released, the notice dismissed, a
+   refused save disarmed): they're dropped before anything else unless a preview has them.
+6. `open_preview` asked `available/0` twice (an install between them would crash the loop): once.
+7. Grid mode's submit wasn't gated: it is, when a preview has become current.
+8. A glyph click on the tab already shown cleared the selection: it toggles without switching.
+9. The preview's scroll bar jumped on a press on the thumb and didn't keep the grabbed cell under
+   the pointer: it uses `Geex.Loop.ScrollBar`'s grab and offset, as the source bars do.
+10. A `~/x.md` link went to `$HOME`: it is joined to the linking file's directory first.
+11. `[a [b] c](x.md)` renders raw (the inline grammar): recorded as a known gap in ADR-0043 §4.
+12. Installing markdown_inline with Markdown missing said the preview was available: it names
+    what is still missing.
+
+Under the load recipe (8 CPU hogs, ten runs of the markdown, preview, buffer and loop preview
+tests): 0 failures. 1313 tests + 116 doctests green twice; compile warnings-clean.
+
+**Not tested:** the fixes live in tmux (the verifier's final pass dogfoods them); 6's race itself
+(the fix removes the second call).

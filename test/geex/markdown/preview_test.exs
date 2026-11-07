@@ -273,6 +273,15 @@ defmodule Geex.Markdown.PreviewTest do
       assert buf == ctx.buf and rows == %{}
     end
 
+    test "slice 5 review 1: a width change keeps the status it had (changing)", ctx do
+      read = fn _path -> {:ok, "# Half writ"} end
+      {pid, r} = open(ctx.buf, 30, read: read, settle_ms: 5)
+      assert r.status == :changing
+      Preview.widths(pid, [30, 20])
+      r = render(ctx.buf, 20)
+      assert r.status == :changing
+    end
+
     test "each render says which text it is and which its line map starts from", ctx do
       {_pid, r} = open(ctx.buf, 30)
       assert r.hash == Buffer.status(ctx.buf).synced

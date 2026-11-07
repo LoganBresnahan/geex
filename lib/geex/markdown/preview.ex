@@ -320,6 +320,9 @@ defmodule Geex.Markdown.Preview do
         wanted: state.wanted,
         new: Enum.filter(state.wanted, &MapSet.member?(widths, &1)),
         anchor: anchor,
+        # The status a render that reads nothing keeps (a width change mustn't clear "changing",
+        # "render failed" or "needs an update" while the rows are stale).
+        status: state.status,
         buffer: state.buffer,
         read: state.read,
         parsed: state.parsed,
@@ -423,7 +426,7 @@ defmodule Geex.Markdown.Preview do
 
   @doc false
   def work(%{reread: false} = job),
-    do: {:ok, layout(job.new, job.parsed, job.hash, nil, :ok)}
+    do: {:ok, layout(job.new, job.parsed, job.hash, nil, job.status)}
 
   def work(job) do
     status = Buffer.status(job.buffer)
@@ -437,14 +440,15 @@ defmodule Geex.Markdown.Preview do
         expected = if status.behind, do: status.behind.sha256, else: status.synced
         same? = sha == job.hash and job.parsed != nil
 
-        same? = same? and not job.force
+        # "Needs an update" stands until a parse decides it.
+        same? = same? and not job.force and not match?({:unavailable, _}, job.status)
         status = if sha == expected, do: :ok, else: :changing
 
         cond do
           sha != expected and not job.last_try -> {:retry, sha}
           same? and job.anchor == nil and job.new == [] -> {:same, status}
-          same? and job.anchor == nil -> {:ok, layout(job.new, job.parsed, sha, nil, :ok)}
-          same? -> {:ok, layout(job.wanted, job.parsed, sha, nil, :ok)}
+          same? and job.anchor == nil -> {:ok, layout(job.new, job.parsed, sha, nil, status)}
+          same? -> {:ok, layout(job.wanted, job.parsed, sha, nil, status)}
           true -> parse(job, bytes, sha, status)
         end
     end

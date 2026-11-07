@@ -39,6 +39,12 @@ defmodule Geex.Markdown.LayoutTest do
     refute Enum.any?(hrefs, fn {t, _} -> t =~ "none" end)
   end
 
+  test "slice 5 review 3: a link's destination is decoded: escapes and entities" do
+    md = "[a](my\\_file.md) [b](x&amp;y.md) [c][r]\n\n[r]: q\\_r&amp;s.md\n"
+    hrefs = for r <- rows(md), {_t, roles} <- r.runs, {:href, d} <- roles, uniq: true, do: d
+    assert hrefs == ["my_file.md", "x&y.md", "q_r&s.md"]
+  end
+
   describe "F33: a table cell's column comes from the pipes before it" do
     test "an empty || cell keeps the rest of the row under its headers" do
       assert "│ x │   │ z │" in texts("| a | b | c |\n|---|---|---|\n|x||z|\n")

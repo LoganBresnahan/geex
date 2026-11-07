@@ -107,6 +107,8 @@ defmodule Geex.Highlight.Grammars do
   def forget(language) do
     _ = :persistent_term.erase({__MODULE__, language})
     _ = :persistent_term.erase({__MODULE__, :render, language})
+    # A replaced Markdown package gets another chance at the preview's queries.
+    if language in Geex.Markdown.grammars(), do: :persistent_term.erase({Geex.Markdown, :broken})
     :ok
   end
 

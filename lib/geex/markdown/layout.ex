@@ -696,7 +696,7 @@ defmodule Geex.Markdown.Layout do
     dest =
       case child(n, :link_destination) do
         nil -> nil
-        d -> ctx.text |> slice(d) |> String.trim_leading("<") |> String.trim_trailing(">")
+        d -> ctx.text |> slice(d) |> destination()
       end
 
     link(n, roles, ctx, dest)
@@ -732,12 +732,20 @@ defmodule Geex.Markdown.Layout do
         {label, dest} ->
           url =
             if dest,
-              do: text |> slice(dest) |> String.trim_leading("<") |> String.trim_trailing(">")
+              do: text |> slice(dest) |> destination()
 
           [{normalize(slice(text, label)), url}]
       end
     end)
     |> Map.new()
+  end
+
+  # A link destination as written, decoded (CommonMark): the angle brackets off, backslash
+  # escapes of punctuation taken out, entities decoded. Percent-encoding stays, for the opener.
+  defp destination(raw) do
+    raw = raw |> String.trim() |> String.trim_leading("<") |> String.trim_trailing(">")
+    raw = Regex.replace(~r/\\([!-\/:-@\[-`{-~])/, raw, "\\1")
+    Regex.replace(~r/&#?[A-Za-z0-9]+;/, raw, &entity/1)
   end
 
   defp normalize(label) do
