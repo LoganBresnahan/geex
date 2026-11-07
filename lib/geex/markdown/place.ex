@@ -7,12 +7,11 @@ defmodule Geex.Markdown.Place do
   between blocks names none). Before a re-render the loop notes the top row's line and its offset
   among the consecutive rows sharing that line (`anchor/2`); afterwards it scrolls to the first
   row of that line, or of the nearest earlier line that has rows, plus the offset, clamped to
-  that run (`scroll/2`). After the user's save the anchor is `{cursor line, 0}`.
+  that run (`scroll/2`).
 
   An anchor taken in one text is carried into the next by `remap/2` through `line_map/2`, a line
   diff the preview process computes on each re-read, so an edit above the reader (an agent
-  writing an earlier section) leaves them on the same row. The save anchor is already a line in
-  the new text and isn't remapped.
+  writing an earlier section, or the user's own save) leaves them on the same row.
 
   Lines are 0-based, as the buffer's cursor is. They are counted in each render's own text, so
   a CRLF file and its LF twin name the same lines.

@@ -293,20 +293,11 @@ defmodule Geex.Markdown.PreviewTest do
     end
   end
 
-  describe "F17: the user's save scrolls to their cursor line" do
-    test "the anchor the loop sends rides on the next render", ctx do
-      {pid, r} = open(ctx.buf, 30)
-      assert r.anchor == nil
-      {:ok, _} = Buffer.dispatch(ctx.buf, insert(2, 5, "!"))
-      {:ok, _} = Buffer.save(ctx.buf)
-      Preview.saved(pid, 2)
-      # The save's own render may come first; the anchor rides on a render started after it.
-      r =
-        Stream.repeatedly(fn -> render(ctx.buf, 30) end)
-        |> Enum.find(&(&1.anchor != nil))
-
-      assert r.anchor == 2
-    end
+  test "a render carries no save anchor: the loop keeps the reader's place by the line map",
+       ctx do
+    {_pid, r} = open(ctx.buf, 30)
+    refute Map.has_key?(r, :anchor)
+    refute function_exported?(Preview, :saved, 2)
   end
 
   describe "F19 and the remap: renames, and edits above the reader" do

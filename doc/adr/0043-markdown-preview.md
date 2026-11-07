@@ -99,7 +99,10 @@ docs (§8), and a review checked the whole design against the code before any of
 - **The glyph** sits between a tab's name and its ×, so the × keeps the label's last two columns.
   `TabBar.layout` learns which tabs carry it, and `TabBar.hit/2` answers `{:toggle_preview, i}` on
   its column. A click on it focuses that pane, shows the tab, then toggles, as a tab's × shows its
-  tab before closing it. On a preview tab it is drawn lit, so a preview never reads as its source.
+  tab before closing it. ~~On a preview tab it is drawn lit, so a preview never reads as its
+  source.~~ **Amended 2026-11-06 (the maintainer's look):** the glyph is drawn in the tab's own
+  colours, exactly as its `×` is, in every state; and a preview's tab has none, since its `×`
+  closes it (the header and the status line say "preview").
   It is one column in any font, checked as the split handles' braille was
   ([ADR-0038](0038-split-panes-and-tabs.md) §6): not East Asian Ambiguous, and present in common
   terminal fonts. `¶` (U+00B6) is Ambiguous and fails that check, so it marks the glyph's place in
@@ -160,7 +163,10 @@ docs (§8), and a review checked the whole design against the code before any of
 - **Drawing.** `repaint/1` draws a preview from its rows: no gutter, highlight overlay, agent
   marks, selection or grid ruler (grid mode doesn't apply: there's no text to address), and the
   hardware cursor is hidden while it has focus. With a preview current, the status line shows the
-  file, `[+]` or behind, and "preview", without a line:col or an author.
+  file, `[+]` or behind, and "preview", without a line:col or an author. **Amended 2026-11-06 (the
+  maintainer's look):** the rows sit one column in from the pane's left border, as the editor's
+  text sits off its line numbers; the text width is the pane's less that column and the scroll
+  bar's.
 - **Which files.** A file whose installed grammar is Markdown (`.md`, `.markdown`), with
   `markdown_inline` installed too (§7). Without them the glyph isn't drawn, and the verb says what
   to install and opens Alt+Y on the missing row, as ADR-0040's hint does.
@@ -231,7 +237,7 @@ docs (§8), and a review checked the whole design against the code before any of
   keystroke's `{:geex_buffer_change, …}` among them.
 - **Merging work.** Pending work merges into one request: a re-read once any open, synced or
   behind trigger has arrived (a re-read lays out again too), the newest width for each preview
-  tab, and the latest save anchor (§6). Each part stays pending until a render started after it
+  tab, and (until §6's 2026-11-06 amendment) the latest save anchor. Each part stays pending until a render started after it
   arrived has run. The reactor's rule, keeping only the latest request, would let a resize replace
   a pending re-read.
 - **Failure.** The loop monitors each preview process ([ADR-0035](0035-the-loop-never-waits.md)).
@@ -348,6 +354,10 @@ docs (§8), and a review checked the whole design against the code before any of
   a preview, a fast-forward, or a change from outside keeps the reader's place. While a preview
   can be open, the loop's own save is the only one: MCP's `save_file` runs only under
   `mix geex.serve`, where there's no terminal.
+- **Amended 2026-11-06 (the maintainer's look): a save doesn't scroll the preview.** Jumping to the
+  saved line moved what the reader was looking at; now a save re-renders and keeps the reader's
+  place like any other re-render, through the line map below. The save anchor (`Preview.saved/2`
+  and the render's `anchor`) is gone.
 - **Amended 2026-11-06: the anchor follows the edit.** By line number alone, a line inserted above
   the reader moved them a row (the verifier's finding on slice 2). Each render now carries its
   text's hash, the hash its line map starts from, and the map (`Geex.Markdown.Place.line_map/2`:
@@ -357,7 +367,7 @@ docs (§8), and a review checked the whole design against the code before any of
   rows are of the text the map starts from; a removed line's anchor goes to the nearest earlier
   kept line. Each tab also keeps `rows_w`, the width of the rows its scroll indexes, and draws
   those until its own width's arrive, so a resize or a split's drag keeps the place too (the
-  slice-4 review). The save anchor is a line of the new text and isn't remapped.
+  slice-4 review).
 
 ### 7. Packaging
 

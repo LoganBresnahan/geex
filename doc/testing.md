@@ -5077,3 +5077,35 @@ live in tmux (slice 5's dogfood covered the resize and the scroll bar's column),
 1314 tests + 116 doctests green twice; compile warnings-clean.
 
 **Not tested:** the docs render on GitHub (links and tables were read as text only).
+
+### 2026-11-06 — the markdown preview: the maintainer's look (glyph colours, no save jump, padding) (ADR-0043)
+
+The maintainer tried the branch and asked for four changes:
+- **The glyph's colours:** on a shown, focused tab it was drawn in `line_number` over the tab's
+  reverse video, so it showed a brown background on a light tab. It is now just part of the label,
+  drawn in the tab's style exactly as the `×` is, in every state (`draw_glyph` is gone).
+- **No glyph on a preview's own tab:** its `×` closes it. `TabBar.layout/5` takes `{name, :glyph}`,
+  and a tab's `glyph` is its column (no "lit").
+- **A save doesn't scroll the preview:** it keeps the reader's place through the line map like any
+  re-render. The save anchor (`Preview.saved/2`, the render's `anchor`, the loop's
+  `saved_anchor/1`) is removed.
+- **Padding:** the rows sit one column in from the pane's left border; the text width is the pane's
+  less that column and the scroll bar's (`preview_text_width/1`); a link click's column is
+  measured from the padded edge.
+
+**Tests first:** the glyph test (`{name, :glyph}`, no glyph on a third, plain tab); the loop's
+glyph test (the preview tab reads ` 1 a.md × `; the glyph cell's fg, bg and attrs equal its `×`'s);
+the save test (para 10's line edited and saved: the preview stays on para 30, line 62, after every
+render the save brings; it failed first at 22, once the test took all the renders, not just the
+first); the padding (`│ Title`); a render carries no `anchor` and `Preview.saved/2` is gone. ADR-0043
+§1 (glyph, drawing) and §6 (save) and ADR-0039's amendment say so.
+
+**Checked by hand** in tmux (private socket, the scratch project): the glyph's SGR is the same as its
+`×`'s; the preview tab reads ` 1 doc.md × `; ` Agent intro line.` sits a column in; Page Down to the
+table, then `line 70`, typing and Ctrl-O from the source: the preview re-rendered and stayed on the
+table rows.
+
+1314 tests + 116 doctests green twice; compile warnings-clean.
+
+**Not tested:** Birds of Paradise or another truecolor theme on screen (the brown came from the
+maintainer's theme; the fix makes the glyph take the tab's style whatever the theme).

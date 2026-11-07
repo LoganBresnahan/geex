@@ -194,8 +194,8 @@ it, into the pane the preview came from (or the current file pane once that one 
 no caret, starts no selection or drag, and a double-click or Shift/Alt+press does no more. The wheel
 and the vertical scroll bar move the preview's row scroll (the thumb held where it was pressed, as
 here); there is no horizontal scroll and no hold. On the tab bar, a markdown file's tabs carry the
-preview's glyph `◫` between the name and the `×` (lit on a preview, drawn only while the preview
-can be offered); a click on it shows that tab, then toggles the preview, as a `×` shows its tab
+preview's glyph `◫` between the name and the `×` (drawn in the tab's colours, as its `×` is; not on
+a preview's own tab; only while the preview can be offered); a click on it shows that tab, then toggles the preview, as a `×` shows its tab
 before closing it.
 
 ## See

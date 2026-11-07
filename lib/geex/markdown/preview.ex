@@ -23,14 +23,14 @@ defmodule Geex.Markdown.Preview do
   marked `:changing`. Renders are sent as they finish.
 
   **Merging work.** Pending work is one request: a re-read once any trigger has arrived, the
-  widths not laid out yet, and the latest save anchor (§6). Each part stays pending until a
+  widths not laid out yet. Each part stays pending until a
   render started after it arrived has run, so a width change never replaces a pending re-read.
   Nothing runs while no width is wanted.
 
   **What subscribers get**, one message per render:
 
       {:geex_preview, buffer, %{render: n, rows: %{width => %{rows: rows, lines: lines}},
-                                status: status, anchor: line | nil, remap: map | nil,
+                                status: status, remap: map | nil,
                                 hash: sha256 | nil, from: sha256 | nil, languages: [name]}}
 
   `rows` holds the widths this render laid out: a width missing from it keeps its old rows.
@@ -118,13 +118,6 @@ defmodule Geex.Markdown.Preview do
   @spec widths(GenServer.server(), [pos_integer()]) :: :ok
   def widths(preview, widths), do: GenServer.cast(preview, {:widths, widths})
 
-  @doc """
-  The user saved from a source tab with the cursor on `line` (0-based): the next render carries
-  it as `anchor`, so the loop scrolls every preview of the buffer there (ADR-0043 §6).
-  """
-  @spec saved(GenServer.server(), non_neg_integer()) :: :ok
-  def saved(preview, line), do: GenServer.cast(preview, {:saved, line})
-
   @doc "Read again (a rename): a read of the text it last rendered renders nothing new."
   @spec reread(GenServer.server()) :: :ok
   def reread(preview), do: GenServer.cast(preview, :reread)
@@ -168,8 +161,9 @@ defmodule Geex.Markdown.Preview do
       settle_ms: Keyword.get(opts, :settle_ms, @settle_ms),
       subs: %{},
       wanted: [],
-      # Work waiting for the next render: `reread`, `widths` not laid out yet, `anchor`.
-      pending: %{reread: false, force: false, widths: MapSet.new(), anchor: nil},
+      # Work waiting for the next render: `reread` (`force`: parse even the same bytes), `widths`
+      # not laid out yet.
+      pending: %{reread: false, force: false, widths: MapSet.new()},
       worker: nil,
       tries: 0,
       retry: nil,
@@ -203,7 +197,7 @@ defmodule Geex.Markdown.Preview do
       {:reply, :ok, state}
     else
       ref = Process.monitor(sub)
-      if state.rows != %{}, do: send(sub, message(state, state.rows, nil, nil, state.hash))
+      if state.rows != %{}, do: send(sub, message(state, state.rows, nil, state.hash))
       state = %{state | subs: Map.put(state.subs, ref, sub)}
       {:reply, :ok, state |> want(:reread) |> run()}
     end
@@ -235,9 +229,6 @@ defmodule Geex.Markdown.Preview do
     {:noreply, run(state)}
   end
 
-  def handle_cast({:saved, line}, state),
-    do: {:noreply, state |> want(:reread) |> put_in([:pending, :anchor], line) |> run()}
-
   def handle_cast(:reread, state), do: {:noreply, state |> want(:reread) |> run()}
 
   def handle_cast(:refresh, state),
@@ -258,10 +249,10 @@ defmodule Geex.Markdown.Preview do
   end
 
   # A render crashed: the rows stay, the status says so (a crash costs a frame).
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{worker: {ref, _wpid, job}} = state) do
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{worker: {ref, _wpid, _job}} = state) do
     Logger.warning("geex preview: a render failed: #{inspect(reason)}")
     state = %{state | worker: nil, status: {:failed, reason}, tries: 0}
-    {:noreply, state |> broadcast(%{}, job.anchor, nil, state.hash) |> run()}
+    {:noreply, state |> broadcast(%{}, nil, state.hash) |> run()}
   end
 
   def handle_info({:DOWN, _ref, :process, buffer, _reason}, %{buffer: buffer} = state),
@@ -309,17 +300,16 @@ defmodule Geex.Markdown.Preview do
 
   # Start a render when nothing runs, a width is wanted and some work is pending.
   defp run(%{worker: nil, retry: nil, wanted: [_ | _]} = state) do
-    %{reread: reread, force: force, widths: widths, anchor: anchor} = state.pending
+    %{reread: reread, force: force, widths: widths} = state.pending
 
-    if reread or MapSet.size(widths) > 0 or anchor != nil do
+    if reread or MapSet.size(widths) > 0 do
       job = %{
         # With no parse to lay out (a failed read, the grammars missing), a new width reads again.
-        reread: reread or anchor != nil or state.parsed == nil,
+        reread: reread or state.parsed == nil,
         force: force,
-        # Every width wanted, for a changed text or an anchor; the new ones, for the same text.
+        # Every width wanted, for a changed text; the new ones, for the same text.
         wanted: state.wanted,
         new: Enum.filter(state.wanted, &MapSet.member?(widths, &1)),
-        anchor: anchor,
         # The status a render that reads nothing keeps (a width change mustn't clear "changing",
         # "render failed" or "needs an update" while the rows are stale).
         status: state.status,
@@ -339,7 +329,7 @@ defmodule Geex.Markdown.Preview do
       %{
         state
         | worker: {ref, pid, job},
-          pending: %{reread: false, force: false, widths: MapSet.new(), anchor: nil}
+          pending: %{reread: false, force: false, widths: MapSet.new()}
       }
     else
       state
@@ -354,32 +344,31 @@ defmodule Geex.Markdown.Preview do
       state.pending
       | reread: true,
         force: state.pending.force or job.force,
-        widths: MapSet.union(state.pending.widths, MapSet.new(job.new)),
-        anchor: state.pending.anchor || job.anchor
+        widths: MapSet.union(state.pending.widths, MapSet.new(job.new))
     }
 
     %{state | pending: pending, tries: state.tries + 1, retry: retry(state.settle_ms)}
   end
 
-  defp finish(state, job, {:read, posix}) do
+  defp finish(state, _job, {:read, posix}) do
     rows = Map.new(state.wanted, &{&1, %{rows: [], lines: {}}})
     state = %{state | parsed: nil, hash: nil, rows: rows, status: {:read, posix}, tries: 0}
-    broadcast(state, rows, job.anchor, nil, nil)
+    broadcast(state, rows, nil, nil)
   end
 
-  defp finish(state, job, {:unavailable, why}) do
+  defp finish(state, _job, {:unavailable, why}) do
     state = %{state | status: {:unavailable, why}, tries: 0}
-    broadcast(state, %{}, job.anchor, nil, state.hash)
+    broadcast(state, %{}, nil, state.hash)
   end
 
   # The text it last rendered, and nothing new to lay out; a status that changed (a write that
   # settled after "changing", a read fine again after a failure) is still said.
-  defp finish(state, job, {:same, status}) do
+  defp finish(state, _job, {:same, status}) do
     state = %{state | tries: 0}
 
     if status == state.status,
       do: state,
-      else: broadcast(%{state | status: status}, %{}, job.anchor, nil, state.hash)
+      else: broadcast(%{state | status: status}, %{}, nil, state.hash)
   end
 
   defp finish(state, job, {:ok, result}) do
@@ -395,26 +384,25 @@ defmodule Geex.Markdown.Preview do
     # A width dropped while the render ran isn't sent. `from`: the text the remap maps from, or
     # this one when the text didn't change.
     from = if result.remap, do: job.hash, else: if(job.hash == result.hash, do: result.hash)
-    broadcast(state, Map.take(result.rows, state.wanted), job.anchor, result.remap, from)
+    broadcast(state, Map.take(result.rows, state.wanted), result.remap, from)
   end
 
   defp retry(ms), do: Process.send_after(self(), :retry, ms)
 
   # Send every subscriber the render, numbered.
-  defp broadcast(state, rows, anchor, remap, from) do
+  defp broadcast(state, rows, remap, from) do
     state = %{state | render: state.render + 1}
-    msg = message(state, rows, anchor, remap, from)
+    msg = message(state, rows, remap, from)
     for {_ref, sub} <- state.subs, do: send(sub, msg)
     state
   end
 
-  defp message(state, rows, anchor, remap, from) do
+  defp message(state, rows, remap, from) do
     {:geex_preview, state.buffer,
      %{
        render: state.render,
        rows: rows,
        status: state.status,
-       anchor: anchor,
        remap: remap,
        hash: state.hash,
        from: from,
@@ -446,9 +434,8 @@ defmodule Geex.Markdown.Preview do
 
         cond do
           sha != expected and not job.last_try -> {:retry, sha}
-          same? and job.anchor == nil and job.new == [] -> {:same, status}
-          same? and job.anchor == nil -> {:ok, layout(job.new, job.parsed, sha, nil, status)}
-          same? -> {:ok, layout(job.wanted, job.parsed, sha, nil, status)}
+          same? and job.new == [] -> {:same, status}
+          same? -> {:ok, layout(job.new, job.parsed, sha, nil, status)}
           true -> parse(job, bytes, sha, status)
         end
     end

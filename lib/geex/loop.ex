@@ -1257,8 +1257,10 @@ defmodule Geex.Loop do
     end
   end
 
-  # A preview pane's rows: the tab bar, the header, then the rendered rows.
+  # A preview pane's rows: the tab bar, the header, then the rendered rows. Its columns: one of
+  # padding by the border, the text, the scroll bar's.
   defp preview_text_rows(rect), do: max(rect.h - 2, 0)
+  defp preview_text_width(rect), do: max(rect.w - 2, 1)
 
   # Switch tabs or panes the loop's way: leave, change, enter.
   defp switch(state, fun), do: state |> leave() |> then(&put_panes(&1, fun.(&1.panes))) |> enter()
@@ -1375,7 +1377,7 @@ defmodule Geex.Loop do
     |> layout()
     |> Map.fetch!(:editor)
     |> Layout.split(state.panes.split)
-    |> Map.new(fn {id, rect} -> {id, max(rect.w - 1, 1)} end)
+    |> Map.new(fn {id, rect} -> {id, preview_text_width(rect)} end)
   end
 
   # A render arrived: each of the buffer's preview tabs whose width it laid out moves to those rows
@@ -1433,9 +1435,6 @@ defmodule Geex.Loop do
 
     schedule_repaint(%{state | panes: panes, previews: Map.put(state.previews, buf, p)})
   end
-
-  defp kept_scroll(_scroll, _old, new, %{anchor: line}) when is_integer(line),
-    do: Place.scroll(new.lines, {line, 0})
 
   defp kept_scroll(_scroll, nil, _new, _msg), do: 0
 
@@ -2339,7 +2338,7 @@ defmodule Geex.Loop do
   # the rows from the tab's scroll, a vertical scroll bar when they overflow. Rows carry roles and
   # capture names; the theme colours them here (`Geex.Markdown.Style`).
   defp draw_preview(rect, tab, %{theme: %Theme{palette: pal} = theme} = state) do
-    w = max(rect.w - 1, 1)
+    w = preview_text_width(rect)
     h = preview_text_rows(rect)
     %{rows: rows} = preview_rows(state, tab)
     total = length(rows)
@@ -2347,8 +2346,9 @@ defmodule Geex.Loop do
     blank = %Cell{char: " ", fg: pal.fg, bg: pal.bg}
 
     # The rows on a screen as wide as the text, so rows of another width (drawn until this tab's
-    # own arrive) stop short of the scroll bar's column, a wide glyph at the edge included.
-    body =
+    # own arrive) stop short of the scroll bar's column, a wide glyph at the edge included; set a
+    # column in from the border, as the editor's text sits off its line numbers.
+    text =
       rows
       |> Enum.drop(scroll)
       |> Enum.take(h)
@@ -2356,8 +2356,11 @@ defmodule Geex.Loop do
       |> Enum.reduce(Screen.fill_rect(Screen.new(w, h), 0, 0, w, h, blank), fn {row, y}, acc ->
         draw_preview_row(acc, row, y, w, theme)
       end)
-      |> Screen.resize(rect.w, h)
-      |> Screen.fill_rect(w, 0, rect.w - w, h, blank)
+
+    body =
+      Screen.new(rect.w, h)
+      |> Screen.fill_rect(0, 0, rect.w, h, blank)
+      |> Screen.blit(text, 1, 0)
       |> maybe_vscrollbar(total > h, rect.w - 1, h, scroll, total, theme)
 
     screen =
@@ -2400,18 +2403,6 @@ defmodule Geex.Loop do
     screen
   end
 
-  # The preview's glyph on tab `i`'s label, lit (the palette's accent) on a preview.
-  defp draw_glyph(screen, rect, bar, i, style, pal) do
-    case Enum.find(bar.tabs, &(&1.i == i)) do
-      %{glyph: %{x: gx, lit: lit}} when gx < bar.w ->
-        fg = if lit, do: pal.accent, else: pal.line_number
-        Screen.draw_text(screen, rect.x + gx, rect.y, TabBar.preview_glyph(), %{style | fg: fg})
-
-      _ ->
-        screen
-    end
-  end
-
   ## The mouse in a preview (ADR-0043 §1): a press focuses the pane and follows a relative link
   ## under it; the vertical scroll bar takes a press and a drag. No caret, selection or drag of
   ## text.
@@ -2434,7 +2425,7 @@ defmodule Geex.Loop do
 
       m.y >= rect.y + 2 ->
         row = Enum.at(rows, tab.scroll + m.y - rect.y - 2)
-        follow_link(state, tab, row && href_at(row.runs, m.x - rect.x))
+        follow_link(state, tab, row && href_at(row.runs, m.x - rect.x - 1))
 
       true ->
         state
@@ -2582,8 +2573,7 @@ defmodule Geex.Loop do
             true -> %Cell{fg: pal.line_number, bg: pal.bg}
           end
 
-        acc = Screen.draw_text(acc, rect.x + x, rect.y, palette_clip(label, bar.w - x), style)
-        draw_glyph(acc, rect, bar, i, style, pal)
+        Screen.draw_text(acc, rect.x + x, rect.y, palette_clip(label, bar.w - x), style)
       end)
 
     screen =
@@ -2620,13 +2610,13 @@ defmodule Geex.Loop do
     TabBar.layout(names, at, rect.w, map_size(state.panes.panes) > 1, handle?)
   end
 
-  # A tab's name on the bar: a preview's carries the glyph lit, a markdown file's source tab the
-  # glyph, while the preview can be offered (ADR-0043 §1).
-  defp tab_name(%{view: :preview, buffer: pid}, _offered?), do: {tab_label(pid), :preview}
+  # A tab's name on the bar: a markdown file's source tab carries the preview's glyph, while the
+  # preview can be offered; a preview's own tab doesn't, its × closes it (ADR-0043 §1).
+  defp tab_name(%{view: :preview, buffer: pid}, _offered?), do: tab_label(pid)
 
   defp tab_name(%{buffer: pid}, true) do
     label = tab_label(pid)
-    if Geex.Markdown.file?(safe_status(pid)[:path]), do: {label, :source}, else: label
+    if Geex.Markdown.file?(safe_status(pid)[:path]), do: {label, :glyph}, else: label
   end
 
   defp tab_name(%{buffer: pid}, false), do: tab_label(pid)
@@ -4457,7 +4447,6 @@ defmodule Geex.Loop do
       case on_active_buffer(&Reconcile.save(&1, force: state.save_armed)) do
         {:ok, path} ->
           Edits.saved(path)
-          saved_anchor(state)
           %{state | save_armed: false}
 
         {:markers, line} ->
@@ -4473,18 +4462,6 @@ defmodule Geex.Loop do
       end
 
     schedule_repaint(state)
-  end
-
-  # The user saved from a source tab: the file's previews scroll to the cursor's line on their next
-  # render (ADR-0043 §6). A save from a preview keeps the reader's place.
-  defp saved_anchor(state) do
-    with %{view: :source, buffer: buf} <- Panes.current(state.panes),
-         %{pid: pid} when is_pid(pid) <- state.previews[buf],
-         {:ok, %{cursor: {line, _col}}} <- safe_session_snapshot() do
-      Preview.saved(pid, line)
-    end
-
-    :ok
   end
 
   # Show `path`, opening it if needed (`open PATH`, ADR-0034). A relative path is from the

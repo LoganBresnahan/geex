@@ -13,7 +13,8 @@ defmodule Geex.Loop.TabBar do
 
   A markdown file's tabs carry the preview's glyph between the name and the `×`, so the `×`
   keeps the label's last two columns: ` N name ◫ × ` ([ADR-0043](../../../doc/adr/0043-markdown-preview.md)
-  §1). A click on it toggles the preview. On a preview tab it is drawn lit.
+  §1). It is part of the label, drawn in the tab's colours as the `×` is; a click on it toggles
+  the preview. A preview's own tab has none: its `×` closes it.
   """
 
   alias Geex.Width
@@ -31,7 +32,7 @@ defmodule Geex.Loop.TabBar do
   @handle_cols "⣿"
   @handle_rows "⠛⠛"
 
-  @type glyph :: %{x: non_neg_integer(), lit: boolean()} | nil
+  @type glyph :: non_neg_integer() | nil
   @type t :: %{
           tabs: [
             %{i: non_neg_integer(), x: non_neg_integer(), label: String.t(), glyph: glyph()}
@@ -44,14 +45,14 @@ defmodule Geex.Loop.TabBar do
   @doc """
   The bar for tabs named `names`, tab `at` shown, `w` columns wide; `closable?` when the pane
   has its own `×`; `handle?` when it keeps a split's handle. Each tab's `x` is from the bar's left
-  edge. A name given as `{name, :source}` or `{name, :preview}` carries the preview's glyph (lit
-  for a preview), and its tab's `glyph` says where.
+  edge. A name given as `{name, :glyph}` carries the preview's glyph, and its tab's `glyph` is
+  the glyph's column.
 
       iex> bar = Geex.Loop.TabBar.layout(["a.txt", "b.txt [+]"], 0, 40, true)
       iex> Enum.map(bar.tabs, &{&1.i, &1.x, &1.label})
       [{0, 0, " 1 a.txt × "}, {1, 11, " 2 b.txt [+] × "}]
-      iex> Geex.Loop.TabBar.layout([{"a.md", :preview}], 0, 40, false).tabs
-      [%{i: 0, x: 0, label: " 1 a.md ◫ × ", glyph: %{x: 8, lit: true}}]
+      iex> Geex.Loop.TabBar.layout([{"a.md", :glyph}], 0, 40, false).tabs
+      [%{i: 0, x: 0, label: " 1 a.md ◫ × ", glyph: 8}]
       iex> {bar.close, bar.handle}
       {37, nil}
       iex> Geex.Loop.TabBar.layout(["a.txt"], 0, 40, true, true).handle
@@ -67,17 +68,17 @@ defmodule Geex.Loop.TabBar do
       names
       |> Enum.with_index()
       |> Enum.map(fn
-        {{name, view}, i} -> {i, " #{i + 1} " <> name <> " #{@preview_glyph} × ", view}
-        {name, i} -> {i, " #{i + 1} " <> name <> " × ", nil}
+        {{name, :glyph}, i} -> {i, " #{i + 1} " <> name <> " #{@preview_glyph} × ", true}
+        {name, i} -> {i, " #{i + 1} " <> name <> " × ", false}
       end)
 
     shown_end = labels |> Enum.take(at + 1) |> Enum.map(&Width.string(elem(&1, 1))) |> Enum.sum()
     labels = drop_until_fits(labels, at, shown_end, room)
 
     {tabs, _x} =
-      Enum.map_reduce(labels, 0, fn {i, label, view}, x ->
+      Enum.map_reduce(labels, 0, fn {i, label, glyph?}, x ->
         lw = Width.string(label)
-        glyph = if view, do: %{x: x + lw - 4, lit: view == :preview}
+        glyph = if glyph?, do: x + lw - 4
         {%{i: i, x: x, label: label, glyph: glyph}, x + lw}
       end)
 
@@ -112,7 +113,7 @@ defmodule Geex.Loop.TabBar do
         # The `×` and the space after it.
         x >= tx + lw - 2 -> {:close_tab, i}
         # The preview's glyph and the space after it.
-        tab.glyph != nil and x >= tab.glyph.x -> {:toggle_preview, i}
+        tab.glyph != nil and x >= tab.glyph -> {:toggle_preview, i}
         true -> {:tab, i}
       end
     end)
@@ -142,7 +143,7 @@ defmodule Geex.Loop.TabBar do
   def pane_close, do: @pane_close
 
   # Drop tabs from the left while the shown one would end past the room.
-  defp drop_until_fits([{i, label, _view} | rest], at, shown_end, room)
+  defp drop_until_fits([{i, label, _glyph?} | rest], at, shown_end, room)
        when shown_end > room and i < at,
        do: drop_until_fits(rest, at, shown_end - Width.string(label), room)
 

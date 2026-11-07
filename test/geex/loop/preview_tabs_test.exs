@@ -97,9 +97,9 @@ defmodule Geex.Loop.PreviewTabsTest do
 
       state = rendered(state, buf)
       {_state, rows} = frame(state)
-      # The header names the file; the rendered rows start under it.
+      # The header names the file; the rendered rows start under it, a column in from the border.
       assert Enum.at(rows, 1) =~ ~r/│ a\.md/
-      assert Enum.at(rows, 2) =~ ~r/│Title/
+      assert Enum.at(rows, 2) =~ ~r/│ Title/
     end
 
     test "where a split has no room, in the source's own pane after it, shown there", ctx do
@@ -307,7 +307,7 @@ defmodule Geex.Loop.PreviewTabsTest do
       assert scroll.(key(state, {:key, :home})) == 0
     end
 
-    test "an edit above the reader keeps their row; the user's save scrolls to its line", ctx do
+    test "an edit above the reader keeps their row, and so does the user's save", ctx do
       {state, buf} = start(ctx.dir)
       state = Loop.toggle_preview(state) |> rendered(buf)
       # Scroll the preview to "para 30".
@@ -322,21 +322,18 @@ defmodule Geex.Loop.PreviewTabsTest do
       lines = state.previews[buf].rows |> Map.values() |> hd() |> Map.fetch!(:lines)
       assert elem(lines, Panes.shown(state.panes, 2).scroll) == 62
 
-      # Take it in, put the cursor on para 10's line and save: the preview goes there.
+      # Take it in, then edit para 10's line from the source and save: the preview re-renders and
+      # stays where the reader was (para 30, line 62), not on the saved line.
       state = key(state, {:alt, ?j})
       Session.set_cursor({22, 0})
-      state = key(state, {:ctrl, ?o})
-
-      state =
-        Stream.repeatedly(fn -> :ok end)
-        |> Enum.reduce_while(state, fn _, s ->
-          assert_receive {:geex_preview, ^buf, msg}, 3_000
-          {:noreply, s} = Loop.handle_info({:geex_preview, buf, msg}, s)
-          if msg.anchor, do: {:halt, s}, else: {:cont, s}
-        end)
-
+      state = key(state, {:char, "X"}) |> key({:ctrl, ?o})
+      assert_receive {:geex_preview, ^buf, %{rows: rows} = msg} when rows != %{}, 3_000
+      {:noreply, state} = Loop.handle_info({:geex_preview, buf, msg}, state)
+      # Every render the save brings, not just the first.
+      state = drain_renders(state, buf)
+      assert "X" <> _ = Buffer.get_text(buf) |> String.split("\n") |> Enum.at(22)
       lines = state.previews[buf].rows |> Map.values() |> hd() |> Map.fetch!(:lines)
-      assert elem(lines, Panes.shown(state.panes, 2).scroll) == 22
+      assert elem(lines, Panes.shown(state.panes, 2).scroll) == 62
     end
 
     test "the preview is told the tab's text width", ctx do
@@ -398,7 +395,6 @@ defmodule Geex.Loop.PreviewTabsTest do
         render: 99,
         rows: %{w => %{rows: rows, lines: lines}},
         status: :ok,
-        anchor: nil,
         remap: shift,
         hash: "new",
         from: "some other text",
@@ -466,7 +462,7 @@ defmodule Geex.Loop.PreviewTabsTest do
       end
     end
 
-    test "the glyph is on a markdown file's tabs, lit on the preview; a click on it toggles",
+    test "the glyph is on a markdown file's tab, in the tab's colours; a click on it toggles",
          ctx do
       {state, buf} = start(ctx.dir)
       {state, _b} = open(state, ctx.dir, "b.txt")
@@ -482,11 +478,15 @@ defmodule Geex.Loop.PreviewTabsTest do
       assert %{view: :preview} = Panes.shown(state.panes, 2)
 
       {_state, rows} = frame(state)
-      assert hd(rows) =~ ~r/│ 1 a\.md ◫ × /
+      # The preview's own tab has no glyph: its × closes it.
+      assert hd(rows) =~ ~r/│ 1 a\.md × /
+      # On the source tab the glyph is drawn as its × is.
       screen = Geex.Renderer.current()
-      px = (hd(rows) |> String.split("│") |> hd() |> String.length()) + 1 + 8
-      assert Screen.get_cell(screen, px, 0).char == "◫"
-      assert Screen.get_cell(screen, px, 0).fg == state.theme.palette.accent
+      gx = String.length(binary_part(hd(rows), 0, elem(:binary.match(hd(rows), "◫"), 0)))
+      glyph = Screen.get_cell(screen, gx, 0)
+      cross = Screen.get_cell(screen, gx + 2, 0)
+      assert {glyph.char, cross.char} == {"◫", "×"}
+      assert {glyph.fg, glyph.bg, glyph.attrs} == {cross.fg, cross.bg, cross.attrs}
     end
 
     test "with markdown_inline missing there is no glyph, and the verb says what to install",
@@ -632,7 +632,6 @@ defmodule Geex.Loop.PreviewTabsTest do
         render: 1,
         rows: %{},
         status: {:unavailable, :update},
-        anchor: nil,
         remap: nil,
         hash: nil,
         from: nil,
@@ -698,6 +697,16 @@ defmodule Geex.Loop.PreviewTabsTest do
       assert s1 > 0
       state = press(state, :drag, x, 5)
       assert Panes.shown(state.panes, 2).scroll > s1
+    end
+  end
+
+  defp drain_renders(state, buf) do
+    receive do
+      {:geex_preview, ^buf, msg} ->
+        {:noreply, state} = Loop.handle_info({:geex_preview, buf, msg}, state)
+        drain_renders(state, buf)
+    after
+      700 -> state
     end
   end
 
