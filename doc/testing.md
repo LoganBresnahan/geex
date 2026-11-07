@@ -4870,3 +4870,35 @@ buffer and loop preview tests under 8 CPU hogs, 0 failures.
 
 **Not tested:** any of it live (no key reaches it: slice 5 dogfoods it in tmux); the install and
 rename re-reads; the scroll bar and the status line in a preview (slice 5).
+
+### 2026-11-06 — the markdown preview, slice 5 (first part): the parser, :strike, the glyph's layout, key help (ADR-0043 §1, §5)
+
+The parts of slice 5 that don't touch slice 4's loop internals, built while the adversarial review
+of slice 4 runs.
+
+**Built:**
+- **Page Up/Down**: the parser reads `ESC [ 5 ~` and `ESC [ 6 ~` as `{:key, :page_up}` and
+  `{:key, :page_down}`; modified forms (`ESC [ 5 ; 5 ~`) stay dropped. Everywhere but a preview
+  they resolve to nothing. `ESC P` is `{:alt, ?P}` (pinned by a test).
+- **`Geex.Cell`'s `:strike`**, written as SGR 9 by `Geex.Sgr`; the preview draws it, and `mix
+  geex.render` no longer writes it by hand.
+- **The glyph**, `◫` (U+25EB, East Asian Width Neutral; in DejaVu Sans Mono, so Menlo, JetBrains
+  Mono and FreeMono; Cascadia, Consolas and SF Mono not checked here): `TabBar.layout/5` takes a
+  name as `{name, :source | :preview}`, draws it between the name and the `×` (` N name ◫ × `,
+  the `×` keeping the last two columns), says where in each tab's `glyph` (lit on a preview), and
+  `TabBar.hit/2` answers `{:toggle_preview, i}` on it and the space after it.
+- **Key help** gains a Panes row for `Alt+Shift+P` and a Mouse row for a click on the glyph; the
+  palette lists `preview` ("… (Alt+Shift+P; read-only)"), and the typed verb `preview` parses to
+  `{:action, :toggle_preview}`, which reaches `toggle_preview/1` through one `apply_action/4`
+  clause (the key itself waits for the review).
+
+**Tests first:** the parser's mapped and dropped lists and `ESC P` (F10/F24); `:strike` as SGR 9;
+the glyph's label, position, hits and width (F26/F27); the palette entry, the verb and the key help
+rows (F28); a loop test that typing `preview` opens and closes it; Page Up/Down changing nothing
+in the editor, the minibuffer, the tree, the edits pane or the settings view. Each failed first;
+two of my expectations were wrong (a column number; a test layout with the tree hidden).
+
+1283 tests + 116 doctests green twice; compile warnings-clean.
+
+**Not yet:** Alt+Shift+P in the keymap, the glyph drawn and clicked, link clicks, the preview's
+scroll bar, the status line, the dogfood (after the review).

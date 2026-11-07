@@ -132,8 +132,7 @@ defmodule Mix.Tasks.Geex.Render do
 
   defp paint(run, theme, _opts) do
     {text, %{fg: fg, bg: bg, attrs: attrs}} = Style.run(theme, run)
-    strike = if :strike in attrs, do: "\e[9m", else: ""
-    [Sgr.escape(fg, bg, attrs -- [:strike]), strike, text, Sgr.reset()]
+    [Sgr.escape(fg, bg, attrs), text, Sgr.reset()]
   end
 
   # The 1-based line of byte `at`, by binary search over the newlines' offsets.

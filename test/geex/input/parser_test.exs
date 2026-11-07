@@ -137,7 +137,10 @@ defmodule Geex.Input.ParserTest do
             {"\eOF", :end},
             {"\e[3~", :delete},
             {"\eOA", :up},
-            {"\eOD", :left}
+            {"\eOD", :left},
+            # Page Up/Down, for the markdown preview's scrolling (ADR-0043 §1).
+            {"\e[5~", :page_up},
+            {"\e[6~", :page_down}
           ] do
         assert Parser.parse(bytes) == {[{:key, key}], ""}, inspect(bytes)
       end
@@ -145,8 +148,9 @@ defmodule Geex.Input.ParserTest do
 
     test "unsupported keys are dropped, never typed" do
       for bytes <- [
-            "\e[5~",
-            "\e[6~",
+            # Modified Page Up/Down stay dropped.
+            "\e[5;5~",
+            "\e[6;2~",
             "\e[2~",
             "\e[1;5C",
             "\e[1;2A",
@@ -162,8 +166,13 @@ defmodule Geex.Input.ParserTest do
     end
 
     test "text around a dropped sequence survives" do
-      assert Parser.parse("a\e[5~b\e[4~c") ==
+      assert Parser.parse("a\e[2~b\e[4~c") ==
                {[{:char, "a"}, {:char, "b"}, {:key, :end}, {:char, "c"}], ""}
+    end
+
+    test "ESC P is Alt+Shift+P, not the start of a DCS string (ADR-0043 §1)" do
+      assert Parser.parse("\eP") == {[{:alt, ?P}], ""}
+      assert Parser.parse("\ePx") == {[{:alt, ?P}, {:char, "x"}], ""}
     end
 
     test "an incomplete sequence waits for the rest, across chunks" do

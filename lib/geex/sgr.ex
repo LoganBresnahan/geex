@@ -47,6 +47,7 @@ defmodule Geex.Sgr do
   defp attr_code(:italic), do: ["3"]
   defp attr_code(:underline), do: ["4"]
   defp attr_code(:reverse), do: ["7"]
+  defp attr_code(:strike), do: ["9"]
 
   defp i(n), do: Integer.to_string(n)
 end

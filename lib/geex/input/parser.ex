@@ -15,8 +15,8 @@ defmodule Geex.Input.Parser do
   A control sequence is read **as one unit**: a CSI (`ESC [`, parameter
   bytes `0x30–0x3F`, intermediate bytes `0x20–0x2F`, a final byte
   `0x40–0x7E`) or an SS3 (`ESC O` and one byte). The ones geex uses become
-  keys (arrows, Home, End, Delete), and a mouse report becomes a mouse event; every other one
-  (Page Up/Down, modified arrows, F-keys…) is **dropped**, never typed into
+  keys (arrows, Home, End, Delete, Page Up/Down), and a mouse report becomes a mouse event; every
+  other one (modified arrows, a modified Page Up/Down, F-keys…) is **dropped**, never typed into
   the buffer as text. An incomplete sequence stays leftover until the rest
   arrives (bounded, so garbage can't be held forever).
 
@@ -31,7 +31,7 @@ defmodule Geex.Input.Parser do
   ## Event shapes
 
       {:key, :up | :down | :left | :right | :home | :end | :delete |
-             :enter | :tab | :backspace | :esc}
+             :page_up | :page_down | :enter | :tab | :backspace | :esc}
       {:char, <<utf8 grapheme>>}
       {:ctrl, ?a..?z}            # Ctrl-letter as the lowercase atom
       {:ctrl, 0x40 | 0x5C..0x5F} # bytes 0, 28–31: Ctrl-@, Ctrl-\\, Ctrl-], Ctrl-^, Ctrl-_
@@ -284,6 +284,8 @@ defmodule Geex.Input.Parser do
   defp csi_key(n, ?~) when n in ["1", "7"], do: {:key, :home}
   defp csi_key(n, ?~) when n in ["4", "8"], do: {:key, :end}
   defp csi_key("3", ?~), do: {:key, :delete}
+  defp csi_key("5", ?~), do: {:key, :page_up}
+  defp csi_key("6", ?~), do: {:key, :page_down}
   defp csi_key("<" <> params, final) when final in [?M, ?m], do: sgr_mouse(params, final)
   defp csi_key(_params, _final), do: nil
 

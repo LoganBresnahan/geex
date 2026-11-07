@@ -9,9 +9,11 @@ defmodule Geex.Command.CatalogTest do
   describe "all/0" do
     test "lists the v1 human command vocabulary" do
       names = names(Catalog.all())
+
       for v <- ~w(copy cut paste undo redo highlight save quit line) do
         assert v in names, "expected #{v} in the catalog"
       end
+
       assert "select all" in names
     end
 
@@ -22,6 +24,13 @@ defmodule Geex.Command.CatalogTest do
                  match?({:typed, p} when is_binary(p), invoke)
       end
     end
+  end
+
+  test "the palette lists `preview`, naming its key (ADR-0043 §1)" do
+    assert %Entry{invoke: {:action, :toggle_preview}, description: d} =
+             Enum.find(Catalog.all(), &(&1.name == "preview"))
+
+    assert d =~ "Alt+Shift+P"
   end
 
   describe "search/1" do

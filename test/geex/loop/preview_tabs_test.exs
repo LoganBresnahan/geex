@@ -155,6 +155,15 @@ defmodule Geex.Loop.PreviewTabsTest do
       assert Panes.current(state.panes).view == :source
     end
 
+    test "the typed verb `preview` and the palette's entry do the same", ctx do
+      {state, buf} = start(ctx.dir)
+      state = type(state, "preview")
+      assert Panes.shown(state.panes, 2) == Panes.preview_tab(buf, 1)
+      # Typed again from the source it closes it; the palette's entry is the same action.
+      state = type(state, "preview")
+      assert preview_tab(state) == nil
+    end
+
     test "a file that isn't markdown has no preview", ctx do
       {state, _a} = start(ctx.dir)
       {state, _b} = open(state, ctx.dir, "b.txt")
@@ -336,6 +345,26 @@ defmodule Geex.Loop.PreviewTabsTest do
       _ = rendered(state, buf)
       assert [w] = :sys.get_state(pid).wanted
       assert w in 40..50
+    end
+  end
+
+  test "Page Up/Down change nothing outside a preview", ctx do
+    {state, buf} = start(ctx.dir)
+    before = text(buf)
+    Session.set_cursor({4, 0})
+
+    for event <- [{:key, :page_up}, {:key, :page_down}] do
+      s = key(state, event)
+      assert {text(buf), cursor(), s.panes} == {before, {4, 0}, state.panes}
+
+      m = state |> key({:alt, ?m}) |> key(event)
+      assert Geex.Minibuffer.value(m.minibuffer) == ""
+
+      shown = %{state | tree_shown: true, edits_shown: true}
+      for focus <- [:tree, :edits], do: assert(key(%{shown | focus: focus}, event).focus == focus)
+
+      settings = state |> key({:alt, ?y}) |> key(event)
+      assert settings.settings != nil
     end
   end
 

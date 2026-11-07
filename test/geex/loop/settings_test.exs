@@ -85,6 +85,14 @@ defmodule Geex.Loop.SettingsTest do
       {view, :none} = Settings.key(view, {:alt, ?D}, [], 30)
       assert {view.tab, view.query} == {:general, ""}
       assert Enum.any?(Geex.Loop.KeyHelp.search("alt+a"), &(elem(&1, 0) == "Settings"))
+      # The markdown preview's chord and glyph (ADR-0043 §1).
+      assert {"Panes", "Alt+Shift+P", _} =
+               Enum.find(Geex.Loop.KeyHelp.search("preview"), &(elem(&1, 0) == "Panes"))
+
+      assert {"Mouse", "click " <> glyph, _} =
+               Enum.find(Geex.Loop.KeyHelp.search("preview"), &(elem(&1, 0) == "Mouse"))
+
+      assert glyph == Geex.Loop.TabBar.preview_glyph()
     end
 
     test "tabs, moving, closing; Keys filters as you type" do

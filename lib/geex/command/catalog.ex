@@ -111,6 +111,12 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, :toggle_edits}
     },
     %Entry{
+      name: "preview",
+      description:
+        "Show or hide a markdown file's rendered preview beside it (Alt+Shift+P; read-only).",
+      invoke: {:action, :toggle_preview}
+    },
+    %Entry{
       name: "split",
       description: "Split the pane top and bottom (Alt+-).",
       invoke: {:action, :split_rows}

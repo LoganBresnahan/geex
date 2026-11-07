@@ -188,6 +188,7 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("close"), do: {:action, :close}
   defp do_parse("edits"), do: {:action, :toggle_edits}
   defp do_parse("tree"), do: {:action, :toggle_tree}
+  defp do_parse("preview"), do: {:action, :toggle_preview}
   defp do_parse("split"), do: {:action, :split_rows}
   defp do_parse("vsplit"), do: {:action, :split_cols}
   defp do_parse("tab next"), do: {:action, :tab_next}

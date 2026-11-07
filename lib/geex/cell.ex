@@ -24,7 +24,7 @@ defmodule Geex.Cell do
   defstruct char: " ", fg: :default, bg: :default, attrs: []
 
   @type colour :: :default | {:ansi, 0..15} | {:xterm, 0..255} | {:rgb, 0..255, 0..255, 0..255}
-  @type attr :: :bold | :italic | :underline | :reverse | :dim
+  @type attr :: :bold | :italic | :underline | :reverse | :dim | :strike
 
   @type t :: %__MODULE__{
           char: String.t(),

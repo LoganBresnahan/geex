@@ -61,6 +61,10 @@ defmodule Geex.Loop.VerbsTest do
       assert Verbs.parse("exit") == {:action, :quit}
     end
 
+    test "preview toggles the markdown preview (= Alt+Shift+P, ADR-0043)" do
+      assert Verbs.parse("preview") == {:action, :toggle_preview}
+    end
+
     test "verbs are case-insensitive" do
       assert Verbs.parse("COPY") == {:action, :copy}
       assert Verbs.parse("Line 3") == {:line, 3}

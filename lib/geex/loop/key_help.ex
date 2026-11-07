@@ -31,6 +31,7 @@ defmodule Geex.Loop.KeyHelp do
     {"Panes", "Alt+-  Alt+=", "split the pane top and bottom, side by side"},
     {"Panes", "Alt+,  Alt+.", "the previous tab, the next tab"},
     {"Panes", "Alt+1 … Alt+9", "tab 1 to 9"},
+    {"Panes", "Alt+Shift+P", "a markdown file's preview, beside it: show or hide"},
     {"Commands", "Alt+M", "type a command (`theme`, `open`, `mouse`, `quit` …)"},
     {"Commands", "↑  ↓", "in the command line: what was entered before"},
     {"Commands", "Alt+M !cmd  !!  |cmd",
@@ -51,7 +52,9 @@ defmodule Geex.Loop.KeyHelp do
     {"Mouse", "drag #{Geex.Loop.TabBar.handle(:cols)}  #{Geex.Loop.TabBar.handle(:rows)}",
      "resize a split, the tree, the edits pane; double-click evens"},
     {"Mouse", "scroll bar", "a click jumps there; drag the thumb to scroll"},
-    {"Mouse", "click ×", "close a tab, or a pane"}
+    {"Mouse", "click ×", "close a tab, or a pane"},
+    {"Mouse", "click #{Geex.Loop.TabBar.preview_glyph()}",
+     "show or hide a markdown file's preview"}
   ]
 
   @type entry :: {String.t(), String.t(), String.t()}

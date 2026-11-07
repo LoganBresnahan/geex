@@ -32,4 +32,13 @@ defmodule Geex.CellTest do
       refute Cell.equal?(%Cell{attrs: [:bold]}, %Cell{attrs: [:bold, :italic]})
     end
   end
+
+  test "strikethrough is an attribute, written as SGR 9 (ADR-0043 §5)" do
+    assert Geex.Sgr.escape(:default, :default, [:strike]) == "\e[9m"
+    assert Geex.Sgr.escape({:ansi, 1}, :default, [:bold, :strike]) == "\e[1;9;31m"
+
+    assert Geex.Cell.equal?(%Geex.Cell{attrs: [:strike, :bold]}, %Geex.Cell{
+             attrs: [:bold, :strike]
+           })
+  end
 end

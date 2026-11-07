@@ -11,8 +11,6 @@ defmodule Geex.Markdown.Style do
   same byte (`Geex.Highlight.Paint`). When the palette has no tint for code (`active_line_bg` is
   `:default`: the terminal theme with no OSC 11 answer), a code row's gutter is drawn as a `▏`
   bar in `line_number`, so a block with no language still reads as code.
-
-  `:strike` is one attribute `Geex.Cell` doesn't have yet; `mix geex.render` writes it.
   """
 
   alias Geex.Theme

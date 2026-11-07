@@ -2275,7 +2275,7 @@ defmodule Geex.Loop do
     {screen, %{tab | scroll: scroll}}
   end
 
-  @cell_attrs [:bold, :italic, :underline, :reverse, :dim]
+  @cell_attrs [:bold, :italic, :underline, :reverse, :dim, :strike]
 
   defp draw_preview_row(screen, row, y, w, theme) do
     {screen, _x} =
@@ -4064,6 +4064,9 @@ defmodule Geex.Loop do
   # shutdown restores the terminal.
   defp apply_action(action, cursor, text, state) do
     case action do
+      :toggle_preview ->
+        toggle_preview(state)
+
       :select_start ->
         # Anchor a selection at the cursor; subsequent motion extends it (ADR-0029).
         schedule_repaint(%{state | selection: Selection.new(cursor)})
@@ -4933,7 +4936,7 @@ defmodule Geex.Loop do
   # Switching and closing buffers need no text either (and work with none active).
   defp verb(action, state)
        when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane, :find_file] or
-              action == :toggle_mouse or
+              action in [:toggle_mouse, :toggle_preview] or
               action in [:split_rows, :split_cols, :tab_next, :tab_prev] or
               (is_tuple(action) and elem(action, 0) in [:tab, :theme]),
        do: apply_action(action, {0, 0}, "", state)
