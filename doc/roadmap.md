@@ -597,9 +597,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      drawn, the grammars' gaps corrected, per-line sources and `Geex.Markdown.Place`.
      (3) 2026-11-06: `{:geex_buffer_synced, …}` and `status/1`'s hash; `Geex.Markdown.Preview`
      under `PreviewSupervisor`; the anchor remapped through a line diff.
-   - **Before merging:** publish the `catalog-v3` release (`_build/catalog/dist/*`, not-latest,
-     ADR-0041 §5). `catalog_release` names it, so until it exists every install from the built-in
-     catalog fails on this branch.
+   - **`catalog-v3` published** 2026-11-06 (the maintainer's word): the full catalog with
+     `markdown_inline`, a not-latest pre-release (ADR-0041 §5).
    - **Later, if wanted:** included ranges in the NIF (faster inline parsing, and injections for
      source highlighting); marking the blocks the last write changed, by who wrote them.
 

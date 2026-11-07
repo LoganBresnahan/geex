@@ -347,12 +347,13 @@ defmodule Geex.Markdown.Preview do
       state
       | parsed: result.parsed,
         hash: result.hash,
-        rows: Map.merge(Map.take(state.rows, state.wanted), result.rows),
+        rows: state.rows |> Map.merge(result.rows) |> Map.take(state.wanted),
         status: result.status,
         tries: 0
     }
 
-    broadcast(state, result.rows, job.anchor, result.remap)
+    # A width dropped while the render ran isn't sent.
+    broadcast(state, Map.take(result.rows, state.wanted), job.anchor, result.remap)
   end
 
   defp retry(ms), do: Process.send_after(self(), :retry, ms)

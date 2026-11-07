@@ -4793,3 +4793,26 @@ heading prepended, `disk_changed`) 1.05 s with line 100 remapped to 102.
 
 **Not tested:** the loop's side (subscribing, widths on resize, the anchor on its save, drawing,
 re-rendering on an install, monitoring the process: slices 4 and 5).
+
+### 2026-11-06 — the markdown preview: a bounded line map, and catalog-v3 published (ADR-0043)
+
+**The line map** (the verifier's slice-3 finding): `Place.line_map/2` ran `List.myers_difference/2`
+on the whole middle, O(N·D): 34 s on `doc/testing.md` with every line changed, 8.4 s with every
+other one, before the render's rows were sent. Now it is bounded: prefix and suffix match
+directly, a middle of up to 200 lines (both sides) goes through Myers, and a larger one is
+anchored on the lines that occur once on each side in their longest common order (patience
+diff, O(n log n)), each gap matched again the same way; unmatched lines are `nil`. On
+testing.md: every line changed 6 ms, every other line 9 ms (2,398 of 4,796 kept, the unchanged
+half), one line inserted 1 ms, the file reversed 7 ms. Tests first: a wholesale rewrite and an
+every-other-line change of testing.md within a second (failed: the old map passed 5 s), and a
+3,000-line file with every 7th line changed, a block inserted and a line removed, whose kept
+lines all map to the same text in order. Also the verifier's nit: a width dropped while a render
+ran is neither kept nor sent.
+
+**catalog-v3 published** at the maintainer's word ("option 1 is fine"): the 32 zips of
+`_build/catalog/dist`, first checked against the committed `catalog.json` (every asset present,
+sha256 and size equal, no extras), as a pre-release, not latest, targeting `26e12dc` (the commit
+whose catalog.json names it). Checked from the public URL with no `GEEX_CATALOG_URL`: markdown,
+markdown_inline and json install into a fresh data_dir. The branch's merge blocker is cleared.
+
+1244 tests + 116 doctests green twice; compile warnings-clean.

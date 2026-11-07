@@ -262,6 +262,51 @@ defmodule Geex.Markdown.LayoutTest do
       assert Place.remap(Place.line_map("a\nb\n", "b\n"), {0, 1}) == {0, 0}
     end
 
+    test "the line map stays fast on a wholesale rewrite of a big file" do
+      # The verifier's slice-3 finding: a plain Myers diff took 34 s on testing.md rewritten.
+      old = File.read!("doc/testing.md")
+      every = old |> String.split("\n") |> Enum.map_join("\n", &(&1 <> " x"))
+
+      alternate =
+        old
+        |> String.split("\n")
+        |> Enum.with_index()
+        |> Enum.map_join("\n", fn {l, i} -> if rem(i, 2) == 0, do: l <> " x", else: l end)
+
+      for new <- [every, alternate] do
+        task = Task.async(fn -> :timer.tc(fn -> Place.line_map(old, new) end) end)
+        {us, map} = Task.await(task, 5_000)
+        assert us < 1_000_000, "#{div(us, 1000)} ms"
+        assert tuple_size(map) == length(String.split(old, "\n"))
+      end
+    end
+
+    test "on a big change the line map still matches the lines both sides kept" do
+      lines = for i <- 1..3000, do: "line #{i}"
+      # Every 7th line changed, a block inserted near the top, one line removed near the end.
+      new =
+        lines
+        |> Enum.with_index()
+        |> Enum.flat_map(fn
+          {_l, 10} -> ["inserted a", "inserted b", "line 11"]
+          {_l, 2900} -> []
+          {l, i} when rem(i, 7) == 0 -> [l <> " changed"]
+          {l, _i} -> [l]
+        end)
+
+      map = Place.line_map(Enum.join(lines, "\n"), Enum.join(new, "\n"))
+      new_t = List.to_tuple(new)
+
+      # Every kept line maps to the same text, and in order.
+      kept = for {n, o} <- Enum.with_index(Tuple.to_list(map)), n != nil, do: {o, n}
+      assert Enum.all?(kept, fn {o, n} -> Enum.at(lines, o) == elem(new_t, n) end)
+      assert Enum.map(kept, &elem(&1, 1)) == Enum.sort(Enum.map(kept, &elem(&1, 1)))
+      # Line 500 (index 499), unchanged, moved down by the two inserted lines.
+      assert elem(map, 499) == 501
+      assert elem(map, 2900) == nil
+      assert elem(map, 2950) == 2951
+    end
+
     test "a line with no rows goes to the nearest earlier line that has some" do
       # A link definition draws nothing.
       {parsed, rows} = render("one\n\n[foo]: /url \"title\"\n\nthree\n")
