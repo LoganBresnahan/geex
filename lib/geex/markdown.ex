@@ -161,12 +161,17 @@ defmodule Geex.Markdown do
   end
 
   @doc """
-  Whether `path` is a markdown file: its installed grammar is Markdown. Says nothing about the
-  companion; `handles/0` does.
+  Whether `path` is a markdown file: the grammar for its name, installed or in the catalog, is
+  Markdown. Not whether the preview can be offered (`available/0`), so a `.md` file with Markdown
+  missing or outdated is told what to install, not that it isn't markdown.
   """
   @spec file?(String.t() | nil) :: boolean()
-  def file?(path) when is_binary(path),
-    do: Geex.Highlight.language_for_path(path) == {:ok, @block}
+  def file?(path) when is_binary(path) do
+    case Geex.Installed.for_path(path) || Geex.Catalog.for_path(path) do
+      %{"name" => @block} -> true
+      _ -> false
+    end
+  end
 
   def file?(_path), do: false
 

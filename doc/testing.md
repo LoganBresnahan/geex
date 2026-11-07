@@ -4902,3 +4902,41 @@ two of my expectations were wrong (a column number; a test layout with the tree 
 
 **Not yet:** Alt+Shift+P in the keymap, the glyph drawn and clicked, link clicks, the preview's
 scroll bar, the status line, the dogfood (after the review).
+
+### 2026-11-06 — the markdown preview: slice 4's adversarial review, fixed (ADR-0043 §1–§3, §6)
+
+**Adversarial review.** The verifier ran an 8-agent workflow against `25699b7` (slice 4): 15
+findings kept, 0 refuted, 9 distinct once merged: 1 high, 4 medium, 4 low. Its sweep of every key
+event the parser emits, with a preview current, changed no text, no Session cursor, no selection
+or drag and opened no grid mode, and the quit keys still quit: the gate held. All 9 are fixed here,
+each with a test written first and seen failing:
+1. **High: a width change threw the preview to the top** (resize, split, tree drag): with no rows
+   at the new width, the scroll was reset. Each preview tab now carries `rows_w`, the width its
+   scroll indexes; it draws those rows until its own width's arrive, and a render moves it by the
+   anchor in them. A width the loop already holds rows of (the same text) converts at once.
+2. **Medium: every width's rows were kept forever**: a returning width drew old text, its anchor was
+   taken from stale rows, and the loop's heap grew per width. Each render now carries `hash`
+   (its text) and `from` (the text its line map maps from); the remap is applied only to rows of
+   `from` (rows of the same text need none), and the loop keeps only the wanted widths' rows and
+   each tab's `rows_w`.
+3. **Medium: an install's re-read did nothing** (the same bytes were `:same`). `Preview.refresh/1`
+   forces a parse (carried through retries); the loop's install path uses it, a rename's
+   `reread/1` stays cheap.
+4. **Medium: a new width with no parse crashed the worker** (after a failed read or with grammars
+   missing). A width-only job with no parse reads again.
+5. **Medium: rows spilled into the scroll bar's column.** Rows are drawn on a screen as wide as the
+   text, then the bar's column is added.
+6. **Low: "changing" or "render failed" stuck** after the write settled. A same-text read reports
+   its status, and a changed status is sent without rows.
+7. **Low: Delete was silent** in a preview: the stand-in text is now two spaces, so Delete resolves
+   to its edit and shows the hint (added to the gated keys).
+8. **Low: a failed output-pane jump moved the cursor** of the buffer behind the preview:
+   `open_location/2` sets it only once the file is shown.
+9. **Low: a `.md` file with Markdown missing was told "not a markdown file"**: `Markdown.file?/1`
+   asks the installed manifests or the catalog, so the user is told what to install.
+
+Also the verifier's font check (Cascadia Mono and Code have `◫`, Consolas doesn't) is in the
+glyph's comment.
+
+Under the verifier's load recipe (8 CPU hogs, ten runs of the markdown, preview, buffer and loop
+preview tests): 0 failures. 1292 tests + 116 doctests green twice; compile warnings-clean.

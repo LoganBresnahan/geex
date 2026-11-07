@@ -228,6 +228,62 @@ defmodule Geex.Markdown.PreviewTest do
     end
   end
 
+  describe "the slice-4 review" do
+    test "refresh/1 parses again with the same bytes (an install of a grammar it uses)", ctx do
+      {pid, r} = open(ctx.buf, 30)
+      Preview.reread(pid)
+      refute_receive {:geex_preview, _, _}, 200
+      Preview.refresh(pid)
+      r2 = render(ctx.buf, 30)
+      assert r2.render > r.render
+      assert r2.hash == r.hash
+    end
+
+    test "a width with no parse to lay out reads again, rather than crashing", ctx do
+      path = Path.join(ctx.dir, "missing.md")
+      buf = start_supervised!({Buffer, path: path}, id: :missing_buf)
+      {pid, r} = open(buf, 30)
+      assert r.status == {:read, :enoent}
+      Preview.widths(pid, [30, 20])
+      r = render(buf, 20)
+      assert r.status == {:read, :enoent}
+    end
+
+    test "changing clears once the buffer's hash catches up with the bytes drawn", ctx do
+      read = fn _path -> {:ok, "# Half writ"} end
+      {_pid, r} = open(ctx.buf, 30, read: read, settle_ms: 5)
+      assert r.status == :changing
+
+      # The buffer now holds those bytes and calls them synced: the same read is fine now.
+      text = Buffer.get_text(ctx.buf)
+      lines = String.split(text, "\n")
+
+      {:ok, cmd} =
+        Geex.Commands.Replace.parse(%{
+          start_line: 0,
+          start_col: 0,
+          end_line: length(lines) - 1,
+          end_col: String.length(List.last(lines)),
+          text: "# Half writ"
+        })
+
+      {:ok, _} = Buffer.dispatch(ctx.buf, Geex.Command.put_meta(cmd, Geex.Command.Meta.human()))
+      Buffer.mark_synced(ctx.buf)
+      assert_receive {:geex_preview, buf, %{status: :ok, rows: rows}}, 2_000
+      assert buf == ctx.buf and rows == %{}
+    end
+
+    test "each render says which text it is and which its line map starts from", ctx do
+      {_pid, r} = open(ctx.buf, 30)
+      assert r.hash == Buffer.status(ctx.buf).synced
+      assert r.from == nil
+      {:ok, _} = Buffer.dispatch(ctx.buf, insert(0, 0, "intro\n\n"))
+      {:ok, _} = Buffer.save(ctx.buf)
+      r2 = render(ctx.buf, 30)
+      assert r2.from == r.hash and r2.hash == Buffer.status(ctx.buf).synced
+    end
+  end
+
   describe "F17: the user's save scrolls to their cursor line" do
     test "the anchor the loop sends rides on the next render", ctx do
       {pid, r} = open(ctx.buf, 30)

@@ -246,6 +246,7 @@ defmodule Geex.Loop.PreviewTabsTest do
       before = text(buf)
 
       for event <- [
+            {:key, :delete},
             {:char, "x"},
             {:key, :enter},
             {:key, :backspace},
@@ -346,6 +347,102 @@ defmodule Geex.Loop.PreviewTabsTest do
       assert [w] = :sys.get_state(pid).wanted
       assert w in 40..50
     end
+  end
+
+  describe "the slice-4 review: widths, stale rows, the scroll bar's column, a failed jump" do
+    defp resize(state, rows, cols) do
+      {:noreply, state} = Loop.handle_info({:geex_io, {:resize, rows, cols}}, state)
+      state
+    end
+
+    defp top_line(state, buf) do
+      tab = Panes.shown(state.panes, 2)
+      lines = state.previews[buf].rows[tab.rows_w].lines
+      elem(lines, tab.scroll)
+    end
+
+    test "a width change keeps the reader's place, before and after its rows arrive", ctx do
+      {state, buf} = start(ctx.dir)
+      state = Loop.toggle_preview(state) |> rendered(buf)
+      %{rows_w: w1} = tab = Panes.shown(state.panes, 2)
+      at = Enum.find_index(Tuple.to_list(state.previews[buf].rows[w1].lines), &(&1 == 60))
+      state = %{state | panes: Panes.update_shown(state.panes, 2, &%{&1 | scroll: at})}
+      assert tab.rows_w == w1
+
+      # Narrower: until its own rows arrive the tab draws the rows its scroll indexes.
+      {state, rows} = state |> resize(24, 70) |> frame()
+      assert Enum.at(rows, 2) =~ "para 30"
+      state = rendered(state, buf)
+      assert %{rows_w: w2} = Panes.shown(state.panes, 2)
+      assert w2 < w1
+      assert top_line(state, buf) == 60
+      # The rows of a width no tab shows any more are let go.
+      assert Map.keys(state.previews[buf].rows) == [w2]
+    end
+
+    test "a render whose remap starts from other rows than the tab's isn't applied to it", ctx do
+      {state, buf} = start(ctx.dir)
+      state = Loop.toggle_preview(state) |> rendered(buf)
+      %{rows_w: w} = Panes.shown(state.panes, 2)
+      at = Enum.find_index(Tuple.to_list(state.previews[buf].rows[w].lines), &(&1 == 60))
+      state = %{state | panes: Panes.update_shown(state.panes, 2, &%{&1 | scroll: at})}
+
+      # A render from a text this tab never had: its line map means nothing here.
+      {:ok, g} = Geex.Markdown.handles()
+      {:ok, parsed} = Geex.Markdown.parse("x\n\n" <> @doc_text, g)
+      rows = Geex.Markdown.rows(parsed, w)
+      lines = Geex.Markdown.Place.lines(rows, parsed.text)
+      shift = List.to_tuple(Enum.map(0..200, &(&1 + 50)))
+
+      msg = %{
+        render: 99,
+        rows: %{w => %{rows: rows, lines: lines}},
+        status: :ok,
+        anchor: nil,
+        remap: shift,
+        hash: "new",
+        from: "some other text",
+        languages: []
+      }
+
+      {:noreply, state} = Loop.handle_info({:geex_preview, buf, msg}, state)
+      assert top_line(state, buf) == 60
+    end
+
+    test "rows never reach the scroll bar's column", ctx do
+      File.write!(Path.join(ctx.dir, "short.md"), String.duplicate("x", 300) <> "\n")
+      state = %{Loop.new_state(100, 24) | tree_shown: false, edits_shown: false}
+      {state, buf} = open(state, ctx.dir, "short.md")
+      state = Loop.toggle_preview(state) |> rendered(buf)
+      # Narrower: the wider rows are drawn until the narrow ones come, and must stop short of
+      # the pane's last column.
+      {_state, rows} = state |> resize(24, 70) |> frame()
+      for y <- 2..6, do: assert(String.last(Enum.at(rows, y)) == " ", inspect(Enum.at(rows, y)))
+    end
+
+    test "an output-pane jump whose open fails leaves the file's cursor alone", ctx do
+      locked = Path.join(ctx.dir, "locked.md")
+      File.write!(locked, "x\n")
+      File.chmod!(locked, 0o000)
+      on_exit(fn -> File.chmod(locked, 0o644) end)
+
+      {state, _buf} = start(ctx.dir, 24)
+      Session.set_cursor({2, 1})
+      state = Loop.toggle_preview(state)
+      state = type(state, "!echo locked.md:40:3")
+      state = ran(state)
+      state = key(state, {:key, :enter})
+      assert state.notice =~ "couldn't open"
+      assert cursor() == {2, 1}
+    end
+  end
+
+  defp ran(%{shell: nil} = state), do: state
+
+  defp ran(%{shell: %{pid: pid}} = state) do
+    assert_receive {:geex_shell, ^pid, _} = msg, 10_000
+    {:noreply, state} = Loop.handle_info(msg, state)
+    ran(state)
   end
 
   test "Page Up/Down change nothing outside a preview", ctx do

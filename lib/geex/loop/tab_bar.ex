@@ -21,8 +21,8 @@ defmodule Geex.Loop.TabBar do
   @pane_close " × "
 
   # The preview's glyph (ADR-0043 §1): U+25EB, East Asian Width Neutral (one column in any font;
-  # `¶` is Ambiguous), in DejaVu Sans Mono (and so Menlo), JetBrains Mono and FreeMono. Swap it
-  # here.
+  # `¶` is Ambiguous), in DejaVu Sans Mono (and so Menlo), JetBrains Mono, FreeMono, and Cascadia
+  # Mono and Code (Windows Terminal's defaults); not in Consolas. Swap it here.
   @preview_glyph "◫"
 
   # The handles' glyphs (ADR-0038 §6): one per direction an edge moves, the same grip turned, 4

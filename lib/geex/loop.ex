@@ -562,7 +562,7 @@ defmodule Geex.Loop do
     for {_buf, %{pid: pid, languages: langs}} <- state.previews,
         is_pid(pid),
         name in langs or name in Geex.Markdown.grammars(),
-        do: Preview.reread(pid)
+        do: Preview.refresh(pid)
 
     notice =
       case Geex.Installed.grammar(name) do
@@ -1181,8 +1181,9 @@ defmodule Geex.Loop do
   defp preview_key(event, state) do
     case preview_scroll(event) do
       nil ->
-        # A stand-in cursor and text, so a key that would edit resolves to its edit, not :ignore.
-        case Keymap.resolve(event, {0, 1}, " ") do
+        # A stand-in cursor with a grapheme on each side, so a key that would edit (Backspace,
+        # Delete) resolves to its edit, not :ignore.
+        case Keymap.resolve(event, {0, 1}, "  ") do
           :ignore -> state
           action when action in @preview_actions -> preview_action(event, state)
           {:tab, _} -> preview_action(event, state)
@@ -1214,10 +1215,10 @@ defmodule Geex.Loop do
   # Scroll pane `id`'s preview tab: by rows, a page (its text rows less one), or to the top or
   # bottom; never above the first row nor past the last row at the bottom of the pane.
   defp scroll_preview(state, id, step) do
-    with %{view: :preview, buffer: buf, scroll: scroll} <- Panes.shown(state.panes, id),
+    with %{view: :preview, scroll: scroll} = tab <- Panes.shown(state.panes, id),
          {^id, rect} <- pane_rect(state, id) do
       h = preview_text_rows(rect)
-      %{rows: rows} = preview_rows(state, buf, max(rect.w - 1, 1))
+      %{rows: rows} = preview_rows(state, tab)
       bottom = max(length(rows) - h, 0)
 
       to =
@@ -1302,20 +1303,30 @@ defmodule Geex.Loop do
   end
 
   # Each preview process learns the text widths of its buffer's preview tabs (the pane's width
-  # less the scroll bar's column), when they change: a tab opening, a resize, a split's drag.
+  # less the scroll bar's column), when they change: a tab opening, a resize, a split's drag. A tab
+  # whose new width the loop already has rows of, for the text it shows, moves to them now, since
+  # no render will come.
   defp preview_widths(%{previews: previews} = state) when previews == %{}, do: state
 
   defp preview_widths(state) do
     widths = pane_text_widths(state)
 
     Enum.reduce(state.previews, state, fn {buf, p}, acc ->
+      tabs = Panes.previews(acc.panes, buf)
+
       ws =
-        state.panes
-        |> Panes.previews(buf)
+        tabs
         |> Enum.map(fn {id, _i} -> widths[id] end)
         |> Enum.reject(&is_nil/1)
         |> Enum.uniq()
         |> Enum.sort()
+
+      panes =
+        Enum.reduce(tabs, acc.panes, fn {id, i}, panes ->
+          Panes.update_tab(panes, id, i, &convert_width(&1, widths[id], p))
+        end)
+
+      acc = %{acc | panes: panes}
 
       if ws != p.widths and p.pid do
         Preview.widths(p.pid, ws)
@@ -1326,6 +1337,19 @@ defmodule Geex.Loop do
     end)
   end
 
+  defp convert_width(%{rows_w: from, scroll: scroll} = tab, to, p)
+       when is_integer(to) and from != to do
+    case {p.rows[from], p.rows[to]} do
+      {%{hash: hash} = old, %{hash: hash} = new} ->
+        %{tab | scroll: Place.scroll(new.lines, Place.anchor(old.lines, scroll)), rows_w: to}
+
+      _ ->
+        tab
+    end
+  end
+
+  defp convert_width(tab, _to, _p), do: tab
+
   defp pane_text_widths(state) do
     state
     |> layout()
@@ -1334,39 +1358,46 @@ defmodule Geex.Loop do
     |> Map.new(fn {id, rect} -> {id, max(rect.w - 1, 1)} end)
   end
 
-  # A render arrived: each of the buffer's preview tabs whose width it laid out keeps its place
-  # (`Geex.Markdown.Place`): the top row's source line, carried through the line map, or the
-  # line of the user's save.
+  # A render arrived: each of the buffer's preview tabs whose width it laid out moves to those rows
+  # and keeps its place (`Geex.Markdown.Place`): the top row's source line in the rows its scroll
+  # indexed, carried through the line map when the render maps from that text, or the line of
+  # the user's save. Rows of widths no tab shows any more are let go.
   defp preview_rendered(state, buf, msg) do
     p = state.previews[buf]
     widths = pane_text_widths(state)
+    tagged = Map.new(msg.rows, fn {w, rows} -> {w, Map.put(rows, :hash, msg[:hash])} end)
 
     panes =
       state.panes
       |> Panes.previews(buf)
       |> Enum.reduce(state.panes, fn {id, i}, acc ->
         with w when is_integer(w) <- widths[id],
-             %{^w => new} <- msg.rows do
-          Panes.update_tab(
-            acc,
-            id,
-            i,
-            &%{&1 | scroll: kept_scroll(&1.scroll, p.rows[w], new, msg)}
-          )
+             %{^w => new} <- tagged do
+          Panes.update_tab(acc, id, i, fn tab ->
+            old = if tab.rows_w, do: p.rows[tab.rows_w]
+            %{tab | scroll: kept_scroll(tab.scroll, old, new, msg), rows_w: w}
+          end)
         else
           _ -> acc
         end
       end)
 
     last =
-      case Enum.max_by(msg.rows, fn {w, _} -> w end, fn -> nil end) do
+      case Enum.max_by(tagged, fn {w, _} -> w end, fn -> nil end) do
         {_w, rows} -> rows
         nil -> p.last
       end
 
+    keep =
+      for {id, i} <- Panes.previews(panes, buf),
+          w <- [widths[id], Enum.at(panes.panes[id].tabs, i).rows_w],
+          w != nil,
+          into: MapSet.new(),
+          do: w
+
     p = %{
       p
-      | rows: Map.merge(p.rows, msg.rows),
+      | rows: p.rows |> Map.merge(tagged) |> Map.take(MapSet.to_list(keep)),
         last: last,
         status: msg.status,
         languages: msg.languages
@@ -1382,14 +1413,24 @@ defmodule Geex.Loop do
 
   defp kept_scroll(scroll, old, new, msg) do
     anchor = Place.anchor(old.lines, scroll)
-    Place.scroll(new.lines, Place.remap(msg.remap, anchor))
+
+    # The line map holds only from the text it maps from; rows of the same text need none; from
+    # any other text the line is kept as it is.
+    anchor =
+      cond do
+        old.hash == msg[:hash] -> anchor
+        old.hash != nil and old.hash == msg[:from] -> Place.remap(msg.remap, anchor)
+        true -> anchor
+      end
+
+    Place.scroll(new.lines, anchor)
   end
 
-  # The rows a preview tab at `width` draws: its own width's, else the last of any width
-  # (clipped or padded) until its own arrive (ADR-0035: one answer counts).
-  defp preview_rows(state, buf, width) do
+  # The rows a preview tab draws and scrolls by: those its scroll indexes, else the last rows of
+  # any width (clipped or padded) until rows are applied to it (ADR-0035: one answer counts).
+  defp preview_rows(state, %{buffer: buf, rows_w: w}) do
     case state.previews[buf] do
-      %{rows: %{^width => rows}} -> rows
+      %{rows: %{^w => rows}} -> rows
       %{last: %{} = rows} -> rows
       _ -> %{rows: [], lines: {}}
     end
@@ -2242,20 +2283,23 @@ defmodule Geex.Loop do
   defp draw_preview(rect, tab, %{theme: %Theme{palette: pal} = theme} = state) do
     w = max(rect.w - 1, 1)
     h = preview_text_rows(rect)
-    %{rows: rows} = preview_rows(state, tab.buffer, w)
+    %{rows: rows} = preview_rows(state, tab)
     total = length(rows)
     scroll = tab.scroll |> min(max(total - h, 0)) |> max(0)
     blank = %Cell{char: " ", fg: pal.fg, bg: pal.bg}
 
+    # The rows on a screen as wide as the text, so rows of another width (drawn until this tab's
+    # own arrive) stop short of the scroll bar's column, a wide glyph at the edge included.
     body =
       rows
       |> Enum.drop(scroll)
       |> Enum.take(h)
       |> Enum.with_index()
-      |> Enum.reduce(Screen.fill_rect(Screen.new(rect.w, h), 0, 0, rect.w, h, blank), fn {row, y},
-                                                                                         acc ->
+      |> Enum.reduce(Screen.fill_rect(Screen.new(w, h), 0, 0, w, h, blank), fn {row, y}, acc ->
         draw_preview_row(acc, row, y, w, theme)
       end)
+      |> Screen.resize(rect.w, h)
+      |> Screen.fill_rect(w, 0, rect.w - w, h, blank)
       |> maybe_vscrollbar(total > h, rect.w - 1, h, scroll, total, theme)
 
     screen =
@@ -3479,9 +3523,16 @@ defmodule Geex.Loop do
       {path, line, col} ->
         with {:ok, full} <- FileOps.resolve(path, file_root()),
              true <- File.regular?(full) do
-          state = do_open(full, state)
-          set_cursor({line - 1, (col || 1) - 1})
-          %{state | goal: (col || 1) - 1, selection: nil}
+          # The cursor moves only once the file is shown: a failed open leaves the tab you were
+          # on (perhaps a preview, whose buffer's cursor it must not move) as it was.
+          case open_tab(full, state) do
+            {:ok, _pid, state} ->
+              set_cursor({line - 1, (col || 1) - 1})
+              %{state | focus: :editor, goal: (col || 1) - 1, selection: nil}
+
+            {:error, reason, state} ->
+              %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
+          end
         else
           _ -> %{state | notice: "no such file here: #{path}"}
         end

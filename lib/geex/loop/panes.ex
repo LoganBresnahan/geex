@@ -18,8 +18,8 @@ defmodule Geex.Loop.Panes do
     view. `nil` otherwise.
   - A tab is a **source** tab (`view: :source`, the above) or a markdown **preview**
     ([ADR-0043](../../../doc/adr/0043-markdown-preview.md) §1): `%{buffer, view: :preview, scroll,
-    from}`, its `scroll` counting rendered rows and `from` the pane it was opened from, with no
-    cursor, hscroll or hold. Only source tabs count as a buffer's views (`show/3`,
+    from, rows_w}`, its `scroll` counting rendered rows of width `rows_w` and `from` the pane it
+    was opened from, with no cursor, hscroll or hold. Only source tabs count as a buffer's views (`show/3`,
     `elsewhere?/2`, `in_other_pane?/3`); `buffers/1` and `drop_buffer/2` count previews too, so
     the loop watches their buffer and a buffer that ends takes its previews with it.
 
@@ -40,7 +40,8 @@ defmodule Geex.Loop.Panes do
           buffer: pid(),
           view: :preview,
           scroll: non_neg_integer(),
-          from: pos_integer()
+          from: pos_integer(),
+          rows_w: pos_integer() | nil
         }
   @type tab :: source_tab() | preview_tab()
   @type pane :: %{tabs: [tab()], at: non_neg_integer()}
@@ -60,9 +61,13 @@ defmodule Geex.Loop.Panes do
   def tab(buffer, cursor \\ {0, 0}),
     do: %{buffer: buffer, view: :source, cursor: cursor, scroll: 0, hscroll: 0, hold: nil}
 
-  @doc "A new preview tab for `buffer`, opened from pane `from`, at the top."
+  @doc """
+  A new preview tab for `buffer`, opened from pane `from`, at the top. `rows_w` is the width of
+  the rows its `scroll` indexes, set when rows are applied to it (`nil` until then).
+  """
   @spec preview_tab(pid(), pos_integer()) :: preview_tab()
-  def preview_tab(buffer, from), do: %{buffer: buffer, view: :preview, scroll: 0, from: from}
+  def preview_tab(buffer, from),
+    do: %{buffer: buffer, view: :preview, scroll: 0, from: from, rows_w: nil}
 
   @doc "Whether `tab` is a preview."
   @spec preview?(tab() | nil) :: boolean()

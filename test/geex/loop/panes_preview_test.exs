@@ -18,7 +18,8 @@ defmodule Geex.Loop.PanesPreviewTest do
        ctx do
     assert Panes.tab(ctx.a) |> Map.fetch!(:view) == :source
     tab = Panes.preview_tab(ctx.a, 1)
-    assert tab == %{buffer: ctx.a, view: :preview, scroll: 0, from: 1}
+    # `rows_w`: the width of the rows its scroll indexes, nil until rows arrive.
+    assert tab == %{buffer: ctx.a, view: :preview, scroll: 0, from: 1, rows_w: nil}
     assert Panes.preview?(tab)
     refute Panes.preview?(Panes.tab(ctx.a))
   end

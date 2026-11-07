@@ -153,7 +153,15 @@ defmodule Geex.MarkdownTest do
     assert Markdown.available() == {:error, {:missing, ["markdown"]}}
   end
 
-  test "only a file whose installed grammar is Markdown is a markdown file" do
+  test "a .md file is a markdown file even when its grammar is missing, so the user is told so" do
+    dir = Installed.dir(:grammar, "markdown")
+    File.rename!(dir, dir <> ".aside")
+    Installed.refresh()
+    assert Markdown.file?("README.md")
+    assert Markdown.available() == {:error, {:missing, ["markdown"]}}
+  end
+
+  test "a markdown file is one Markdown's grammar covers, installed or in the catalog" do
     assert Markdown.file?("README.md")
     assert Markdown.file?("/x/notes.markdown")
     refute Markdown.file?("lib/geex.ex")
