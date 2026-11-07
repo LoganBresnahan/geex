@@ -596,7 +596,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      (2) 2026-11-06: the layout: `Geex.Markdown.parse/2` and `rows/2`, code colours resolved when
      drawn, the grammars' gaps corrected, per-line sources and `Geex.Markdown.Place`.
      (3) 2026-11-06: `{:geex_buffer_synced, …}` and `status/1`'s hash; `Geex.Markdown.Preview`
-     under `PreviewSupervisor`; the anchor remapped through a line diff.
+     under `PreviewSupervisor`; the anchor remapped through a line diff. (4) 2026-11-06: preview
+     tabs in `Panes` and the loop, the toggle (no key yet), the close paths, the gate.
    - **`catalog-v3` published** 2026-11-06 (the maintainer's word): the full catalog with
      `markdown_inline`, a not-latest pre-release (ADR-0041 §5).
    - **Later, if wanted:** included ranges in the NIF (faster inline parsing, and injections for

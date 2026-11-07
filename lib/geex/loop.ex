@@ -65,6 +65,7 @@ defmodule Geex.Loop do
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
   alias Geex.Highlight.{Paint, Reactor}
+  alias Geex.Markdown.{Place, Preview}
 
   alias Geex.Loop.{
     EditsPane,
@@ -329,6 +330,10 @@ defmodule Geex.Loop do
       # and its highlight reactor, `%{pid => %{ref, reactor}}`.
       panes: Panes.new(),
       watched: %{},
+      # The markdown previews (ADR-0043 §3), by buffer: its preview process (monitored), the rows
+      # it last sent per width, its status, the grammars its code blocks name, the widths it was
+      # last told, and the last rows of any width (drawn, clipped, until a tab's own arrive).
+      previews: %{},
       repaint?: false,
       minibuffer: Minibuffer.new(),
       # A one-line message from the buffer (`{:geex_buffer_notice, …}`, e.g. a reconcile
@@ -551,6 +556,13 @@ defmodule Geex.Loop do
           acc
         end
       end)
+
+    # A preview whose code blocks name the grammar, or one waiting on the Markdown grammars,
+    # renders again (ADR-0043 §4: an install takes effect without a restart).
+    for {_buf, %{pid: pid, languages: langs}} <- state.previews,
+        is_pid(pid),
+        name in langs or name in Geex.Markdown.grammars(),
+        do: Preview.reread(pid)
 
     notice =
       case Geex.Installed.grammar(name) do
@@ -827,7 +839,9 @@ defmodule Geex.Loop do
     {:noreply, schedule_repaint(%{state | notice: notice})}
   end
 
-  # An install the settings view started died without answering; any other `:DOWN` is nothing.
+  # An install the settings view started died without answering, or a markdown preview's
+  # process ended under its tabs (they keep their rows, and say it stopped, ADR-0043 §3); any
+  # other `:DOWN` is nothing.
   def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
     case Enum.find(state.installing, fn {_name, i} -> i.ref == ref end) do
       {name, _} ->
@@ -837,12 +851,23 @@ defmodule Geex.Loop do
          schedule_repaint(say(state, "#{name}: the install stopped (#{inspect(reason)})"))}
 
       nil ->
-        {:noreply, state}
+        case Enum.find(state.previews, fn {_buf, p} -> p.ref == ref end) do
+          {buf, p} ->
+            p = %{p | pid: nil, ref: nil, status: :stopped}
+            {:noreply, schedule_repaint(put_in(state.previews[buf], p))}
+
+          nil ->
+            {:noreply, state}
+        end
     end
   end
 
   # Coalesced repaint — one per burst.
   def handle_info(:repaint, state), do: {:noreply, repaint(%{state | repaint?: false})}
+
+  # A markdown preview's render (ADR-0043 §2, §3).
+  def handle_info({:geex_preview, buf, msg}, state) when is_map_key(state.previews, buf),
+    do: {:noreply, preview_rendered(state, buf, msg)}
 
   def handle_info(_msg, state), do: {:noreply, state}
 
@@ -850,7 +875,12 @@ defmodule Geex.Loop do
 
   # A key for the editor: resolve it against the current text + cursor (read fresh from
   # Session).
+  # A preview's keys go to a handler of their own: it is read-only (ADR-0043 §1).
   defp apply_editor_key(event, state) do
+    if preview_current?(state), do: preview_key(event, state), else: source_key(event, state)
+  end
+
+  defp source_key(event, state) do
     # The scroll the mouse set holds until a key acts on the text (ADR-0039): even one that
     # doesn't move the cursor (Delete, Alt+H) should show where it acts.
     state = %{state | panes: Panes.update_current(state.panes, &%{&1 | hold: nil})}
@@ -895,17 +925,33 @@ defmodule Geex.Loop do
         state
 
       true ->
-        cursor =
-          case safe_session_snapshot() do
-            {:ok, %{cursor: cursor}} -> cursor
-            _ -> {0, 0}
-          end
+        show_source(state, pid)
+    end
+  end
 
-        {panes, kind} = Panes.show(state.panes, pid, cursor)
-        # A tab this pane already had keeps the cursor it had here.
-        if kind == :existing, do: set_cursor(Panes.current(panes).cursor)
-        state = put_panes(%{state | selection: nil, goal: 0, drag: nil}, panes)
-        if kind == :existing, do: state, else: grammar_notice(state, pid)
+  # Show `pid`'s source tab in the current pane (a new one at the end if the pane has none, even
+  # where it has the file's preview), at Session's cursor for a new tab, at the tab's own for one
+  # the pane had. The loop's own opens come here directly, not through `adopt_active/2`, whose
+  # early return fires exactly when the file's preview is current (ADR-0043 §1).
+  defp show_source(state, pid) do
+    cursor =
+      case safe_session_snapshot() do
+        {:ok, %{cursor: cursor}} -> cursor
+        _ -> {0, 0}
+      end
+
+    {panes, kind} = Panes.show(state.panes, pid, cursor)
+    # A tab this pane already had keeps the cursor it had here.
+    if kind == :existing, do: set_cursor(Panes.current(panes).cursor)
+    state = put_panes(%{state | selection: nil, goal: 0, drag: nil}, panes)
+    if kind == :existing, do: state, else: grammar_notice(state, pid)
+  end
+
+  # An open the loop made: show the file's source tab unless it is the current tab already.
+  defp show_opened(state, pid) do
+    case Panes.current(state.panes) do
+      %{buffer: ^pid, view: :source} -> state
+      _ -> if safe_active_buffer() == {:ok, pid}, do: show_source(state, pid), else: state
     end
   end
 
@@ -939,7 +985,7 @@ defmodule Geex.Loop do
     state = leave(state)
 
     case safe_open_file(path) do
-      {:ok, pid} -> {:ok, pid, adopt_active(state, pid)}
+      {:ok, pid} -> {:ok, pid, show_opened(state, pid)}
       {:error, reason} -> {:error, reason, state}
     end
   end
@@ -947,7 +993,7 @@ defmodule Geex.Loop do
   # Before the loop makes another tab current: copy Session's cursor (the current tab's while it
   # is current) into the tab.
   defp leave(state) do
-    with %{buffer: pid} <- Panes.current(state.panes),
+    with %{buffer: pid, view: :source} <- Panes.current(state.panes),
          {:ok, ^pid} <- safe_active_buffer(),
          {:ok, %{cursor: cursor}} <- safe_session_snapshot() do
       %{state | panes: Panes.update_current(state.panes, &%{&1 | cursor: cursor})}
@@ -960,6 +1006,11 @@ defmodule Geex.Loop do
   # and the goal column belong to the tab you left.
   defp enter(state) do
     case Panes.current(state.panes) do
+      # A preview makes its buffer active and leaves Session's cursor as it is: the file's,
+      # never a preview's (ADR-0043 §1).
+      %{buffer: pid, view: :preview} ->
+        safe_set_active(pid)
+
       %{buffer: pid, cursor: cursor} ->
         safe_set_active(pid)
         set_cursor(cursor)
@@ -1016,22 +1067,177 @@ defmodule Geex.Loop do
 
   # Alt+- / Alt+=: split the current pane, unless the halves would be smaller than a pane can be.
   defp split(state, dir) do
+    if room_to_split?(state, dir),
+      do: switch(state, &Panes.split(&1, dir)),
+      else: %{state | notice: "no room to split this pane"}
+  end
+
+  defp room_to_split?(state, dir) do
     rect =
       layout(state).editor
       |> Layout.split(state.panes.split)
       |> Enum.find_value(fn {id, rect} -> id == state.panes.pane && rect end)
 
-    roomy? =
-      case {dir, rect} do
-        {:rows, %Geex.Rect{h: h}} -> div(h, 2) >= @min_pane_h
-        {:cols, %Geex.Rect{w: w}} -> div(w - 1, 2) >= @min_pane_w
-        _ -> false
-      end
-
-    if roomy?,
-      do: switch(state, &Panes.split(&1, dir)),
-      else: %{state | notice: "no room to split this pane"}
+    case {dir, rect} do
+      {:rows, %Geex.Rect{h: h}} -> div(h, 2) >= @min_pane_h
+      {:cols, %Geex.Rect{w: w}} -> div(w - 1, 2) >= @min_pane_w
+      _ -> false
+    end
   end
+
+  ## The preview's toggle (ADR-0043 §1). From a source tab it opens the file's preview, the
+  ## source keeping focus, or closes every preview of the file; from a preview it closes that one
+  ## and focuses the pane it came from. No key reaches it yet.
+
+  @doc false
+  def toggle_preview(state) do
+    case Panes.current(state.panes) do
+      nil ->
+        %{state | notice: "no file to preview"}
+
+      %{view: :preview, from: from} ->
+        id = state.panes.pane
+        panes = Panes.close_tab_at(state.panes, id, state.panes.panes[id].at)
+        panes = if Map.has_key?(panes.panes, from), do: Panes.focus(panes, from), else: panes
+        state |> put_panes(panes) |> enter() |> schedule_repaint()
+
+      %{buffer: buf} ->
+        case Panes.previews(state.panes, buf) do
+          [] -> open_preview(state, buf)
+          tabs -> close_previews(state, tabs)
+        end
+    end
+  end
+
+  # With one pane, beside it (or in it, after the source, where a split has no room); with more,
+  # in the next pane after the source's, after the tab that pane shows.
+  defp open_preview(state, buf) do
+    path = safe_status(buf)[:path]
+
+    cond do
+      not Geex.Markdown.file?(path) ->
+        %{state | notice: "no preview: not a markdown file"}
+
+      match?({:error, _}, Geex.Markdown.available()) ->
+        {:error, why} = Geex.Markdown.available()
+        %{state | notice: Geex.Markdown.describe(why)}
+
+      true ->
+        ps = state.panes
+        tab = Panes.preview_tab(buf, ps.pane)
+
+        state =
+          cond do
+            map_size(ps.panes) > 1 ->
+              put_panes(state, Panes.add_tab(ps, Panes.next_pane(ps, ps.pane), tab))
+
+            room_to_split?(state, :cols) ->
+              put_panes(state, Panes.split_beside(ps, :cols, tab))
+
+            true ->
+              state = leave(state)
+              state |> put_panes(Panes.add_tab(state.panes, ps.pane, tab)) |> enter()
+          end
+
+        schedule_repaint(state)
+    end
+  end
+
+  defp close_previews(state, tabs) do
+    # The highest index first in each pane, so the others keep theirs.
+    panes =
+      tabs
+      |> Enum.sort_by(fn {id, i} -> {id, -i} end)
+      |> Enum.reduce(state.panes, fn {id, i}, acc ->
+        if Map.has_key?(acc.panes, id), do: Panes.close_tab_at(acc, id, i), else: acc
+      end)
+
+    state |> put_panes(panes) |> schedule_repaint()
+  end
+
+  ## A preview's keys: the scroll keys move it by rows; the keys that don't touch the text (the
+  ## panes, the files, save, fast-forward, quit …) do what they do anywhere; the rest say why
+  ## they don't (ADR-0043 §1).
+
+  @read_only "the preview is read-only (Alt+Shift+P closes it)"
+  @preview_actions [
+    :select_clear,
+    :minibuffer,
+    :palette,
+    :next_pane,
+    :find_file,
+    :close,
+    :toggle_tree,
+    :toggle_edits,
+    :split_rows,
+    :split_cols,
+    :tab_prev,
+    :tab_next,
+    :save,
+    :fast_forward,
+    :quit
+  ]
+
+  defp preview_key(event, state) do
+    case preview_scroll(event) do
+      nil ->
+        # A stand-in cursor and text, so a key that would edit resolves to its edit, not :ignore.
+        case Keymap.resolve(event, {0, 1}, " ") do
+          :ignore -> state
+          action when action in @preview_actions -> preview_action(event, state)
+          {:tab, _} -> preview_action(event, state)
+          _ -> schedule_repaint(%{state | notice: @read_only})
+        end
+
+      step ->
+        schedule_repaint(scroll_preview(state, state.panes.pane, step))
+    end
+  end
+
+  defp preview_action(event, state) do
+    case safe_session_snapshot() do
+      {:ok, %{text: text, cursor: cursor}} -> apply_key(event, cursor, text, state)
+      _ -> apply_key(event, {0, 0}, "", state)
+    end
+  end
+
+  defp preview_scroll({:key, :up}), do: -1
+  defp preview_scroll({:key, :down}), do: 1
+  defp preview_scroll({:alt, c}) when c in [?w, ?W], do: -1
+  defp preview_scroll({:alt, c}) when c in [?s, ?S], do: 1
+  defp preview_scroll({:key, :page_up}), do: :page_up
+  defp preview_scroll({:key, :page_down}), do: :page_down
+  defp preview_scroll({:key, :home}), do: :top
+  defp preview_scroll({:key, :end}), do: :bottom
+  defp preview_scroll(_event), do: nil
+
+  # Scroll pane `id`'s preview tab: by rows, a page (its text rows less one), or to the top or
+  # bottom; never above the first row nor past the last row at the bottom of the pane.
+  defp scroll_preview(state, id, step) do
+    with %{view: :preview, buffer: buf, scroll: scroll} <- Panes.shown(state.panes, id),
+         {^id, rect} <- pane_rect(state, id) do
+      h = preview_text_rows(rect)
+      %{rows: rows} = preview_rows(state, buf, max(rect.w - 1, 1))
+      bottom = max(length(rows) - h, 0)
+
+      to =
+        case step do
+          :top -> 0
+          :bottom -> bottom
+          :page_up -> scroll - max(h - 1, 1)
+          :page_down -> scroll + max(h - 1, 1)
+          n -> scroll + n
+        end
+
+      to = to |> min(bottom) |> max(0)
+      %{state | panes: Panes.update_shown(state.panes, id, &%{&1 | scroll: to})}
+    else
+      _ -> state
+    end
+  end
+
+  # A preview pane's rows: the tab bar, the header, then the rendered rows.
+  defp preview_text_rows(rect), do: max(rect.h - 2, 0)
 
   # Switch tabs or panes the loop's way: leave, change, enter.
   defp switch(state, fun), do: state |> leave() |> then(&put_panes(&1, fun.(&1.panes))) |> enter()
@@ -1051,8 +1257,145 @@ defmodule Geex.Loop do
         if Map.has_key?(acc.watched, pid), do: acc, else: watch(acc, pid)
       end)
 
-    %{state | panes: panes}
+    sync_previews(%{state | panes: panes})
   end
+
+  ## Markdown previews (ADR-0043). A buffer with a preview tab has its preview process attached
+  ## (`Geex.Markdown.Preview`, monitored); one with none is let go. The loop owns every preview
+  ## tab's row scroll, and tells each process its tabs' text widths.
+
+  defp sync_previews(state) do
+    want =
+      for id <- Panes.ids(state.panes),
+          t <- state.panes.panes[id].tabs,
+          Panes.preview?(t),
+          into: MapSet.new(),
+          do: t.buffer
+
+    state =
+      Enum.reduce(Map.keys(state.previews), state, fn buf, acc ->
+        if MapSet.member?(want, buf), do: acc, else: drop_preview(acc, buf)
+      end)
+
+    state =
+      Enum.reduce(want, state, fn buf, acc ->
+        if Map.has_key?(acc.previews, buf), do: acc, else: attach_preview(acc, buf)
+      end)
+
+    preview_widths(state)
+  end
+
+  defp attach_preview(state, buf) do
+    entry = %{pid: nil, ref: nil, rows: %{}, last: nil, status: :ok, languages: [], widths: []}
+
+    case Preview.attach(buf, self()) do
+      {:ok, pid} -> put_in(state.previews[buf], %{entry | pid: pid, ref: Process.monitor(pid)})
+      {:error, _} -> put_in(state.previews[buf], %{entry | status: :stopped})
+    end
+  end
+
+  defp drop_preview(state, buf) do
+    {p, previews} = Map.pop(state.previews, buf)
+    if p.ref, do: Process.demonitor(p.ref, [:flush])
+    if p.pid, do: Preview.unsubscribe(p.pid, self())
+    %{state | previews: previews}
+  end
+
+  # Each preview process learns the text widths of its buffer's preview tabs (the pane's width
+  # less the scroll bar's column), when they change: a tab opening, a resize, a split's drag.
+  defp preview_widths(%{previews: previews} = state) when previews == %{}, do: state
+
+  defp preview_widths(state) do
+    widths = pane_text_widths(state)
+
+    Enum.reduce(state.previews, state, fn {buf, p}, acc ->
+      ws =
+        state.panes
+        |> Panes.previews(buf)
+        |> Enum.map(fn {id, _i} -> widths[id] end)
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      if ws != p.widths and p.pid do
+        Preview.widths(p.pid, ws)
+        put_in(acc.previews[buf].widths, ws)
+      else
+        acc
+      end
+    end)
+  end
+
+  defp pane_text_widths(state) do
+    state
+    |> layout()
+    |> Map.fetch!(:editor)
+    |> Layout.split(state.panes.split)
+    |> Map.new(fn {id, rect} -> {id, max(rect.w - 1, 1)} end)
+  end
+
+  # A render arrived: each of the buffer's preview tabs whose width it laid out keeps its place
+  # (`Geex.Markdown.Place`): the top row's source line, carried through the line map, or the
+  # line of the user's save.
+  defp preview_rendered(state, buf, msg) do
+    p = state.previews[buf]
+    widths = pane_text_widths(state)
+
+    panes =
+      state.panes
+      |> Panes.previews(buf)
+      |> Enum.reduce(state.panes, fn {id, i}, acc ->
+        with w when is_integer(w) <- widths[id],
+             %{^w => new} <- msg.rows do
+          Panes.update_tab(
+            acc,
+            id,
+            i,
+            &%{&1 | scroll: kept_scroll(&1.scroll, p.rows[w], new, msg)}
+          )
+        else
+          _ -> acc
+        end
+      end)
+
+    last =
+      case Enum.max_by(msg.rows, fn {w, _} -> w end, fn -> nil end) do
+        {_w, rows} -> rows
+        nil -> p.last
+      end
+
+    p = %{
+      p
+      | rows: Map.merge(p.rows, msg.rows),
+        last: last,
+        status: msg.status,
+        languages: msg.languages
+    }
+
+    schedule_repaint(%{state | panes: panes, previews: Map.put(state.previews, buf, p)})
+  end
+
+  defp kept_scroll(_scroll, _old, new, %{anchor: line}) when is_integer(line),
+    do: Place.scroll(new.lines, {line, 0})
+
+  defp kept_scroll(_scroll, nil, _new, _msg), do: 0
+
+  defp kept_scroll(scroll, old, new, msg) do
+    anchor = Place.anchor(old.lines, scroll)
+    Place.scroll(new.lines, Place.remap(msg.remap, anchor))
+  end
+
+  # The rows a preview tab at `width` draws: its own width's, else the last of any width
+  # (clipped or padded) until its own arrive (ADR-0035: one answer counts).
+  defp preview_rows(state, buf, width) do
+    case state.previews[buf] do
+      %{rows: %{^width => rows}} -> rows
+      %{last: %{} = rows} -> rows
+      _ -> %{rows: [], lines: {}}
+    end
+  end
+
+  defp preview_current?(state), do: Panes.preview?(Panes.current(state.panes))
 
   defp watch(state, pid) do
     ref = Process.monitor(pid)
@@ -1258,6 +1601,13 @@ defmodule Geex.Loop do
 
   # The wheel over pane `id`: scroll it, keeping its cursor where it is.
   defp wheel(state, id, rect, step) do
+    case Panes.shown(state.panes, id) do
+      %{view: :preview} -> scroll_preview(state, id, elem(step, 1))
+      _ -> wheel_text(state, id, rect, step)
+    end
+  end
+
+  defp wheel_text(state, id, rect, step) do
     case pane_text(state, id) do
       {tab, text} -> hold_scroll(state, id, rect, scrolled(tab, text, rect, step), text)
       nil -> state
@@ -1512,10 +1862,11 @@ defmodule Geex.Loop do
         state |> enter_pane({:file, id}) |> switch(&Panes.select(&1, i))
 
       {:close_tab, i} ->
-        %{buffer: buf} = Enum.at(pane.tabs, i)
+        %{buffer: buf} = tab = Enum.at(pane.tabs, i)
 
-        # Refused without switching to it: the tab holds the only copy of unsaved edits.
-        if match?(%{dirty: true}, safe_status(buf)) and
+        # Refused without switching to it: the tab holds the only copy of unsaved edits. A
+        # preview's × is never refused (ADR-0043 §1).
+        if not Panes.preview?(tab) and match?(%{dirty: true}, safe_status(buf)) and
              not Panes.in_other_pane?(state.panes, buf, id) do
           name = status_label(safe_status(buf)[:path])
 
@@ -1538,8 +1889,10 @@ defmodule Geex.Loop do
   defp close_pane(state, id) do
     tabs = state.panes.panes[id].tabs
 
+    # The buffers this pane has the only source tabs of; its previews just go.
     own =
       tabs
+      |> Enum.reject(&Panes.preview?/1)
       |> Enum.map(& &1.buffer)
       |> Enum.uniq()
       |> Enum.reject(&Panes.in_other_pane?(state.panes, &1, id))
@@ -1683,8 +2036,9 @@ defmodule Geex.Loop do
   end
 
   # Pane `id`'s shown tab and its buffer's text, or `nil` when it has none.
+  # A preview has no text to place a caret in, select or scroll by lines: nil (ADR-0043 §1).
   defp pane_text(state, id) do
-    with %{buffer: pid} = tab <- Panes.shown(state.panes, id),
+    with %{buffer: pid, view: :source} = tab <- Panes.shown(state.panes, id),
          {:ok, %{text: text}} <- safe_buffer_snapshot(pid) do
       {tab, text}
     else
@@ -1705,7 +2059,8 @@ defmodule Geex.Loop do
   end
 
   defp repaint(state) do
-    state = ensure_tree(state)
+    # A resize or a split's drag changes a preview tab's width: its process lays out again.
+    state = state |> ensure_tree() |> preview_widths()
     layout = layout(state)
     entries = if layout.edits && !state.output, do: edits_entries(), else: []
     state = settle_lists(state, layout, entries)
@@ -1729,6 +2084,20 @@ defmodule Geex.Loop do
 
           nil ->
             {draw_empty_pane(screen, rect, current? and editing?, state), panes, cursor}
+
+          # A preview: its rows, no gutter, overlay, marks, selection or ruler, and the hardware
+          # cursor hidden while it has focus (ADR-0043 §1).
+          {tab, :preview} ->
+            {pane, tab} = draw_preview(rect, tab, state)
+            panes = Panes.update_shown(panes, id, fn _ -> tab end)
+            cursor = if current? and editing?, do: :hidden, else: cursor
+
+            screen =
+              screen
+              |> Screen.blit(pane, rect.x, rect.y)
+              |> draw_tab_bar(rect, panes.panes[id], current? and editing?, state)
+
+            {screen, panes, cursor}
 
           {tab, snap} ->
             {pane, tab, at} = draw_pane(rect, tab, snap, current?, current? and editing?, state)
@@ -1773,6 +2142,9 @@ defmodule Geex.Loop do
     case Panes.shown(panes, id) do
       nil ->
         nil
+
+      %{view: :preview} = tab ->
+        {tab, :preview}
 
       %{buffer: pid} = tab ->
         case {current?, active, active_pid} do
@@ -1862,6 +2234,84 @@ defmodule Geex.Loop do
     # loop (an outside open).
     hold = if held?, do: tab.hold
     {screen, %{tab | scroll: scroll, hscroll: hscroll, cursor: cursor, hold: hold}, at}
+  end
+
+  # A preview pane on a screen of its own size: the tab bar's row (drawn after), the header, then
+  # the rows from the tab's scroll, a vertical scroll bar when they overflow. Rows carry roles and
+  # capture names; the theme colours them here (`Geex.Markdown.Style`).
+  defp draw_preview(rect, tab, %{theme: %Theme{palette: pal} = theme} = state) do
+    w = max(rect.w - 1, 1)
+    h = preview_text_rows(rect)
+    %{rows: rows} = preview_rows(state, tab.buffer, w)
+    total = length(rows)
+    scroll = tab.scroll |> min(max(total - h, 0)) |> max(0)
+    blank = %Cell{char: " ", fg: pal.fg, bg: pal.bg}
+
+    body =
+      rows
+      |> Enum.drop(scroll)
+      |> Enum.take(h)
+      |> Enum.with_index()
+      |> Enum.reduce(Screen.fill_rect(Screen.new(rect.w, h), 0, 0, rect.w, h, blank), fn {row, y},
+                                                                                         acc ->
+        draw_preview_row(acc, row, y, w, theme)
+      end)
+      |> maybe_vscrollbar(total > h, rect.w - 1, h, scroll, total, theme)
+
+    screen =
+      Screen.new(rect.w, rect.h)
+      |> Screen.fill_rect(0, 0, rect.w, rect.h, blank)
+      |> Screen.blit(body, 0, 2)
+      |> Screen.draw_text(
+        0,
+        1,
+        palette_clip(" " <> preview_header(state, tab.buffer), rect.w),
+        %Cell{
+          fg: pal.line_number,
+          bg: pal.bg
+        }
+      )
+
+    {screen, %{tab | scroll: scroll}}
+  end
+
+  @cell_attrs [:bold, :italic, :underline, :reverse, :dim]
+
+  defp draw_preview_row(screen, row, y, w, theme) do
+    {screen, _x} =
+      Enum.reduce(row.runs, {screen, 0}, fn run, {acc, x} ->
+        {text, style} = Geex.Markdown.Style.run(theme, run)
+
+        if x >= w do
+          {acc, x}
+        else
+          cell = %Cell{
+            fg: style.fg,
+            bg: style.bg,
+            attrs: Enum.filter(style.attrs, &(&1 in @cell_attrs))
+          }
+
+          {Screen.draw_text(acc, x, y, text, cell), x + Geex.Width.string(text)}
+        end
+      end)
+
+    screen
+  end
+
+  # The preview's header: the file, and when the preview isn't the buffer, why: `[+]` while the
+  # buffer has unsaved edits, "behind" while the disk is ahead, or what the read or process says.
+  defp preview_header(state, buf) do
+    st = safe_status(buf) || %{}
+    status = get_in(state.previews, [buf, :status]) || :ok
+
+    [
+      status_label(st[:path]),
+      if(st[:dirty], do: "[+]"),
+      if(st[:behind], do: "behind"),
+      Preview.describe(status)
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" · ")
   end
 
   defp fill_pane(screen, rect, %Theme{palette: pal}),
@@ -2760,6 +3210,9 @@ defmodule Geex.Loop do
 
   # A moved directory keeps its place in the tree: open, or made here, under its new name.
   defp file_op_done({:renamed, from, to, notice}, state) do
+    # A buffer's previews read the file at its new path (`Buffer.rename/2` tells no one).
+    for {_buf, %{pid: pid}} <- state.previews, is_pid(pid), do: Preview.reread(pid)
+
     state =
       case {tree_path(from), tree_path(to)} do
         {from_rel, to_rel} when is_binary(from_rel) and is_binary(to_rel) ->
@@ -2840,6 +3293,12 @@ defmodule Geex.Loop do
   defp run_pipe(%{shell: %{}} = state, _cmd), do: %{state | notice: @running}
 
   defp run_pipe(state, cmd) do
+    if preview_current?(state), do: read_only(state), else: start_pipe(state, cmd)
+  end
+
+  defp read_only(state), do: schedule_repaint(%{state | notice: @read_only})
+
+  defp start_pipe(state, cmd) do
     with false <- Geex.Shell.Text.full_screen?(cmd),
          %Selection{anchor: a, active: b} = sel when a != b <- state.selection,
          {:ok, pid} <- safe_active_buffer(),
@@ -2942,6 +3401,10 @@ defmodule Geex.Loop do
   # Alt+Z takes it back. Only while the buffer is the one shown and unchanged since it began.
   # Output ending in a newline loses it when the selection didn't end in one (`sort`, `fmt` …).
   defp replace_selection(state, shell, out) do
+    if preview_current?(state), do: read_only(state), else: replace_selection!(state, shell, out)
+  end
+
+  defp replace_selection!(state, shell, out) do
     text = shell.text
 
     same? =
@@ -3735,6 +4198,7 @@ defmodule Geex.Loop do
       case on_active_buffer(&Reconcile.save(&1, force: state.save_armed)) do
         {:ok, path} ->
           Edits.saved(path)
+          saved_anchor(state)
           %{state | save_armed: false}
 
         {:markers, line} ->
@@ -3750,6 +4214,18 @@ defmodule Geex.Loop do
       end
 
     schedule_repaint(state)
+  end
+
+  # The user saved from a source tab: the file's previews scroll to the cursor's line on their next
+  # render (ADR-0043 §6). A save from a preview keeps the reader's place.
+  defp saved_anchor(state) do
+    with %{view: :source, buffer: buf} <- Panes.current(state.panes),
+         %{pid: pid} when is_pid(pid) <- state.previews[buf],
+         {:ok, %{cursor: {line, _col}}} <- safe_session_snapshot() do
+      Preview.saved(pid, line)
+    end
+
+    :ok
   end
 
   # Show `path`, opening it if needed (`open PATH`, ADR-0034). A relative path is from the
@@ -3786,9 +4262,16 @@ defmodule Geex.Loop do
       nil ->
         close_active(state)
 
+      # A preview closes alone, never the buffer, never refused (ADR-0043 §1).
+      %{view: :preview} ->
+        state = state |> put_panes(Panes.close_tab(state.panes)) |> enter()
+        %{state | notice: "closed the preview"}
+
       %{buffer: pid} ->
         name = status_label(safe_status(pid)[:path])
         rest = Panes.close_tab(state.panes)
+        # The file's last source tab closes the file, and its previews with it.
+        gone = Panes.drop_buffer(rest, pid)
 
         cond do
           Panes.elsewhere?(state.panes, pid) ->
@@ -3800,13 +4283,13 @@ defmodule Geex.Loop do
 
           # The only pane's last tab: Session closes it and picks what to show next, which
           # `adopt_active/2` then shows. Only while Session agrees what that tab is.
-          Panes.current(rest) == nil ->
+          Panes.current(gone) == nil ->
             if safe_active_buffer() == {:ok, pid},
-              do: close_active(state),
+              do: close_active(put_panes(state, gone)),
               else: state
 
           true ->
-            state = state |> put_panes(rest) |> enter()
+            state = state |> put_panes(gone) |> enter()
 
             case safe_close_buffer(pid) do
               {:ok, label} -> %{state | notice: "closed " <> Path.basename(label)}
@@ -4266,7 +4749,7 @@ defmodule Geex.Loop do
     state = state |> remember() |> close_minibuffer()
 
     case Verbs.parse(input) do
-      {:line, n} -> jump_to_line(n, state)
+      {:line, n} -> if preview_current?(state), do: read_only(state), else: jump_to_line(n, state)
       {:open, path} -> do_open(path, state)
       {:new, path} -> with_path(state, path, &start_file_op(state, {:new, &1}))
       {:mkdir, path} -> with_path(state, path, &start_file_op(state, {:mkdir, &1}))
@@ -4295,7 +4778,7 @@ defmodule Geex.Loop do
   defp pick(%{invoke: {:buffer, pid}}, state) do
     state = leave(state)
     safe_set_active(pid)
-    close_minibuffer(adopt_active(state, pid))
+    close_minibuffer(show_opened(state, pid))
   end
 
   defp pick(%{invoke: invoke}, state), do: dispatch_palette(invoke, state)
@@ -4403,12 +4886,44 @@ defmodule Geex.Loop do
   # :quit must work with no buffer open (you can always type `quit`); the rest no-op.
   defp apply_verb(:quit, state), do: apply_action(:quit, {0, 0}, "", state)
 
+  # While a preview is current, its buffer is Session's active one: only the verbs that need no
+  # cursor reach it (ADR-0043 §1).
+  defp apply_verb(action, state) do
+    if preview_current?(state) and not preview_verb?(action),
+      do: schedule_repaint(%{state | notice: @read_only}),
+      else: verb(action, state)
+  end
+
+  defp preview_verb?({kind, _}) when kind in [:tab, :theme], do: true
+
+  defp preview_verb?(action),
+    do:
+      action in [
+        :find_file,
+        :buffers,
+        :close,
+        :toggle_tree,
+        :toggle_edits,
+        :next_pane,
+        :split_rows,
+        :split_cols,
+        :tab_next,
+        :tab_prev,
+        :toggle_mouse,
+        :save,
+        :fast_forward,
+        :select_clear,
+        :delete_file,
+        :rename_file,
+        :toggle_preview
+      ]
+
   # `delete` checks what's there and asks y/n (`Geex.Loop.FileOps`); `rename` alone asks for
   # the path.
-  defp apply_verb(:delete_file, state),
+  defp verb(:delete_file, state),
     do: with_current_file(state, "delete", &start_file_op(state, {:delete, &1}))
 
-  defp apply_verb(:rename_file, state) do
+  defp verb(:rename_file, state) do
     with_current_file(state, "rename", fn from ->
       shown = FileOps.name(from, file_root())
       ask_rename(state, from, shown, shown)
@@ -4416,14 +4931,14 @@ defmodule Geex.Loop do
   end
 
   # Switching and closing buffers need no text either (and work with none active).
-  defp apply_verb(action, state)
+  defp verb(action, state)
        when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane, :find_file] or
               action == :toggle_mouse or
               action in [:split_rows, :split_cols, :tab_next, :tab_prev] or
               (is_tuple(action) and elem(action, 0) in [:tab, :theme]),
        do: apply_action(action, {0, 0}, "", state)
 
-  defp apply_verb(action, state) do
+  defp verb(action, state) do
     case safe_session_snapshot() do
       {:ok, %{text: text, cursor: cursor}} -> apply_action(action, cursor, text, state)
       _ -> state

@@ -16,12 +16,19 @@ defmodule Geex.Loop.Panes do
     cursor and the pane's size when the mouse last set the scroll (the wheel, a click; ADR-0039).
     While both stay so, the scroll stays where the mouse put it, and the cursor may be out of
     view. `nil` otherwise.
+  - A tab is a **source** tab (`view: :source`, the above) or a markdown **preview**
+    ([ADR-0043](../../../doc/adr/0043-markdown-preview.md) §1): `%{buffer, view: :preview, scroll,
+    from}`, its `scroll` counting rendered rows and `from` the pane it was opened from, with no
+    cursor, hscroll or hold. Only source tabs count as a buffer's views (`show/3`,
+    `elsewhere?/2`, `in_other_pane?/3`); `buffers/1` and `drop_buffer/2` count previews too, so
+    the loop watches their buffer and a buffer that ends takes its previews with it.
 
   Closing a pane's last tab closes the pane, unless it is the only one.
   """
 
-  @type tab :: %{
+  @type source_tab :: %{
           buffer: pid(),
+          view: :source,
           cursor: {non_neg_integer(), non_neg_integer()},
           scroll: non_neg_integer(),
           hscroll: non_neg_integer(),
@@ -29,6 +36,13 @@ defmodule Geex.Loop.Panes do
             {{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}}
             | nil
         }
+  @type preview_tab :: %{
+          buffer: pid(),
+          view: :preview,
+          scroll: non_neg_integer(),
+          from: pos_integer()
+        }
+  @type tab :: source_tab() | preview_tab()
   @type pane :: %{tabs: [tab()], at: non_neg_integer()}
   @type t :: %{
           split: Geex.Layout.split(),
@@ -42,9 +56,22 @@ defmodule Geex.Loop.Panes do
   def new, do: %{split: {:pane, 1}, panes: %{1 => %{tabs: [], at: 0}}, pane: 1, next: 2}
 
   @doc "A new tab for `buffer`, at the top of the file unless a cursor is given."
-  @spec tab(pid(), {non_neg_integer(), non_neg_integer()}) :: tab()
+  @spec tab(pid(), {non_neg_integer(), non_neg_integer()}) :: source_tab()
   def tab(buffer, cursor \\ {0, 0}),
-    do: %{buffer: buffer, cursor: cursor, scroll: 0, hscroll: 0, hold: nil}
+    do: %{buffer: buffer, view: :source, cursor: cursor, scroll: 0, hscroll: 0, hold: nil}
+
+  @doc "A new preview tab for `buffer`, opened from pane `from`, at the top."
+  @spec preview_tab(pid(), pos_integer()) :: preview_tab()
+  def preview_tab(buffer, from), do: %{buffer: buffer, view: :preview, scroll: 0, from: from}
+
+  @doc "Whether `tab` is a preview."
+  @spec preview?(tab() | nil) :: boolean()
+  def preview?(%{view: :preview}), do: true
+  def preview?(_tab), do: false
+
+  defp source_of?(%{view: :preview}, _buffer), do: false
+  defp source_of?(%{buffer: buffer}, buffer), do: true
+  defp source_of?(_tab, _buffer), do: false
 
   @doc "The current pane's shown tab, or `nil` when it has none."
   @spec current(t()) :: tab() | nil
@@ -72,20 +99,100 @@ defmodule Geex.Loop.Panes do
   end
 
   @doc """
-  Show `buffer` in the current pane: its tab there if it has one, else a new tab at the end
-  (with `cursor`). Returns the panes and whether the tab is new.
+  Show `buffer` in the current pane: its source tab there if it has one, else a new tab at the
+  end (with `cursor`), even where the pane has the file's preview, so an open lands on text.
+  Returns the panes and whether the tab is new.
   """
   @spec show(t(), pid(), {non_neg_integer(), non_neg_integer()}) :: {t(), :new | :existing}
   def show(ps, buffer, cursor \\ {0, 0}) do
     %{tabs: tabs} = pane = ps.panes[ps.pane]
 
-    case Enum.find_index(tabs, &(&1.buffer == buffer)) do
+    case Enum.find_index(tabs, &source_of?(&1, buffer)) do
       nil ->
         pane = %{pane | tabs: tabs ++ [tab(buffer, cursor)], at: length(tabs)}
         {put_in(ps.panes[ps.pane], pane), :new}
 
       i ->
         {put_in(ps.panes[ps.pane], %{pane | at: i}), :existing}
+    end
+  end
+
+  @doc """
+  Add `tab` to pane `id`, after the tab it shows, and show it there; the current pane, and
+  whatever it shows, stay as they are (a preview opening beside its source, ADR-0043 §1).
+  """
+  @spec add_tab(t(), pos_integer(), tab()) :: t()
+  def add_tab(ps, id, tab) do
+    %{tabs: tabs, at: at} = ps.panes[id]
+    at = if tabs == [], do: 0, else: at + 1
+    put_in(ps.panes[id], %{tabs: List.insert_at(tabs, at, tab), at: at})
+  end
+
+  @doc """
+  Split the current pane in two, `:rows` or `:cols`, the new pane after it holding only `tab`.
+  Unlike `split/2`, the current pane stays current (a preview opening beside its source).
+  """
+  @spec split_beside(t(), :rows | :cols, tab()) :: t()
+  def split_beside(ps, dir, tab) do
+    id = ps.next
+
+    %{
+      ps
+      | split: replace(ps.split, ps.pane, {dir, {:pane, ps.pane}, {:pane, id}, 0.5}),
+        panes: Map.put(ps.panes, id, %{tabs: [tab], at: 0}),
+        next: id + 1
+    }
+  end
+
+  @doc "The pane after `id` in reading order, wrapping (`id` itself when it is the only one)."
+  @spec next_pane(t(), pos_integer()) :: pos_integer()
+  def next_pane(ps, id) do
+    ids = ids(ps)
+    i = Enum.find_index(ids, &(&1 == id)) || 0
+    Enum.at(ids, rem(i + 1, length(ids)))
+  end
+
+  @doc """
+  Close tab `i` of pane `id`; the current pane stays current unless it is the one that closes
+  (left with no tabs, and not the only pane). The pane shows the tab it showed, or the one before
+  when that was the tab closed.
+  """
+  @spec close_tab_at(t(), pos_integer(), non_neg_integer()) :: t()
+  def close_tab_at(ps, id, i) do
+    %{tabs: tabs, at: at} = ps.panes[id]
+
+    cond do
+      i >= length(tabs) -> ps
+      i < at -> put_tabs(ps, id, List.delete_at(tabs, i), at - 1)
+      i == at -> put_tabs(ps, id, List.delete_at(tabs, i), max(at - 1, 0))
+      true -> put_tabs(ps, id, List.delete_at(tabs, i), at)
+    end
+  end
+
+  @doc "Every preview tab of `buffer`, as `{pane id, index}`, in reading order."
+  @spec previews(t(), pid()) :: [{pos_integer(), non_neg_integer()}]
+  def previews(ps, buffer) do
+    for id <- ids(ps),
+        {t, i} <- Enum.with_index(ps.panes[id].tabs),
+        preview?(t) and t.buffer == buffer,
+        do: {id, i}
+  end
+
+  @doc "Whether `buffer` has a source tab in any pane."
+  @spec source?(t(), pid()) :: boolean()
+  def source?(ps, buffer),
+    do:
+      Enum.any?(ps.panes, fn {_id, %{tabs: tabs}} -> Enum.any?(tabs, &source_of?(&1, buffer)) end)
+
+  @doc "Update tab `i` of pane `id` with `fun`."
+  @spec update_tab(t(), pos_integer(), non_neg_integer(), (tab() -> tab())) :: t()
+  def update_tab(ps, id, i, fun) do
+    case ps.panes[id] do
+      %{tabs: tabs} = pane when i < length(tabs) ->
+        put_in(ps.panes[id], %{pane | tabs: List.update_at(tabs, i, fun)})
+
+      _ ->
+        ps
     end
   end
 
@@ -151,11 +258,11 @@ defmodule Geex.Loop.Panes do
     if map_size(ps.panes) == 1, do: ps, else: put_tabs(ps, id, [], 0)
   end
 
-  @doc "Whether `buffer` is in a tab of a pane other than `id`."
+  @doc "Whether `buffer` has a source tab in a pane other than `id` (a preview doesn't count)."
   @spec in_other_pane?(t(), pid(), pos_integer()) :: boolean()
   def in_other_pane?(ps, buffer, id) do
     Enum.any?(ps.panes, fn {other, %{tabs: tabs}} ->
-      other != id and Enum.any?(tabs, &(&1.buffer == buffer))
+      other != id and Enum.any?(tabs, &source_of?(&1, buffer))
     end)
   end
 
@@ -187,13 +294,16 @@ defmodule Geex.Loop.Panes do
   @spec buffers(t()) :: MapSet.t(pid())
   def buffers(ps), do: for({_id, p} <- ps.panes, t <- p.tabs, into: MapSet.new(), do: t.buffer)
 
-  @doc "Whether `buffer` is in a tab other than the current one (in any pane)."
+  @doc """
+  Whether `buffer` has a source tab other than the current tab (in any pane). A preview doesn't
+  count: closing a file's last source tab closes the file (ADR-0043 §1).
+  """
   @spec elsewhere?(t(), pid()) :: boolean()
   def elsewhere?(ps, buffer) do
     Enum.any?(ps.panes, fn {id, %{tabs: tabs, at: at}} ->
       tabs
       |> Enum.with_index()
-      |> Enum.any?(fn {t, i} -> t.buffer == buffer and not (id == ps.pane and i == at) end)
+      |> Enum.any?(fn {t, i} -> source_of?(t, buffer) and not (id == ps.pane and i == at) end)
     end)
   end
 

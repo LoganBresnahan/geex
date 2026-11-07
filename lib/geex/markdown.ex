@@ -141,6 +141,26 @@ defmodule Geex.Markdown do
   end
 
   @doc """
+  Whether the preview can be offered, from the installed manifests alone: both grammars
+  installed, each of an ABI this geex loads. Cheap enough for the key loop (it compiles nothing);
+  a render query that doesn't compile shows later, as the preview's status.
+  """
+  @spec available() :: :ok | {:error, unavailable()}
+  def available do
+    manifests = Enum.map(grammars(), &{&1, Geex.Installed.grammar(&1)})
+
+    case for({name, nil} <- manifests, do: name) do
+      [] ->
+        if Enum.all?(manifests, fn {_name, m} -> m["abi"] in Grammars.abi() end),
+          do: :ok,
+          else: {:error, :update}
+
+      missing ->
+        {:error, {:missing, missing}}
+    end
+  end
+
+  @doc """
   Whether `path` is a markdown file: its installed grammar is Markdown. Says nothing about the
   companion; `handles/0` does.
   """

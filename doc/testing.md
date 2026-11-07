@@ -4816,3 +4816,57 @@ whose catalog.json names it). Checked from the public URL with no `GEEX_CATALOG_
 markdown_inline and json install into a fresh data_dir. The branch's merge blocker is cleared.
 
 1244 tests + 116 doctests green twice; compile warnings-clean.
+
+### 2026-11-06 — the markdown preview, slice 4: preview tabs and the gate (ADR-0043 §1)
+
+Not reachable from the UI yet: `Loop.toggle_preview/1` (`@doc false`) stands in for the key.
+
+**Built:**
+- **`Panes`**: a source tab carries `view: :source`; a preview is `%{buffer, view: :preview,
+  scroll, from}`. `show/3`, `elsewhere?/2` and `in_other_pane?/3` count source tabs only;
+  `buffers/1` and `drop_buffer/2` count previews. New: `preview_tab/2`, `preview?/1`,
+  `add_tab/3` (after a pane's shown tab, shown, focus unchanged), `split_beside/3`,
+  `next_pane/2`, `close_tab_at/3`, `previews/2`, `source?/2`, `update_tab/4`.
+- **The toggle**: from a source tab it opens the preview beside it with one pane (in the same
+  pane, after the source, where a split has no room), or in the next pane after the source's,
+  after that pane's shown tab; the source keeps focus, its selection and goal column. Again from
+  the source it closes every preview of the file; from a preview it closes that one and focuses
+  the pane it came from. A file that isn't markdown, or missing grammars (checked from the
+  manifests by `Geex.Markdown.available/0`, compiling nothing), say so.
+- **The loop**: `put_panes` attaches a buffer's preview process while it has a preview tab and
+  lets it go after; each is told its tabs' text widths (also on each repaint, for resizes). A
+  render keeps every preview tab's place (`Place.anchor` → `remap` → `scroll`, or the save's
+  line). A preview's process ending marks its tabs "stopped". `enter/1` makes a preview's
+  buffer active without touching Session's cursor; `leave/1` copies nothing; the loop's opens
+  show the source tab through `show_source/2`, not `adopt_active/2`'s early return.
+- **Closing**: Alt+K on a preview closes only it, never refused; the last source tab closes the
+  file and drops its previews at once (refused while unsaved, the previews no longer counting as
+  "open in another pane"); a preview's × is never refused; a pane's × closes only the buffers it
+  has the only source tabs of.
+- **The gate**, one predicate: a preview's keys go to their own handler (Up/Down, Alt+W/S, Page
+  Up/Down, Home/End scroll by rows; the allowed actions run; the rest say "the preview is
+  read-only"); typed verbs and the palette (`apply_verb/2` after `:quit`); `line N`; `|` and its
+  result; the mouse (a press only focuses; the wheel scrolls rows).
+- **Drawing**, enough for slice 5 to finish: a header (the file, `[+]`, behind, the status), the
+  rows coloured by `Style.run/2`, a vertical scroll bar, the hardware cursor hidden.
+- A user's save from a source tab sends the preview its cursor line; an install of a grammar a
+  code block names (or a Markdown one) and a rename re-read.
+
+**Tests first:** `test/geex/loop/panes_preview_test.exs` (F2/F20, F3, F4, F8/F21 in the pure
+model; 10 of 10 failed first) and `test/geex/loop/preview_tabs_test.exs` (where a preview opens
+with one pane, no room, three panes; the toggle both ways and on a non-markdown file; F2/F20
+closing; F3 `open` from the preview's pane; F4/F7 Session's cursor round trip and a frame; F1/F22
+ten edit keys, six gated verbs, allowed `tree` and `save`, Ctrl-O; scrolling; an agent's edit
+above keeping the row and a save scrolling to its line; the width told), written before the loop
+code. They found two bugs: the no-room open lost the source tab's cursor (panes taken before
+`leave/1`), and the last source tab's close left the preview in the only pane. `available/0`'s
+test came after its code.
+
+**The verifier's flake** (committed alone, `8a841ac`): a stopped preview kills its render
+under way, in `stop/1` and in `terminate/2` (it traps exits); ten runs of the markdown, preview,
+buffer and loop preview tests under 8 CPU hogs, 0 failures.
+
+1274 tests + 116 doctests green twice; compile warnings-clean.
+
+**Not tested:** any of it live (no key reaches it: slice 5 dogfoods it in tmux); the install and
+rename re-reads; the scroll bar and the status line in a preview (slice 5).

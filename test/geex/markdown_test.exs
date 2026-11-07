@@ -143,6 +143,16 @@ defmodule Geex.MarkdownTest do
              "Markdown preview needs Markdown inline installed (Alt+Y)"
   end
 
+  test "available/0 answers from the manifests, compiling nothing" do
+    assert Markdown.available() == :ok
+    manifest("markdown_inline", %{"abi" => 12})
+    assert Markdown.available() == {:error, :update}
+    dir = Installed.dir(:grammar, "markdown")
+    File.rename!(dir, dir <> ".aside")
+    Installed.refresh()
+    assert Markdown.available() == {:error, {:missing, ["markdown"]}}
+  end
+
   test "only a file whose installed grammar is Markdown is a markdown file" do
     assert Markdown.file?("README.md")
     assert Markdown.file?("/x/notes.markdown")
