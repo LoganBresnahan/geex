@@ -30,9 +30,12 @@ The pyramid (detail + rationale in §15a):
    text and blame, an index agreeing with a walk. Texts come from `Geex.Gen`
    (`test/support/gen.ex`), weighted toward CRLF, combining marks, wide and ZWJ graphemes. A
    property failure is a bug, never a flake: its shrunk case becomes an example test.
-   `GEEX_PROPERTY_RUNS=N mix test` runs deeper. Still to come (ADR-0044 §8): the attestation
-   path, addressing, and `minibuffer-string → %Command{}` = `MCP-args → %Command{}` (the §1
-   round-trip the compiler can't enforce). Dialyzer (§5) is not adopted.
+   `GEEX_PROPERTY_RUNS=N mix test` runs deeper. Also covered (ADR-0044 §8.2–3): the attestation
+   path (`Spool.chain/3`, `Attest.matches?/2`, one actor per reconcile group), addressing (the
+   draw and address width walks agree; `Coord.to_span/2` covers its range inclusive), and the §1
+   round-trip the compiler can't enforce: every command's `parse/1` gives one struct for native,
+   raw-string and MCP-JSON arguments, and the human's grid line and the agent's grid argument
+   parse to the same coordinates. Dialyzer (§5) is not adopted.
 3. **Integration** — `Dispatch.run/1 → Buffer → undo history` with provenance present
    and correct; feature-gated supervision subtrees start/stop cleanly (mirroring the
    `terminal_io_child/0` gate).
@@ -5228,3 +5231,49 @@ s, 15.0 s). The 11 properties take ~121 ms together at 100 runs. `mix compile --
 **Not tested / deferred:** `Buffer.attest/2` itself (the process: newest group, `unattested?`,
 holding) stays example-tested; the held-attestation path through `credit_held` is covered only via
 `chain/3`; slice 3 (addressing, the parse round-trip); the ledger loop.
+
+### 2026-11-09 — property tests, slice 3: addressing and the parse round-trip (ADR-0044)
+
+Slice 3 (ADR-0044 §8.3), at the maintainer's word ("yes" to slice 2's commit; slice 3 next).
+Tests only; no code under `lib/` changed.
+
+- **Width** (`width_test.exs`): `col_at_display/2` maps every display column to the grapheme
+  drawn there (a naive model: one entry per column, naming its grapheme; past the drawn width,
+  the caret after the last), and it agrees with the draw walk: for every grapheme with a width,
+  `Loop.cursor_xy/3`'s display column addresses that grapheme, and the end caret's column
+  addresses the caret after the last. Two implementations of one mapping, now pinned together
+  (ADR-0027 §2).
+- **Coord** (`coord_test.exs`): `to_span/2` stays inside the document (ordered, rows and columns
+  in range, or `:line_out_of_range` exactly when the end's `y` is past the last line) and
+  `Doc.slice` of the span is exactly the graphemes between the ends, inclusive, by a naive walk
+  over `{y, x}` coordinates (a line's newline at `x = length + 1`; a start past a line's end
+  starts at its newline, an end past it stops at its last grapheme).
+- **The grid's two surfaces** (`coord_test.exs`): the same text, in any case and spacing, parses
+  to the same `Coord`/`Range` through the human's `Verbs.parse_grid/1` (`goto`, a bare
+  coordinate, `copy`) and through the agent's `goto`/`copy` tool field-specs
+  (`Command.cast_args/2`); both refuse a zero, an empty and a reversed range.
+- **The parse round-trip** (`command_test.exs`): over every command in the running
+  `CommandRegistry` (insert, delete, replace, edit), generated arguments parse to one struct as
+  native atom-keyed values, as raw strings (every scalar), and as JSON-encoded-then-decoded
+  string-keyed maps (what `tools/call` hands `parse/1`); optional fields are sometimes left out
+  (the default lands). An argument type with no generator fails the property by name. The
+  minibuffer has no typed grammar for the edit commands, so its side of testing.md's §1 promise
+  is the raw-string form `Type.cast/2` documents; `edit`'s `:edits` array has no raw form and is
+  checked native and JSON only.
+
+**Checked by hand.** Planted bugs, each reverted: `to_span/2`'s inclusive end off by one (shrank
+to `"end"`, `x1 y1 - x2 y1`); `col_at_display/2`'s wide-glyph test narrowed (shrank to `"中"`,
+display column 2); `cursor_xy/3` counting a zero-width grapheme as a column (shrank to `"\ra"`,
+caught by the agreement law); `Type.cast(:string, _)` trimming (shrank to `insert` with text
+`"a\n"`). **Deep runs:** all 16 properties at 10,000 runs, seeds 21 and 22: 0 failures. Nothing
+found in the code this slice.
+
+**Automated.** `mix test` → **1309 tests + 16 properties + 117 doctests, 0 failures**, twice
+(15.6 s, 16.4 s; the run-to-run spread on this machine is about a second). The 16 properties
+take ~142 ms together at 100 runs. `mix compile --warnings-as-errors --force` clean in dev and
+test.
+
+**Not tested / deferred:** the loop's own display-to-grapheme cast in grid mode (it calls
+`col_at_display/2`, pinned here, but the loop step itself is example-tested); the JSON-RPC
+envelope's properties (the MCP surface is frozen); ADR-0044 §8.4's later properties (markdown
+anchors, `Fuzzy`, `Selection`) wait for a consumer; the ledger loop.

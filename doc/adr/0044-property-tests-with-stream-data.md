@@ -2,9 +2,10 @@
 
 - **Status:** Accepted 2026-11-09. The maintainer asked for property tests to help the agentic
   workflow, naming StreamData; the rest was proposed in the same conversation, drafted here at
-  the maintainer's request, and accepted by the maintainer the same day. **Slices 1 and 2
+  the maintainer's request, and accepted by the maintainer the same day. **Slices 1–3
   built 2026-11-09** ([testing.md](../testing.md) 2026-11-09); amended below (§3, §5, §8) where
-  building them changed the design. Slice 2 found and fixed BUG-8.
+  building them changed the design. Slice 2 found and fixed BUG-8. §8.4's slices wait for their
+  consumers.
 - **Date:** 2026-11-09
 - **Relates to:** [ADR-0006](0006-elixir-not-gleam.md) (which promised property tests for the
   boundary), [ADR-0020](0020-diff-edit-tool.md) (the edit tool's grapheme property),
@@ -209,6 +210,27 @@ a property; a shrunk counterexample gets an example test.* `/shipshape` doesn't 
 - **Teeth.** A bug planted in each function under test was caught and shrunk: `chain/3` ignoring
   the session (two writes, two sessions, `"" -> "a" -> ""`), and `matches?/2` ignoring `before`
   (a before one byte off).
+
+## Amendment — 2026-11-09: slice 3, addressing and the parse round-trip
+
+- **Two width walks, pinned together.** Besides `Width.col_at_display/2` against a naive
+  one-entry-per-column model, a property checks it against the draw walk, `Loop.cursor_xy/3`:
+  the column a grapheme's cursor is drawn at addresses that grapheme. A click or a grid line can
+  only address what was drawn there if the two agree (ADR-0027 §2).
+- **`Coord.to_span/2`** is checked through `Doc.slice`: the span's text is exactly the graphemes
+  between the ends, inclusive, by a walk over `{y, x}` coordinates, with ADR-0027 §7's clamping
+  stated in coordinates (a line's newline at `x = length + 1`).
+- **What "the minibuffer/MCP round-trip" became.** The minibuffer has no typed grammar for the
+  edit commands (its verbs are actions), so §8.3's law is stated over what each surface really
+  hands the one parser: native atom-keyed values (the keymap), raw strings (`Type.cast/2`'s typed
+  form), and JSON decoded as `tools/call` delivers it. It runs over every command in the running
+  `CommandRegistry`, so a new command is covered on registration, and a new argument type without
+  a generator fails the property by name. Where both surfaces do have a typed form, the grid, the
+  human's `Verbs.parse_grid/1` and the agent's `goto`/`copy` field-specs must parse the same text
+  to the same coordinates and refuse the same lines.
+- **Teeth.** Planted bugs in `to_span/2`, `col_at_display/2`, `cursor_xy/3` and
+  `Type.cast(:string, _)` were each caught and shrunk to a one-line case. The slice found nothing
+  in the code.
 
 ## See
 

@@ -1,7 +1,8 @@
 defmodule Geex.WidthTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
-  alias Geex.Width
+  alias Geex.{Gen, Loop, Width}
 
   describe "cells/1 — column width of a grapheme" do
     test "ASCII printable is one column" do
@@ -98,6 +99,43 @@ defmodule Geex.WidthTest do
     test "past the drawn width returns the caret after the last grapheme (clamped by the resolver)" do
       assert Width.col_at_display("abc", 99) == 4
       assert Width.col_at_display("", 1) == 1
+    end
+  end
+
+  # ADR-0044 §8.3, ADR-0027 §2: width renders, never addresses. Every display column maps to the
+  # grapheme drawn there: a wide glyph owns two columns, a zero-width grapheme none, and past the
+  # drawn width is the caret after the last grapheme.
+  property "col_at_display/2 maps each display column to the grapheme drawn in it" do
+    check all(line <- Gen.fragment(max_length: 20), extra <- integer(1..4)) do
+      graphemes = String.graphemes(line)
+      # the naive model: one entry per display column, naming the grapheme (1-based) drawn there
+      columns =
+        graphemes
+        |> Enum.with_index(1)
+        |> Enum.flat_map(fn {g, gx} -> List.duplicate(gx, Width.cells(g)) end)
+
+      for display_x <- 1..(length(columns) + extra) do
+        assert Width.col_at_display(line, display_x) ==
+                 Enum.at(columns, display_x - 1, length(graphemes) + 1)
+      end
+    end
+  end
+
+  # The draw walk (`Loop.cursor_xy/3`, where a grapheme's cursor is painted) and the address walk
+  # (`col_at_display/2`, which grapheme a display column names) are two implementations of one
+  # mapping; they must agree, or a click or a grid line would address a grapheme other than the
+  # one drawn there.
+  property "the cursor's display column addresses the grapheme it sits on" do
+    check all(line <- Gen.fragment(max_length: 20)) do
+      graphemes = String.graphemes(line)
+
+      for {g, col} <- Enum.with_index(graphemes), Width.cells(g) > 0 do
+        {x, 0} = Loop.cursor_xy(line, {0, col}, 0)
+        assert Width.col_at_display(line, x + 1) == col + 1
+      end
+
+      {end_x, 0} = Loop.cursor_xy(line, {0, length(graphemes)}, 0)
+      assert Width.col_at_display(line, end_x + 1) == length(graphemes) + 1
     end
   end
 end

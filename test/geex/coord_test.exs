@@ -1,9 +1,11 @@
 defmodule Geex.CoordTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
-  alias Geex.Coord
+  alias Geex.{Coord, Gen}
   alias Geex.Coord.Range
   alias Geex.Buffer.Doc
+  alias Geex.Loop.Verbs
 
   defp doc(text), do: Doc.new(text)
 
@@ -107,4 +109,102 @@ defmodule Geex.CoordTest do
       assert {:ok, {{0, 2}, {0, 2}}} = Coord.to_span(r, doc("ab"))
     end
   end
+
+  # ADR-0044 §8.3, ADR-0027 §7: a range resolves inside the document, and covers exactly the
+  # graphemes between its ends, inclusive. In coordinates, a line's newline sits at x = length + 1;
+  # a start past the line's end starts at its newline, an end past it stops at its last grapheme.
+  property "to_span/2 stays inside the document and covers the range, inclusive" do
+    check all(
+            text <- Gen.text(),
+            lines = String.split(text, "\n"),
+            widest = lines |> Enum.map(&String.length/1) |> Enum.max(),
+            a <- coord(length(lines) + 1, widest + 2),
+            b <- coord(length(lines) + 1, widest + 2),
+            a != b
+          ) do
+      [from, to] = Enum.sort_by([a, b], &{&1.y, &1.x})
+      doc = Doc.new(text)
+
+      case Coord.to_span(%Range{from: from, to: to}, doc) do
+        {:error, :line_out_of_range} ->
+          assert to.y > length(lines)
+
+        {:ok, {{r1, c1} = start, {r2, c2} = stop} = span} ->
+          assert to.y <= length(lines)
+          assert start <= stop
+          assert c1 <= String.length(Enum.at(lines, r1))
+          assert c2 <= String.length(Enum.at(lines, r2))
+
+          len = fn y -> String.length(Enum.at(lines, y - 1)) end
+          first = {from.y, min(from.x, len.(from.y) + 1)}
+          last = {to.y, min(to.x, len.(to.y))}
+
+          expected =
+            for {line, y} <- Enum.with_index(lines, 1),
+                {g, x} <- Enum.with_index(String.graphemes(line) ++ ["\n"], 1),
+                {y, x} >= first and {y, x} <= last,
+                into: "",
+                do: g
+
+          assert Doc.slice(doc, span) == {:ok, expected}
+      end
+    end
+  end
+
+  # ADR-0044 §8.3: a human's grid line (`Verbs.parse_grid/1`, display columns) and an agent's grid
+  # argument (the `goto`/`copy` tools' field-specs, graphemes) speak one grammar, so the same
+  # text parses to the same coordinates on both surfaces, in any case and spacing, and both
+  # refuse the same lines (a zero, an empty or reversed range).
+  property "a human's grid line and an agent's grid argument parse to the same coordinates" do
+    {:ok, %{fields: goto}} = Geex.MCP.Grid.lookup("goto")
+    {:ok, %{fields: copy}} = Geex.MCP.Grid.lookup("copy")
+
+    check all(
+            a <- coord(30, 30, 0),
+            b <- coord(30, 30, 0),
+            style_a <- style(),
+            style_b <- style(),
+            dash <- member_of(["-", " - ", "  -\t"]),
+            verb <- member_of(["copy", "COPY", "Copy"])
+          ) do
+      point = render(a, style_a)
+      range = render(a, style_a) <> dash <> render(b, style_b)
+      valid? = fn c -> c.x >= 1 and c.y >= 1 end
+
+      if valid?.(a) do
+        assert Verbs.parse_grid("goto " <> point) == {:goto, a}
+        assert Verbs.parse_grid(point) == {:goto, a}
+        assert Geex.Command.cast_args(goto, %{"pos" => point}) == {:ok, %{pos: a}}
+      else
+        assert Verbs.parse_grid("goto " <> point) == :unknown
+        assert {:error, _} = Geex.Command.cast_args(goto, %{"pos" => point})
+      end
+
+      if valid?.(a) and valid?.(b) and {a.y, a.x} < {b.y, b.x} do
+        expected = %Range{from: a, to: b}
+        assert Verbs.parse_grid(verb <> " " <> range) == {:copy, expected}
+        assert Geex.Command.cast_args(copy, %{"range" => range}) == {:ok, %{range: expected}}
+      else
+        assert Verbs.parse_grid(verb <> " " <> range) == :unknown
+        assert {:error, _} = Geex.Command.cast_args(copy, %{"range" => range})
+      end
+    end
+  end
+
+  # A coordinate with y in min..max_y and x in min..max_x (a `min` of 0 makes invalid ones).
+  defp coord(max_y, max_x, min \\ 1) do
+    gen all(y <- integer(min..max_y), x <- integer(min..max_x)) do
+      %Coord{x: x, y: y}
+    end
+  end
+
+  defp style do
+    tuple(
+      {member_of(["x", "X"]), member_of(["y", "Y"]), member_of([" ", "  ", "\t"]),
+       member_of(["", " "]), member_of(["", " "])}
+    )
+  end
+
+  defp render(%Coord{x: x, y: y}, {xs, ys, gap, before, after_}),
+    do: "#{before}#{xs}#{x}#{gap}#{ys}#{y}#{after_}"
 end
