@@ -7,23 +7,36 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-9 — An attestation doesn't relabel the blame a compacted ledger's checkpoint carries
+## BUG-9 — An attestation didn't relabel the blame a compacted ledger's checkpoint carries  ✅ FIXED (2026-11-09)
 
-- **Status:** open, found 2026-11-09 by a verify pass over ADR-0044 (session geex-d3) and
-  reproduced in `History` directly. Very rare: it needs a compaction that splits a reconcile
-  group (some of its commands folded into the checkpoint, some still recorded), a restart, then
-  a late attestation for that group.
+- **Status:** **FIXED** 2026-11-09, at the maintainer's word (relayed by session geex-d3): the
+  recommended fix below. Verification is in the [testing.md](testing.md) 2026-11-09 entry
+  "BUG-9: an attestation credits a checkpoint's lines". Found the same day by a verify pass over
+  ADR-0044 (session geex-d3). Very rare: it needs a compaction that splits a reconcile group
+  (some of its commands folded into the checkpoint, some still recorded), a restart (compaction
+  refuses while a running geex has the ledger open, so a history only starts from a checkpoint
+  after a reopen), then a late attestation for that group.
 - **Symptom:** `History.from_checkpoint("a\nb", [{:external, 7}, {:external, 7}], "a\nb", 8)`,
   a command of group 7 on line 1, `attest(h, 7, agent)`: both lines show the agent. Then any
-  edit and its undo: line 0 shows `{:external, 7}` again, and `unattested?(h, 7)` is false, so a
-  repeat attestation is ignored and the line stays an outside change.
-- **Verified cause:** `History.attest/3` relabels `blame` and the commands but not `base_blame`;
+  edit and its undo: line 0 showed `{:external, 7}` again, and `unattested?(h, 7)` was false, so
+  a repeat attestation was ignored and the line stayed an outside change.
+- **Verified cause:** `History.attest/3` relabelled `blame` and the commands but not `base_blame`;
   `undo/1` rebuilds the blame from `base_blame` plus the remaining commands
-  (`Blame.replay(h.base, …, h.base_blame)`), so the checkpoint's lines of the group come back as
+  (`Blame.replay(h.base, …, h.base_blame)`), so the checkpoint's lines of the group came back as
   they were.
-- **Recommended fix:** `base_blame: Blame.relabel(h.base_blame, group, actor)` in
-  `History.attest/3`, with the example above as a test. The ledger replays `{:attest, …}` through
-  the same function, so restore stays equal to live.
+- **Fix:** `base_blame: Blame.relabel(h.base_blame, group, actor)` in `History.attest/3`. The
+  ledger replays `{:attest, …}` through the same function, so restore stays equal to live. The
+  example above is a test (`history_test.exs`), and a property compacts a split group through the
+  real `Ledger.Compact` rewrite and checks that attesting commutes with undo and redo. The fix
+  also keeps a later compaction honest: `Compact.entries` replays the folded commands from
+  `base_blame`, so without it a second compaction after such an attestation would have written
+  the lines `:external` and `Compact.check` would have refused it ("blame differs"). Ledgers
+  written before the fix restore such a checkpoint line as credited where the live session had
+  shown `:external`: a correction.
+- **Known limit, not this bug:** a compaction that folds **every** command of a group into the
+  checkpoint drops the group's stamp, so a late attestation finds no group and is lost, even for
+  the newest write. Older than this fix and very rare (close, compact, reopen, then the late
+  attestation).
 - **Ruled out:** compaction itself (`Ledger.Compact` writes the blame it replayed, correctly).
 
 ---

@@ -4,6 +4,7 @@ defmodule Geex.HistoryTest do
   doctest Geex.History
 
   alias Geex.{Blame, Command, Dispatch, EditorState, Gen, History, Reconcile}
+  alias Geex.Ledger.{Codec, Compact, Restore}
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
 
@@ -120,6 +121,24 @@ defmodule Geex.HistoryTest do
       refute History.unattested?(h, 2)
     end
 
+    # BUG-9: a compaction folded some of group 7's commands into the checkpoint (their lines carry
+    # `{:external, 7}` in the checkpoint's blame) and kept one. The attestation must credit the
+    # checkpoint's lines too, or the next undo, which rebuilds the blame from the checkpoint's,
+    # brings them back `:external` while `unattested?/2` says the group is credited.
+    test "attest credits the group's lines in a checkpoint's blame, through an undo" do
+      h = History.from_checkpoint("a\nb", [{:external, 7}, {:external, 7}], "a\nb", 8)
+      {:ok, h} = History.dispatch(h, replace(1, "B", :external, 7))
+      agent = {:agent, %{harness: "claude-code", session: "s1"}}
+      h = History.attest(h, 7, agent)
+      assert h.blame == [{agent, 7}, {agent, 7}]
+
+      {:ok, h} = History.dispatch(h, insert(1, 1, "!"))
+      {:ok, h, _} = History.undo(h)
+      assert h.blame == [{agent, 7}, {agent, 7}]
+      assert h.base_blame == [{agent, 7}, {agent, 7}]
+      refute History.unattested?(h, 7)
+    end
+
     test "a group with no reconcile stamp leaves the counter alone" do
       {:ok, h} = History.group(History.new("a"), [insert(0, 0, "x")], nil)
       assert h.next_group == 1
@@ -207,6 +226,87 @@ defmodule Geex.HistoryTest do
       refute History.unattested?(h, group)
       for {_actor, ^group} = writer <- h.blame, do: assert(writer == {agent, group})
     end
+  end
+
+  # BUG-9's law: a compaction (the real `Ledger.Compact` rewrite, encoded and restored as a
+  # ledger would be) may fold some of a group's commands into the checkpoint and keep the rest;
+  # an attestation for the group then credits every line it wrote, the checkpoint's included,
+  # through any undo and redo after it. Stated as attesting commuting with undo and redo (the
+  # whole history value alike either way round), which also catches crediting too much.
+  property "after a compaction splits a group, an attestation credits all its lines" do
+    check all(
+            start <- Gen.text(max_lines: 3),
+            lines <- list_of(Gen.line(), min_length: 3, max_length: 8),
+            flips <- list_of(boolean(), length: length(lines)),
+            typed <-
+              list_of(
+                tuple({non_negative_integer(), non_negative_integer(), member_of(["x", "\n"])}),
+                max_length: 3
+              ),
+            keep_seed <- non_negative_integer(),
+            aim_split <- frequency([{3, constant(true)}, {1, constant(false)}]),
+            steps <- list_of(member_of([:undo, :redo]), max_length: 12),
+            session <- member_of(["s1", "s2"])
+          ) do
+      before = lines |> Enum.with_index() |> Enum.map(fn {l, i} -> "#{l}~#{i}" end)
+
+      disk =
+        before
+        |> Enum.zip(flips)
+        |> Enum.with_index()
+        |> Enum.map(fn {{l, flip}, i} ->
+          if rem(i, 2) == 0 and (flip or i == 0), do: "agent #{i}", else: l
+        end)
+
+      h = run_op({:reconcile, Enum.join(before, "\n")}, History.new(start))
+      group = h.next_group
+      h = run_op({:reconcile, Enum.join(disk, "\n")}, h)
+      h = Enum.reduce(typed, h, fn {l, c, t}, h -> run_op({:insert, l, c, t, :human}, h) end)
+
+      # Mostly a `keep` that splits the group (all the typed commands and some, not all, of the
+      # group's); otherwise any.
+      ours = Enum.count(h.commands, &match?(%{meta: %{reconcile: %{group: ^group}}}, &1))
+
+      keep =
+        if aim_split and ours > 1,
+          do: length(typed) + 1 + rem(keep_seed, ours - 1),
+          else: rem(keep_seed, length(h.commands) + 1)
+
+      restored = compact(h, keep)
+      assert Compact.check(restored, h) == :ok
+
+      # Attestable only while one of its commands is kept: a compaction that folds every command
+      # of the group into the checkpoint (keep <= the typed edits, when not aiming) drops its
+      # stamp, so a late attestation finds no group, even for the newest write (a known limit,
+      # bugs.md BUG-9).
+      if group in Enum.map(History.attestable_groups(restored), & &1.group) do
+        agent = {:agent, %{harness: "claude-code", session: session}}
+        h = Enum.reduce(steps, History.attest(restored, group, agent), &run_op/2)
+
+        assert h == History.attest(Enum.reduce(steps, restored, &run_op/2), group, agent)
+        for {_actor, ^group} = writer <- h.blame, do: assert(writer == {agent, group})
+        refute History.unattested?(h, group)
+      end
+    end
+  end
+
+  # `h` compacted to its last `keep` commands and restored, as `mix geex.ledger compact` does.
+  # The line split mirrors `Geex.Ledger`'s private `split_lines/1`; keep the two alike.
+  defp compact(h, keep) do
+    at = ~U[2026-11-09 12:00:00Z]
+    bytes = h |> Compact.entries("/r/f", keep, "test") |> Enum.map_join(&Codec.encode(&1, at))
+
+    {lines, _end} =
+      bytes
+      |> :binary.split("\n", [:global])
+      |> Enum.drop(-1)
+      |> Enum.map_reduce(0, fn line, offset ->
+        next = offset + byte_size(line) + 1
+        {{line, next}, next}
+      end)
+
+    {:ok, %{history: restored, stopped: nil}} = Restore.restore(lines)
+    restored
   end
 
   defp transitions, do: tuple({Gen.text(), list_of(transition(), max_length: 100)})

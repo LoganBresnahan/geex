@@ -206,7 +206,9 @@ defmodule Geex.History do
   Relabel every command of reconcile `group` (and the lines they last wrote) with `actor`:
   an attestation took effect (ADR-0032). That includes the group's undone commands waiting on
   the redo stack, so a redo brings them back credited and the group never ends up half
-  attested (BUG-8, found by the history property, ADR-0044). Replay is unaffected: `meta`
+  attested (BUG-8, found by the history property, ADR-0044). And the group's lines in
+  `base_blame`, which a compacted ledger's checkpoint carries for commands it folded in, so the
+  blame an undo rebuilds from it keeps them credited (BUG-9). Replay is unaffected: `meta`
   never feeds `run/2`.
   """
   @spec attest(t(), pos_integer(), Meta.actor()) :: t()
@@ -219,7 +221,8 @@ defmodule Geex.History do
       h
       | commands: Enum.map(h.commands, relabel),
         redo: Enum.map(h.redo, relabel),
-        blame: Blame.relabel(h.blame, group, actor)
+        blame: Blame.relabel(h.blame, group, actor),
+        base_blame: Blame.relabel(h.base_blame, group, actor)
     }
   end
 

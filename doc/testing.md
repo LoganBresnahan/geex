@@ -5344,3 +5344,53 @@ planted bug above was reverted (`git checkout` of the file, or the saved copy fo
 **Not tested / deferred:** BUG-9's fix; a fully undone group whose attestation is held *and*
 spooled (the fast-forward path is unchanged; the late path now credits it); the ledger loop
 (still seeded); ADR-0044 §8.4.
+
+### 2026-11-09 — BUG-9: an attestation credits a checkpoint's lines (ADR-0032, ADR-0044)
+
+At the maintainer's word, relayed by session geex-d3: fix BUG-9 (found by geex-d3's verify pass,
+logged in `b312b57`), test it, and hand it back for an adversarial verify before committing.
+
+- **Fix** (`lib/geex/history.ex`): `History.attest/3` also relabels `base_blame`, the blame a
+  compacted ledger's checkpoint carries for the commands it folded in, so the blame an undo
+  rebuilds from it keeps the group's lines credited. The doc says so; ADR-0032's 2026-11-09
+  amendment ("what crediting does") too.
+- **Example test** (`history_test.exs`, bugs.md's repro): `from_checkpoint` with group 7's two
+  lines in the checkpoint blame, a group-7 command on line 1, attest, then an insert and its
+  undo: the blame stays `[{agent, 7}, {agent, 7}]`, `base_blame` likewise, `unattested?` false.
+  Before the fix it failed at the assertion after the undo: line 0 was `{:external, 7}`.
+- **A property through the real compaction** (`history_test.exs`): a multi-hunk group after an
+  earlier one, up to three typed edits, then `Ledger.Compact.entries` → `Codec.encode` →
+  `Restore.restore` (as `mix geex.ledger compact` does), `Compact.check` against the live
+  history, and, while the group is attestable, any undo/redo sequence: attesting then stepping
+  equals stepping then attesting (the whole `History` value), and every line the group wrote is
+  the agent's. `keep` aims at splitting the group three times in four; a probe counted the
+  bug-relevant case (a split group, attestable, with an undo among the steps) in 48–50% of runs
+  (14–16% before the aim).
+- **Planted bugs, each reverted** (from a saved copy of the fixed file): the fix removed fails
+  the property on 10 seeds in 10 and the example test always; relabelling the whole checkpoint
+  blame (crediting too much) fails on 5 seeds in 5, caught by the commutation law (the "group's
+  lines are the agent's" check alone would not have caught it).
+- **Both orders are generated.** The law's right-hand side undoes first and attests second, so
+  "every kept command undone, then the attestation" is covered: geex-d3 planted `attest/3`
+  skipping the redo stack when none of the group is applied, and the property failed on 5 seeds
+  in 5, shrunk to steps `[:undo]` (the one kept command undone).
+
+**geex-d3's verify** (before this commit): the fix is correct and complete (undo is the only
+place that rebuilds blame from `base_blame`; a checkpoint's group ids are all below `next_group`,
+so relabelling it can't touch another group; `Compact.entries` replays from `base_blame`, so the
+fix also keeps a second compaction from being refused); the whole-struct comparison is sound
+(`attest/3` touches only commands, redo, blame and base_blame); suite green twice and the 8
+attestation and history properties at 10,000 runs, seed 71. Its wording fixes are in: the
+property's comment and BUG-9's entry now say a compaction folding **every** command of a group
+drops its stamp, so a late attestation for it is lost even for the newest write (older than
+this fix; close, compact, reopen, then the attestation).
+
+**Automated.** `mix test` → **1313 tests + 19 properties + 118 doctests, 0 failures**, twice
+(15.0 s, 19.1 s; the second under load, the same counts). The 19 properties take ~265 ms together
+at 100 runs (the new one ~30 ms). The attestation and history properties (history, attest,
+spool, blame: 8) at 10,000 runs, seeds 61 and 62: 0 failures. `mix compile --warnings-as-errors
+--force` clean in dev and test.
+
+**Not tested / deferred:** a fully folded group stays unattestable (the known limit above, not
+fixed); a second compaction after such an attestation (reasoned from the code by geex-d3, not
+run); the ledger loop (still seeded).

@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14); shell commands run from the minibuffer (`!`, `!!`, `|`, item 15); both ship in 0.3.4. From 0.3.5 the captAInHook payload ships in each release, linked at `~/.local/share/geex/integrations/geex-attest.sh` (ADR-0041's amendment). **2026-11-06:** a read-only markdown preview (item 16, [adr/0043](adr/0043-markdown-preview.md)): `Alt+Shift+P` opens a markdown file's rendered preview beside it, re-rendered when the file on disk changes; it needs the `markdown_inline` companion grammar, published in `catalog-v3`. Merged to main after the maintainer's look and released in 0.4.0; 1314 tests + 116 doctests green. **2026-11-09:** property tests with StreamData (item 17, [adr/0044](adr/0044-property-tests-with-stream-data.md)): slice 1 moved six seeded loops over to generated, shrinking cases; slice 2 covered the attestation path and found and fixed BUG-8 (an attestation missed a group's undone hunks); slice 3 covered addressing and the parse round-trip; a verify pass completed BUG-8's fix and strengthened three properties, and logged BUG-9; 1312 tests + 18 properties + 118 doctests green. Since the
+**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14); shell commands run from the minibuffer (`!`, `!!`, `|`, item 15); both ship in 0.3.4. From 0.3.5 the captAInHook payload ships in each release, linked at `~/.local/share/geex/integrations/geex-attest.sh` (ADR-0041's amendment). **2026-11-06:** a read-only markdown preview (item 16, [adr/0043](adr/0043-markdown-preview.md)): `Alt+Shift+P` opens a markdown file's rendered preview beside it, re-rendered when the file on disk changes; it needs the `markdown_inline` companion grammar, published in `catalog-v3`. Merged to main after the maintainer's look and released in 0.4.0; 1314 tests + 116 doctests green. **2026-11-09:** property tests with StreamData (item 17, [adr/0044](adr/0044-property-tests-with-stream-data.md)): slice 1 moved six seeded loops over to generated, shrinking cases; slice 2 covered the attestation path and found and fixed BUG-8 (an attestation missed a group's undone hunks); slice 3 covered addressing and the parse round-trip; a verify pass completed BUG-8's fix and strengthened three properties, and found BUG-9, fixed the same day; 1313 tests + 19 properties + 118 doctests green. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -635,15 +635,17 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      (an attestation may match the newest undone group, then the newest applied one); a targeted
      BUG-8 property; the spool oracle pins the whole credited chain across harnesses; the relabel
      property no longer restates the function; the grid property reaches its empty-range branch;
-     the painter joins the width walks. BUG-9 (a checkpoint's blame not relabelled) logged.
+     the painter joins the width walks. BUG-9 (a checkpoint's blame not relabelled) logged, then
+     fixed the same day with a property through the real compaction (attesting commutes with
+     undo and redo).
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the
 tty) is **FIXED** (2026-10-16), and BUG-4 (a deploy removed a running geex's unpack) is **FIXED** (2026-10-18); BUG-5 and BUG-6 are **FIXED** (2026-10-18). BUG-7 (stale text after a terminal resize, found
 while dogfooding the markdown preview) is **FIXED** (2026-11-06). BUG-8 (an attestation missed the
-undone hunks of its group, found by a property test) is **FIXED** (2026-11-09). **Open:** BUG-9 (an
-attestation doesn't relabel a compacted ledger's checkpoint blame; very rare; one-line fix
-recommended).
+undone hunks of its group, found by a property test) is **FIXED** (2026-11-09). BUG-9 (an attestation didn't
+relabel a compacted ledger's checkpoint blame, found by the verify pass) is **FIXED**
+(2026-11-09); the shelf is clear again.
 
 ---
 

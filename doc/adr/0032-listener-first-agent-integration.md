@@ -501,7 +501,10 @@ property test, [ADR-0044](0044-property-tests-with-stream-data.md)):
   `Buffer.attest/2`). Only the newest undone group is tried: undo two groups in full, and a late
   attestation for the older one is held and lost, as "only the newest group" already said.
 - **What crediting does.** `History.attest/3` relabels the group's commands, applied and undone,
-  and its lines; `unattested?/2` counts both, so a repeat attestation is ignored either way.
+  and its lines, including those a compacted ledger's checkpoint carries for commands it folded
+  in (`base_blame`, which an undo rebuilds the blame from; BUG-9); `unattested?/2` counts applied
+  and undone commands, so a repeat attestation is ignored either way. A group whose every command
+  a compaction folded into the checkpoint has no stamp left, so a late attestation can't find it.
 - **Revised the same day.** The first version relabelled undone commands but matched only the
   newest applied group, so a fully undone group stayed `:external`; a verify pass (session
   geex-d3) found it. Its recheck found the second version stopping at the first matching group
