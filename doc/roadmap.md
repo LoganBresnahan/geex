@@ -612,6 +612,15 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    - **Later, if wanted:** included ranges in the NIF (faster inline parsing, and injections for
      source highlighting); marking the blocks the last write changed, by who wrote them.
 
+17. **Property tests with StreamData** ([adr/0044](adr/0044-property-tests-with-stream-data.md),
+   accepted 2026-11-09) — the maintainer's ask 2026-11-09, for the agentic workflow: laws over the
+   pure core checked by generated, shrinking cases instead of the fixed-seed `:rand` loops.
+   - **Next,** in slices (ADR-0044 §8): (1) `stream_data` test-only, `Geex.Gen`, and six of the
+     seven seeded loops rewritten as properties stating the same laws (the ledger one drives a live
+     buffer and waits); (2) the attestation path: `Ledger.Spool.chain/3`, `Buffer`'s hash check
+     extracted pure, `Blame.relabel/3`; (3) addressing (`Width`, `Coord`) and the minibuffer/MCP
+     parse round-trip. Later ones (markdown anchors, `Fuzzy`, `Selection`) wait for a consumer.
+
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the
 tty) is **FIXED** (2026-10-16), and BUG-4 (a deploy removed a running geex's unpack) is **FIXED** (2026-10-18); BUG-5 and BUG-6 are **FIXED** (2026-10-18). BUG-7 (stale text after a terminal resize, found
