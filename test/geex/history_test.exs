@@ -109,7 +109,7 @@ defmodule Geex.HistoryTest do
     # brought that command back still :external, so the group was half credited and a repeat
     # attestation was ignored (`unattested?/2` false).
     test "attest credits the group's undone commands too, so a redo stays credited" do
-      ops = [{:reconcile, "a"}, {:reconcile, "\na\n"}, :undo, {:attest, "s1"}, :redo]
+      ops = [{:reconcile, "a"}, {:reconcile, "\na\n"}, :undo, {:attest, "s1", 0}, :redo]
       h = Enum.reduce(ops, History.new(""), &run_op/2)
 
       agent = {:agent, %{harness: "claude-code", session: "s1"}}
@@ -145,7 +145,7 @@ defmodule Geex.HistoryTest do
 
   # ADR-0044 §8.2: attribution is the history's. Whoever the blame names for a line is the writer
   # of a recorded command, and an attestation credits a reconcile group as a whole: all of its
-  # commands carry one actor.
+  # commands, applied or undone, carry one actor.
   property "the blame names only recorded writers, and a group has one actor" do
     check all({base, ops} <- transitions()) do
       final = Enum.reduce(ops, History.new(base), &run_op/2)
@@ -155,7 +155,7 @@ defmodule Geex.HistoryTest do
           writer != nil,
           do: assert(writer in writers, "#{inspect(writer)} wrote no recorded command")
 
-      final.commands
+      (final.commands ++ final.redo)
       |> Enum.filter(&match?(%{meta: %{reconcile: %{group: g}}} when is_integer(g), &1))
       |> Enum.group_by(& &1.meta.reconcile.group, & &1.meta.actor)
       |> Enum.each(fn {group, actors} ->
@@ -164,12 +164,57 @@ defmodule Geex.HistoryTest do
     end
   end
 
+  # BUG-8's law, aimed at directly (the general property above reaches it only now and then): a
+  # reconcile group of several hunks, any number of them undone (all of them, and an older group's
+  # too), then a late attestation, then any number redone. The group stays attestable, and the
+  # attestation credits every command of it, applied or undone, and every line it wrote.
+  property "an attestation credits its whole group, however much of it was undone" do
+    check all(
+            start <- Gen.text(max_lines: 3),
+            lines <- list_of(Gen.line(), min_length: 3, max_length: 8),
+            flips <- list_of(boolean(), length: length(lines)),
+            undos <- integer(0..8),
+            redos <- integer(0..8),
+            session <- member_of(["s1", "s2"])
+          ) do
+      # distinct lines, and every other one rewritten (the first always), so the group has
+      # separate hunks
+      before = lines |> Enum.with_index() |> Enum.map(fn {l, i} -> "#{l}~#{i}" end)
+
+      disk =
+        before
+        |> Enum.zip(flips)
+        |> Enum.with_index()
+        |> Enum.map(fn {{l, flip}, i} ->
+          if rem(i, 2) == 0 and (flip or i == 0), do: "agent #{i}", else: l
+        end)
+
+      h = run_op({:reconcile, Enum.join(before, "\n")}, History.new(start))
+      group = h.next_group
+      h = run_op({:reconcile, Enum.join(disk, "\n")}, h)
+      h = Enum.reduce(List.duplicate(:undo, undos), h, &run_op/2)
+
+      assert group in Enum.map(History.attestable_groups(h), & &1.group)
+      agent = {:agent, %{harness: "claude-code", session: session}}
+      h = History.attest(h, group, agent)
+      h = Enum.reduce(List.duplicate(:redo, redos), h, &run_op/2)
+
+      ours =
+        Enum.filter(h.commands ++ h.redo, &match?(%{meta: %{reconcile: %{group: ^group}}}, &1))
+
+      assert ours != []
+      assert Enum.all?(ours, &(&1.meta.actor == agent))
+      refute History.unattested?(h, group)
+      for {_actor, ^group} = writer <- h.blame, do: assert(writer == {agent, group})
+    end
+  end
+
   defp transitions, do: tuple({Gen.text(), list_of(transition(), max_length: 100)})
 
   # What a buffer's history goes through: edits (an insert's line and column are seeds, taken
   # modulo the document as it is when the insert runs, so every insert lands somewhere valid and
-  # shrinks toward 0:0), undo and redo, the disk changing (a reconcile group adopting it), an
-  # attestation for the newest group (as `Geex.Buffer` takes one, hashes aside), and a save.
+  # shrinks toward 0:0), undo and redo, the disk changing (a reconcile group adopting it), a late
+  # attestation for one of the groups `Geex.Buffer` would try (hashes aside), and a save.
   defp transition do
     frequency([
       {1, constant(:undo)},
@@ -180,7 +225,7 @@ defmodule Geex.HistoryTest do
           Gen.actor()}
        )},
       {1, tuple({constant(:reconcile), Gen.text(max_lines: 5)})},
-      {1, tuple({constant(:attest), member_of(["s1", "s2"])})},
+      {1, tuple({constant(:attest), member_of(["s1", "s2"]), non_negative_integer()})},
       {1, constant(:sync)}
     ])
   end
@@ -210,16 +255,19 @@ defmodule Geex.HistoryTest do
     end
   end
 
-  # Buffer's rule: the newest reconcile group, once, while every command of it is :external.
-  defp run_op({:attest, session}, h) do
-    case History.newest_group(h) do
-      %{group: group} when is_integer(group) ->
+  # Buffer's rule: one of the groups it tries (the newest undone, the newest applied; `pick`
+  # stands for which one the attestation's hashes match), once, while all of it is :external.
+  defp run_op({:attest, session, pick}, h) do
+    case History.attestable_groups(h) do
+      [] ->
+        h
+
+      stamps ->
+        %{group: group} = Enum.at(stamps, rem(pick, length(stamps)))
+
         if History.unattested?(h, group),
           do: History.attest(h, group, {:agent, %{harness: "claude-code", session: session}}),
           else: h
-
-      _none ->
-        h
     end
   end
 

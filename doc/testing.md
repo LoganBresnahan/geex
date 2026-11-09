@@ -5277,3 +5277,70 @@ test.
 `col_at_display/2`, pinned here, but the loop step itself is example-tested); the JSON-RPC
 envelope's properties (the MCP surface is frozen); ADR-0044 §8.4's later properties (markdown
 anchors, `Fuzzy`, `Selection`) wait for a consumer; the ledger loop.
+
+### 2026-11-09 — property tests: the verify pass; BUG-8 completed, BUG-9 logged (ADR-0044)
+
+A second session (geex-d3) adversarially verified slices 1–3 (`c3e265f..e50081d`) at the
+maintainer's request; the maintainer chose to fix everything it found except BUG-9, which is
+logged. Its report confirmed the suite, the deep runs, `GEEX_PROPERTY_RUNS`, the lock cleanup,
+restore == live for attest-then-redo, and the §8.3 reading; and found the gaps below. Earlier
+entries' claims that this corrects: slice 2's BUG-8 fix covered a partly undone group only;
+slice 3's "two implementations of one mapping" missed the painter, and its grid property barely
+reached the empty-range branch it claimed.
+
+- **BUG-8 completed** (`lib/geex/history.ex`, `lib/geex/buffer.ex`): `History.attestable_groups/1`
+  (the newest undone group, then the newest applied one, deduplicated; doctest), `Buffer.attest/2`
+  takes the first that matches both hashes, `unattested?/2` counts undone commands. Two `Buffer`
+  examples (`attest_test.exs`): a late attestation after both hunks were undone is `:attested`
+  and the redo brings both back credited (this failed with `:held` before the change, as
+  geex-d3 reported), and with a newer group undone the newest applied group still matches
+  (passed before and after).
+- **A targeted BUG-8 property** (`history_test.exs`): a multi-hunk group (distinct lines, every
+  other one rewritten), any number undone (an older group's too), an attestation, any number
+  redone: the group stays attestable and every command of it, applied or undone, and every line it
+  wrote carry the agent. With the redo relabelling removed: fails on 10 seeds in 10 at 100 runs;
+  with undone groups not attestable: 10 in 10. The general property's attestation step now
+  follows `attestable_groups/1`, and its "one actor" law covers the redo stack.
+- **Spool** (`spool_test.exs`): writers are `claude-code/s1`, `claude-code/s2` and `codex/s1`;
+  the oracle returns the very chain to credit (best predecessor = longest, earliest among equals;
+  the earliest of the longest ending at the disk), compared with `chain/3`'s tool calls. geex-d3's
+  `who = e.session` and ties going to the last found each fail on 5 seeds in 5.
+- **Blame**: the relabel property is now "relabelling a replayed blame equals replaying with the
+  group's commands relabelled"; relabelling every group's lines fails it (shrank to one human
+  insert).
+- **Grid** (`coord_test.exs`): the second point is the first one time in five; `cut` (human
+  only) and the refusal of an invalid bare coordinate are asserted. geex-d3's empty-range
+  mutation of `Coord.parse` now fails on 10 seeds in 10 (it passed 20 in 20).
+- **Width** (`width_test.exs`): a third walk, the painter: `Paint.to_screen/9` puts each grapheme
+  in the columns `col_at_display/2` gives it (lead, continuation `""`, background past the end).
+  The painter advancing one column per zero-width grapheme fails (shrank to `"\ra"`), as does a
+  wide glyph's continuation drawn as a space (`"中"`).
+- **BUG-9 reproduced and logged**, not fixed (bugs.md): after `from_checkpoint` with a group's
+  lines in the checkpoint blame, attest, then an edit and its undo, the checkpoint line is back
+  to `{:external, 7}` with `unattested?` false. Cause: `History.attest/3` doesn't relabel
+  `base_blame`.
+- **The recheck** (geex-d3, before this commit): the first version of `Buffer.attest/2` stopped
+  at the first matching group and answered `:ignored` when it was already attested, so an
+  attested undone group shadowed an applied group with the same hashes: the agent writes a → b,
+  you put "a" back and save, it writes a → b again, s2's attestation credits the second, you undo
+  it, and s1's late attestation for the first was `:ignored` (at the previous commit's code it
+  was `:attested`). Now it credits the first match still unattested. The steps are an example
+  test (`attest_test.exs`, real file, save in between): `:ignored` before the change,
+  `:attested` with the first group credited after. The recheck also confirmed: no loss on the
+  held-then-full-undo path (an early attestation is credited when the group is recorded, before
+  any undo); restore replays `{:attest, group, actor}` by the recorded group id, so the new order
+  can't make restore differ from live; the older of two fully undone groups is still not
+  attestable (ADR-0032's "only the newest group"; now said so in the docs).
+- **Documented, not changed:** slice 1's default runs use smaller inputs than the loops they
+  replaced (lists capped at the generation size, ≤100 at 100 runs); ADR-0044's verify-pass
+  amendment states the numbers.
+
+**Automated.** `mix test` → **1312 tests + 18 properties + 118 doctests, 0 failures**, twice
+(14.8 s, 15.1 s, after the recheck's fix). The 18 properties take ~171 ms together at 100 runs.
+All 18 at 10,000 runs, seeds 31 and 32 (before the recheck) and 51 (after): 0 failures. `mix compile --warnings-as-errors --force` clean in dev and test. Every
+planted bug above was reverted (`git checkout` of the file, or the saved copy for
+`history.ex`); `git status` shows only the intended changes.
+
+**Not tested / deferred:** BUG-9's fix; a fully undone group whose attestation is held *and*
+spooled (the fast-forward path is unchanged; the late path now credits it); the ledger loop
+(still seeded); ADR-0044 §8.4.

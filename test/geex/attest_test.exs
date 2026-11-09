@@ -112,6 +112,71 @@ defmodule Geex.AttestTest do
       assert actors(buf) == [:external]
     end
 
+    # BUG-8, completed after a verify pass: the attestation lands after every hunk of its group
+    # was undone. It credits the undone hunks, so the redo brings them back as the agent's.
+    test "a late attestation for a fully undone group credits it, and the redo keeps it" do
+      buf = start_supervised!({Buffer, text: "1\n2\n3\n"})
+      {:reconciled, _} = Reconcile.reconcile(buf, "ONE\n2\nTHREE\n")
+      {:ok, _, _} = Buffer.undo(buf)
+      {:ok, _, _} = Buffer.undo(buf)
+      assert actors(buf) == []
+
+      assert Buffer.attest(buf, attestation("1\n2\n3\n", "ONE\n2\nTHREE\n")) == :attested
+
+      {:ok, _, _} = Buffer.redo(buf)
+      {:ok, _, _} = Buffer.redo(buf)
+      assert [{:agent, %{session: "s1"}}, {:agent, %{session: "s1"}}] = actors(buf)
+      assert Buffer.attest(buf, attestation("1\n2\n3\n", "ONE\n2\nTHREE\n")) == :ignored
+    end
+
+    # Undoing a newer group keeps the newest applied one attestable, as before.
+    test "with a newer group undone, the newest applied group still matches" do
+      buf = start_supervised!({Buffer, text: "a\n"})
+      {:reconciled, _} = Reconcile.reconcile(buf, "b\n")
+      {:reconciled, _} = Reconcile.reconcile(buf, "c\n")
+      {:ok, _, _} = Buffer.undo(buf)
+      assert Buffer.attest(buf, attestation("a\n", "b\n")) == :attested
+      assert [{:agent, %{session: "s1"}}] = actors(buf)
+    end
+
+    # The verify pass's counterexample to "nothing that matched stops matching": an undone group
+    # already attested with the same hashes must not shadow the applied group the attestation
+    # would have credited before. The agent writes a -> b twice (you put "a" back and saved in
+    # between); s2's attestation credits the second write; you undo it; s1's late attestation
+    # for the first write still credits the first.
+    test "an attested undone group doesn't shadow an applied one with the same hashes" do
+      dir = Path.join(System.tmp_dir!(), "geex_attest_#{Geex.Fixtures.uniq()}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+      path = Path.join(dir, "doc.txt")
+      File.write!(path, "a\n")
+      buf = start_supervised!({Buffer, path: path})
+
+      File.write!(path, "b\n")
+      {:reconciled, _} = Reconcile.reconcile(buf, "b\n")
+
+      {:ok, back} =
+        Geex.Commands.Replace.parse(%{
+          start_line: 0,
+          start_col: 0,
+          end_line: 0,
+          end_col: 1,
+          text: "a"
+        })
+
+      {:ok, _} = Buffer.dispatch(buf, Command.put_meta(back, Meta.human()))
+      {:ok, _} = Buffer.save(buf)
+
+      File.write!(path, "b\n")
+      {:reconciled, _} = Reconcile.reconcile(buf, "b\n")
+      s2 = attestation("a\n", "b\n", %{session: "s2"})
+      assert Buffer.attest(buf, s2) == :attested
+      {:ok, _, _} = Buffer.undo(buf)
+
+      assert Buffer.attest(buf, attestation("a\n", "b\n")) == :attested
+      assert [{:agent, %{session: "s1"}}, :human] = actors(buf)
+    end
+
     test "only the newest group: an attestation for an older write doesn't match" do
       buf = start_supervised!({Buffer, text: "a\n"})
       {:reconciled, _} = Reconcile.reconcile(buf, "b\n")

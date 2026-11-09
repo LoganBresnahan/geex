@@ -20,7 +20,8 @@ defmodule Geex.Ledger.SpoolTest do
 
   # Entries over a few contents, so writes link up (and sometimes cycle): each one moves the
   # file from one content to another, sometimes reporting its `before` in LF form, from one of
-  # two sessions, sometimes edited in the permission prompt. `tool_use` is the entry's index, so
+  # three writers (two sessions of one harness, and another harness reusing a session id, so a
+  # chain keyed by session alone would stitch them), sometimes edited in the permission prompt. `tool_use` is the entry's index, so
   # a credit names the entries it used. The first element tells the same writes as text, so a
   # shrunk counterexample reads as contents rather than hashes.
   defp scenario do
@@ -32,7 +33,7 @@ defmodule Geex.Ledger.SpoolTest do
                 frequency([{2, constant(:follow)}, {1, non_negative_integer()}]),
                 non_negative_integer(),
                 frequency([{4, constant(:exact)}, {1, constant(:lf)}]),
-                member_of(["s1", "s2"]),
+                member_of([{"claude-code", "s1"}, {"claude-code", "s2"}, {"codex", "s1"}]),
                 frequency([{4, constant(false)}, {1, constant(true)}])
               }),
               max_length: 12
@@ -52,14 +53,15 @@ defmodule Geex.Ledger.SpoolTest do
       {written, _last} =
         writes
         |> Enum.with_index()
-        |> Enum.map_reduce(synced_at, fn {{from, to, form, session, edited}, i}, previous ->
+        |> Enum.map_reduce(synced_at, fn {{from, to, form, {harness, session}, edited}, i},
+                                         previous ->
           from = if from == :follow, do: previous, else: from
           before = if form == :lf, do: lf(at.(from)), else: at.(from)
 
           entry = %{
             before: hex(before),
             sha256: hex(at.(to)),
-            harness: "claude-code",
+            harness: harness,
             session: session,
             turn: "t#{i}",
             tool_use: "u#{i}",
@@ -67,7 +69,7 @@ defmodule Geex.Ledger.SpoolTest do
           }
 
           story =
-            "u#{i} #{session}: #{inspect(before)} -> #{inspect(at.(to))}" <>
+            "u#{i} #{harness}/#{session}: #{inspect(before)} -> #{inspect(at.(to))}" <>
               if(edited, do: " (edited)", else: "")
 
           {{story, entry}, to}
@@ -87,49 +89,57 @@ defmodule Geex.Ledger.SpoolTest do
     end
   end
 
-  # The naive oracle: the longest exact chain, by dynamic programming over the entries in time
-  # order (each entry's longest chain is one more than the longest earlier chain from its session
-  # ending at its `before`, or 1 if its `before` is a start). Returns the length, or nil.
-  defp longest_chain(entries, synced, disk) do
+  # The naive oracle: the chain `chain/3` must credit, by dynamic programming over the entries
+  # in time order. An entry's chain is the chain of its best predecessor (an earlier entry of the
+  # same harness and session ending at its `before`: the longest, the earliest among equals) plus
+  # itself, or itself alone if its `before` is a start. The credit is the chain of the earliest
+  # entry ending at the disk among the longest. Returns its tool calls, or nil.
+  defp oracle_chain(entries, synced, disk) do
     starts = starts(synced)
     disk = hex(disk)
+    who = &{&1.harness, &1.session}
 
     {_ends, best} =
       entries
       |> Enum.reject(&(&1.before == &1.sha256))
       |> Enum.reduce({[], nil}, fn e, {ends, best} ->
-        earlier =
-          for {len, f} <- ends, f.session == e.session, f.sha256 == e.before, do: len + 1
+        # `ends` is newest first; the earliest predecessor among the longest is the last max
+        predecessor =
+          ends
+          |> Enum.filter(fn {_chain, f} -> who.(f) == who.(e) and f.sha256 == e.before end)
+          |> Enum.reverse()
+          |> Enum.max_by(fn {chain, _f} -> length(chain) end, fn -> nil end)
 
-        candidates = if e.before in starts, do: [1 | earlier], else: earlier
+        chain =
+          case predecessor do
+            {chain, _f} -> chain ++ [e]
+            nil -> if e.before in starts, do: [e]
+          end
 
-        case candidates do
-          [] ->
-            {ends, best}
-
-          _ ->
-            len = Enum.max(candidates)
-            best = if e.sha256 == disk, do: max(best || 0, len), else: best
-            {[{len, e} | ends], best}
+        cond do
+          chain == nil -> {ends, best}
+          e.sha256 == disk and length(chain) > length(best || []) -> {[{chain, e} | ends], chain}
+          true -> {[{chain, e} | ends], best}
         end
       end)
 
-    best
+    best && Enum.map(best, & &1.tool_use)
   end
 
-  property "chain/3 credits the longest exact chain from one session, and nothing else" do
+  property "chain/3 credits the longest exact chain from one writer, and nothing else" do
     check all({_story, entries, synced, disk} <- scenario()) do
-      case {Spool.chain(entries, synced, disk), longest_chain(entries, synced, disk)} do
+      case {Spool.chain(entries, synced, disk), oracle_chain(entries, synced, disk)} do
         {:none, nil} ->
           :ok
 
-        {{:ok, {:agent, who}, tool_uses}, best} when is_integer(best) ->
+        {{:ok, {:agent, who}, tool_uses}, expected} when is_list(expected) ->
           by_tool_use = Map.new(entries, &{&1.tool_use, &1})
           links = Enum.map(tool_uses, &Map.fetch!(by_tool_use, &1))
           [first | _] = links
           last = List.last(links)
 
-          assert length(links) == best
+          # the very chain: the longest, its ties broken by the first found
+          assert tool_uses == expected
           # in time order, each write once
           indices = Enum.map(tool_uses, fn "u" <> i -> String.to_integer(i) end)
           assert indices == Enum.sort(Enum.uniq(indices))

@@ -251,10 +251,12 @@ defmodule Geex.Buffer do
 
   It upgrades the buffer's **newest reconcile group**, every command of it, once, from
   `:external` to `{:agent, %{harness, session, turn, tool_use}}`, only when **both**
-  `before` and `sha256` equal the group's `before_sha256` and `sha256`. `before` may instead
-  equal `before_sha256_lf`, the baseline with each `\\r\\n` turned into `\\n`: Claude Code reports a
-  CRLF file's prior text that way. `sha256` is always exact. Replay is unaffected: `meta` never
-  feeds a command's `run/2`.
+  `before` and `sha256` equal the group's `before_sha256` and `sha256`. The groups tried are
+  the newest undone one (its commands on the redo stack, so a redo brings them back credited),
+  then the newest applied one (`History.attestable_groups/1`); the first that matches and is
+  still unattested is credited. `before` may instead equal `before_sha256_lf`, the baseline with
+  each `\\r\\n` turned into `\\n`: Claude Code reports a CRLF file's prior text that way. `sha256`
+  is always exact. Replay is unaffected: `meta` never feeds a command's `run/2`.
 
   Otherwise the write hasn't been taken in yet (the buffer holds, ADR-0034), so the attestation
   is **held** (at most 256 per buffer) and the next fast-forward credits it by the spool's
@@ -385,31 +387,34 @@ defmodule Geex.Buffer do
   def handle_call({:attest, %{before: nil}}, _from, state), do: {:reply, :ignored, state}
 
   def handle_call({:attest, attestation}, _from, state) do
-    case History.newest_group(state.history) do
-      %{group: group} = stamp when not is_nil(group) ->
-        cond do
-          not Geex.Attest.matches?(attestation, stamp) ->
-            {:reply, :held, hold(state, attestation)}
+    matching =
+      state.history
+      |> History.attestable_groups()
+      |> Enum.filter(&Geex.Attest.matches?(attestation, &1))
 
-          History.unattested?(state.history, group) ->
-            actor = agent_actor(attestation)
+    # The first matching group still all :external is credited. One already attested doesn't
+    # shadow the next (the same transition can be both the newest undone group and the newest
+    # applied one).
+    case {Enum.find(matching, &History.unattested?(state.history, &1.group)), matching} do
+      {%{group: group}, _matching} ->
+        actor = agent_actor(attestation)
 
-            new_state =
-              record(
-                %{state | history: History.attest(state.history, group, actor)},
-                {:attest, group, actor}
-              )
+        new_state =
+          record(
+            %{state | history: History.attest(state.history, group, actor)},
+            {:attest, group, actor}
+          )
 
-            notify_attested(new_state, group, actor)
-            {:reply, :attested, new_state}
+        notify_attested(new_state, group, actor)
+        {:reply, :attested, new_state}
 
-          # Already attested: a repeat says nothing new, and parking it could let it match a
-          # later, unrelated write of the same transition.
-          true ->
-            {:reply, :ignored, state}
-        end
+      # Every match already attested: a repeat says nothing new, and parking it could let it
+      # match a later, unrelated write of the same transition.
+      {nil, [_ | _]} ->
+        {:reply, :ignored, state}
 
-      _no_group ->
+      # No group matches: the write hasn't been taken in yet.
+      {nil, []} ->
         {:reply, :held, hold(state, attestation)}
     end
   end

@@ -4,7 +4,9 @@
   workflow, naming StreamData; the rest was proposed in the same conversation, drafted here at
   the maintainer's request, and accepted by the maintainer the same day. **Slices 1–3
   built 2026-11-09** ([testing.md](../testing.md) 2026-11-09); amended below (§3, §5, §8) where
-  building them changed the design. Slice 2 found and fixed BUG-8. §8.4's slices wait for their
+  building them changed the design. Slice 2 found and fixed BUG-8. A verify pass the same day
+  (session geex-d3) found BUG-8's fix incomplete, three weak properties and some overclaiming;
+  all addressed below ("the verify pass"), and BUG-9 logged. §8.4's slices wait for their
   consumers.
 - **Date:** 2026-11-09
 - **Relates to:** [ADR-0006](0006-elixir-not-gleam.md) (which promised property tests for the
@@ -203,8 +205,10 @@ a property; a shrunk counterexample gets an example test.* `/shipshape` doesn't 
   Kept for every later property over hashed or encoded inputs.
 - **One law added to the list:** "a reconcile group's commands carry one actor" (with "the blame
   names only recorded writers"), over a history whose transitions now include reconcile groups,
-  attestations taken as `Buffer` takes them, and saves. On its first run it found **BUG-8**: an
-  attestation landing while part of its group was undone left the redone part `:external`. Fixed
+  attestations taken as `Buffer` takes them, and saves. On the first of five runs it found
+  **BUG-8**: an attestation landing while part of its group was undone left the redone part
+  `:external` (the law alone catches it on about 3 seeds in 10; the verify pass added a targeted
+  property, and completed the fix for a fully undone group). Fixed for the partly undone case
   in the same commit (`History.attest/3` relabels the redo stack too, [ADR-0032](0032-listener-first-agent-integration.md)'s
   2026-11-09 amendment); the shrunk counterexample is an example test (§4).
 - **Teeth.** A bug planted in each function under test was caught and shrunk: `chain/3` ignoring
@@ -213,7 +217,7 @@ a property; a shrunk counterexample gets an example test.* `/shipshape` doesn't 
 
 ## Amendment — 2026-11-09: slice 3, addressing and the parse round-trip
 
-- **Two width walks, pinned together.** Besides `Width.col_at_display/2` against a naive
+- **Two width walks, pinned together** (three, after the verify pass: the painter too). Besides `Width.col_at_display/2` against a naive
   one-entry-per-column model, a property checks it against the draw walk, `Loop.cursor_xy/3`:
   the column a grapheme's cursor is drawn at addresses that grapheme. A click or a grid line can
   only address what was drawn there if the two agree (ADR-0027 §2).
@@ -231,6 +235,48 @@ a property; a shrunk counterexample gets an example test.* `/shipshape` doesn't 
 - **Teeth.** Planted bugs in `to_span/2`, `col_at_display/2`, `cursor_xy/3` and
   `Type.cast(:string, _)` were each caught and shrunk to a one-line case. The slice found nothing
   in the code.
+
+## Amendment — 2026-11-09: the verify pass
+
+A second session (geex-d3) adversarially verified slices 1–3 the same day, planting bugs and
+measuring what the properties catch. What it found, and what changed:
+
+- **BUG-8 was fixed only for a partly undone group.** With every hunk undone, a late attestation
+  matched nothing and was lost. Completed: an attestation may match the newest undone group, then
+  the newest applied one ([ADR-0032](0032-listener-first-agent-integration.md)'s 2026-11-09
+  amendment, revised). The history property's model missed it because its attestation step
+  copied the old rule; it now copies the new one. geex-d3's recheck then found the first version
+  of that fix stopping at the first matching group even when it was already attested, losing a
+  credit the old rule gave (an attested undone group shadowing an applied one with the same
+  hashes); `Buffer.attest/2` now credits the first match still unattested, with the case as an
+  example test. No property generates two groups with the same hashes, which is why none caught
+  it. A **targeted property** (a multi-hunk group,
+  any number of hunks undone, an attestation, any number redone: the whole group credited, and
+  attestable throughout) catches either half of the fix removed on 10 seeds in 10 at 100 runs,
+  where the general "one actor" law caught it on about 3.
+- **The spool property never varied the harness**, so a chain keyed by session alone passed
+  every test. Writers now include another harness reusing a session id, and the oracle returns
+  the very chain `chain/3` must credit (ties broken by the first found, as documented), not just
+  its length. Keying by session alone, and ties going to the last found, each fail on 5 seeds in 5.
+- **`Blame.relabel/3`'s property restated the function** (§7). Replaced by a law the function
+  doesn't define: relabelling a replayed blame equals replaying the commands with the group's
+  actors relabelled.
+- **The grid property almost never generated an empty range** (two uniform points rarely
+  coincide): a `Coord.parse` accepting one passed 20 seeds in 20. The second point is now
+  sometimes the first (caught on 10 in 10); `cut` and the refusal of an invalid bare coordinate
+  are covered. Both surfaces call `Coord.parse/1`, so the property mostly guards what each does
+  around it; said so in the test.
+- **Three width walks, not two.** The painter (`Highlight.Paint.to_screen/9` through
+  `Screen.put_grapheme/4`) now joins the property: each grapheme drawn in the columns
+  `col_at_display/2` gives it.
+- **Slice 1's default runs are smaller than the loops they replaced.** At 100 runs a list is
+  capped by the generation size (at most ~100), not its `max_length`: SpanIndex had 2,000 spans
+  over 10,000 bytes, now at most 100 over ~2,300; the history loop was one 300-operation run, now
+  up to ~100 operations per run over 100 runs; resolve, line-diff and merge drop from 400/500/300
+  cases to 100. The laws are the same and the inputs more varied; depth comes from
+  `GEEX_PROPERTY_RUNS`. A trade-off, stated here rather than hidden in "the same laws".
+- **BUG-9**, older than this ADR: an attestation doesn't relabel a checkpoint's `base_blame`.
+  Logged in [bugs.md](../bugs.md), not fixed.
 
 ## See
 

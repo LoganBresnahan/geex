@@ -2,7 +2,8 @@ defmodule Geex.WidthTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Geex.{Gen, Loop, Width}
+  alias Geex.{Gen, Loop, Screen, Width}
+  alias Geex.Highlight.Paint
 
   describe "cells/1 — column width of a grapheme" do
     test "ASCII printable is one column" do
@@ -136,6 +137,36 @@ defmodule Geex.WidthTest do
 
       {end_x, 0} = Loop.cursor_xy(line, {0, length(graphemes)}, 0)
       assert Width.col_at_display(line, end_x + 1) == length(graphemes) + 1
+    end
+  end
+
+  # The third walk: the painter (`Highlight.Paint.to_screen/9`, through `Screen.put_grapheme/4`)
+  # puts each grapheme in the column `col_at_display/2` says it occupies: a wide glyph's lead in
+  # its first column and a continuation ("") in its second, nothing for a zero-width one, and the
+  # background past the drawn width.
+  property "the painter draws each grapheme in the columns col_at_display/2 gives it" do
+    theme = Geex.Fixtures.birds()
+
+    check all(line <- Gen.fragment(max_length: 20)) do
+      graphemes = String.graphemes(line)
+      width = Width.string(line)
+      screen = Paint.to_screen(line, [], theme, width + 2, 1)
+
+      for display_x <- 1..(width + 2) do
+        gx = Width.col_at_display(line, display_x)
+        cell = Screen.get_cell(screen, display_x - 1, 0)
+
+        cond do
+          gx > length(graphemes) ->
+            assert cell.char == " "
+
+          display_x > 1 and Width.col_at_display(line, display_x - 1) == gx ->
+            assert cell.char == ""
+
+          true ->
+            assert cell.char == Enum.at(graphemes, gx - 1)
+        end
+      end
     end
   end
 end

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (amended 2026-10-14: attestation safety + write completion; 2026-10-18: a
   created file is sent as `created`; 2026-11-09: an attestation credits the group's undone
-  commands too). For open
+  commands too, and can match the newest write's group when fully undone). For open
   buffers, step b's disk-wins merge and the pending table are superseded by
   [ADR-0034](0034-panes-tree-edits-hold.md) (buffers hold; `git merge-file`; held attestations)
 - **Date:** 2026-10-14
@@ -488,8 +488,22 @@ with no hash match needed, a created file has a use after all. Relayed by the co
 
 An attestation credits a reconcile group as a whole, including the group's commands that are
 undone and waiting on the redo stack, so step (e)'s "an undone hunk loses its mark, and redo
-restores it" also holds after a late attestation. Before, `History.attest/3` relabelled only the
-applied commands. A redo then brought an undone hunk back as `:external`, and the group stayed
-half credited, because a repeat attestation finds it partly attested and is ignored (BUG-8,
-[bugs.md](../bugs.md)). Found by a property test ([ADR-0044](0044-property-tests-with-stream-data.md)):
-"a reconcile group's commands carry one actor".
+restores it" also holds after a late attestation (BUG-8, [bugs.md](../bugs.md), found by a
+property test, [ADR-0044](0044-property-tests-with-stream-data.md)):
+
+- **Which group a late attestation may match.** The newest undone group (its commands on the
+  redo stack, everything there being newer than everything applied), then the newest applied
+  group, which was the only one before. Both hashes must match, as always; the first that
+  matches **and is still unattested** is credited, once, so an attested undone group with the
+  same hashes never shadows the applied one. So an attestation that lands after the user undid
+  every hunk of the agent's **newest** write still credits it, and one for the newest applied
+  group still matches while a newer group is undone (`History.attestable_groups/1`,
+  `Buffer.attest/2`). Only the newest undone group is tried: undo two groups in full, and a late
+  attestation for the older one is held and lost, as "only the newest group" already said.
+- **What crediting does.** `History.attest/3` relabels the group's commands, applied and undone,
+  and its lines; `unattested?/2` counts both, so a repeat attestation is ignored either way.
+- **Revised the same day.** The first version relabelled undone commands but matched only the
+  newest applied group, so a fully undone group stayed `:external`; a verify pass (session
+  geex-d3) found it. Its recheck found the second version stopping at the first matching group
+  even when attested (`:ignored`), which lost a credit the first version gave; hence "still
+  unattested".

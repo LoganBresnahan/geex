@@ -154,18 +154,20 @@ defmodule Geex.CoordTest do
   # ADR-0044 §8.3: a human's grid line (`Verbs.parse_grid/1`, display columns) and an agent's grid
   # argument (the `goto`/`copy` tools' field-specs, graphemes) speak one grammar, so the same
   # text parses to the same coordinates on both surfaces, in any case and spacing, and both
-  # refuse the same lines (a zero, an empty or reversed range).
+  # refuse the same lines (a zero, an empty or reversed range). Both call `Coord.parse/1`, so
+  # this mostly guards what each surface does around it (the human's lowercasing and verbs).
   property "a human's grid line and an agent's grid argument parse to the same coordinates" do
     {:ok, %{fields: goto}} = Geex.MCP.Grid.lookup("goto")
     {:ok, %{fields: copy}} = Geex.MCP.Grid.lookup("copy")
 
     check all(
             a <- coord(30, 30, 0),
-            b <- coord(30, 30, 0),
+            # sometimes the same point: an empty range, which both surfaces must refuse
+            b <- frequency([{4, coord(30, 30, 0)}, {1, constant(a)}]),
             style_a <- style(),
             style_b <- style(),
             dash <- member_of(["-", " - ", "  -\t"]),
-            verb <- member_of(["copy", "COPY", "Copy"])
+            verb <- member_of(["copy", "COPY", "Copy", "cut", "CUT"])
           ) do
       point = render(a, style_a)
       range = render(a, style_a) <> dash <> render(b, style_b)
@@ -177,12 +179,15 @@ defmodule Geex.CoordTest do
         assert Geex.Command.cast_args(goto, %{"pos" => point}) == {:ok, %{pos: a}}
       else
         assert Verbs.parse_grid("goto " <> point) == :unknown
+        assert Verbs.parse_grid(point) == :unknown
         assert {:error, _} = Geex.Command.cast_args(goto, %{"pos" => point})
       end
 
+      # `cut` is the human's only (the agent's is deferred, `Geex.MCP.Grid`): its range is copy's
       if valid?.(a) and valid?.(b) and {a.y, a.x} < {b.y, b.x} do
         expected = %Range{from: a, to: b}
-        assert Verbs.parse_grid(verb <> " " <> range) == {:copy, expected}
+        verb_atom = verb |> String.downcase() |> String.to_existing_atom()
+        assert Verbs.parse_grid(verb <> " " <> range) == {verb_atom, expected}
         assert Geex.Command.cast_args(copy, %{"range" => range}) == {:ok, %{range: expected}}
       else
         assert Verbs.parse_grid(verb <> " " <> range) == :unknown

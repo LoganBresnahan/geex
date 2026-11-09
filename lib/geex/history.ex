@@ -227,15 +227,39 @@ defmodule Geex.History do
   @spec sync(t()) :: t()
   def sync(%__MODULE__{} = h), do: %{h | synced: text(h), dirty: false}
 
-  @doc "The reconcile stamp of the newest reconcile group, or `nil` (ADR-0032)."
+  @doc "The reconcile stamp of the newest applied reconcile group, or `nil` (ADR-0032)."
   @spec newest_group(t()) :: map() | nil
   def newest_group(%__MODULE__{commands: commands}),
     do: Enum.find_value(commands, fn command -> command.meta.reconcile end)
 
-  @doc "Whether every command of reconcile `group` is still the anonymous `:external`."
+  @doc """
+  The reconcile stamps a late attestation may match, in the order to try them (ADR-0032's
+  2026-11-09 amendment): the newest **undone** group, whose commands wait on the redo stack, then
+  the newest applied group (`newest_group/1`); one entry when they are the same group, none
+  when there is no reconcile group. The undone one comes first because it is the newer write:
+  everything on the redo stack was applied after everything still applied.
+
+      iex> h = Geex.History.new("a")
+      iex> Geex.History.attestable_groups(h)
+      []
+  """
+  @spec attestable_groups(t()) :: [map()]
+  def attestable_groups(%__MODULE__{redo: redo} = h) do
+    # The redo stack is newest-undone first, so its oldest write first: the newest write is last.
+    undone = redo |> Enum.reverse() |> Enum.find_value(fn command -> command.meta.reconcile end)
+
+    [undone, newest_group(h)]
+    |> Enum.filter(&match?(%{group: group} when is_integer(group), &1))
+    |> Enum.uniq_by(& &1.group)
+  end
+
+  @doc """
+  Whether every command of reconcile `group`, applied or undone, is still the anonymous
+  `:external`.
+  """
   @spec unattested?(t(), pos_integer()) :: boolean()
-  def unattested?(%__MODULE__{commands: commands}, group) do
-    commands
+  def unattested?(%__MODULE__{commands: commands, redo: redo}, group) do
+    (commands ++ redo)
     |> Enum.filter(&in_group?(&1, group))
     |> Enum.all?(&(&1.meta.actor == :external))
   end

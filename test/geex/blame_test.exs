@@ -127,30 +127,62 @@ defmodule Geex.BlameTest do
     end
   end
 
-  # ADR-0044 §8.2: an attestation relabels its own group's lines and nothing else.
-  property "relabel/3 changes only its own group's lines" do
+  # ADR-0044 §8.2: an attestation relabels its own group's lines and nothing else. Stated without
+  # restating `relabel/3`: relabelling a replayed blame gives the blame of replaying the same
+  # commands with that group's actors relabelled (`History.attest/3` relies on the two agreeing).
+  property "relabel/3 equals replaying with the group's commands relabelled" do
     check all(
-            blame <-
+            base <- Gen.text(max_lines: 4),
+            ops <-
               list_of(
-                one_of([
-                  constant(nil),
-                  tuple({Gen.actor(), constant(nil)}),
-                  tuple({Gen.actor(), integer(1..4)})
-                ]),
+                tuple(
+                  {non_negative_integer(), non_negative_integer(), Gen.insertion(), Gen.actor(),
+                   one_of([constant(nil), integer(1..3)])}
+                ),
                 max_length: 30
               ),
-            group <- integer(1..4),
+            group <- integer(1..3),
             actor <- Gen.actor()
           ) do
-      relabelled = Blame.relabel(blame, group, actor)
-      assert length(relabelled) == length(blame)
+      start = EditorState.new(base)
+      commands = commands_for(start, ops)
+      {:ok, _editor, blame} = Blame.replay(start, commands)
 
-      for {was, now} <- Enum.zip(blame, relabelled) do
-        case was do
-          {_old, ^group} -> assert now == {actor, group}
-          _other -> assert now == was
-        end
-      end
+      relabelled =
+        Enum.map(commands, fn
+          %{meta: %Meta{reconcile: %{group: ^group}} = meta} = c ->
+            %{c | meta: %{meta | actor: actor}}
+
+          c ->
+            c
+        end)
+
+      {:ok, _editor, expected} = Blame.replay(start, relabelled)
+      assert Blame.relabel(blame, group, actor) == expected
     end
+  end
+
+  # Valid inserts against the document as it evolves: each op's line and column are seeds taken
+  # modulo the document then; its group, if any, is stamped as reconcile stamps it.
+  defp commands_for(start, ops) do
+    {commands, _editor} =
+      Enum.reduce(ops, {[], start}, fn {line_seed, col_seed, text, actor, group}, {acc, editor} ->
+        lines = EditorState.lines(editor)
+        line = rem(line_seed, length(lines))
+        col = rem(col_seed, String.length(Enum.at(lines, line)) + 1)
+        {:ok, cmd} = Insert.parse(%{line: line, col: col, text: text})
+
+        stamp =
+          group && %{group: group, before_sha256: "b", before_sha256_lf: nil, sha256: "d"}
+
+        cmd = Command.put_meta(cmd, Meta.new(actor, reconcile: stamp))
+
+        case Geex.Dispatch.apply_command(cmd, editor) do
+          {:ok, next} -> {[cmd | acc], next}
+          {:error, _} -> {acc, editor}
+        end
+      end)
+
+    Enum.reverse(commands)
   end
 end

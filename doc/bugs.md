@@ -7,27 +7,64 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-8 — An attestation that lands while part of its group is undone leaves the redone part `:external`  ✅ FIXED (2026-11-09)
+## BUG-9 — An attestation doesn't relabel the blame a compacted ledger's checkpoint carries
 
-- **Status:** **FIXED** 2026-11-09 in the same commit that found it: `History.attest/3` relabels
-  the group's commands on the redo stack too. Verification is in the [testing.md](testing.md)
-  2026-11-09 entry "property tests, slice 2". Found by the history property's new law, "a
-  reconcile group's commands carry one actor" (ADR-0044 §8.2), on its first run.
-- **Symptom:** a reconcile group of two hunks; undo one; the attestation arrives and matches
-  (the group's stamp is on the hunk still applied); redo. The redone hunk's line shows as an
-  outside change while the rest of the group shows the agent, and a repeat attestation is
-  ignored, because `History.unattested?/2` now finds the group partly credited. ADR-0032 step
-  (e)'s "an undone hunk loses its mark, and redo restores it" didn't hold after a late
-  attestation.
-- **Verified cause:** `History.attest/3` mapped over `h.commands` only. The undone hunk waited on
-  `h.redo` with its old `:external` actor, and `redo/1` re-applied it as it was. The shrunk
-  counterexample: base `""`, the disk becomes `"a"` (group 1), then `"\na\n"` (group 2, two
-  hunks), undo, attest group 2, redo: group 2's actors were `[:external, agent]`.
-- **Fix:** relabel `h.redo` with the same function as `h.commands`. The ledger replays
-  `{:attest, group, actor}` through `History.attest/3`, so a restored history matches the live
-  one. The counterexample is an example test in `history_test.exs`.
-- **Ruled out:** the hashes. The attestation matched the stamp correctly; only the redo stack
-  was missed.
+- **Status:** open, found 2026-11-09 by a verify pass over ADR-0044 (session geex-d3) and
+  reproduced in `History` directly. Very rare: it needs a compaction that splits a reconcile
+  group (some of its commands folded into the checkpoint, some still recorded), a restart, then
+  a late attestation for that group.
+- **Symptom:** `History.from_checkpoint("a\nb", [{:external, 7}, {:external, 7}], "a\nb", 8)`,
+  a command of group 7 on line 1, `attest(h, 7, agent)`: both lines show the agent. Then any
+  edit and its undo: line 0 shows `{:external, 7}` again, and `unattested?(h, 7)` is false, so a
+  repeat attestation is ignored and the line stays an outside change.
+- **Verified cause:** `History.attest/3` relabels `blame` and the commands but not `base_blame`;
+  `undo/1` rebuilds the blame from `base_blame` plus the remaining commands
+  (`Blame.replay(h.base, …, h.base_blame)`), so the checkpoint's lines of the group come back as
+  they were.
+- **Recommended fix:** `base_blame: Blame.relabel(h.base_blame, group, actor)` in
+  `History.attest/3`, with the example above as a test. The ledger replays `{:attest, …}` through
+  the same function, so restore stays equal to live.
+- **Ruled out:** compaction itself (`Ledger.Compact` writes the blame it replayed, correctly).
+
+---
+
+## BUG-8 — A late attestation missed the undone hunks of its group  ✅ FIXED (2026-11-09)
+
+- **Status:** **FIXED** 2026-11-09, in two steps. Found by the history property's new law, "a
+  reconcile group's commands carry one actor" (ADR-0044 §8.2), on the first of five runs (the
+  law alone catches it on about 3 seeds in 10 at 100 runs). Fixed for a **partly** undone group
+  in the same commit (`ff1e66b`); a verify pass (session geex-d3) then found the **fully**
+  undone case still open, fixed the same day; its recheck found the first version of that fix
+  let an attested undone group shadow an applied one, also fixed. Verification is in the [testing.md](testing.md)
+  2026-11-09 entries "property tests, slice 2" and "the verify pass".
+- **Symptom (partly undone):** a reconcile group of two hunks; undo one; the attestation arrives
+  and matches (the group's stamp is on the hunk still applied); redo. The redone hunk's line
+  shows as an outside change while the rest of the group shows the agent, and a repeat
+  attestation is ignored, because `History.unattested?/2` finds the group partly credited.
+- **Symptom (fully undone):** undo both hunks before the attestation arrives: it is `:held` (no
+  applied group matches), never links at the next fast-forward (the held entry starts from the
+  text before the group, the chain from the disk after it), and is dropped; the redo brings both
+  hunks back `:external`. ADR-0032 step (e)'s "an undone hunk loses its mark, and redo restores
+  it" didn't hold after a late attestation in either case.
+- **Verified cause:** `History.attest/3` mapped over `h.commands` only, so an undone hunk waited
+  on `h.redo` with its old actor; and `Buffer.attest/2` matched only `History.newest_group/1`,
+  which scans the applied commands, so a fully undone group wasn't attestable at all. The shrunk
+  counterexample (partly undone): base `""`, the disk becomes `"a"` (group 1), then `"\na\n"`
+  (group 2, two hunks), undo, attest group 2, redo: group 2's actors were `[:external, agent]`.
+- **Fix:** `History.attest/3` relabels `h.redo` too; `History.attestable_groups/1` gives the
+  stamps an attestation may match, the newest undone group first, then the newest applied one;
+  `Buffer.attest/2` credits the first that matches and is still unattested, so an attested
+  undone group with the same hashes doesn't shadow the applied one (the recheck's
+  counterexample, now an example test) and nothing that matched before stops matching;
+  `unattested?/2` counts undone commands. As before, only the newest write's group is tried
+  among the undone ones: undo two groups in full, and a late attestation for the older is still
+  held and lost, under ADR-0032's "only the newest group". The ledger replays `{:attest, group, actor}`
+  through `History.attest/3`, so a restored history matches the live one. Ledgers written
+  before the fix restore an attest-then-redo with the redone hunk credited, where the live
+  session had left it `:external`: a correction. Examples in `history_test.exs` and
+  `attest_test.exs`; a targeted property (below) catches either half of the fix removed on 10
+  seeds in 10.
+- **Ruled out:** the hashes. The attestation matched the stamp correctly.
 
 ---
 
