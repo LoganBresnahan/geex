@@ -1,12 +1,13 @@
 defmodule Geex.AttestTest do
   # Discovery is a named singleton with a global token; buffers register in Geex.Registry.
   use ExUnit.Case, async: false
+  use ExUnitProperties
   doctest Geex.Attest
 
   import Plug.Test
   import Plug.Conn
 
-  alias Geex.{Attest, Buffer, Command, Reconcile}
+  alias Geex.{Attest, Buffer, Command, Gen, Reconcile}
   alias Geex.Attest.Discovery
   alias Geex.Command.Meta
   alias Geex.Commands.Insert
@@ -232,6 +233,61 @@ defmodule Geex.AttestTest do
       assert Buffer.attest(other, attestation("x\nb\n", "x\nB\n")) == :held
       assert actors(other) == [:external]
     end
+  end
+
+  # ADR-0044 §8.2, sacred invariant 6: from the contents, not the hashes. The stamp is the one
+  # reconcile records for a change from `baseline` to `disk`; the attestation names the contents
+  # a hook saw before and after. They match exactly when the after is the disk and the before is
+  # the baseline (or its LF form, for a baseline with a CRLF): never a byte more or less.
+  describe "matches?/2 (property)" do
+    property "an attestation matches a group exactly when its contents are the group's" do
+      check all(
+              baseline <- Gen.text(),
+              disk <- Gen.text(),
+              disk = if(disk == baseline, do: disk <> "!", else: disk),
+              before <- frequency([{1, constant(nil)}, {4, seen(baseline)}]),
+              after_text <- seen(disk)
+            ) do
+        commands = Reconcile.external_commands(baseline, disk, baseline, disk)
+        # one group, one stamp
+        assert [stamp] = commands |> Enum.map(& &1.meta.reconcile) |> Enum.uniq()
+
+        lf = String.replace(baseline, "\r\n", "\n")
+
+        expected =
+          after_text == disk and
+            (before == baseline or (String.contains?(baseline, "\r\n") and before == lf))
+
+        assert Attest.matches?(
+                 %{before: before && hex(before), sha256: hex(after_text)},
+                 stamp
+               ) == expected
+      end
+    end
+  end
+
+  # What a hook might report for `text`: the text itself, its LF form, a byte changed, a byte
+  # added, or another text altogether. Weighted toward the true contents, so about a quarter of
+  # the runs match.
+  defp seen(text) do
+    frequency([
+      {3, constant(text)},
+      {2, constant(String.replace(text, "\r\n", "\n"))},
+      {1,
+       map(tuple({non_negative_integer(), integer(0..255)}), fn {pos, byte} ->
+         one_byte_off(text, pos, byte)
+       end)},
+      {1, constant(text <> "\n")},
+      {1, Gen.text()}
+    ])
+  end
+
+  defp one_byte_off("", _pos, byte), do: <<byte>>
+
+  defp one_byte_off(text, pos, byte) do
+    i = rem(pos, byte_size(text))
+    <<head::binary-size(i), old, rest::binary>> = text
+    <<head::binary, if(byte == old, do: rem(byte + 1, 256), else: byte), rest::binary>>
   end
 
   describe "submit/1" do

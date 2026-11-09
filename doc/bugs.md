@@ -7,6 +7,30 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-8 — An attestation that lands while part of its group is undone leaves the redone part `:external`  ✅ FIXED (2026-11-09)
+
+- **Status:** **FIXED** 2026-11-09 in the same commit that found it: `History.attest/3` relabels
+  the group's commands on the redo stack too. Verification is in the [testing.md](testing.md)
+  2026-11-09 entry "property tests, slice 2". Found by the history property's new law, "a
+  reconcile group's commands carry one actor" (ADR-0044 §8.2), on its first run.
+- **Symptom:** a reconcile group of two hunks; undo one; the attestation arrives and matches
+  (the group's stamp is on the hunk still applied); redo. The redone hunk's line shows as an
+  outside change while the rest of the group shows the agent, and a repeat attestation is
+  ignored, because `History.unattested?/2` now finds the group partly credited. ADR-0032 step
+  (e)'s "an undone hunk loses its mark, and redo restores it" didn't hold after a late
+  attestation.
+- **Verified cause:** `History.attest/3` mapped over `h.commands` only. The undone hunk waited on
+  `h.redo` with its old `:external` actor, and `redo/1` re-applied it as it was. The shrunk
+  counterexample: base `""`, the disk becomes `"a"` (group 1), then `"\na\n"` (group 2, two
+  hunks), undo, attest group 2, redo: group 2's actors were `[:external, agent]`.
+- **Fix:** relabel `h.redo` with the same function as `h.commands`. The ledger replays
+  `{:attest, group, actor}` through `History.attest/3`, so a restored history matches the live
+  one. The counterexample is an example test in `history_test.exs`.
+- **Ruled out:** the hashes. The attestation matched the stamp correctly; only the redo stack
+  was missed.
+
+---
+
 ## BUG-7 — After a terminal resize, stale text stays in the cells the new frame leaves blank  ✅ FIXED (2026-11-06)
 
 - **Status:** **FIXED** 2026-11-06 on the branch `markdown-preview`, at the maintainer's word

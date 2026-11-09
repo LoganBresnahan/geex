@@ -1,7 +1,8 @@
 # ADR-0032: Listener-first agent integration — agents edit natively, geex records, captAInHook attributes; MCP frozen
 
 - **Status:** Accepted (amended 2026-10-14: attestation safety + write completion; 2026-10-18: a
-  created file is sent as `created`). For open
+  created file is sent as `created`; 2026-11-09: an attestation credits the group's undone
+  commands too). For open
   buffers, step b's disk-wins merge and the pending table are superseded by
   [ADR-0034](0034-panes-tree-edits-hold.md) (buffers hold; `git merge-file`; held attestations)
 - **Date:** 2026-10-14
@@ -482,3 +483,13 @@ with no hash match needed, a created file has a use after all. Relayed by the co
   has no ledger, so this only arises when the agent recreates a file geex once kept one for.
 - A message with neither `before` nor `created` (an older payload) is still accepted and still
   ignored by a buffer.
+
+## Amendment — 2026-11-09: an attestation credits the group's undone commands too
+
+An attestation credits a reconcile group as a whole, including the group's commands that are
+undone and waiting on the redo stack, so step (e)'s "an undone hunk loses its mark, and redo
+restores it" also holds after a late attestation. Before, `History.attest/3` relabelled only the
+applied commands. A redo then brought an undone hunk back as `:external`, and the group stayed
+half credited, because a repeat attestation finds it partly attested and is ignored (BUG-8,
+[bugs.md](../bugs.md)). Found by a property test ([ADR-0044](0044-property-tests-with-stream-data.md)):
+"a reconcile group's commands carry one actor".

@@ -2,9 +2,9 @@
 
 - **Status:** Accepted 2026-11-09. The maintainer asked for property tests to help the agentic
   workflow, naming StreamData; the rest was proposed in the same conversation, drafted here at
-  the maintainer's request, and accepted by the maintainer the same day. **Slice 1 built
-  2026-11-09** ([testing.md](../testing.md) 2026-11-09); amended below (§3, §5) where building it
-  changed the design.
+  the maintainer's request, and accepted by the maintainer the same day. **Slices 1 and 2
+  built 2026-11-09** ([testing.md](../testing.md) 2026-11-09); amended below (§3, §5, §8) where
+  building them changed the design. Slice 2 found and fixed BUG-8.
 - **Date:** 2026-11-09
 - **Relates to:** [ADR-0006](0006-elixir-not-gleam.md) (which promised property tests for the
   boundary), [ADR-0020](0020-diff-edit-tool.md) (the edit tool's grapheme property),
@@ -183,6 +183,32 @@ a property; a shrunk counterexample gets an example test.* `/shipshape` doesn't 
 - **Formatting.** geex has no `.formatter.exs`, so `mix format` writes `check all(...)` and
   `gen all(...)` with parentheses. Left so: adding a formatter config would reformat files this
   ADR doesn't touch.
+
+## Amendment — 2026-11-09: slice 2, the attestation path
+
+- **`Geex.Attest.matches?/2`** is `Buffer`'s hash check, extracted (§2's first case). Its
+  property starts from contents: the stamp is the one `Reconcile.external_commands/4` records
+  for `baseline` to `disk`, the attestation hashes what a hook might report (the true text, its
+  LF form, a byte changed or added, another text), and they must match exactly when the after is
+  the disk and the before is the baseline or its LF form.
+- **`Ledger.Spool.chain/3`** is checked against a naive oracle (§7): the longest exact chain by
+  dynamic programming over the entries in time order. A credit must also be in time order, link
+  exactly from the synced text (or its LF form) to the disk, come from one session, and name the
+  last write's turn and tool call. A second property states §8.2's line: a chain that explains
+  the disk explains nothing once the disk differs by one byte. Writes mostly follow on from the
+  previous one, so about 30% of runs credit something and 11–17% credit a chain of two or more.
+- **A scenario carries its story.** A generator whose values are hashes also returns the same
+  inputs as text (`"u1 s1: \"a\" -> \"\""`), so a shrunk counterexample reads as contents.
+  Kept for every later property over hashed or encoded inputs.
+- **One law added to the list:** "a reconcile group's commands carry one actor" (with "the blame
+  names only recorded writers"), over a history whose transitions now include reconcile groups,
+  attestations taken as `Buffer` takes them, and saves. On its first run it found **BUG-8**: an
+  attestation landing while part of its group was undone left the redone part `:external`. Fixed
+  in the same commit (`History.attest/3` relabels the redo stack too, [ADR-0032](0032-listener-first-agent-integration.md)'s
+  2026-11-09 amendment); the shrunk counterexample is an example test (§4).
+- **Teeth.** A bug planted in each function under test was caught and shrunk: `chain/3` ignoring
+  the session (two writes, two sessions, `"" -> "a" -> ""`), and `matches?/2` ignoring `before`
+  (a before one byte off).
 
 ## See
 

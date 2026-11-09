@@ -204,16 +204,23 @@ defmodule Geex.History do
 
   @doc """
   Relabel every command of reconcile `group` (and the lines they last wrote) with `actor`:
-  an attestation took effect (ADR-0032). Replay is unaffected: `meta` never feeds `run/2`.
+  an attestation took effect (ADR-0032). That includes the group's undone commands waiting on
+  the redo stack, so a redo brings them back credited and the group never ends up half
+  attested (BUG-8, found by the history property, ADR-0044). Replay is unaffected: `meta`
+  never feeds `run/2`.
   """
   @spec attest(t(), pos_integer(), Meta.actor()) :: t()
   def attest(%__MODULE__{} = h, group, actor) do
-    commands =
-      Enum.map(h.commands, fn command ->
-        if in_group?(command, group), do: put_actor(command, actor), else: command
-      end)
+    relabel = fn command ->
+      if in_group?(command, group), do: put_actor(command, actor), else: command
+    end
 
-    %{h | commands: commands, blame: Blame.relabel(h.blame, group, actor)}
+    %{
+      h
+      | commands: Enum.map(h.commands, relabel),
+        redo: Enum.map(h.redo, relabel),
+        blame: Blame.relabel(h.blame, group, actor)
+    }
   end
 
   @doc "Disk now holds the current text (a save, or reconcile adopting it): clean."

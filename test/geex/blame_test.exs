@@ -1,8 +1,9 @@
 defmodule Geex.BlameTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
   doctest Geex.Blame
 
-  alias Geex.{Blame, Buffer, Command, EditorState, Reconcile}
+  alias Geex.{Blame, Buffer, Command, EditorState, Gen, Reconcile}
   alias Geex.Command.Meta
   alias Geex.Commands.{Insert, Replace}
 
@@ -123,6 +124,33 @@ defmodule Geex.BlameTest do
       :attested = attest(buf, "a\nb\n", "a\nB\n")
       type(buf, 0, 0, "top\n")
       assert [:human, nil, agent("s1"), nil] == actors(buf)
+    end
+  end
+
+  # ADR-0044 §8.2: an attestation relabels its own group's lines and nothing else.
+  property "relabel/3 changes only its own group's lines" do
+    check all(
+            blame <-
+              list_of(
+                one_of([
+                  constant(nil),
+                  tuple({Gen.actor(), constant(nil)}),
+                  tuple({Gen.actor(), integer(1..4)})
+                ]),
+                max_length: 30
+              ),
+            group <- integer(1..4),
+            actor <- Gen.actor()
+          ) do
+      relabelled = Blame.relabel(blame, group, actor)
+      assert length(relabelled) == length(blame)
+
+      for {was, now} <- Enum.zip(blame, relabelled) do
+        case was do
+          {_old, ^group} -> assert now == {actor, group}
+          _other -> assert now == was
+        end
+      end
     end
   end
 end

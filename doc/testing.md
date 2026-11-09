@@ -5183,3 +5183,48 @@ loops took ~37 ms). `mix compile --warnings-as-errors` clean in dev and test.
 the ledger loop; no property found a bug in the code at 10,000 runs, so no counterexample has
 become an example test yet. No `.formatter.exs` exists, so `mix format` writes
 `check all(...)` with parentheses; left so.
+
+### 2026-11-09 — property tests, slice 2: the attestation path; BUG-8 found and fixed (ADR-0044)
+
+Slice 2 (ADR-0044 §8.2), at the maintainer's word ("yes" to slice 1's commit and starting slice 2).
+
+- `Geex.Attest.matches?/2`: `Buffer`'s private hash check, extracted unchanged and public (§2),
+  with a doctest. Its property (`attest_test.exs`) starts from contents: the stamp
+  `Reconcile.external_commands/4` records for `baseline` to `disk`, and an attestation hashing the
+  true text, its LF form, a byte changed, a byte added, or another text; it must match exactly when
+  the after is the disk and the before is the baseline, or its LF form for a baseline with a CRLF.
+  One stamp per group is checked on the way.
+- `Ledger.Spool.chain/3` (new `test/geex/ledger/spool_test.exs`): against a naive oracle (the
+  longest exact chain by dynamic programming over the entries); a credit is in time order, links
+  exactly from the synced text or its LF form to the disk, is one session's, and names the last
+  write's turn, tool call and `user_modified`. And: a chain that explains the disk explains nothing
+  once the disk differs by one byte. Each scenario also tells its writes as text, so a
+  counterexample reads as contents, not hashes.
+- `Blame.relabel/3` changes only its group's lines (`blame_test.exs`).
+- The history property's transitions now include reconcile groups (`external_commands` +
+  `History.group/3`), an attestation of the newest group taken as `Buffer` takes it, and saves; a
+  second property over them: the blame names only recorded writers, and a reconcile group's
+  commands carry one actor.
+
+**BUG-8, found and fixed.** The "one actor" law failed on its first run (1 of 5 seeds at 100
+runs), shrunk to `""` → disk `"a"` → disk `"\na\n"` (two hunks) → undo → attest → redo: group 2's
+actors `[:external, agent]`. `History.attest/3` relabelled `h.commands` only; it now relabels
+`h.redo` too (bugs.md BUG-8, ADR-0032's 2026-11-09 amendment). The counterexample is an example
+test; it failed before the fix and passes after, with the blame exactly `[{agent, 2}, {:external,
+1}, {agent, 2}]`.
+
+**Checked by hand.** Planted bugs, each reverted: `chain/3` keyed by harness only (ignoring the
+session) failed and shrank to two writes from two sessions, `"" -> "a" -> ""`; `matches?/2`
+without its `before` check failed and shrank to a before one byte off the empty baseline. Probes of
+the generators: the chain property credits in ~30% of runs and a multi-write chain in 11–17%
+(after making writes mostly follow on from the previous one; 5–9% before); the matches property
+weights the true contents so about a quarter of runs match. **Deep runs:** all 11 properties at
+10,000 runs, seeds 11 and 12: 0 failures (~15 s each).
+
+**Automated.** `mix test` → **1309 tests + 11 properties + 117 doctests, 0 failures**, twice (15.6
+s, 15.0 s). The 11 properties take ~121 ms together at 100 runs. `mix compile --warnings-as-errors
+--force` clean in dev and test.
+
+**Not tested / deferred:** `Buffer.attest/2` itself (the process: newest group, `unattested?`,
+holding) stays example-tested; the held-attestation path through `credit_held` is covered only via
+`chain/3`; slice 3 (addressing, the parse round-trip); the ledger loop.

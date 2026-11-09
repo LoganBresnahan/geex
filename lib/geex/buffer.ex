@@ -388,7 +388,7 @@ defmodule Geex.Buffer do
     case History.newest_group(state.history) do
       %{group: group} = stamp when not is_nil(group) ->
         cond do
-          not matches?(attestation, stamp) ->
+          not Geex.Attest.matches?(attestation, stamp) ->
             {:reply, :held, hold(state, attestation)}
 
           History.unattested?(state.history, group) ->
@@ -567,15 +567,6 @@ defmodule Geex.Buffer do
   end
 
   # --- attestation (ADR-0032) ---
-
-  # `after` must equal the disk bytes exactly; `before` may also equal the baseline with
-  # each "\r\n" turned into "\n" (`before_sha256_lf`, nil for a baseline without one), the form
-  # Claude Code reports a CRLF file's prior text in.
-  defp matches?(%{before: before, sha256: sha256}, stamp) when is_binary(before) do
-    sha256 == stamp.sha256 and before in [stamp.before_sha256, stamp.before_sha256_lf]
-  end
-
-  defp matches?(_attestation, _stamp), do: false
 
   defp agent_actor(attestation), do: {:agent, Geex.Attest.who(attestation)}
 

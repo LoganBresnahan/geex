@@ -21,7 +21,7 @@ defmodule Geex.Attest do
   before accepting it (Claude Code's `userModified`, ADR-0034 §8); geex then says "edited by
   you". Anything else is rejected rather than accepted as a hash that could never match.
 
-  `parse/1` is pure; `submit/1` routes a parsed attestation to the buffer open on `path`
+  `parse/1`, `matches?/2` and `who/1` are pure; `submit/1` routes a parsed attestation to the buffer open on `path`
   (`Geex.Buffer.attest/2`). A path geex doesn't have open is not geex's to record.
   """
 
@@ -92,6 +92,30 @@ defmodule Geex.Attest do
 
   def parse(%{"v" => v}), do: {:error, "unsupported version #{inspect(v)}"}
   def parse(_), do: {:error, "expected a JSON object with \"v\": 1"}
+
+  @doc """
+  Whether `attestation` describes the transition a reconcile group's `stamp` records
+  (`Geex.Command.Meta` `reconcile`): both hashes, exactly ([ADR-0032](../../doc/adr/0032-listener-first-agent-integration.md)).
+  `sha256` must equal the disk the group took in. `before` must equal the baseline the group
+  started from, or `before_sha256_lf`, that baseline with each `"\r\n"` turned into `"\n"` (`nil`
+  for a baseline without one), the form Claude Code reports a CRLF file's prior text in. An
+  attestation with no `before` never matches. Pure; the property test checks it against the
+  contents ([ADR-0044](../../doc/adr/0044-property-tests-with-stream-data.md) §8).
+
+      iex> stamp = %{before_sha256: "b", before_sha256_lf: nil, sha256: "d"}
+      iex> Geex.Attest.matches?(%{before: "b", sha256: "d"}, stamp)
+      true
+      iex> Geex.Attest.matches?(%{before: "b", sha256: "x"}, stamp)
+      false
+      iex> Geex.Attest.matches?(%{before: nil, sha256: "d"}, stamp)
+      false
+  """
+  @spec matches?(map(), map()) :: boolean()
+  def matches?(%{before: before, sha256: sha256}, stamp) when is_binary(before) do
+    sha256 == stamp.sha256 and before in [stamp.before_sha256, stamp.before_sha256_lf]
+  end
+
+  def matches?(_attestation, _stamp), do: false
 
   @doc """
   Who an attestation (or a spooled one) names, for an `{:agent, who}` actor: its harness,
