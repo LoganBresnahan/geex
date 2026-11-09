@@ -3,6 +3,7 @@ defmodule Geex.EditsTest do
   # saves, joined by {path, sha256}; the pane's entries and text; the layout. Each test starts
   # its own Geex.Edits.
   use ExUnit.Case, async: true
+  use ExUnitProperties
   doctest Geex.Layout
   doctest Geex.Loop.EditsPane
 
@@ -229,18 +230,10 @@ defmodule Geex.EditsTest do
       assert :sys.get_state(e).file == nil
     end
 
-    test "fold/1 leaves the rows as adding them one by one does" do
-      :rand.seed(:exsss, {7, 7, 7})
-      agent = {:agent, %{harness: "claude-code", session: "s"}}
-
-      for _ <- 1..50 do
-        loaded =
-          for _ <- 1..60 do
-            who = Enum.random([:you, :outside, :outside, agent])
-            sha = if who == :you, do: nil, else: "h#{:rand.uniform(8)}"
-            %{kept_row("/r/f#{:rand.uniform(4)}", who, sha) | tool_use: "t#{:rand.uniform(99)}"}
-          end
-
+    # ADR-0044: for any rows loaded from the file, `fold/1`'s one pass leaves what adding them
+    # one by one (`add/2`, a walk of the list per row) does.
+    property "fold/1 leaves the rows as adding them one by one does" do
+      check all(loaded <- list_of(loaded_row(), max_length: 60)) do
         added =
           Enum.reduce(loaded, [], fn row, rows ->
             case Edits.add(rows, row) do
@@ -250,6 +243,28 @@ defmodule Geex.EditsTest do
           end)
 
         assert Edits.fold(loaded) == added
+      end
+    end
+
+    # A row as the file keeps it: a save (no hash), a disk change or an agent's write, on one
+    # of a few paths and hashes so later rows join earlier ones.
+    defp loaded_row do
+      gen all(
+            who <-
+              frequency([
+                {1, constant(:you)},
+                {2, constant(:outside)},
+                {1,
+                 member_of([
+                   {:agent, %{harness: "claude-code", session: "s1"}},
+                   {:agent, %{harness: "claude-code", session: "s2"}}
+                 ])}
+              ]),
+            path <- member_of(~w(/r/f1 /r/f2 /r/f3 /r/f4)),
+            sha <- member_of(~w(h1 h2 h3 h4 h5 h6 h7 h8)),
+            tool_use <- member_of(~w(t1 t2 t3))
+          ) do
+        %{kept_row(path, who, if(who == :you, do: nil, else: sha)) | tool_use: tool_use}
       end
     end
 

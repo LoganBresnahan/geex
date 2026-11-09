@@ -1,8 +1,9 @@
 defmodule Geex.HistoryTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
   doctest Geex.History
 
-  alias Geex.{Blame, Command, Dispatch, EditorState, History}
+  alias Geex.{Blame, Command, Dispatch, EditorState, Gen, History}
   alias Geex.Command.Meta
   alias Geex.Commands.{Delete, Insert, Replace}
 
@@ -111,36 +112,42 @@ defmodule Geex.HistoryTest do
 
   # The rule the durable ledger rests on (ADR-0033 §3): whatever sequence of transitions ran,
   # replaying the recorded commands over `base` rebuilds the same document and the same blame.
-  test "after random dispatch/undo/redo, replay rebuilds the document and the blame" do
-    :rand.seed(:exsss, {1, 2, 3})
+  # ADR-0044 §6: the sequence is generated, so a failure shrinks to the fewest operations.
+  property "after any dispatch/undo/redo, replay rebuilds the document and the blame" do
+    check all(base <- Gen.text(), ops <- list_of(history_op(), max_length: 100)) do
+      final = Enum.reduce(ops, History.new(base), &run_op/2)
 
-    final =
-      Enum.reduce(1..300, History.new("one\ntwo\nthree\n"), fn _, h ->
-        case :rand.uniform(4) do
-          1 -> step(History.undo(h), h)
-          2 -> step(History.redo(h), h)
-          _ -> random_edit(h)
-        end
-      end)
+      {:ok, via_dispatch} = Dispatch.replay(final.base, History.commands_oldest_first(final))
+      {:ok, editor, blame} = Blame.replay(final.base, History.commands_oldest_first(final))
 
-    {:ok, via_dispatch} = Dispatch.replay(final.base, History.commands_oldest_first(final))
-    {:ok, editor, blame} = Blame.replay(final.base, History.commands_oldest_first(final))
-
-    assert EditorState.text(via_dispatch) == History.text(final)
-    assert editor == final.editor
-    assert blame == final.blame
-    assert length(final.blame) == length(EditorState.lines(final.editor))
+      assert EditorState.text(via_dispatch) == History.text(final)
+      assert editor == final.editor
+      assert blame == final.blame
+      assert length(final.blame) == length(EditorState.lines(final.editor))
+    end
   end
 
-  defp step({:ok, h, _command}, _h), do: h
-  defp step({:error, _}, h), do: h
+  # An insert's line and column are seeds, taken modulo the document as it is when the insert
+  # runs, so every generated insert lands somewhere valid (and shrinks toward 0:0).
+  defp history_op do
+    frequency([
+      {1, constant(:undo)},
+      {1, constant(:redo)},
+      {2,
+       tuple(
+         {constant(:insert), non_negative_integer(), non_negative_integer(), Gen.insertion(),
+          Gen.actor()}
+       )}
+    ])
+  end
 
-  defp random_edit(h) do
+  defp run_op(:undo, h), do: step(History.undo(h), h)
+  defp run_op(:redo, h), do: step(History.redo(h), h)
+
+  defp run_op({:insert, line_seed, col_seed, text, actor}, h) do
     lines = EditorState.lines(h.editor)
-    line = :rand.uniform(length(lines)) - 1
-    col = :rand.uniform(String.length(Enum.at(lines, line)) + 1) - 1
-    text = Enum.random(["x", "\n", "yy\nz", ""])
-    actor = Enum.random([:human, :external, {:agent, %{harness: "h", session: "s"}}])
+    line = rem(line_seed, length(lines))
+    col = rem(col_seed, String.length(Enum.at(lines, line)) + 1)
     {:ok, cmd} = Insert.parse(%{line: line, col: col, text: text})
 
     case History.dispatch(h, Command.put_meta(cmd, Meta.new(actor))) do
@@ -148,4 +155,7 @@ defmodule Geex.HistoryTest do
       {:error, _} -> h
     end
   end
+
+  defp step({:ok, h, _command}, _h), do: h
+  defp step({:error, _}, h), do: h
 end

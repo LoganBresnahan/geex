@@ -24,10 +24,15 @@ The pyramid (detail + rationale in §15a):
    `parse/1`, `Geex.Dispatch.apply_command/2` and `replay/2` over an
    `%EditorState{}`, `Geex.EditorState` ops, and (later) `MCP.Protocol.handle_line/1`
    and the field-spec→JSON-Schema renderer. All pure `value -> value`.
-2. **Property + Dialyzer** (§5 mandates this) — the §1 round-trip the compiler can't
-   enforce: `minibuffer-string → %Command{}` and `MCP-args → %Command{}` must yield the
-   *same* struct; the JSON-RPC envelope (id echo, request-vs-notification, the three
-   outcomes). *Lands with the MCP projection (v0.2).*
+2. **Property** ([ADR-0044](adr/0044-property-tests-with-stream-data.md), StreamData, test
+   only) — laws over the pure core, checked on generated cases that shrink to the smallest
+   failure: round-trips (`LineDiff`), identities (`Merge`), replay rebuilding the history's
+   text and blame, an index agreeing with a walk. Texts come from `Geex.Gen`
+   (`test/support/gen.ex`), weighted toward CRLF, combining marks, wide and ZWJ graphemes. A
+   property failure is a bug, never a flake: its shrunk case becomes an example test.
+   `GEEX_PROPERTY_RUNS=N mix test` runs deeper. Still to come (ADR-0044 §8): the attestation
+   path, addressing, and `minibuffer-string → %Command{}` = `MCP-args → %Command{}` (the §1
+   round-trip the compiler can't enforce). Dialyzer (§5) is not adopted.
 3. **Integration** — `Dispatch.run/1 → Buffer → undo history` with provenance present
    and correct; feature-gated supervision subtrees start/stop cleanly (mirroring the
    `terminal_io_child/0` gate).
@@ -5138,3 +5143,43 @@ there after checking no release existed. Release run 42336195006: the four build
 `releases/latest` redirects to `tag/v0.4.0` and `latest/download/install.sh` to v0.4.0's asset;
 `catalog-v3` is still a pre-release. The release notes gained a "What's new" section. Still not
 run: the maintainer's `geex self update` from 0.3.6.
+
+### 2026-11-09 — property tests, slice 1: StreamData, `Geex.Gen`, six seeded loops moved over (ADR-0044)
+
+The maintainer's ask (property tests for the agentic workflow), decided in ADR-0044 (accepted
+`c3e265f`). Slice 1 (§8.1): no new laws, the same ones on generated, shrinking inputs.
+
+- `{:stream_data, "~> 1.4", only: :test}` (1.4.0 locked). Release builds run
+  `mix deps.get --only prod`, so the tarball never fetches it.
+- `Geex.Gen` (`test/support/gen.ex`): `piece/0`, `fragment/1`, `line/0`, `text/1`, `insertion/0`,
+  `actor/0`. Texts mix recurring lines (so two texts share lines and a diff has something to
+  align) with awkward pieces: `\r` and CRLF line ends, precomposed/decomposed/lone combining
+  marks, wide CJK, a skin-tone emoji, a ZWJ family, a flag, zero-width characters, tabs; with or
+  without a trailing newline.
+- Six fixed-seed `:rand` loops became `check all` properties stating the same laws: `Resolve`
+  (exact-unique resolve + `Doc.replace` = `String.replace`, with its vacuity guard kept as a
+  counter: more than a fifth of runs must reach the exact tier; measured ~72%), `LineDiff`
+  (round-trip), `Merge` (identities), `History` (any dispatch/undo/redo sequence replays to the
+  same text and blame; the sequence is a generated list of operations, so it shrinks), `Edits.fold/1`
+  (equals adding one by one), `SpanIndex` (a window equals a walk; several windows per index).
+  The ledger loop stays seeded: it drives a live `Buffer` and real files (ADR-0044 §2).
+- `GEEX_PROPERTY_RUNS=N` in `config/runtime.exs` (test env only) sets StreamData's `max_runs`; a
+  bad value stops the boot naming the variable.
+
+**Checked by hand.** A deliberately false law over `Gen.text()` failed after 4 runs and shrank
+to the one-grapheme text `"é"`. `GEEX_PROPERTY_RUNS=abc` stops the boot with the message;
+`=5000` reaches `Application.get_env(:stream_data, :max_runs)`. A sample of `Gen.text()` shows
+CRLF texts, `x\r` lines, the ZWJ family and empty texts. **Deep runs:** all six properties at
+10,000 runs each, seeds 1 and 2: 0 failures (~10 s). The first deep run found that list sizes
+grow with the run count (StreamData's generation size rises by one per run, unbounded): the
+history and edits properties timed out on lists of thousands of elements. Every generated list
+now has a `max_length` (ADR-0044 §5's amendment).
+
+**Automated.** `mix test` → **1308 tests + 6 properties + 116 doctests, 0 failures**, twice
+(14.5 s and 15.0 s; 14.4 s before). The six properties take ~56 ms together at 100 runs (the
+loops took ~37 ms). `mix compile --warnings-as-errors` clean in dev and test.
+
+**Not tested / deferred:** slices 2–3 (the attestation path, addressing, the parse round-trip);
+the ledger loop; no property found a bug in the code at 10,000 runs, so no counterexample has
+become an example test yet. No `.formatter.exs` exists, so `mix format` writes
+`check all(...)` with parentheses; left so.

@@ -1,8 +1,10 @@
 defmodule Geex.Edit.ResolveTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Geex.Buffer.Doc
   alias Geex.Edit.Resolve
+  alias Geex.Gen
 
   # The value-add is the coordinate span; prove resolve + Doc.replace equals the obvious
   # string substitution for unique matches — including UTF-8 (the grapheme off-by-one risk).
@@ -11,9 +13,6 @@ defmodule Geex.Edit.ResolveTest do
     {:ok, doc} = Doc.replace(Doc.new(text), span, repl)
     Doc.text(doc)
   end
-
-  defp random_string(_alphabet, 0), do: ""
-  defp random_string(alphabet, n), do: Enum.map_join(1..n, "", fn _ -> Enum.random(alphabet) end)
 
   describe "tier 1 — exact-unique substring" do
     test "mid-line replace" do
@@ -103,41 +102,34 @@ defmodule Geex.Edit.ResolveTest do
   end
 
   describe "grapheme-correctness property (the riskiest assumption: offset <-> {row,col})" do
-    test "exact-unique resolve + Doc.replace == naive String.replace, over random UTF-8 inputs" do
-      # seeded for determinism (tests may use :rand; app code must not)
-      :rand.seed(:exsss, {17, 23, 42})
-      alphabet = ["a", "b", "c", "x", "y", " ", "\n", "\n", "é", "λ", "😀", "\t", "ü"]
+    # ADR-0044. `search` is a run of the text's own graphemes, so tier 1 sees at least one
+    # occurrence; `{:ok, _, ^replace}` means exactly one (the exact tier), and then the span
+    # must splice where String.replace would.
+    property "exact-unique resolve + Doc.replace == naive String.replace" do
+      exact = :counters.new(1, [])
 
-      asserted =
-        Enum.reduce(1..400, 0, fn _, count ->
-          text = random_string(alphabet, :rand.uniform(40))
-          graphemes = String.graphemes(text)
-          len = length(graphemes)
+      check all(
+              text <- Gen.text(),
+              graphemes = String.graphemes(text),
+              start <- integer(0..max(length(graphemes) - 1, 0)),
+              take <- integer(1..12),
+              replace <- Gen.insertion()
+            ) do
+        search = graphemes |> Enum.slice(start, take) |> Enum.join()
 
-          if len < 2 do
-            count
-          else
-            start = :rand.uniform(len) - 1
-            take = :rand.uniform(min(len - start, 12))
-            search = graphemes |> Enum.slice(start, take) |> Enum.join()
-            replace = random_string(alphabet, :rand.uniform(8))
+        case search != "" and Resolve.resolve_block(text, search, replace) do
+          {:ok, span, ^replace} ->
+            :counters.add(exact, 1, 1)
+            {:ok, doc} = Doc.replace(Doc.new(text), span, replace)
+            assert Doc.text(doc) == String.replace(text, search, replace, global: false)
 
-            # {:ok, _, ^replace} is necessarily the exact tier (search is a substring, so
-            # tier 1 sees >= 1 occurrence; :ok means exactly one) -> compare to naive replace.
-            case Resolve.resolve_block(text, search, replace) do
-              {:ok, span, ^replace} ->
-                {:ok, doc} = Doc.replace(Doc.new(text), span, replace)
-                assert Doc.text(doc) == String.replace(text, search, replace, global: false)
-                count + 1
+          _ ->
+            :ok
+        end
+      end
 
-              _ ->
-                count
-            end
-          end
-        end)
-
-      # guard against a vacuous pass: the property must have exercised many real cases
-      assert asserted > 50
+      # guard against a vacuous pass: a good share of the runs must have reached the exact tier
+      assert :counters.get(exact, 1) > div(Application.fetch_env!(:stream_data, :max_runs), 5)
     end
   end
 

@@ -140,7 +140,10 @@ defmodule Geex.MixProject do
       # tree-sitter runtime that loads portable grammar.wasm. Net-new on the BEAM
       # (every other binding static-links grammars). Path dep during the spike;
       # github/hex once its highlight/4 API stabilizes.
-      {:tree_sitter_wasm, path: "../tree_sitter_wasm"}
+      {:tree_sitter_wasm, path: "../tree_sitter_wasm"},
+      # Property tests (ADR-0044): generated, shrinking cases for the pure core's laws. Test
+      # only, so a release (`deps.get --only prod`) never fetches it.
+      {:stream_data, "~> 1.4", only: :test}
     ]
   end
 end

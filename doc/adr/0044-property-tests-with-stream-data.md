@@ -2,7 +2,9 @@
 
 - **Status:** Accepted 2026-11-09. The maintainer asked for property tests to help the agentic
   workflow, naming StreamData; the rest was proposed in the same conversation, drafted here at
-  the maintainer's request, and accepted by the maintainer the same day.
+  the maintainer's request, and accepted by the maintainer the same day. **Slice 1 built
+  2026-11-09** ([testing.md](../testing.md) 2026-11-09); amended below (§3, §5) where building it
+  changed the design.
 - **Date:** 2026-11-09
 - **Relates to:** [ADR-0006](0006-elixir-not-gleam.md) (which promised property tests for the
   boundary), [ADR-0020](0020-diff-edit-tool.md) (the edit tool's grapheme property),
@@ -160,6 +162,27 @@ a property; a shrunk counterexample gets an example test.* `/shipshape` doesn't 
 - `Buffer.matches?/2` and any later law found in a process become public pure functions,
   which widens the pure core slightly.
 - ADR-0006's Dialyzer half is still not done. It is out of scope here.
+
+## Amendment — 2026-11-09: what slice 1 changed
+
+- **§5: every generated list has a `max_length`.** StreamData's generation size rises by one per
+  run with no ceiling, and a list without a bound is as long as the size allows. At the default
+  100 runs that is harmless; the first `GEEX_PROPERTY_RUNS=10000` run made lists of thousands of
+  operations and rows, and the history and edits properties timed out. A bound on the list (100
+  operations, 60 rows, 300 spans, 20 windows, 8 lines of text) keeps the inputs the same shape
+  however many runs are asked for. `max_generation_size` would do it too, but only as an option
+  on each property, and properties set no options (§5).
+- **§3: `Geex.Gen` holds only what two or more properties share** (the named-consumer rule):
+  `piece/0`, `fragment/1`, `line/0`, `text/1`, `insertion/0`, `actor/0`. Generators one test
+  uses stay in that test: the history's operations, the edits list's rows, the highlighter's
+  spans. The history's operation list moves to `Geex.Gen` when the ledger property (§8.1's
+  deferred loop) needs the same one.
+- **The vacuity guard.** The resolve property counts the runs that reach the exact tier and
+  requires more than a fifth of `max_runs` (measured: ~72%), as the seeded loop required more
+  than 50 of 400.
+- **Formatting.** geex has no `.formatter.exs`, so `mix format` writes `check all(...)` and
+  `gen all(...)` with parentheses. Left so: adding a formatter config would reformat files this
+  ADR doesn't touch.
 
 ## See
 

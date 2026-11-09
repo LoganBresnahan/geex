@@ -39,3 +39,20 @@ if System.get_env("GEEX_SERVE") in ~w(1 true yes) do
     start_terminal: false,
     http_mcp_port: port
 end
+
+# Property tests (ADR-0044 §5): StreamData's 100 runs per property, unless
+# `GEEX_PROPERTY_RUNS=N mix test` asks for a deeper run (before a release, or after a change to
+# the reconcile path). Test only: StreamData isn't a dependency anywhere else. A property never
+# sets `max_runs` itself, so this reaches every one.
+if config_env() == :test do
+  case System.get_env("GEEX_PROPERTY_RUNS") do
+    empty when empty in [nil, ""] ->
+      :ok
+
+    str ->
+      case Integer.parse(String.trim(str)) do
+        {n, ""} when n > 0 -> config :stream_data, max_runs: n
+        _ -> raise "GEEX_PROPERTY_RUNS must be a positive integer, got: #{inspect(str)}"
+      end
+  end
+end

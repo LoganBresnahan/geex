@@ -106,6 +106,7 @@ One Mix app, `:geex`, under `lib/geex/`:
 mix compile --warnings-as-errors   # the bar locally; ci.yml runs it and the suite on every push
 mix test                           # ~1300 tests, ~13s; green TWICE is the ship bar
 mix test test/geex/mcp/grid_test.exs
+GEEX_PROPERTY_RUNS=10000 mix test --only property   # a deep run of the properties (ADR-0044)
 mix geex.serve                     # headless + loopback MCP on a free port (logged)
 mix geex.serve --port 4000         # pin 4000 to match presets/claude-code/.mcp.json
 mix geex.highlight <file>          # one-shot highlighted dump (engine check)
@@ -140,6 +141,10 @@ inject a stub via `Geex.Reconcile`'s `:start_watcher` option.
   helper (`Protocol.route/2` is the JSON-RPC router).
 - **Assert against values, never rendered bytes** — buffer text, cursor, the
   command history, `Screen` cells. (testing.md § Strategy.)
+- **A pure function with a law gets a property; a shrunk counterexample gets an
+  example test** (ADR-0044). Generators shared by properties live in `Geex.Gen`
+  (`test/support/gen.ex`); bound every generated list (`max_length`). A property
+  failure is a bug, never a flake: never re-run it green.
 - **Named-consumer rule:** don't build a subsystem until its first real
   consumer lands (the clipboard waited for copy/paste; per-participant Views
   wait for multi-participant).
@@ -182,7 +187,7 @@ session's `Co-Authored-By` trailer.
 ## Names & paths
 
 - app `:geex`, modules `Geex.*`, repo `~/geex`
-- env: `GEEX_SERVE`, `GEEX_MCP_PORT`, `GEEX_MCP_PORT_FILE`
+- env: `GEEX_SERVE`, `GEEX_MCP_PORT`, `GEEX_MCP_PORT_FILE`; `GEEX_PROPERTY_RUNS` (tests only)
 - attestation discovery file (ADR-0032): `$XDG_RUNTIME_DIR/geex/<os_pid>.json`
   (`<tmp>/geex-<user>/` without it), `0600`, removed on clean exit; app gate
   `:start_attest` (off under test)

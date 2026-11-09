@@ -1,8 +1,10 @@
 defmodule Geex.Edit.MergeTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
   doctest Geex.Edit.Merge
 
   alias Geex.Edit.Merge
+  alias Geex.Gen
 
   @base "1\n2\n3\n4\n5\n"
 
@@ -38,16 +40,11 @@ defmodule Geex.Edit.MergeTest do
     assert Merge.merge("1\n2\n3", "1\n2\n3\nmine", "0\n1\n2\n3") == {"0\n1\n2\n3\nmine", 0}
   end
 
-  test "identities: no disk change keeps yours; no unsaved edits takes disk (fixed seed)" do
-    :rand.seed(:exsss, {4, 5, 6})
-    pool = ["a", "b", "c", "", "中文", "x\r"]
-    gen = fn -> Enum.map_join(0..:rand.uniform(6), "\n", fn _ -> Enum.random(pool) end) end
-
-    for _ <- 1..300 do
-      base = gen.()
-      other = gen.()
+  # ADR-0044: the merge's identities, for any two texts.
+  property "identities: no disk change keeps yours; no unsaved edits takes disk" do
+    check all(base <- Gen.text(), other <- Gen.text()) do
       assert Merge.merge(base, other, base) == {other, 0}
-      assert {^other, 0} = Merge.merge(base, base, other)
+      assert Merge.merge(base, base, other) == {other, 0}
     end
   end
 end

@@ -1,6 +1,7 @@
 # ADR-0006: Elixir, not Gleam, for the MCP boundary
 
-- **Status:** Accepted
+- **Status:** Accepted. **Amended 2026-11-09 ([ADR-0044](0044-property-tests-with-stream-data.md)):**
+  the property tests promised below arrive, with StreamData; Dialyzer is still not adopted.
 - **Date:** 2026-05-28
 
 ## Context
@@ -28,6 +29,14 @@ Gleam was meant to remove.
 - **Gleam still earns its keep at the third-party extension API** — a genuinely typed
   contract with external authors, where the typed boundary *is* the product feature
   ([ADR-0009](0009-three-tier-extension-model.md)). The MCP server is not that.
+
+## Amendment — 2026-11-09: property tests ([ADR-0044](0044-property-tests-with-stream-data.md))
+
+The "property tests" half of the consequence above is met: StreamData (test only) checks laws
+over the pure core, starting with the seeded loops the suite already had. The JSON-RPC
+envelope's properties are not written yet: the MCP surface is frozen (ADR-0032), and the
+minibuffer/MCP parse round-trip comes first (ADR-0044 §8.3). Typespecs stay; Dialyzer is not
+adopted.
 
 ## See
 

@@ -1,8 +1,10 @@
 defmodule Geex.Edit.LineDiffTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
   doctest Geex.Edit.LineDiff
 
   alias Geex.Edit.LineDiff
+  alias Geex.Gen
 
   # spans/2 must reproduce `new` exactly, and every span must be one hunk.
   defp roundtrip(old, new) do
@@ -75,15 +77,10 @@ defmodule Geex.Edit.LineDiffTest do
       roundtrip("a\r\nb\r\n", "a\r\nB\r\n")
     end
 
-    test "randomized round-trip over a small alphabet (fixed seed)" do
-      :rand.seed(:exsss, {1, 2, 3})
-      pool = ["a", "b", "", "x\r", "é", "中文", "  indented"]
-      text = fn -> Enum.map_join(0..:rand.uniform(7), "\n", fn _ -> Enum.random(pool) end) end
-
-      for _ <- 1..500 do
-        old = text.()
-        new = text.()
-        assert {:ok, spans} = LineDiff.spans(old, new), "no spans for #{inspect({old, new})}"
+    # ADR-0044: applying the spans from `old` to `new` gives `new`, for any two texts.
+    property "applying spans(old, new) to old gives new" do
+      check all(old <- Gen.text(), new <- Gen.text()) do
+        assert {:ok, spans} = LineDiff.spans(old, new)
         assert LineDiff.apply_spans(old, spans) == {:ok, new}
       end
     end
