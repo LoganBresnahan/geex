@@ -30,7 +30,7 @@ config :geex,
   # The minibuffer's history kept across restarts (ADR-0042), in
   # ~/.local/state/geex/history.json (`history_file` overrides). Tests keep it in memory.
   minibuffer_history: config_env() != :test,
-  # The last session kept across restarts (roadmap item 18.9, ADR-0038's 2026-11-09 amendment), in
+  # The last session kept across restarts (roadmap item 18.9, ADR-0046), in
   # ~/.local/state/geex/sessions/ (`sessions_dir` overrides). Tests pass a directory of their own.
   session_memory: config_env() != :test,
   # Compiled grammars kept in $XDG_CACHE_HOME/geex/wasm (ADR-0040 §8). Tests leave the user's

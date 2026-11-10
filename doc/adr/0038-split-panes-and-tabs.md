@@ -5,7 +5,7 @@
   splits keep a ratio, and the mouse resizes them (§6). **Amended 2026-10-18:** an edge dragged
   up and down shows `⠛⠛` (§6). **Builds** what
   [ADR-0034](0034-panes-tree-edits-hold.md) deferred ("splits and tabs") and
-  [ADR-0028](0028-editor-shell-and-minibuffer.md) put "behind the pane system". **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** preview tabs aren't a buffer's views; what reaches the active buffer while one is current (the 2026-11-06 amendment). **Amended 2026-11-09 (roadmap item 18):** the tab bar scrolls; the keyboard resizes; the output pane gets the band's handle; the last session comes back.
+  [ADR-0028](0028-editor-shell-and-minibuffer.md) put "behind the pane system". **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** preview tabs aren't a buffer's views; what reaches the active buffer while one is current (the 2026-11-06 amendment). **Amended 2026-11-09 (roadmap item 18):** the tab bar scrolls; the keyboard resizes; the output pane gets the band's handle; the last session comes back (now [ADR-0046](0046-the-last-session.md)).
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0014](0014-editor-state-and-dispatch-ownership.md) (the cursor is
   view-local; Session holds the active buffer), [ADR-0034](0034-panes-tree-edits-hold.md) (the
@@ -211,7 +211,8 @@ The maintainer's list from using geex, decided 2026-11-09:
 - **The band's handle is the output pane's too** (§6, [ADR-0042](0042-shell-commands.md)): while
   `!`'s output pane holds the band, its title row draws `⠛⠛` and a press on it focuses the output
   pane, not the hidden edits pane.
-- **The last session** (the layout "kept across restarts" this ADR deferred): `Geex.LastSession`
+- **The last session** (the layout "kept across restarts" this ADR deferred; recorded as
+  [ADR-0046](0046-the-last-session.md) of its own since 2026-11-10, which is current): `Geex.LastSession`
   keeps a project's panes, each one's source tabs (the file, its cursor, its scroll) and the shown
   one, the current pane, the split with its ratios, and the tree's and the band's sizes, in
   `$XDG_STATE_HOME/geex/sessions/<key>.json` (`<key>` 16 hex of the root's sha256, as ADR-0033

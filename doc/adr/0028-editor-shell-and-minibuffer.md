@@ -1,7 +1,7 @@
 # ADR-0028: The editor shell — screen regions, the minibuffer, and the buffer/view/pane model
 
 - **Status:** Accepted. **Keys amended** 2026-10-17 by [ADR-0037](0037-pane-and-file-keys.md):
-  the palette is `Alt+I` (`Alt+P` is now the next pane). **Amended** 2026-10-17: the file finder
+  the palette is `Alt+I` (`Alt+P` is now the next pane). **Amended 2026-11-09 (recorded 2026-11-10):** catalog entries carry `usage` and `aliases`, and the catalog covers every typed verb (for `Alt+Y`'s Commands tab). **Amended** 2026-10-17: the file finder
   is built (`Alt+O`). Tabs and splits built 2026-10-17 by
   [ADR-0038](0038-split-panes-and-tabs.md).
 - **Date:** 2026-06-08
@@ -221,6 +221,26 @@ The fuzzy finder §2 promised, for files (the maintainer's list, step 2 of roadm
   before the files are read) waits and opens the top match when the answer comes.
 - **The `Completion` abstraction stays deferred.** The palette, the buffer picker and the finder
   each compute their own rows; one abstraction waits for path tab-completion, its next consumer.
+
+
+## Amendment (2026-11-09, recorded 2026-11-10): the catalog's usage and aliases, for `Alt+Y`'s Commands tab
+
+Roadmap item 18.6 (with [ADR-0040](0040-bare-geex-and-the-catalog.md)'s 2026-11-09 amendment)
+made the settings view list every typed command from `Geex.Command.Catalog`, which changed the
+catalog itself:
+- `Catalog.Entry` gains `usage` (how a command taking an argument is typed: `new PATH`,
+  `rename [PATH]`, `line N`; `nil` when the name is all) and `aliases` (the other names the
+  minibuffer takes: `exit`, `mv`, `find`, `select`, `highlight all`, `N`). `Catalog.typed/1`
+  joins them for display.
+- The catalog gains the typed commands it lacked: `no` (clear the selection), `!!` (the last
+  shell command again, typed) and `tab N` (typed).
+- `Catalog.search/1` ranks a match on any alias as a name match, so the palette finds `quit` from
+  `exit`.
+- A test reads the minibuffer parser's own source (`Geex.Loop.Verbs`' `do_parse` and `path_verb`
+  heads and `when verb in` lists, plus `!!`, `!`, `|`) and fails on any word that is neither a
+  command's name nor an alias. Command mode only: grid mode's verbs aren't commands.
+The typed parser still resolves its own clauses (this ADR's "decision A" stands); the catalog is
+now held to them by that test.
 
 ## See
 

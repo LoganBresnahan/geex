@@ -678,7 +678,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       (with Caps Lock on they resize; the maintainer accepted that).
    9. **The last session comes back** ([adr/0038](adr/0038-split-panes-and-tabs.md)'s deferred
       item): a bare `geex` or `geex .` reopens the project's last panes, their tabs and every size;
-      `geex FILE` opens just that file but keeps the sizes. Needs ADR-0038's amendment.
+      `geex FILE` opens just that file but keeps the sizes. Built as ADR-0038's amendment;
+      recorded as [adr/0046](adr/0046-the-last-session.md) of its own 2026-11-10.
 
 19. **Typing assists** ([adr/0045](adr/0045-typing-assists.md)) — the maintainer's asks 2026-11-09,
    with the rules proposed in the same conversation and accepted whole. **Built 2026-11-09** on

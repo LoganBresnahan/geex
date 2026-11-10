@@ -1,7 +1,7 @@
 defmodule Geex.LastSession do
   @moduledoc """
   The last session of a project, kept across restarts (roadmap item 18.9,
-  [ADR-0038](../../doc/adr/0038-split-panes-and-tabs.md)'s 2026-11-09 amendment): the file panes,
+  [ADR-0046](../../doc/adr/0046-the-last-session.md)): the file panes,
   each one's tabs (the file, its cursor and scroll) and which is shown, the current pane, how the
   split divides the editor, and the sizes of the tree and the edits pane.
 

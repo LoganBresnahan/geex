@@ -1,7 +1,7 @@
 # ADR-0042: Shell commands from the minibuffer
 
 - **Status:** Accepted 2026-10-19 (the maintainer's ask, relayed by the coordinator session,
-  which also passed on the maintainer's choice of `!` to run a command again). Built the same day.
+  which also passed on the maintainer's choice of `!` to run a command again). Built the same day. **Amended 2026-11-09 (recorded 2026-11-10):** the output pane's title row is the band's handle.
 - **Date:** 2026-10-19
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the minibuffer and its typed
   verbs), [ADR-0035](0035-the-loop-never-waits.md) (slow work runs off the key loop),
@@ -111,6 +111,14 @@ history for the minibuffer.
   heuristic: one it doesn't name, under `TERM=dumb`, runs until Ctrl-G.
 - Colours are lost in v1. Interpreting SGR into the pane's cells is a later step if a consumer
   wants it.
+
+
+## Amendment (2026-11-09, recorded 2026-11-10): the output pane's handle
+
+Roadmap item 18.3: the output pane takes the edits pane's band, and now its title row is the
+band's handle too ([ADR-0038](0038-split-panes-and-tabs.md) §6): it draws `⠛⠛` between the
+title and the hint, a drag resizes the band (the same height the edits pane uses), and a press on
+it focuses the output pane, not the edits pane it covers.
 
 ## See
 
