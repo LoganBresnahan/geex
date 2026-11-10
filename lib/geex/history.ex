@@ -21,8 +21,9 @@ defmodule Geex.History do
       rebuilt on undo, relabelled by an attestation.
     * `synced` — the disk text the buffer is in sync with (its baseline). Reconcile compares
       disk against this, not the possibly dirty text.
-    * `dirty` — whether the text differs from disk as far as the buffer knows. A forward edit
-      is always dirty; undo/redo recompute it against `synced`.
+    * `dirty` — whether the text differs from disk as far as the buffer knows: every edit,
+      undo and redo recomputes it against `synced`, so typing a space and deleting it leaves
+      the buffer clean (roadmap item 18.2).
     * `seq` — a **monotonic** change clock, bumped by every transition that can change the
       text. Unlike the command count it never goes backwards on undo, so the highlight
       reactor orders its overlays by it (ADR-0031).
@@ -103,7 +104,8 @@ defmodule Geex.History do
   def commands_oldest_first(%__MODULE__{commands: commands}), do: Enum.reverse(commands)
 
   @doc """
-  Apply one command and record it. A fresh edit clears the redo future and is always dirty.
+  Apply one command and record it. A fresh edit clears the redo future; it is dirty unless it
+  brought the text back to `synced`.
   Returns the new history, or the command's error with nothing changed.
   """
   @spec dispatch(t(), struct()) :: {:ok, t()} | {:error, term()}
@@ -116,7 +118,7 @@ defmodule Geex.History do
            commands: [command | h.commands],
            blame: advance(h.blame, h.editor, editor, command),
            redo: [],
-           dirty: true,
+           dirty: differs?(editor, h.synced),
            seq: h.seq + 1
        }}
     end
@@ -129,7 +131,8 @@ defmodule Geex.History do
   `baseline` is the disk text the buffer is now in sync with (reconcile passes the bytes it
   read), or `nil`. With one, `synced` becomes it and `dirty` is recomputed, so a merge that
   keeps your unsaved edits stays dirty, and `commands` may be empty (disk changed to what the
-  buffer already holds). Without one, the history is simply marked dirty. An empty group
+  buffer already holds). Without one (a revert, ADR-0033 §7), `synced` stays and `dirty` is
+  recomputed against it, so a revert back to the saved text is clean (roadmap item 18.2). An empty group
   keeps the redo future; a non-empty one clears it.
 
   Commands that carry a reconcile stamp get this history's `next_group` as their group id,
@@ -150,8 +153,8 @@ defmodule Geex.History do
     with {:ok, editor, blame} <- applied do
       {synced, dirty} =
         case baseline do
-          nil -> {h.synced, true}
-          baseline -> {baseline, EditorState.text(editor) != baseline}
+          nil -> {h.synced, differs?(editor, h.synced)}
+          baseline -> {baseline, differs?(editor, baseline)}
         end
 
       {:ok,
@@ -303,9 +306,16 @@ defmodule Geex.History do
         blame: blame,
         commands: commands,
         redo: redo,
-        dirty: EditorState.text(editor) != h.synced,
+        dirty: differs?(editor, h.synced),
         seq: h.seq + 1
     }
+  end
+
+  # Whether the editor's text differs from `synced`. The sizes first, which costs no copy: they
+  # differ for almost every keystroke, and only equal sizes join the text to compare it.
+  defp differs?(editor, synced) do
+    size = editor |> EditorState.lines() |> Enum.reduce(-1, &(&2 + byte_size(&1) + 1))
+    size != byte_size(synced) or EditorState.text(editor) != synced
   end
 
   defp advance(blame, before, after_editor, command) do

@@ -48,24 +48,25 @@ defmodule Geex.Loop.ScrollBar do
 
   @doc """
   The bars a file pane at `rect` showing `text` scrolled to `{scroll, hscroll}` draws: none, one
-  or both.
+  or both. `tab` is the tab size, which the widest line's width depends on (roadmap item 18.7).
 
       iex> rect = %Geex.Rect{x: 10, y: 0, w: 20, h: 6}
       iex> text = Enum.map_join(1..9, "\\n", &"line \#{&1}")
-      iex> [v] = Geex.Loop.ScrollBar.layout(text, rect, {2, 0})
+      iex> [v] = Geex.Loop.ScrollBar.layout(text, rect, {2, 0}, 2)
       iex> {v.axis, v.x, v.y, v.len, v.content, v.offset}
       {:v, 29, 1, 4, 9, 2}
-      iex> Geex.Loop.ScrollBar.layout("short", rect, {0, 0})
+      iex> Geex.Loop.ScrollBar.layout("short", rect, {0, 0}, 2)
       []
   """
-  @spec layout(String.t(), Rect.t(), {non_neg_integer(), non_neg_integer()}) :: [t()]
-  def layout(text, %Rect{} = rect, {scroll, hscroll}) do
+  @spec layout(String.t(), Rect.t(), {non_neg_integer(), non_neg_integer()}, pos_integer()) ::
+          [t()]
+  def layout(text, %Rect{} = rect, {scroll, hscroll}, tab) do
     lines = length(:binary.matches(text, "\n")) + 1
     rows = max(rect.h - 2, 0)
     vbar? = rows > 0 and lines > rows
     gw = Geex.Loop.gutter_width(text)
     cols = max(rect.w - if(vbar?, do: 1, else: 0) - gw, 0)
-    widest = if cols > 0, do: Geex.Loop.max_line_width(text), else: 0
+    widest = if cols > 0, do: Geex.Loop.max_line_width(text, tab), else: 0
 
     v =
       if vbar?,

@@ -190,9 +190,21 @@ defmodule Geex.Session do
   """
   @spec set_start(String.t()) :: %{dir: String.t(), root: String.t()}
   def set_start(path) when is_binary(path) do
+    {dir, root} = dir_and_root(path)
+    GenServer.call(__MODULE__, {:set_start, %{dir: dir, root: root}})
+  end
+
+  @doc """
+  The project root `set_start/1` would give `path`: its git work tree's top, else its directory
+  (a file's, or itself). Read without changing where geex was started.
+  """
+  @spec root_of(String.t()) :: String.t()
+  def root_of(path) when is_binary(path), do: path |> dir_and_root() |> elem(1)
+
+  defp dir_and_root(path) do
     full = Path.expand(path)
     dir = if File.dir?(full), do: full, else: Path.dirname(full)
-    GenServer.call(__MODULE__, {:set_start, %{dir: dir, root: git_root(dir) || dir}})
+    {dir, git_root(dir) || dir}
   end
 
   @doc "Where geex was started: `%{dir, root}`, each `nil` before `set_start/1`."

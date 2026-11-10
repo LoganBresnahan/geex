@@ -7,6 +7,20 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-10 — A tab character draws zero columns wide, so tab-indented files lose their indentation  ✅ FIXED (2026-11-09)
+
+- **Status:** **FIXED** 2026-11-09 by roadmap item 18.7 (ADR-0027's 2026-11-09 amendment), on the
+  `editor-comfort` branch. Verification is in the [testing.md](testing.md) 2026-11-09 entry
+  "editor comfort". Found the same day while looking at the maintainer's tab-size ask.
+- **Symptom:** a Go file (or a Makefile) indented with tabs shows every line flush left: `\tfmt.Println`
+  draws as `fmt.Println`. Seen live in tmux.
+- **Verified cause:** `Geex.Width.cells/1` gives a control character, `\t` included, zero columns,
+  so `Width.string("a\tb") == 2` and the painter lays the line out without the tab.
+- **Fix:** a tab's width depends on where it starts: the columns to the next tab stop of the
+  tab-size setting. The width walks (the painter, `cursor_xy`, `col_at_display`, the mouse) learn
+  it; addressing stays by grapheme (ADR-0027), so a wrong width mis-renders, never mis-addresses.
+- **Ruled out:** loading. `EditorState.new/1` keeps the tab (the text round-trips byte for byte).
+
 ## BUG-9 — An attestation didn't relabel the blame a compacted ledger's checkpoint carries  ✅ FIXED (2026-11-09)
 
 - **Status:** **FIXED** 2026-11-09, at the maintainer's word (relayed by session geex-d3): the

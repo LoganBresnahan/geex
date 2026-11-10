@@ -1,5 +1,8 @@
 defmodule Geex.Loop.KeymapTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
+
+  doctest Geex.Loop.Keymap
 
   alias Geex.Loop.Keymap
   alias Geex.Commands.{Delete, Insert, Replace}
@@ -258,5 +261,35 @@ defmodule Geex.Loop.KeymapTest do
     test "Delete at the very end of the buffer is ignored" do
       assert :ignore = Keymap.resolve({:key, :delete}, {1, 2}, "ab\ncd")
     end
+  end
+
+  # Roadmap item 18.7: Tab follows the file. The indented lines vote, tab-led against space-led;
+  # unindented and blank ones don't; a tie, or none, is spaces.
+  property "indent_style/1 is the majority of the indented lines" do
+    check all(
+            lines <-
+              list_of(
+                one_of([
+                  constant({:tab, "\tx"}),
+                  constant({:tab, "\t  y"}),
+                  constant({:space, "  x"}),
+                  constant({:space, " \tz"}),
+                  constant({:none, "x"}),
+                  constant({:none, "   "}),
+                  constant({:none, ""})
+                ]),
+                max_length: 60
+              )
+          ) do
+      text = Enum.map_join(lines, "\n", &elem(&1, 1))
+      tabs = Enum.count(lines, &(elem(&1, 0) == :tab))
+      spaces = Enum.count(lines, &(elem(&1, 0) == :space))
+      assert Keymap.indent_style(text) == if(tabs > spaces, do: :tabs, else: :spaces)
+    end
+  end
+
+  test "indent_style/1 reads only the first 1000 lines" do
+    text = String.duplicate("  x\n", 1000) <> String.duplicate("\tx\n", 2000)
+    assert Keymap.indent_style(text) == :spaces
   end
 end

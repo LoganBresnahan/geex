@@ -6,7 +6,9 @@ defmodule Geex.CLI.Signals do
   The one difference is SIGTERM. OTP's handler calls `init:stop/0`. Under the binary, the
   application never finishes starting, so that stop skips `Geex.TerminalIO`'s `terminate/2`,
   which leaves the terminal on the alternate screen. Here SIGTERM goes through `Geex.stop/0`,
-  the same orderly quit as `Ctrl-X`. SIGUSR1 and SIGQUIT halt, as OTP's handler does.
+  the same orderly stop as `Ctrl-X`, except that the editor loop isn't asked first: the last
+  session is as the loop last kept it, at most 2 s old (roadmap item 18.9), not written at the
+  signal. SIGUSR1 and SIGQUIT halt, as OTP's handler does.
   """
 
   @behaviour :gen_event

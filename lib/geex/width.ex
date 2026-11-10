@@ -26,7 +26,16 @@ defmodule Geex.Width do
   itself falls back to (`npwcwidth/1`) — so this stays **NIF-free** (no libc
   `wcwidth`, no native code), which keeps the terminal core extractable per
   [ADR-0024](../../doc/adr/0024-tui-core-extractable.md).
+
+  **A tab** is the one grapheme whose width depends on where it starts: it runs to the next tab
+  stop, every `tab` columns (the tab-size setting, roadmap item 18.7). `cells/1` alone can't
+  know that, so a line of text is measured with `advance/3`, `line/2` and `col_at_display/3`,
+  which take the tab size (2 unless given). Width stays a render concern (ADR-0027): a tab is
+  one grapheme to every command, however wide it draws.
   """
+
+  # The tab size when none is given: the tab-size setting's default.
+  @tab 2
 
   # Codepoints that take no column even when grapheme segmentation hands them to
   # us standing alone: ZWSP, ZWNJ, ZWJ, word-joiner, BOM/ZWNBSP, soft hyphen.
@@ -64,25 +73,56 @@ defmodule Geex.Width do
   end
 
   @doc """
+  The columns `grapheme` takes when it starts at display column `at` (0-based): a tab runs to
+  the next stop of every `tab` columns; anything else is `cells/1`.
+
+      iex> {Geex.Width.advance("\t", 0, 4), Geex.Width.advance("\t", 3, 4), Geex.Width.advance("字", 3, 4)}
+      {4, 1, 2}
+  """
+  @spec advance(String.t(), non_neg_integer(), pos_integer()) :: non_neg_integer()
+  def advance("\t", at, tab), do: tab - rem(at, tab)
+  def advance(grapheme, _at, _tab), do: cells(grapheme)
+
+  @doc """
+  The display width of a line of text with tab stops every `tab` columns.
+
+      iex> {Geex.Width.line("\tab", 4), Geex.Width.line("a\tb", 4), Geex.Width.line("a\tb", 2)}
+      {6, 5, 3}
+  """
+  @spec line(String.t(), pos_integer()) :: non_neg_integer()
+  def line(line, tab \\ @tab) when is_binary(line) do
+    line |> String.graphemes() |> Enum.reduce(0, &(&2 + advance(&1, &2, tab)))
+  end
+
+  @doc """
   The **1-based grapheme `x`** at display column `display_x` (1-based) of `line` — the cast
   the grid ruler needs (display column → addressing column, [ADR-0027](../../doc/adr/0027-grid-command-addressing.md)
-  §"display ruler"). The dual of `Geex.Loop.cursor_xy/3`'s width walk: a wide glyph owns two
+  §"display ruler"). The dual of `Geex.Loop.cursor_xy/4`'s width walk: a wide glyph owns two
   display columns, so **both** map to it; a zero-width grapheme owns none, so it is skipped.
   A `display_x` past the line's drawn width returns the caret **after** the last grapheme
   (`graphemes + 1`), which the resolver clamps to the line end ("to end of line"). Pure — a
-  function of the line text only, so it never reaches into view state.
+  function of the line text and the tab size, so it never reaches into view state. A tab owns
+  every column to its stop.
+
+      iex> Geex.Width.col_at_display("\tx", 4, 4)
+      1
+      iex> Geex.Width.col_at_display("\tx", 5, 4)
+      2
   """
-  @spec col_at_display(String.t(), pos_integer()) :: pos_integer()
-  def col_at_display(line, display_x) when is_binary(line) and display_x >= 1 do
-    walk_to_display(String.graphemes(line), display_x, 1, 1)
+  @spec col_at_display(String.t(), pos_integer(), pos_integer()) :: pos_integer()
+  def col_at_display(line, display_x, tab \\ @tab) when is_binary(line) and display_x >= 1 do
+    walk_to_display(String.graphemes(line), display_x, 1, 1, tab)
   end
 
   # gx = current grapheme's 1-based index; ds = its 1-based display-column start.
-  defp walk_to_display([], _target, gx, _ds), do: gx
+  defp walk_to_display([], _target, gx, _ds, _tab), do: gx
 
-  defp walk_to_display([g | rest], target, gx, ds) do
-    w = cells(g)
-    if w > 0 and target < ds + w, do: gx, else: walk_to_display(rest, target, gx + 1, ds + w)
+  defp walk_to_display([g | rest], target, gx, ds, tab) do
+    w = advance(g, ds - 1, tab)
+
+    if w > 0 and target < ds + w,
+      do: gx,
+      else: walk_to_display(rest, target, gx + 1, ds + w, tab)
   end
 
   # `is_wide/1` is a compiled clause table (cheap) and is checked first: a wide

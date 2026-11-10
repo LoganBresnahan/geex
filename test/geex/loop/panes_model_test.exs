@@ -4,6 +4,8 @@ defmodule Geex.Loop.PanesModelTest do
 
   alias Geex.Loop.Panes
 
+  doctest Geex.Loop.Panes
+
   # Stand-in buffer pids: the model only compares them.
   setup do
     [a, b, c] = for _ <- 1..3, do: spawn(fn -> :ok end)

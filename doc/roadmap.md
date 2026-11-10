@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14); shell commands run from the minibuffer (`!`, `!!`, `|`, item 15); both ship in 0.3.4. From 0.3.5 the captAInHook payload ships in each release, linked at `~/.local/share/geex/integrations/geex-attest.sh` (ADR-0041's amendment). **2026-11-06:** a read-only markdown preview (item 16, [adr/0043](adr/0043-markdown-preview.md)): `Alt+Shift+P` opens a markdown file's rendered preview beside it, re-rendered when the file on disk changes; it needs the `markdown_inline` companion grammar, published in `catalog-v3`. Merged to main after the maintainer's look and released in 0.4.0; 1314 tests + 116 doctests green. **2026-11-09:** property tests with StreamData (item 17, [adr/0044](adr/0044-property-tests-with-stream-data.md)): slice 1 moved six seeded loops over to generated, shrinking cases; slice 2 covered the attestation path and found and fixed BUG-8 (an attestation missed a group's undone hunks); slice 3 covered addressing and the parse round-trip; a verify pass completed BUG-8's fix and strengthened three properties, and found BUG-9, fixed the same day; 1313 tests + 19 properties + 118 doctests green. Since the
+**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14); shell commands run from the minibuffer (`!`, `!!`, `|`, item 15); both ship in 0.3.4. From 0.3.5 the captAInHook payload ships in each release, linked at `~/.local/share/geex/integrations/geex-attest.sh` (ADR-0041's amendment). **2026-11-06:** a read-only markdown preview (item 16, [adr/0043](adr/0043-markdown-preview.md)): `Alt+Shift+P` opens a markdown file's rendered preview beside it, re-rendered when the file on disk changes; it needs the `markdown_inline` companion grammar, published in `catalog-v3`. Merged to main after the maintainer's look and released in 0.4.0; 1314 tests + 116 doctests green. **2026-11-09:** property tests with StreamData (item 17, [adr/0044](adr/0044-property-tests-with-stream-data.md)): slice 1 moved six seeded loops over to generated, shrinking cases; slice 2 covered the attestation path and found and fixed BUG-8 (an attestation missed a group's undone hunks); slice 3 covered addressing and the parse round-trip; a verify pass completed BUG-8's fix and strengthened three properties, and found BUG-9, fixed the same day; 1313 tests + 19 properties + 118 doctests green. Later that day, on the branch `editor-comfort`: the maintainer's editor-comfort list (item 18): typing over a selection, `[+]` that follows the text, the output pane's handle, a final newline on save, a scrolling tab bar, `Alt+Y`'s Commands tab, the tab size (fixing BUG-10), resizing from the keyboard, and the last session brought back; 1370 tests + 22 properties + 130 doctests green; merged to main after geex-d3's verify and the maintainer's OK. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -639,13 +639,50 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      fixed the same day with a property through the real compaction (attesting commutes with
      undo and redo).
 
+18. **Editor comfort** — the maintainer's list from using geex, 2026-11-09, decided the same day.
+   **Built 2026-11-09** on the branch `editor-comfort` (all nine; ADR-0038's, 0019's, 0026's,
+   0027's, 0029's, 0031's and 0040's amendments; dogfooded in tmux), verified by session geex-d3
+   over three passes, and merged to main at the maintainer's word; releasing waits.
+   The maintainer's later answers (relayed by session geex-d3, 2026-11-09): the final newline is
+   off by default and, on, applies to every save; Tab follows the file, Shift+Tab forces a tab
+   (`Alt+Tab`, first asked for, never reaches a terminal on Windows or most desktops):
+   1. **Delete and Backspace over a selection delete it**, any selection (a mouse drag or
+      `Alt+H`), as one undoable edit; typing over a selection replaces it.
+   2. **`[+]` clears whenever the text is back to what's saved**, by any edit (a space, then
+      Backspace), not only by `Alt+Z`, which already did.
+   3. **The output pane (`!`) gets the `⠛⠛` handle**; dragging its title row resizes the band, as
+      the edits pane's does.
+   4. **A final newline on save** — a General setting, off by default; on, every save adds the
+      missing one, edited or not (the maintainer: "many companies want the newline at the end as
+      their standard"). It goes in as a recorded `:human` insert in the file's own line ending,
+      made with a successful write after the save catches up with the disk; `Alt+Z` takes it back.
+   5. **The tab bar scrolls** when a pane's tabs don't fit: a mark at each end counts the hidden
+      tabs, the wheel over the bar scrolls it, and switching tabs brings the current one back
+      into view. No list of
+      tabs (the `buffers` search is enough); `Alt+,`/`Alt+.` stay the keys.
+   6. **A Commands tab in `Alt+Y`**: every typed command with what it does, searchable, read from
+      `Geex.Command.Catalog` (the palette's list), with a test that every verb the minibuffer
+      accepts is in it.
+   7. **Tab size** — a General setting, default 2: a tab character draws to the next tab stop of
+      that size (BUG-10: it drew zero columns wide), and Tab follows the file: a tab where the
+      file's indented lines mostly start with one, else that many spaces; Shift+Tab always
+      inserts a tab. Width stays a render concern (ADR-0027).
+   8. **Resize from the keyboard**: `Alt+arrows` and `Alt+Shift+W/A/S/D` move the focused pane's
+      edge that way by a fixed step, kept to the least pane size. The parser learns modified
+      arrows (`ESC [ 1 ; 3 A`); `Alt+Shift+W/A/S/D` become case-sensitive, as `Alt+Shift+Z` is
+      (with Caps Lock on they resize; the maintainer accepted that).
+   9. **The last session comes back** ([adr/0038](adr/0038-split-panes-and-tabs.md)'s deferred
+      item): a bare `geex` or `geex .` reopens the project's last panes, their tabs and every size;
+      `geex FILE` opens just that file but keeps the sizes. Needs ADR-0038's amendment.
+
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the
 tty) is **FIXED** (2026-10-16), and BUG-4 (a deploy removed a running geex's unpack) is **FIXED** (2026-10-18); BUG-5 and BUG-6 are **FIXED** (2026-10-18). BUG-7 (stale text after a terminal resize, found
 while dogfooding the markdown preview) is **FIXED** (2026-11-06). BUG-8 (an attestation missed the
 undone hunks of its group, found by a property test) is **FIXED** (2026-11-09). BUG-9 (an attestation didn't
 relabel a compacted ledger's checkpoint blame, found by the verify pass) is **FIXED**
-(2026-11-09); the shelf is clear again.
+(2026-11-09). BUG-10 (a tab character drew zero columns wide, found looking at item 18.7) is
+**FIXED** (2026-11-09, on the `editor-comfort` branch); the shelf is clear again.
 
 ---
 

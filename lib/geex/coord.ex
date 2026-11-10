@@ -10,7 +10,7 @@ defmodule Geex.Coord do
   a line, never mis-*address* an edit (ADR-0027 §2).
 
   The human picking surface enters coordinates in **display columns** (what the ruler shows);
-  the transport casts those to grapheme `x` ([`Geex.Width.col_at_display/2`](`Geex.Width`)) before
+  the transport casts those to grapheme `x` ([`Geex.Width.col_at_display/3`](`Geex.Width`)) before
   calling `to_span/2` / `to_caret/2` — so this module only ever sees grapheme coordinates.
 
   Ranges are **inclusive** at both ends (`x5 y7 - x12 y9` includes the `x12` grapheme), `-`

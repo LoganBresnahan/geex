@@ -1,6 +1,6 @@
 # ADR-0029: The selection primitive — one region, two surfaces
 
-- **Status:** Accepted
+- **Status:** Accepted. **Amended 2026-11-09:** typing over a selection replaces it.
 - **Date:** 2026-06-09 (Accepted 2026-06-09 when wired into highlight mode + clipboard)
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (a *view* is cursor/scroll/**selection**
   onto a buffer; highlight mode), [ADR-0027](0027-grid-command-addressing.md) (grid coordinates resolve
@@ -87,6 +87,15 @@ the (already-defined) `palette.selection` bg; the clipboard ops (`Alt+C`/`X`/`V`
   named / buffer-local clipboard registers + yank-pop ([ADR-0015](0015-clipboard-subsystem.md)).
 - **Status is Accepted** — the half-open caret span and the cursor-is-active-end rule are locked, and the
   primitive is wired into highlight mode + the clipboard (2026-06-09).
+
+
+## Amendment (2026-11-09): typing over a selection (roadmap item 18.1)
+
+A key that edits replaces a live selection, whichever surface made it (a mouse drag, `Alt+H`):
+Backspace and Delete delete it, a printable grapheme or Enter replaces it, as one recorded
+`Replace` on the shared path that `Alt+Z` takes back whole; the cursor lands after what was typed
+and the selection is gone (`Keymap.over_selection/1`). A collapsed selection is none. Tab isn't
+one of those keys: indenting a selection is its own decision, still open.
 
 ## See
 

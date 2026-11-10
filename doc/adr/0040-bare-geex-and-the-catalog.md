@@ -2,7 +2,7 @@
 
 - **Status:** Accepted 2026-10-18 (the maintainer's decisions, relayed by the coordinator session
   and built autonomously at the maintainer's word). Steps 2–7 build it; each amends this ADR
-  with what it found. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** the `markdown_inline` companion and the render queries in the load check; `catalog-v3`.
+  with what it found. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** the `markdown_inline` companion and the render queries in the load check; `catalog-v3`. **Amended 2026-11-09:** the settings view's Commands tab; General's tab size and final newline.
 - **Date:** 2026-10-18
 - **Amends:** [ADR-0023](0023-theming-and-extension-loading.md) §5 ("geex fetches nothing") and
   §7 ("no marketplace"). §4 (themes are data, grammars are sandboxed `.wasm`, separate load paths)
@@ -541,6 +541,20 @@ One Dark and One Light (Atom's), Tokyo Night, Dracula, Nord and Kanagawa.
   install's sha256 and the query, ABI-gated, dropped by `forget/1`).
 - Published as **`catalog-v3`** (2026-11-06, a not-latest pre-release, ADR-0041 §5): the full
   catalog, the 31 earlier packages byte-identical.
+
+
+## Amendment — 2026-11-09: a Commands tab, the tab size and a final newline (roadmap item 18)
+
+- **Commands** (between Keys and General): every command typed after `Alt+M`, how it is typed and
+  what it does, searchable like Keys. It reads `Geex.Command.Catalog`, the palette's list, which
+  gains `usage` (`new PATH`) and `aliases` (`exit`, `mv`, `find` …) and the commands it lacked
+  (`no`, `!!`, `tab N`); a test reads the minibuffer parser's own source so a verb without an
+  entry fails.
+- **General** gains **Tab size** (2, 4, 8; Enter steps; `tab_size`; Tab inserts that many spaces,
+  following the file: a tab where the file indents with tabs, Shift+Tab always a tab; a tab
+  character draws to its stop, ADR-0027's amendment) and **Final newline** (off unless
+  `final_newline` is true; on, every save; ADR-0019's amendment). Both apply this session and are
+  kept in `settings.json`.
 
 ## See
 

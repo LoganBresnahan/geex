@@ -81,9 +81,11 @@ defmodule Geex.Loop.SettingsTest do
       {view, :none} = Settings.key(view, {:alt, ?a}, [], 30)
       assert view.tab == :general
       {view, :none} = Settings.key(view, {:alt, ?a}, [], 30)
+      assert {view.tab, view.query} == {:commands, ""}
+      {view, :none} = Settings.key(view, {:alt, ?a}, [], 30)
       assert {view.tab, view.query} == {:keys, ""}
       {view, :none} = Settings.key(view, {:alt, ?D}, [], 30)
-      assert {view.tab, view.query} == {:general, ""}
+      assert {view.tab, view.query} == {:commands, ""}
       assert Enum.any?(Geex.Loop.KeyHelp.search("alt+a"), &(elem(&1, 0) == "Settings"))
       # The markdown preview's chord and glyph (ADR-0043 §1).
       assert {"Panes", "Alt+Shift+P", _} =
@@ -103,6 +105,7 @@ defmodule Geex.Loop.SettingsTest do
       {view, :none} = Settings.key(view, {:key, :left}, [], 30)
       assert view.tab == :general
       {view, :none} = Settings.key(view, {:key, :left}, [], 30)
+      {view, :none} = Settings.key(view, {:key, :left}, [], 30)
       assert view.tab == :keys
 
       view =
@@ -118,6 +121,25 @@ defmodule Geex.Loop.SettingsTest do
           do: assert({_, :close} = Settings.key(view, key, [], 30))
 
       assert {_, :quit} = Settings.key(view, {:ctrl, ?x}, [], 30)
+    end
+
+    test "Commands lists every typed command, how it is typed, and filters as you type" do
+      # Roadmap item 18.6.
+      view = %{Settings.open() | tab: :commands}
+      rows = Settings.rows(view, %{})
+      assert length(rows) == length(Geex.Command.Catalog.all())
+
+      assert %{cells: ["rename [PATH], mv", "Rename or move this file" <> _]} =
+               Enum.find(rows, &(hd(&1.cells) =~ "rename"))
+
+      view =
+        Enum.reduce(String.graphemes("exit"), view, fn g, v ->
+          elem(Settings.key(v, {:char, g}, [], 30), 0)
+        end)
+
+      assert [%{cells: ["quit, exit", "Leave the editor."]} | _] = Settings.rows(view, %{})
+      {view, :none} = Settings.key(view, {:key, :backspace}, [], 30)
+      assert view.query == "exi"
     end
 
     test "Markdown's companion is listed after it as the preview's, not as a language" do
@@ -212,7 +234,7 @@ defmodule Geex.Loop.SettingsTest do
       state = send_io(state, {:alt, ?y})
       assert %Settings{tab: :languages} = state.settings
       {state, screen} = frame(state)
-      assert row_text(screen, 0) =~ "Languages   Themes   Keys   General"
+      assert row_text(screen, 0) =~ "Languages   Themes   Keys   Commands   General"
       assert :reverse in Screen.get_cell(screen, 2, 0).attrs
       assert row_text(screen, 2) =~ "Bash"
 
@@ -387,6 +409,40 @@ defmodule Geex.Loop.SettingsTest do
       assert JSON.decode!(File.read!(Path.join(dir, "settings.json"))) == %{"tree" => false}
     end
 
+    test "General's final newline turns over, kept in settings.json (roadmap item 18.4)",
+         %{state: state, dir: dir} do
+      state = state |> send_io({:alt, ?y}) |> send_io({:key, :left})
+      rows = Settings.rows(state.settings, %{saved: state.settings_saved})
+      at = Enum.find_index(rows, &(&1.name == :final_newline))
+      assert %{cells: ["Final newline", "off", _]} = Enum.at(rows, at)
+
+      state = Enum.reduce(1..at, state, fn _, acc -> send_io(acc, {:key, :down}) end)
+      state = send_io(state, {:key, :enter})
+      assert state.final_newline == true
+
+      assert JSON.decode!(File.read!(Path.join(dir, "settings.json"))) == %{
+               "final_newline" => true
+             }
+
+      rows = Settings.rows(state.settings, %{saved: state.settings_saved})
+      assert %{cells: ["Final newline", "on", _]} = Enum.at(rows, at)
+    end
+
+    test "General's tab size steps 2, 4, 8 and round, kept in settings.json (roadmap item 18.7)",
+         %{state: state, dir: dir} do
+      state = state |> send_io({:alt, ?y}) |> send_io({:key, :left})
+      rows = Settings.rows(state.settings, %{tab_size: state.tab_size})
+      at = Enum.find_index(rows, &(&1.name == :tab_size))
+      assert %{cells: ["Tab size", "2", _]} = Enum.at(rows, at)
+
+      state = Enum.reduce(1..at, state, fn _, acc -> send_io(acc, {:key, :down}) end)
+      state = send_io(state, {:key, :enter})
+      assert state.tab_size == 4
+      assert JSON.decode!(File.read!(Path.join(dir, "settings.json"))) == %{"tab_size" => 4}
+      state = state |> send_io({:key, :enter}) |> send_io({:key, :enter})
+      assert state.tab_size == 2
+    end
+
     test "a settings.json that isn't JSON is left alone, and the view says so",
          %{state: state, dir: dir} do
       file = Path.join(dir, "settings.json")
@@ -416,7 +472,11 @@ defmodule Geex.Loop.SettingsTest do
     test "General's paths show ~ and keep their file name, cut from the left", %{state: state} do
       state = %{state | w: 40} |> send_io({:alt, ?y}) |> send_io({:key, :left})
       {_state, screen} = frame(state)
-      settings_row = row_text(screen, 5)
+      # Found by its name: General's rows above it grow (roadmap item 18).
+      settings_row =
+        Enum.find(0..(screen.h - 1), &String.starts_with?(row_text(screen, &1), "Settings "))
+        |> then(&row_text(screen, &1))
+
       assert String.starts_with?(settings_row, "Settings")
       assert String.ends_with?(settings_row, "settings.json")
       assert settings_row =~ "…"

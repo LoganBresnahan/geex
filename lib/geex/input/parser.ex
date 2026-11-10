@@ -15,9 +15,9 @@ defmodule Geex.Input.Parser do
   A control sequence is read **as one unit**: a CSI (`ESC [`, parameter
   bytes `0x30–0x3F`, intermediate bytes `0x20–0x2F`, a final byte
   `0x40–0x7E`) or an SS3 (`ESC O` and one byte). The ones geex uses become
-  keys (arrows, Home, End, Delete, Page Up/Down), and a mouse report becomes a mouse event; every
-  other one (modified arrows, a modified Page Up/Down, F-keys…) is **dropped**, never typed into
-  the buffer as text. An incomplete sequence stays leftover until the rest
+  keys (arrows, Home, End, Delete, Page Up/Down, Alt with an arrow), and a mouse report becomes a
+  mouse event; every other one (other modified arrows, a modified Page Up/Down, F-keys…) is
+  **dropped**, never typed into the buffer as text. An incomplete sequence stays leftover until the rest
   arrives (bounded, so garbage can't be held forever).
 
   ## Mouse reports ([ADR-0039](../../../doc/adr/0039-mouse.md))
@@ -31,12 +31,13 @@ defmodule Geex.Input.Parser do
   ## Event shapes
 
       {:key, :up | :down | :left | :right | :home | :end | :delete |
-             :page_up | :page_down | :enter | :tab | :backspace | :esc}
+             :page_up | :page_down | :enter | :tab | :shift_tab | :backspace | :esc}
       {:char, <<utf8 grapheme>>}
       {:ctrl, ?a..?z}            # Ctrl-letter as the lowercase atom
       {:ctrl, 0x40 | 0x5C..0x5F} # bytes 0, 28–31: Ctrl-@, Ctrl-\\, Ctrl-], Ctrl-^, Ctrl-_
       {:alt, ?a..?z | ?A..?Z}   # Alt/Meta-letter (ESC-prefixed)
       {:alt, ?0..?9 | ?- | ?= | ?, | ?.}   # the pane and tab keys
+      {:alt, :up | :down | :left | :right} # Alt with an arrow (`ESC [ 1 ; 3 A`): resizing
       {:mouse, %{action: :press | :release | :drag | :wheel | :move,
                  button: :left | :middle | :right | :up | :down | :wheel_left | :wheel_right
                          | :none | pos_integer(),
@@ -63,7 +64,7 @@ defmodule Geex.Input.Parser do
           {:key, atom()}
           | {:char, binary()}
           | {:ctrl, byte()}
-          | {:alt, byte()}
+          | {:alt, byte() | :up | :down | :left | :right}
           | {:mouse, mouse()}
           | {:osc, binary(), binary()}
 
@@ -284,6 +285,13 @@ defmodule Geex.Input.Parser do
   defp csi_key(n, ?~) when n in ["1", "7"], do: {:key, :home}
   defp csi_key(n, ?~) when n in ["4", "8"], do: {:key, :end}
   defp csi_key("3", ?~), do: {:key, :delete}
+
+  # Shift+Tab, back-tab (`ESC [ Z`): a real tab, whatever the file indents with (roadmap item 18.7).
+  defp csi_key("", ?Z), do: {:key, :shift_tab}
+  # Alt with an arrow: xterm's modifier parameter 3 (roadmap item 18.8, resizing).
+  defp csi_key("1;3", final) when final in ?A..?D,
+    do: {:alt, Enum.at([:up, :down, :right, :left], final - ?A)}
+
   defp csi_key("5", ?~), do: {:key, :page_up}
   defp csi_key("6", ?~), do: {:key, :page_down}
   defp csi_key("<" <> params, final) when final in [?M, ?m], do: sgr_mouse(params, final)

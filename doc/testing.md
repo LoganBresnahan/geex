@@ -5394,3 +5394,154 @@ spool, blame: 8) at 10,000 runs, seeds 61 and 62: 0 failures. `mix compile --war
 **Not tested / deferred:** a fully folded group stays unattestable (the known limit above, not
 fixed); a second compaction after such an attestation (reasoned from the code by geex-d3, not
 run); the ledger loop (still seeded).
+
+### 2026-11-09 — editor comfort: the maintainer's list (roadmap item 18; ADR-0038, 0019, 0026, 0027, 0029, 0031, 0040)
+
+Built on the branch `editor-comfort` (worktree `~/geex-comfort`), uncommitted, rebased onto main at
+5ec166b (the stream session's BUG-9 commit; conflicts in `bugs.md`, `history_test.exs` and
+`width_test.exs`, both sides kept).
+
+**Hand-verified in tmux** (private socket, `XDG_STATE_HOME` and `XDG_CONFIG_HOME` in a scratch
+dir, 100 × 30, the worktree's build through `mix run --no-start`):
+- **18.1:** `Alt+H` + five `Alt+D` then Delete took `hello` and left one `[+]`; `Alt+Z` gave it
+  back. A mouse drag over `hello` (raw SGR press, drag, release) then Delete deleted it: the
+  maintainer's case.
+- **18.2:** Space then Backspace: `[+]` came and went.
+- **18.3:** `! ls`: the output pane's title row drew `⠛⠛`; dragging it moved the band's top from
+  row 21 to row 15.
+- **18.4:** `nn.txt` (no final newline) saved with Ctrl-O ends in `\n` on disk (`od -c`); no
+  `[+]` after.
+- **18.5:** ten tabs at 100 columns: `‹5` at the left; the wheel up over the bar gave `‹2 … 3›`,
+  down `‹3 … 2›`; `Alt+.` (wrapping to tab 1) followed it back to the start, `5›`.
+- **18.6:** `Alt+Y`'s tabs read `Languages Themes Keys Commands General`; Commands lists every
+  command with its usage and aliases; typing `exit` puts `quit, exit` first.
+- **18.7:** a Go file indented with tabs drew 2 columns a tab, the hardware cursor after the tab
+  at the column the status line names; General's Tab size Enter → 4: tabs 4 wide,
+  `{"tab_size":4}` in settings.json, Tab inserted 4 spaces.
+- **18.8:** `M-Right` / `M-A` moved the tree's edge 24 → 28 → 24 columns; `M-Down`, `M-W`,
+  `M-Up` moved the edits band 2 rows a press; `M-Left` twice in the right half of a side-by-side
+  split moved its divider (ratio 0.5 → 0.399); lower-case `M-d` still moved the cursor.
+- **18.9:** `geex FILE` kept only sizes (`{"tree_w":25,"edits_h":17,…,"tabs":[]}`, `0600`);
+  `geex DIR` then took those sizes, and its split, ten tabs and cursor (pane 2's `f3.txt` at 2:1)
+  were kept within the 2 s tick; after Ctrl-X, `geex DIR` and a bare `geex` started inside the
+  project each brought back the same split, tabs (`6›`), current pane, cursor, tree width and band
+  height, with no scratch tab. The new, never-saved `m.go.txt` was left out. `geex.log`: no
+  error.
+
+**Automated.** New: `test/geex/loop/comfort_test.exs` (21 through the loop's `handle_info/2`:
+typing over a selection, `[+]`, the final newline, the tab bar's marks, wheel and mark clicks,
+the tab size, keyboard resizing), `test/geex/last_session_test.exs` (9 + doctests: encode,
+decode, rebuild, the file, sizes only, the loop's restore and tick, `geex DIR` / `geex FILE`
+startup), the dirty property (`history_test.exs`: after any generated transition, `dirty` is
+whether the text differs from `synced`), the width properties extended with a generated tab size
+(the model, the cursor, the painter), the catalog's coverage test (every word in the parser's
+source is a command's name or alias), and examples in the parser, settings, resize and panes
+tests. Changed on purpose: `panes_test.exs`'s tree test (`Alt+Shift+A` now resizes, as decided)
+and `width_test.exs`'s two properties from slice 3, whose model drew a tab zero wide (BUG-10).
+`mix test` → **1353 tests + 20 properties + 126 doctests, 0 failures**, twice;
+`GEEX_PROPERTY_RUNS=10000 mix test --only property` → 20 properties, 0 failures;
+`mix compile --warnings-as-errors --force` clean in dev and test.
+
+**Not tested / deferred:** a real tab from the Tab key (the maintainer's `Alt+Tab` can't arrive;
+the options are with the maintainer); Tab over a selection (indenting it, undecided); tabs in the
+markdown preview's code blocks; restoring preview tabs; session saves after a SIGTERM land within
+the 2 s tick, not at the signal; Windows Terminal's own `Alt+arrow` bindings (whether it passes
+them through without its panes) — tmux only here; the frame-cost guard ran in the suite, not
+measured by hand with tabs.
+
+### 2026-11-09 — editor comfort: geex-d3's review answered (roadmap item 18)
+
+geex-d3's adversarial verify of the branch found seven defects and three gaps, each run; all
+fixed here, still uncommitted on `editor-comfort`:
+1. **18.4, a clean buffer whose file changed merged with conflict markers on Ctrl-O** (the newline
+   went in before the save caught up). Now `Buffer.save/2` takes `final_newline:` and makes the
+   insert inside the buffer, in the same step as the write, after `Reconcile.save/2`'s catch-up.
+2. **18.4, a failed save left the newline in the buffer.** It is kept only if the write succeeds:
+   read-only, no path and behind leave the buffer as it was.
+3. **18.4, a bare LF on a CRLF file, and an untouched file rewritten.** The break is the file's
+   own; only a buffer with unsaved edits gets one (whether that and the default suit the
+   maintainer is with the maintainer).
+4. **18.9, a failed session write was never retried.** One writer process per loop, in order; a
+   session counts as kept only when the writer says so; a quit always writes and waits.
+5. **18.9, a sizes-only write replaced a session it couldn't read.** Left alone now
+   (`{:error, :unreadable}`); the sizes alone are written only when there is no file.
+6. **18.7, the horizontal scroll bar's mouse handling measured tabs at 2.** `ScrollBar.layout/4`
+   takes the tab size; `max_line_width/2`, `Mouse.text_pos/5` and it have no default, so the
+   compiler finds a caller that forgets it.
+7. **18.2, a revert back to the saved text kept `[+]`.** `History.group/3` without a baseline
+   recomputes `dirty` too.
+8. **18.5, an old tab-bar scroll came back** after leaving the tab and returning: showing a tab
+   drops the scroll.
+9. **18.5, a `0›` mark that counted nothing**, and marks overlapping in narrow bars: neither now.
+10. **18.7, nothing pinned the loop's tab-size threading.** A loop-level test at tab size 4
+    through `handle_info/2`: the frame, the bar, a click, a drag, a drag's auto-scroll, the
+    wheel, a scroll-bar press, grid goto and copy.
+
+Also from the review: the hardware cursor is hidden left of the text (a held scroll could put it
+over the gutter); session paths must be absolute; the writer logs a failure once
+(`geex session: …`), fsyncs and closes on every path; a `geex FILE` instance writes only when the
+sizes change; stale arities and docs; Keymap's doctests now run; the parser's type names the Alt
+arrows; the tree's resize test measures the edge.
+
+**Planted bugs, each reverted:** the old `group/3` dirty rule fails the new example test and the
+dirty property (at 5,000 runs; the property's transitions now include deletes and reverts). Each
+of the loop's tab-size sites set to 2, one at a time, fails the threading test, except
+`drag_to/2`'s first `text_pos`, whose position is discarded (only its edge, from geometry, is
+used). The painter counting stops from the screen column fails the painter property, which now
+generates the gutter width and the horizontal scroll.
+
+**Hand-verified in tmux** (scratch XDG dirs): a clean `x\ny` whose file became `x\nz` on disk,
+then Ctrl-O: the buffer reads `x\nz`, the disk is `x\nz` (no line break added, no markers); `a\r\nb`
+edited and saved ends `\r\n`. `geex.log`: no error.
+
+**Automated.** `mix test` → **1366 tests + 21 properties + 129 doctests, 0 failures**, twice;
+`GEEX_PROPERTY_RUNS=10000 mix test --only property` → 21 properties, 0 failures (new: encode,
+JSON and decode give back the panes); `mix compile --warnings-as-errors --force` clean in dev and
+test.
+
+**Not tested / deferred (decided):** a lock on the session file (a `geex FILE` and a project
+instance at once can lose one's write until its next change; stated in ADR-0038's amendment);
+SIGTERM keeps the session as last kept, at most 2 s old (`Geex.CLI.Signals` says so); restored
+files open one after another at startup, as `geex a b c`'s do; `max_line_width/2` on a tab-heavy
+file costs more per frame than before (geex-d3 measured 29.7 ms against 20.1 ms on a 400 KB TSV
+at tab size 8), not optimized; a held hscroll isn't clamped when the tab size shrinks (the next key
+releases it); urxvt and old tmux send Alt+arrow as `ESC ESC [ A`, not read. Reported by the
+review from reading, not reproduced here: in grid mode the ruler row may put a click one line
+low (`Mouse.text_pos/5` doesn't know the ruler), older than this branch.
+
+### 2026-11-09 — editor comfort: the maintainer's two answers, and geex-d3's last pass (roadmap item 18)
+
+The maintainer's answers (relayed by session geex-d3): **the final newline is off by default and,
+on, applies to every save**, edited or not ("many companies want the newline at the end as
+their standard"); **Tab follows the file, Shift+Tab forces a tab**. Built, still uncommitted on
+`editor-comfort`:
+- **18.4:** `final_newline` defaults to false (the loop, `apply_settings/2`, the General row);
+  `Buffer.save/2` drops its "unsaved edits" condition; still made after the catch-up and kept only
+  with a successful write. geex-d3's new bug: a text ending in a bare `\r` (a CRLF file whose last
+  break lost its `\n`) got `\r\r\n`; now just `\n`.
+- **18.7:** `Keymap.indent_style/1` (pure): the first 1000 lines' indented ones vote, tab-led
+  against space-led, blank ones don't count, a tie or none is spaces. Tab inserts `\t` in a
+  `:tabs` file, else the tab size's spaces; Shift+Tab (`ESC [ Z`, now `{:key, :shift_tab}`)
+  always `\t`. A pasted tab arrives as the Tab key, so in a tab-indented file it now stays a tab
+  (in a space-indented one it still becomes spaces).
+- geex-d3's nits: the session writer monitors its loop and stops with it (no idle writer left per
+  loop restart); `{:geex_open_tabs, …}` drops a tab-bar scroll as `Panes` does.
+
+**Hand-verified in tmux** (scratch XDG dirs, no settings.json): in `tab.go` (tab-indented) Tab
+inserted `\t`, and Ctrl-O left the file with no final newline (off by default); in `sp.rb`
+(space-indented) Tab inserted 2 spaces and Shift+Tab (`BTab`) a `\t` (`od -c`). `geex.log`: no
+error.
+
+**Automated.** New: the indent-style property (the majority law over generated tab-led,
+space-led, unindented and blank lines) and its 1000-line bound, the parser's `ESC [ Z`, Tab and
+Shift+Tab through the loop (and harmless in the tree, the edits pane, the settings view and the
+minibuffer), the final-newline tests reworked for off by default and every save (an untouched
+file gets one; the bare-CR case; a clean buffer whose file changed catches up, then gets it).
+`mix test` → **1370 tests + 22 properties + 130 doctests, 0 failures**, twice;
+`GEEX_PROPERTY_RUNS=10000 mix test --only property` → 22 properties, 0 failures;
+`mix compile --warnings-as-errors --force` clean in dev and test.
+
+**Not tested / deferred:** Shift+Tab over a selection (like Tab, it doesn't replace it;
+indenting a selection is undecided); terminals that send Shift+Tab other than `ESC [ Z`; with no
+left mark when the bar is too narrow for marks, the hidden tabs at the left have no count
+(geex-d3's note, accepted for panes that narrow).

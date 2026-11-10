@@ -55,6 +55,8 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "open",
+      usage: "open [PATH]",
+      aliases: ["find"],
       description: "Find a file by name and open it, or switch to it (Alt+O).",
       invoke: {:action, :find_file}
     },
@@ -70,18 +72,22 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "new",
+      usage: "new PATH",
       description:
         "Create a file, from the project root, and open it (`new DIR/` makes a directory).",
       invoke: {:typed, "new"}
     },
     %Entry{
       name: "mkdir",
+      usage: "mkdir DIR",
       description: "Make a directory, from the project root.",
       invoke: {:typed, "mkdir"}
     },
     %Entry{
       name: "rename",
-      description: "Rename or move this file, keeping its undo history (also `mv PATH`).",
+      usage: "rename [PATH]",
+      aliases: ["mv"],
+      description: "Rename or move this file, keeping its undo history.",
       invoke: {:action, :rename_file}
     },
     %Entry{
@@ -91,12 +97,14 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "!",
+      usage: "!COMMAND",
       description:
         "Run a shell command in the project root; its output shows below (`!!` again).",
       invoke: {:typed, "!"}
     },
     %Entry{
       name: "|",
+      usage: "|COMMAND",
       description: "Pipe the selection through a shell command and replace it with the output.",
       invoke: {:typed, "|"}
     },
@@ -148,6 +156,7 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "theme",
+      usage: "theme [NAME]",
       description: "Use an installed theme, for this session (Alt+Y installs and keeps one).",
       invoke: {:typed, "theme"}
     },
@@ -158,16 +167,20 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "highlight",
+      aliases: ["select"],
       description: "Start a selection at the cursor (extend it with motion).",
       invoke: {:action, :select_start}
     },
     %Entry{
       name: "select all",
+      aliases: ["highlight all"],
       description: "Select the whole buffer.",
       invoke: {:action, :select_all}
     },
     %Entry{
       name: "line",
+      usage: "line N",
+      aliases: ["N"],
       description: "Go to a line by number (1-based; 0 = last line).",
       invoke: {:typed, "line"}
     },
@@ -176,8 +189,40 @@ defmodule Geex.Command.Catalog do
       description: "Write the active buffer to disk.",
       invoke: {:action, :save}
     },
-    %Entry{name: "quit", description: "Leave the editor.", invoke: {:action, :quit}}
+    %Entry{
+      name: "no",
+      description: "Clear the selection (Alt+N, Esc).",
+      invoke: {:action, :select_clear}
+    },
+    %Entry{
+      name: "!!",
+      description: "Run the last shell command again.",
+      invoke: {:typed, "!!"}
+    },
+    %Entry{
+      name: "tab",
+      usage: "tab N",
+      description: "Show the pane's tab N (Alt+1 … Alt+9).",
+      invoke: {:typed, "tab"}
+    },
+    %Entry{
+      name: "quit",
+      aliases: ["exit"],
+      description: "Leave the editor.",
+      invoke: {:action, :quit}
+    }
   ]
+
+  @doc """
+  How `entry` is typed, with its other names: `usage` (or the name) and the aliases.
+
+      iex> Geex.Command.Catalog.all() |> Enum.find(&(&1.name == "rename")) |> Geex.Command.Catalog.typed()
+      "rename [PATH], mv"
+      iex> Geex.Command.Catalog.all() |> Enum.find(&(&1.name == "save")) |> Geex.Command.Catalog.typed()
+      "save"
+  """
+  @spec typed(Entry.t()) :: String.t()
+  def typed(%Entry{} = entry), do: Enum.join([entry.usage || entry.name | entry.aliases], ", ")
 
   @doc "Every catalog command, in its canonical (declaration) order."
   @spec all() :: [Entry.t()]
@@ -206,10 +251,10 @@ defmodule Geex.Command.Catalog do
 
   # Name matches live in a high band (+1000) so they always sort above description-only matches;
   # a description hit keeps its raw score. `nil` (neither matches) drops the entry.
-  defp rank(%Entry{name: name, description: desc}, q) do
-    case Fuzzy.score(name, q) do
-      nil -> Fuzzy.score(desc, q)
-      score -> score + 1000
+  defp rank(%Entry{name: name, aliases: aliases, description: desc}, q) do
+    case [name | aliases] |> Enum.map(&Fuzzy.score(&1, q)) |> Enum.reject(&is_nil/1) do
+      [] -> Fuzzy.score(desc, q)
+      scores -> Enum.max(scores) + 1000
     end
   end
 end

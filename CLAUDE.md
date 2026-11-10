@@ -217,6 +217,11 @@ session's `Co-Authored-By` trailer.
 - minibuffer history (ADR-0042): `$XDG_STATE_HOME/geex/history.json` (`{"command": [...],
   "grid": [...]}`, newest first, 500 each), `0600`; app gate `minibuffer_history` (off under test),
   `history_file` overrides. Shell commands (`!`, `|`) run in the project root via `Geex.Shell`
+- the last session (roadmap item 18.9, ADR-0038's 2026-11-09 amendment):
+  `$XDG_STATE_HOME/geex/sessions/<key>.json` (`<key>` = 16 hex of the sha256 of the project root),
+  `0600` in `0700`, kept by the loop every 2 s while it changes and on quit (`Geex.LastSession`);
+  a bare `geex` / `geex DIR` restores it, `geex FILE` keeps only sizes; app gate `session_memory`
+  (off under test), `sessions_dir` overrides
 - TUI log: `$XDG_STATE_HOME/geex/geex.log` (`Geex.log_file/0`, default `~/.local/state/geex/`,
   0700, rotates at 1 MB); a VM crash dump lands beside it (`erl_crash.dump`, the launcher's
   `ERL_CRASH_DUMP`)

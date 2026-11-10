@@ -1,6 +1,6 @@
 # ADR-0026: Terminal input model & keymap (one default, capability-gated extras)
 
-- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview.
+- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read.
 - **Date:** 2026-06-08
 - **Refines:** [ADR-0025](0025-user-config-layer.md) (the keymap is user-config *data*),
   [ADR-0024](0024-tui-core-extractable.md) (the TUI core / `prim_tty`)
@@ -115,6 +115,23 @@ which the markdown preview scrolls by a page. Anywhere else they do nothing at a
 them before anything a key does (dismissing a notice, ending a mouse hold, disarming a refused
 save). Modified forms (`ESC [ 5 ; 5 ~`) stay dropped by the parser. `ESC P` is `{:alt, ?P}`
 (Alt+Shift+P), not the start of a DCS string: geex sends no query a terminal answers with one.
+
+
+## Amendment — 2026-11-09: Alt with an arrow, and Alt+Shift+W/A/S/D (roadmap item 18.8)
+
+The parser reads `ESC [ 1 ; 3 A`–`D` (xterm's Alt modifier on an arrow) as
+`{:alt, :up | :down | :right | :left}`; other modified arrows stay dropped. They and
+`Alt+Shift+W/A/S/D` (`ESC W` …) resize the focused pane (ADR-0038's 2026-11-09 amendment).
+That makes `W A S D` case-sensitive outside the minibuffer and the settings view, which keep
+their own reading, as `Alt+Shift+Z` already was (ADR-0031): with Caps Lock on, `Alt+w` arrives as
+`ESC W` and resizes. The maintainer accepted that. In the tree, `Alt+Shift+A`/`D` no longer act
+as Left and Right.
+
+Shift+Tab, back-tab (`ESC [ Z`), is read too, as `{:key, :shift_tab}`: it inserts a real tab
+whatever the file indents with, while Tab follows the file (`Keymap.indent_style/1`: the first
+1000 lines' indented ones vote, tab-led against space-led; a tie or none is spaces). Nothing else
+binds it: the tree, the edits and output panes, the settings view and the minibuffer ignore it. A
+pasted tab arrives as the Tab key, so in a tab-indented file it stays a tab.
 
 ## See
 

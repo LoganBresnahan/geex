@@ -271,18 +271,18 @@ defmodule Geex.Loop.MouseTest do
 
   test "Mouse.text_pos/4 counts the horizontal scroll" do
     rect = %Geex.Rect{x: 0, y: 0, w: 20, h: 6}
-    assert {{0, 12}, {0, 0}} = Mouse.text_pos("0123456789abcdef", rect, {0, 10}, {4 + 2, 1})
+    assert {{0, 12}, {0, 0}} = Mouse.text_pos("0123456789abcdef", rect, {0, 10}, {4 + 2, 1}, 2)
     # Right of the pane: the pointer is past its edge.
-    assert {_pos, {1, 0}} = Mouse.text_pos("x", rect, {0, 0}, {25, 1})
+    assert {_pos, {1, 0}} = Mouse.text_pos("x", rect, {0, 0}, {25, 1}, 2)
     # Below the text rows (rows 1–4), on the scroll-bar row.
-    assert {_pos, {0, 1}} = Mouse.text_pos("x", rect, {0, 0}, {5, 5})
+    assert {_pos, {0, 1}} = Mouse.text_pos("x", rect, {0, 0}, {5, 5}, 2)
 
     # Text taller than the rows has a scroll bar in the last column: a click there lands on the
     # last text column before it, not on text hidden under the bar.
     tall = Enum.map_join(1..10, "\n", fn _ -> String.duplicate("z", 40) end)
-    assert {{0, 14}, {1, 0}} = Mouse.text_pos(tall, rect, {0, 0}, {19, 1})
-    assert {{0, 14}, {1, 0}} = Mouse.text_pos(tall, rect, {0, 0}, {18, 1})
-    assert {{0, 13}, {0, 0}} = Mouse.text_pos(tall, rect, {0, 0}, {17, 1})
+    assert {{0, 14}, {1, 0}} = Mouse.text_pos(tall, rect, {0, 0}, {19, 1}, 2)
+    assert {{0, 14}, {1, 0}} = Mouse.text_pos(tall, rect, {0, 0}, {18, 1}, 2)
+    assert {{0, 13}, {0, 0}} = Mouse.text_pos(tall, rect, {0, 0}, {17, 1}, 2)
   end
 
   # The step 1 review's findings (ADR-0039).

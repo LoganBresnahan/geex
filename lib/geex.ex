@@ -67,10 +67,86 @@ defmodule Geex do
   # Open what geex was started on: `run/1` above, and the installed binary's `Geex.CLI`.
   @spec open_paths(String.t() | [String.t()] | nil) :: :ok
   def open_paths(path) do
-    # Where geex was started, for the edits pane's root and a relative `open` (ADR-0034 §5).
-    with [first | _] <- List.wrap(path), do: Geex.Session.set_start(first)
-    open(path)
+    case last_session(List.wrap(path)) do
+      {:ok, dir, saved} ->
+        Geex.Session.set_start(dir)
+        restore(saved)
+
+      :none ->
+        # Where geex was started, for the edits pane's root and a relative `open` (ADR-0034 §5).
+        with [first | _] <- List.wrap(path), do: Geex.Session.set_start(first)
+        open(path)
+        remember(List.wrap(path))
+    end
+
     :ok
+  end
+
+  # The last session (roadmap item 18.9, `Geex.LastSession`): a bare `geex` or `geex DIR` brings
+  # back the project's, when one was kept; `geex FILE` doesn't.
+  defp last_session(paths) do
+    dir =
+      case paths do
+        [] -> File.cwd!()
+        [one] -> if File.dir?(one), do: one
+        _ -> nil
+      end
+
+    with true <- dir != nil and Geex.LastSession.enabled?(),
+         {:ok, saved} <- Geex.LastSession.read(Geex.Session.root_of(dir)),
+         [_ | _] <- Enum.filter(Geex.LastSession.paths(saved), &File.regular?/1) do
+      {:ok, dir, saved}
+    else
+      _ -> :none
+    end
+  end
+
+  # Open the session's files (the first shown last, so it is the recent list's first) and hand
+  # the loop the panes they rebuild. None opened: a scratch buffer, as with no file.
+  defp restore(saved) do
+    pids =
+      for path <- saved |> Geex.LastSession.paths() |> Enum.reverse(),
+          File.regular?(path),
+          {:ok, pid} <- [Geex.Session.open_file(path)],
+          into: %{},
+          do: {path, pid}
+
+    case Geex.LastSession.panes(saved, pids) do
+      nil ->
+        open(nil)
+        Geex.Loop.restore(%{mode: :project, tree_w: saved.tree_w, edits_h: saved.edits_h})
+
+      panes ->
+        Geex.Loop.restore(%{
+          mode: :project,
+          panes: panes,
+          tree_w: saved.tree_w,
+          edits_h: saved.edits_h
+        })
+    end
+  end
+
+  # Nothing to bring back: a project session (`geex DIR`) starts keeping one; `geex FILE` keeps
+  # only the sizes, and takes the remembered ones. A bare `geex` with no session has no project.
+  defp remember(paths) do
+    if Geex.LastSession.enabled?() do
+      case paths do
+        [one] -> sizes(if File.dir?(one), do: :project, else: :sizes)
+        [_ | _] -> sizes(:sizes)
+        [] -> :ok
+      end
+    end
+  end
+
+  # The remembered sizes, if any, and what this session keeps (`mode`).
+  defp sizes(mode) do
+    case Geex.LastSession.read(Geex.Session.start().root) do
+      {:ok, saved} ->
+        Geex.Loop.restore(%{mode: mode, tree_w: saved.tree_w, edits_h: saved.edits_h})
+
+      :none ->
+        Geex.Loop.restore(%{mode: mode})
+    end
   end
 
   defp open([]), do: open(nil)
@@ -125,7 +201,8 @@ defmodule Geex do
 
   @doc """
   geex's state directory: `$XDG_STATE_HOME/geex`, else `~/.local/state/geex`. It holds the
-  ledgers, the edits list, the log and a VM crash dump, and geex keeps it 0700.
+  ledgers, the edits list, the minibuffer's history, the last sessions (`sessions/`), the log
+  and a VM crash dump, and geex keeps it 0700.
   """
   @spec state_dir() :: Path.t()
   def state_dir do

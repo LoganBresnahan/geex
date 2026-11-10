@@ -4,6 +4,8 @@ defmodule Geex.Command.CatalogTest do
   alias Geex.Command.Catalog
   alias Geex.Command.Catalog.Entry
 
+  doctest Geex.Command.Catalog
+
   defp names(entries), do: Enum.map(entries, & &1.name)
 
   describe "all/0" do
@@ -23,6 +25,50 @@ defmodule Geex.Command.CatalogTest do
                  match?({:action, {:theme, name}} when is_binary(name), invoke) or
                  match?({:typed, p} when is_binary(p), invoke)
       end
+    end
+  end
+
+  # Roadmap item 18.6: the settings view's Commands tab lists this catalog, so every word the
+  # minibuffer's parser takes must be in it, as a name or an alias. The words are read from the
+  # parser's own source (its `do_parse` and `path_verb` heads and `when verb in` lists), so a new
+  # verb there without an entry fails here; `parse/1`'s own prefixes (`!!`, `!`, `|`) are listed
+  # by hand. Command mode only: grid mode's verbs (`goto`, `copy`, `cut`) aren't commands.
+  describe "covers the typed verbs (18.6)" do
+    defp parser_words do
+      src = File.read!(Path.join(File.cwd!(), "lib/geex/loop/verbs.ex"))
+
+      singles =
+        Regex.scan(~r/defp (?:do_parse|path_verb)\("([^"]+)"/, src, capture: :all_but_first)
+
+      lists = Regex.scan(~r/when verb in \[([^\]]+)\]/, src, capture: :all_but_first)
+
+      listed =
+        for [list] <- lists,
+            [w] <- Regex.scan(~r/"([^"]+)"/, list, capture: :all_but_first),
+            do: w
+
+      (List.flatten(singles) ++ listed ++ ["!!", "!", "|"])
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+    end
+
+    test "every word the parser takes is a command's name or alias" do
+      known = Enum.flat_map(Catalog.all(), &[&1.name | &1.aliases])
+      words = parser_words()
+      assert length(words) > 30
+
+      for w <- words, do: assert(w in known, "#{inspect(w)} is typed but not in the catalog")
+    end
+
+    test "every command that runs as picked parses as typed" do
+      for %Entry{name: name, invoke: {:action, _}} <- Catalog.all(),
+          do: refute(Geex.Loop.Verbs.parse(name) == :unknown, "#{name} doesn't parse")
+    end
+
+    test "an alias finds its command" do
+      assert [%Entry{name: "quit"} | _] = Catalog.search("exit")
+      assert [%Entry{name: "rename"} | _] = Catalog.search("mv")
     end
   end
 

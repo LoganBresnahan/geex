@@ -3,7 +3,7 @@ defmodule Geex.LoopTest do
 
   alias Geex.{Loop, Screen}
 
-  describe "cursor_xy/3 — width-correct cursor position" do
+  describe "cursor_xy/4 — width-correct cursor position" do
     test "ASCII: x is the grapheme count, y is the line minus scroll" do
       assert Loop.cursor_xy("hello", {0, 3}, 0) == {3, 0}
     end
@@ -139,12 +139,12 @@ defmodule Geex.LoopTest do
   describe "max_line_width/1 — widest line in the whole buffer" do
     test "is the widest display width across all lines" do
       # "ijklmno" is the widest at 7 — regardless of which lines are on screen.
-      assert Loop.max_line_width("ab\ncdef\ngh\nijklmno") == 7
+      assert Loop.max_line_width("ab\ncdef\ngh\nijklmno", 2) == 7
     end
 
     test "counts display columns, so a wide glyph is two" do
       # "a中" = 1 + 2 = 3 columns.
-      assert Loop.max_line_width("a\u{4E2D}") == 3
+      assert Loop.max_line_width("a\u{4E2D}", 2) == 3
     end
   end
 

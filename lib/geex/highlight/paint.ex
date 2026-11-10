@@ -76,7 +76,8 @@ defmodule Geex.Highlight.Paint do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          Selection.t() | nil
+          Selection.t() | nil,
+          pos_integer()
         ) ::
           Screen.t()
   def to_screen(
@@ -88,7 +89,8 @@ defmodule Geex.Highlight.Paint do
         scroll \\ 0,
         x0 \\ 0,
         hscroll \\ 0,
-        selection \\ nil
+        selection \\ nil,
+        tab \\ 2
       )
       when is_binary(text) and w >= 0 and h >= 0 and scroll >= 0 and x0 >= 0 and hscroll >= 0 do
     # Only the rows on screen are walked, sliced out of the text by their byte offsets (one
@@ -120,7 +122,7 @@ defmodule Geex.Highlight.Paint do
           line
           |> String.graphemes()
           |> Enum.reduce({screen, byte0, x0, 0}, fn g, {screen, byte, vcol, col} ->
-            wd = Width.cells(g)
+            wd = Width.advance(g, vcol - x0, tab)
             cell = cell_for(g, style_at(by_byte, byte, byte_size(g)), fg, bg)
 
             cell =
@@ -209,6 +211,11 @@ defmodule Geex.Highlight.Paint do
   #     scrolled off, so its visible column shows a blank in the glyph's style;
   #   * anything fully left of `x0` — dropped.
   defp place(screen, _x, _row, _cell, 0, _x0), do: screen
+
+  # A tab (roadmap item 18.7): blanks to its stop, in its style, each column clipped as one.
+  defp place(screen, x, row, %Cell{char: "\t"} = cell, wd, x0) do
+    Enum.reduce(0..(wd - 1)//1, screen, &place(&2, x + &1, row, %{cell | char: " "}, 1, x0))
+  end
 
   defp place(screen, x, row, cell, _wd, x0) when x >= x0,
     do: elem(Screen.put_grapheme(screen, x, row, cell), 0)

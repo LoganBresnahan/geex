@@ -1,7 +1,7 @@
 defmodule Geex.Loop.Settings do
   @moduledoc """
   The settings view, `Alt+Y` ([ADR-0040](../../../doc/adr/0040-bare-geex-and-the-catalog.md) §7):
-  a full-screen view with four tabs.
+  a full-screen view with five tabs.
 
     * **Languages** — the catalog's grammars: name, size, and installed, available, an update,
       or installing. Enter (or a click) installs or updates one.
@@ -10,8 +10,11 @@ defmodule Geex.Loop.Settings do
       if it isn't yet, and geex keeps the choice (`Geex.Settings`). Leaving without choosing
       puts the theme back.
     * **Keys** — every key (`Geex.Loop.KeyHelp`); typing filters it.
-    * **General** — the mouse, whether the tree and the edits pane start shown, and where
-      geex keeps its settings, packages and caches.
+    * **Commands** — every command typed after `Alt+M` (`Geex.Command.Catalog`, the palette's
+      list), how it is typed and what it does; typing filters it (roadmap item 18.6).
+    * **General** — the mouse, whether the tree and the edits pane start shown, the tab size,
+      whether a save adds a final newline, and where geex keeps its settings, packages and
+      caches.
 
   Esc or `Alt+Y` closes it; Tab, Left, Right, `Alt+A` and `Alt+D` move between tabs; Up, Down,
   `Alt+W` and `Alt+S` move the highlight; the mouse clicks tabs and rows and scrolls (ADR-0039).
@@ -22,14 +25,23 @@ defmodule Geex.Loop.Settings do
   """
 
   alias Geex.{Catalog, Cell, Installed, Screen, Width}
+  alias Geex.Command.Catalog, as: Commands
   alias Geex.Loop.KeyHelp
 
-  @tabs [:languages, :themes, :keys, :general]
-  @labels %{languages: "Languages", themes: "Themes", keys: "Keys", general: "General"}
+  @tabs [:languages, :themes, :keys, :commands, :general]
+  @labels %{
+    languages: "Languages",
+    themes: "Themes",
+    keys: "Keys",
+    commands: "Commands",
+    general: "General"
+  }
+  # The tabs typing searches.
+  @searched [:keys, :commands]
 
   defstruct tab: :languages, sel: 0, top: 0, query: "", message: nil
 
-  @type tab :: :languages | :themes | :keys | :general
+  @type tab :: :languages | :themes | :keys | :commands | :general
   @type t :: %__MODULE__{
           tab: tab(),
           sel: non_neg_integer(),
@@ -126,6 +138,11 @@ defmodule Geex.Loop.Settings do
     for {group, keys, what} <- KeyHelp.search(query), do: %{name: nil, cells: [keys, what, group]}
   end
 
+  def rows(%__MODULE__{tab: :commands, query: query}, _ctx) do
+    for entry <- Commands.search(query),
+        do: %{name: nil, cells: [Commands.typed(entry), entry.description]}
+  end
+
   # What geex starts with, as `settings.json` keeps it (`ctx.saved`): not this session's state,
   # which `mouse`, `Alt+T` and `Alt+L` change without keeping. A tree or edits pane left unset
   # shows when the terminal is wide enough.
@@ -152,6 +169,22 @@ defmodule Geex.Loop.Settings do
       %{
         name: :edits,
         cells: ["Edits pane", at_start.("edits", "auto"), "at start (auto: wide terminals)"]
+      },
+      %{
+        name: :tab_size,
+        cells: [
+          "Tab size",
+          "#{Map.get(ctx, :tab_size, 2)}",
+          "Tab's spaces (a tab-indented file gets a tab), a tab's width; Enter: 2, 4, 8"
+        ]
+      },
+      %{
+        name: :final_newline,
+        cells: [
+          "Final newline",
+          at_start.("final_newline", "off"),
+          "every save adds one if missing"
+        ]
       },
       %{name: nil, cells: ["Settings", tilde(Geex.Settings.path()), ""], left_cut: 1},
       %{name: nil, cells: ["Packages", tilde(Installed.root()), ""], left_cut: 1},
@@ -228,10 +261,10 @@ defmodule Geex.Loop.Settings do
       {:key, :enter} ->
         {view, act(view, rows)}
 
-      {:key, :backspace} when view.tab == :keys ->
+      {:key, :backspace} when view.tab in @searched ->
         {search(view, String.slice(view.query, 0..-2//1)), :none}
 
-      {:char, g} when view.tab == :keys ->
+      {:char, g} when view.tab in @searched ->
         {search(view, view.query <> g), :none}
 
       _ ->
@@ -291,7 +324,7 @@ defmodule Geex.Loop.Settings do
       {:themes, %{name: name}} ->
         {:choose_theme, name}
 
-      {:general, %{name: id}} when id in [:mouse, :tree, :edits] ->
+      {:general, %{name: id}} when id in [:mouse, :tree, :edits, :tab_size, :final_newline] ->
         {:toggle, id}
 
       _ ->
@@ -387,7 +420,7 @@ defmodule Geex.Loop.Settings do
       end)
 
     rule =
-      if view.tab == :keys,
+      if view.tab in @searched,
         do: " Search: " <> view.query <> "▏",
         else: String.duplicate("─", w)
 
@@ -445,7 +478,8 @@ defmodule Geex.Loop.Settings do
   defp help(:themes),
     do: " ↑ ↓ preview · Enter chooses · Esc puts it back · ← → or Alt+A Alt+D tabs "
 
-  defp help(:keys), do: " type to search · ← → or Alt+A Alt+D tabs · Esc or Alt+Y closes "
+  defp help(tab) when tab in @searched,
+    do: " type to search · ← → or Alt+A Alt+D tabs · Esc or Alt+Y closes "
 
   defp help(:general),
     do: " Enter turns it on or off · ← → or Alt+A Alt+D tabs · Esc or Alt+Y closes "

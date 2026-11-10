@@ -81,19 +81,22 @@ defmodule Geex.Buffer do
   Write the buffer's current text to its `:path` and clear `dirty`. Returns
   `{:ok, path}`, `{:error, :no_path}` (buffer has no backing file), `{:error, :behind}` (the
   file on disk is no longer the `synced` text, so writing would discard someone else's change:
-  fast-forward first, ADR-0034), or `{:error, posix}`. Not an edit — `save/1` does not touch
-  the undo history.
+  fast-forward first, ADR-0034), or `{:error, posix}`. Not an edit — a save does not touch
+  the undo history, with one exception: `final_newline: true` adds the final line break a
+  non-empty text lacks, on every save (roadmap item 18.4, ADR-0019's 2026-11-09 amendment). It
+  is a recorded `:human` insert, in the file's own line ending, made in the same step as the write
+  and kept only if the write succeeds: a failed save leaves the buffer as it was.
   """
-  @spec save(GenServer.server()) :: {:ok, String.t()} | {:error, term()}
-  def save(server), do: GenServer.call(server, :save)
+  @spec save(GenServer.server(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  def save(server, opts \\ []), do: GenServer.call(server, {:save, opts})
 
   @doc """
   Mark the buffer as **in sync with its backing file** — clears `dirty` and sets the
   `synced` baseline to the current text, *without* writing. Used by reconcile (ADR-0017)
   after adopting an out-of-band disk change: the `EditorState` already equals disk
   byte-for-byte, so the buffer is clean and that text is the new baseline (a save would
-  re-write identical bytes), even though the adopting `replace` ran through `dispatch/2`
-  (which marks every command dirty). Returns the updated snapshot.
+  re-write identical bytes), even though the adopting `replace` ran through `dispatch/2`.
+  Returns the updated snapshot.
   """
   @spec mark_synced(GenServer.server()) :: map()
   def mark_synced(server), do: GenServer.call(server, :mark_synced)
@@ -349,11 +352,7 @@ defmodule Geex.Buffer do
   def handle_call({:dispatch, command}, _from, state) do
     case History.dispatch(state.history, command) do
       {:ok, history} ->
-        # The edit's byte footprint against the *pre-edit* doc lets a byte-oriented overlay
-        # (highlighting) shift optimistically across the edit (ADR-0022).
-        footprint = Footprint.of(EditorState.doc(state.history.editor), command)
-        new_state = record(%{state | history: history}, {:cmd, command})
-        notify_change(new_state, footprint)
+        new_state = applied(state, history, command)
         {:reply, {:ok, build_snapshot(new_state)}, new_state}
 
       {:error, _reason} = error ->
@@ -475,11 +474,16 @@ defmodule Geex.Buffer do
     {:reply, :ok, state}
   end
 
-  def handle_call(:save, _from, %{path: nil} = state), do: {:reply, {:error, :no_path}, state}
+  def handle_call({:save, _opts}, _from, %{path: nil} = state),
+    do: {:reply, {:error, :no_path}, state}
 
-  def handle_call(:save, _from, state) do
+  def handle_call({:save, opts}, _from, state) do
+    {history, newline} = final_newline(state.history, opts[:final_newline] == true)
+
     with :ok <- not_behind(state),
-         :ok <- File.write(state.path, History.text(state.history)) do
+         :ok <- File.write(state.path, History.text(history)) do
+      # The final newline is kept now the write it went out with succeeded.
+      state = if newline, do: applied(state, history, newline), else: state
       # disk now equals the written text — that is the new in-sync baseline.
       state = %{state | history: History.sync(state.history)} |> record_sync()
       state = state |> set_behind(nil) |> notify_synced()
@@ -489,6 +493,51 @@ defmodule Geex.Buffer do
       {:error, _reason} = error -> {:reply, error, state}
     end
   end
+
+  # A dispatched command took effect (`history` is `state.history` with it applied): record it
+  # and tell the subscribers. The edit's byte footprint against the *pre-edit* doc lets a
+  # byte-oriented overlay (highlighting) shift optimistically across the edit (ADR-0022).
+  defp applied(state, history, command) do
+    footprint = Footprint.of(EditorState.doc(state.history.editor), command)
+    new_state = record(%{state | history: history}, {:cmd, command})
+    notify_change(new_state, footprint)
+    new_state
+  end
+
+  # A save's final newline (roadmap item 18.4): the history with the line break a non-empty text
+  # lacks, and the insert that adds it, or the history as it is and `nil`. On every save, edited
+  # or not (the maintainer's word: a team's standard). The break is the text's own: CRLF when its
+  # last line ends in one, else LF; a text that already ends in a bare `\r` (a CRLF file whose
+  # last line break lost its `\n`) gets just the `\n`.
+  defp final_newline(history, true) do
+    text = History.text(history)
+
+    if text != "" and not String.ends_with?(text, "\n") do
+      lines = EditorState.lines(history.editor)
+
+      eol =
+        cond do
+          String.ends_with?(text, "\r") -> "\n"
+          length(lines) > 1 and String.ends_with?(Enum.at(lines, -2), "\r") -> "\r\n"
+          true -> "\n"
+        end
+
+      {:ok, cmd} =
+        Geex.Commands.Insert.parse(%{
+          line: length(lines) - 1,
+          col: String.length(List.last(lines)),
+          text: eol
+        })
+
+      cmd = Geex.Command.put_meta(cmd, Geex.Command.Meta.human())
+      {:ok, with_newline} = History.dispatch(history, cmd)
+      {with_newline, cmd}
+    else
+      {history, nil}
+    end
+  end
+
+  defp final_newline(history, false), do: {history, nil}
 
   # The file is still what the buffer last synced (or gone, or unreadable: nothing to lose).
   # Read at the write, so a change the watcher hasn't reported yet is caught too (ADR-0034 §3).

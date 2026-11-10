@@ -5,7 +5,7 @@ defmodule Geex.Loop.Mouse do
 
   A file pane's rows (ADR-0038): the tab bar, the text, then the horizontal scroll bar. Its
   columns: the line-number gutter, then the text. A screen column turns into a grapheme through
-  the same width walk the drawing uses (`Geex.Width.col_at_display/2`), so a wide character's
+  the same width walk the drawing uses (`Geex.Width.col_at_display/3`), so a wide character's
   two columns both land on it, a zero-width one is never landed on, and a click past a line's
   end lands at its end. Width never addresses (ADR-0027): the caret is in graphemes.
   """
@@ -26,23 +26,24 @@ defmodule Geex.Loop.Mouse do
       iex> rect = %Geex.Rect{x: 10, y: 0, w: 30, h: 10}
       iex> text = "one\\n字字x\\nthree"
       iex> # the gutter is 4 columns, so the text starts at x 14, on row 1 (under the tab bar)
-      iex> Geex.Loop.Mouse.text_pos(text, rect, {0, 0}, {16, 2})
+      iex> Geex.Loop.Mouse.text_pos(text, rect, {0, 0}, {16, 2}, 2)
       {{1, 1}, {0, 0}}
-      iex> Geex.Loop.Mouse.text_pos(text, rect, {0, 0}, {17, 2})
+      iex> Geex.Loop.Mouse.text_pos(text, rect, {0, 0}, {17, 2}, 2)
       {{1, 1}, {0, 0}}
-      iex> Geex.Loop.Mouse.text_pos(text, rect, {0, 0}, {35, 1})
+      iex> Geex.Loop.Mouse.text_pos(text, rect, {0, 0}, {35, 1}, 2)
       {{0, 3}, {0, 0}}
-      iex> Geex.Loop.Mouse.text_pos(text, rect, {0, 0}, {12, 0})
+      iex> Geex.Loop.Mouse.text_pos(text, rect, {0, 0}, {12, 0}, 2)
       {{0, 0}, {-1, -1}}
   """
   @spec text_pos(
           String.t(),
           Rect.t(),
           {non_neg_integer(), non_neg_integer()},
-          {integer(), integer()}
+          {integer(), integer()},
+          pos_integer()
         ) ::
           {pos(), {-1 | 0 | 1, -1 | 0 | 1}}
-  def text_pos(text, %Rect{} = rect, {scroll, hscroll}, {x, y}) do
+  def text_pos(text, %Rect{} = rect, {scroll, hscroll}, {x, y}, tab) do
     lines = String.split(text, "\n")
     gw = gutter_width(length(lines))
     # The text rows: under the tab bar, above the scroll-bar row. The text columns: after the
@@ -65,7 +66,7 @@ defmodule Geex.Loop.Mouse do
       {{last, String.length(List.last(lines))}, {dx, dy}}
     else
       text_line = Enum.at(lines, line)
-      g = Width.col_at_display(text_line, max(col, 0) + hscroll + 1) - 1
+      g = Width.col_at_display(text_line, max(col, 0) + hscroll + 1, tab) - 1
       {{line, min(g, String.length(text_line))}, {dx, dy}}
     end
   end

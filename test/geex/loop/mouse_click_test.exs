@@ -134,6 +134,17 @@ defmodule Geex.Loop.MouseClickTest do
       assert Panes.ids(state.panes) == [1]
       assert Process.alive?(a)
       assert TabBar.layout(["a.txt"], 0, 120, false).close == nil
+
+      # The review of roadmap item 18.5: a lone tab too wide for the bar has no mark counting
+      # nothing, and a bar too narrow for two marks has none, so they never overlap.
+      bar = TabBar.layout(["a_rather_long_file_name.ex"], 0, 20, false)
+      assert {bar.left, bar.right, bar.w} == {nil, nil, 20}
+      names = for n <- 1..12, do: "file_#{n}.txt"
+      bar = TabBar.layout(names, 6, 6, false)
+      assert {bar.left, bar.right, Enum.map(bar.tabs, & &1.i)} == {nil, nil, [6]}
+      bar = TabBar.layout(names, 6, 40, false)
+      assert bar.left.x + bar.left.w <= hd(bar.tabs).x
+      assert bar.right.x >= List.last(bar.tabs).x + 1
     end
   end
 

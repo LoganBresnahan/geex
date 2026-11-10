@@ -66,7 +66,7 @@ defmodule Geex.Loop.ScrollBarTest do
 
     %{text: text} = Geex.Buffer.snapshot(tab.buffer)
     rect = %Geex.Rect{x: 0, y: 0, w: 120, h: 29}
-    [v] = ScrollBar.layout(text, rect, {tab.scroll, tab.hscroll})
+    [v] = ScrollBar.layout(text, rect, {tab.scroll, tab.hscroll}, 2)
     assert {v.x, v.y, v.len, v.content} == {119, 1, 27, 100}
     {pos, len} = ScrollBar.thumb(v.len, v.content, v.offset)
     assert drawn_thumb(screen) == Enum.to_list((v.y + pos)..(v.y + pos + len - 1))

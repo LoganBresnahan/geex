@@ -219,6 +219,34 @@ defmodule Geex.Loop.ResizeTest do
     end
   end
 
+  # Roadmap item 18.3: the output pane (`!`) sits in the edits pane's band, and its title row is
+  # the same handle, drawn and dragged.
+  describe "the output pane" do
+    # 120 × 30, the tree hidden: the band is rows 20–28 (its title on row 20), columns 0–119.
+    defp with_output(dir) do
+      out = Geex.Loop.Output.new("ls", :show, 0) |> Geex.Loop.Output.append("a.txt\nb.txt\n")
+      %{start(dir) | output: out}
+    end
+
+    test "its title row shows the handle, focused or not", %{dir: dir} do
+      state = with_output(dir)
+      {_state, rows} = frame(state)
+      assert Enum.at(rows, 20) =~ "! ls"
+      assert at(rows, 20, 59, 2) == @rows
+
+      {_state, rows} = frame(%{state | focus: :output})
+      assert at(rows, 20, 59, 2) == @rows
+    end
+
+    test "dragging its title resizes the band and focuses the output pane", %{dir: dir} do
+      state = with_output(dir)
+      state = drag(state, {59, 20}, {59, 10})
+      assert {state.edits_h, state.focus} == {19, :output}
+      state = double(state, {59, 10})
+      assert state.edits_h == nil
+    end
+  end
+
   # The step 3 review's findings.
   describe "review fixes" do
     test "short of room, neither half of a dragged split collapses to nothing" do

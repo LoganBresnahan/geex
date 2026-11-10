@@ -8,8 +8,13 @@ defmodule Geex.Loop.TabBar do
   and a `×` that closes it. When the pane can close (it isn't the only one), the bar's last three
   columns are ` × `, which closes the pane. When the bar is the top of a stacked split's lower
   half, it keeps two columns for the split's handle (`handle(:rows)`), just before the pane's `×` ([ADR-0038](../../../doc/adr/0038-split-panes-and-tabs.md)
-  §6), so the split can be dragged however many tabs there are. Tabs that don't fit are cut from
-  the left so the shown one stays visible.
+  §6), so the split can be dragged however many tabs there are.
+
+  Tabs that don't fit are hidden whole, and a mark at each end counts them: `‹2` at the left,
+  `3›` at the right (roadmap item 18.5). The bar follows the shown tab: it starts at the first
+  tab that keeps the shown one visible. Scrolled (the wheel, a click on a mark), it starts at the
+  `first` tab it is given instead, and the shown tab may be out of view; the loop drops the
+  scroll when the shown tab changes. A tab too wide for the bar on its own is cut.
 
   A markdown file's tabs carry the preview's glyph between the name and the `×`, so the `×`
   keeps the label's last two columns: ` N name ◫ × ` ([ADR-0043](../../../doc/adr/0043-markdown-preview.md)
@@ -33,20 +38,26 @@ defmodule Geex.Loop.TabBar do
   @handle_rows "⠛⠛"
 
   @type glyph :: non_neg_integer() | nil
+  @type mark :: %{x: non_neg_integer(), w: pos_integer(), text: String.t()} | nil
   @type t :: %{
           tabs: [
             %{i: non_neg_integer(), x: non_neg_integer(), label: String.t(), glyph: glyph()}
           ],
           close: non_neg_integer() | nil,
           handle: non_neg_integer() | nil,
-          w: non_neg_integer()
+          w: non_neg_integer(),
+          first: non_neg_integer(),
+          left: mark(),
+          right: mark()
         }
 
   @doc """
   The bar for tabs named `names`, tab `at` shown, `w` columns wide; `closable?` when the pane
-  has its own `×`; `handle?` when it keeps a split's handle. Each tab's `x` is from the bar's left
-  edge. A name given as `{name, :glyph}` carries the preview's glyph, and its tab's `glyph` is
-  the glyph's column.
+  has its own `×`; `handle?` when it keeps a split's handle; `first`, the tab a scrolled bar
+  starts at (`nil` follows the shown tab). Each tab's `x` is from the bar's left edge. A name
+  given as `{name, :glyph}` carries the preview's glyph, and its tab's `glyph` is the glyph's
+  column. `first` in the answer is the tab the bar starts at, and `left` and `right` the marks
+  counting the hidden tabs (`nil` when none are hidden on that side).
 
       iex> bar = Geex.Loop.TabBar.layout(["a.txt", "b.txt [+]"], 0, 40, true)
       iex> Enum.map(bar.tabs, &{&1.i, &1.x, &1.label})
@@ -57,9 +68,27 @@ defmodule Geex.Loop.TabBar do
       {37, nil}
       iex> Geex.Loop.TabBar.layout(["a.txt"], 0, 40, true, true).handle
       35
+
+  Five tabs of 11 columns in 30: the bar follows tab 3, so tabs 0 and 1 are hidden at the left,
+  and tab 4 at the right; scrolled to start at 0, tab 3 is out of view.
+
+      iex> names = ~w(a.txt b.txt c.txt d.txt e.txt)
+      iex> bar = Geex.Loop.TabBar.layout(names, 3, 30, false)
+      iex> {bar.first, Enum.map(bar.tabs, & &1.i), bar.left, bar.right}
+      {2, [2, 3], %{x: 0, w: 2, text: "‹2"}, %{x: 28, w: 2, text: "1›"}}
+      iex> bar = Geex.Loop.TabBar.layout(names, 3, 30, false, false, 0)
+      iex> {bar.first, Enum.map(bar.tabs, & &1.i), bar.left, bar.right}
+      {0, [0, 1], nil, %{x: 28, w: 2, text: "3›"}}
   """
-  @spec layout([String.t()], non_neg_integer(), non_neg_integer(), boolean(), boolean()) :: t()
-  def layout(names, at, w, closable?, handle? \\ false) do
+  @spec layout(
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          boolean(),
+          boolean(),
+          non_neg_integer() | nil
+        ) :: t()
+  def layout(names, at, w, closable?, handle? \\ false, first \\ nil) do
     room = if closable?, do: max(w - Width.string(@pane_close), 0), else: w
     handle = if handle? and room >= 2, do: room - 2
     room = if handle, do: handle, else: room
@@ -72,27 +101,98 @@ defmodule Geex.Loop.TabBar do
         {name, i} -> {i, " #{i + 1} " <> name <> " × ", false}
       end)
 
-    shown_end = labels |> Enum.take(at + 1) |> Enum.map(&Width.string(elem(&1, 1))) |> Enum.sum()
-    labels = drop_until_fits(labels, at, shown_end, room)
+    widths = Enum.map(labels, &Width.string(elem(&1, 1)))
+    # A mark's columns: the arrow and the most digits a count can have here. A bar too narrow
+    # for both marks and a column of tab between them has none.
+    mark_w = 1 + length(Integer.digits(max(length(labels), 1)))
+    marks? = room > 2 * mark_w
+    mark_w = if marks?, do: mark_w, else: 0
+    first = first_shown(widths, at, room, mark_w, first)
+    {count, left_w, right?} = place(widths, first, room, mark_w)
+    right? = right? and marks?
 
     {tabs, _x} =
-      Enum.map_reduce(labels, 0, fn {i, label, glyph?}, x ->
+      labels
+      |> Enum.slice(first, count)
+      |> Enum.map_reduce(left_w, fn {i, label, glyph?}, x ->
         lw = Width.string(label)
         glyph = if glyph?, do: x + lw - 4
         {%{i: i, x: x, label: label, glyph: glyph}, x + lw}
       end)
 
+    hidden_right = length(labels) - first - count
+
     %{
-      tabs: Enum.filter(tabs, &(&1.x < room)),
+      tabs: tabs,
       close: if(closable? and w >= Width.string(@pane_close), do: w - 3),
       handle: handle,
-      w: room
+      # The labels' room: up to the right mark, when there is one.
+      w: if(right?, do: room - mark_w, else: room),
+      first: first,
+      left:
+        if(first > 0 and marks?,
+          do: %{x: 0, w: mark_w, text: String.pad_trailing("‹#{first}", mark_w)}
+        ),
+      right:
+        if(right?,
+          do: %{x: room - mark_w, w: mark_w, text: String.pad_leading("#{hidden_right}›", mark_w)}
+        )
     }
+  end
+
+  # The tab the bar starts at. Following tab `at`: the first start that keeps it in view. Scrolled:
+  # the start asked for, kept between the first tab and the last start that still reaches the
+  # last tab (scrolling further would only hide tabs).
+  defp first_shown([], _at, _room, _mark_w, _first), do: 0
+
+  defp first_shown(widths, at, room, mark_w, nil) do
+    Enum.find(0..at//1, at, fn f ->
+      {count, _, _} = place(widths, f, room, mark_w)
+      f + count > at
+    end)
+  end
+
+  defp first_shown(widths, _at, room, mark_w, first) do
+    last = length(widths) - 1
+
+    reaches_end =
+      Enum.find(0..last//1, last, fn f ->
+        {count, _, _} = place(widths, f, room, mark_w)
+        f + count > last
+      end)
+
+    first |> max(0) |> min(reaches_end)
+  end
+
+  # How many tabs from `first` fit, the left mark's columns, and whether a right mark is needed.
+  # Room is kept for the right mark only when some tabs are left over; at least one tab is
+  # placed, cut when it is too wide on its own, and then there is no right mark unless tabs
+  # follow it.
+  defp place(widths, first, room, mark_w) do
+    left_w = if first > 0, do: mark_w, else: 0
+    rest = Enum.drop(widths, first)
+    all = fitting(rest, room - left_w)
+
+    if all == length(rest) do
+      {all, left_w, false}
+    else
+      count = max(fitting(rest, room - left_w - mark_w), 1)
+      {count, left_w, count < length(rest)}
+    end
+  end
+
+  # How many of `widths`, in order, fit in `room` columns.
+  defp fitting(widths, room) do
+    widths
+    |> Enum.reduce_while({0, 0}, fn w, {n, used} ->
+      if used + w <= room, do: {:cont, {n + 1, used + w}}, else: {:halt, {n, used}}
+    end)
+    |> elem(0)
   end
 
   @doc """
   What the bar's column `x` is: a tab, a tab's `×`, the pane's `×`, the split's handle (and the
-  space after it), or nothing.
+  space after it), a mark (scroll the bar a tab that way), or nothing.
   """
   @spec hit(t(), integer()) ::
           {:tab, non_neg_integer()}
@@ -100,9 +200,13 @@ defmodule Geex.Loop.TabBar do
           | {:toggle_preview, non_neg_integer()}
           | :close_pane
           | :handle
+          | {:scroll, -1 | 1}
           | nil
   def hit(%{close: close}, x) when is_integer(close) and x >= close, do: :close_pane
   def hit(%{handle: h}, x) when is_integer(h) and x in h..(h + 1)//1, do: :handle
+
+  def hit(%{left: %{x: lx, w: mw}}, x) when x >= lx and x < lx + mw, do: {:scroll, -1}
+  def hit(%{right: %{x: rx, w: mw}}, x) when x >= rx and x < rx + mw, do: {:scroll, 1}
 
   def hit(%{tabs: tabs, w: room}, x) when x < room do
     Enum.find_value(tabs, fn %{i: i, x: tx, label: label} = tab ->
@@ -141,11 +245,4 @@ defmodule Geex.Loop.TabBar do
   @doc "The pane's `×`, as drawn in the bar's last three columns."
   @spec pane_close() :: String.t()
   def pane_close, do: @pane_close
-
-  # Drop tabs from the left while the shown one would end past the room.
-  defp drop_until_fits([{i, label, _glyph?} | rest], at, shown_end, room)
-       when shown_end > room and i < at,
-       do: drop_until_fits(rest, at, shown_end - Width.string(label), room)
-
-  defp drop_until_fits(labels, _at, _shown_end, _room), do: labels
 end

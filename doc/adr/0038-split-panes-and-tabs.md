@@ -5,7 +5,7 @@
   splits keep a ratio, and the mouse resizes them (§6). **Amended 2026-10-18:** an edge dragged
   up and down shows `⠛⠛` (§6). **Builds** what
   [ADR-0034](0034-panes-tree-edits-hold.md) deferred ("splits and tabs") and
-  [ADR-0028](0028-editor-shell-and-minibuffer.md) put "behind the pane system". **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** preview tabs aren't a buffer's views; what reaches the active buffer while one is current (the 2026-11-06 amendment).
+  [ADR-0028](0028-editor-shell-and-minibuffer.md) put "behind the pane system". **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** preview tabs aren't a buffer's views; what reaches the active buffer while one is current (the 2026-11-06 amendment). **Amended 2026-11-09 (roadmap item 18):** the tab bar scrolls; the keyboard resizes; the output pane gets the band's handle; the last session comes back.
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0014](0014-editor-state-and-dispatch-ownership.md) (the cursor is
   view-local; Session holds the active buffer), [ADR-0034](0034-panes-tree-edits-hold.md) (the
@@ -188,6 +188,47 @@ Built with the mouse's step 3 ([ADR-0039](0039-mouse.md)):
   pane has only the preview, not through `adopt_active/2`'s early return.
 - New `Panes` calls that move no focus: `add_tab/3`, `split_beside/3`, `close_tab_at/3`, with
   `next_pane/2` and `previews/2`.
+
+
+## Amendment — 2026-11-09: the tab bar scrolls, the keyboard resizes, the last session comes back (roadmap item 18)
+
+The maintainer's list from using geex, decided 2026-11-09:
+
+- **The tab bar scrolls** (§5). Tabs that don't fit are hidden whole, never cut, and a mark at
+  each end counts them (`‹2`, `3›`, in the accent colour). The bar follows the shown tab: it
+  starts at the first tab that keeps the shown one in view. The wheel over the bar (either axis)
+  and a click on a mark scroll it a tab at a time, leaving the shown tab, which may then be out of
+  view; a pane keeps that as `bar: {at, first}`, and showing a tab drops it (`Panes.bar_first/1`),
+  so switching tabs brings the shown one back. A tab too wide for the bar alone is still cut, with
+  no mark unless tabs follow it, and a bar too narrow for both marks and a column of tab has none. No list of a pane's tabs:
+  the `buffers` picker is enough, and `Alt+,`/`Alt+.` stay the keys.
+- **Resizing from the keyboard** (§6): `Alt` with an arrow, or `Alt+Shift+W/A/S/D`, moves the
+  focused pane's nearest edge on that axis that way, 4 columns or 2 rows a press, kept to the least
+  sizes as a drag is. From a file pane: its innermost split of that direction, else the tree's
+  edge (left, right) or the band's top (up, down); from the tree, its edge; from the edits or
+  output pane, the band's top. Anything else does nothing. tmux's rule: the edge moves the way the
+  arrow points.
+- **The band's handle is the output pane's too** (§6, [ADR-0042](0042-shell-commands.md)): while
+  `!`'s output pane holds the band, its title row draws `⠛⠛` and a press on it focuses the output
+  pane, not the hidden edits pane.
+- **The last session** (the layout "kept across restarts" this ADR deferred): `Geex.LastSession`
+  keeps a project's panes, each one's source tabs (the file, its cursor, its scroll) and the shown
+  one, the current pane, the split with its ratios, and the tree's and the band's sizes, in
+  `$XDG_STATE_HOME/geex/sessions/<key>.json` (`<key>` 16 hex of the root's sha256, as ADR-0033
+  names ledgers; `0600` in `0700`, written whole). A bare `geex` or `geex DIR` brings the project's
+  back when one was kept (a bare `geex` with none is a scratch buffer, as before); `geex FILE`
+  opens just that file, takes the remembered sizes and keeps only sizes, leaving the files a
+  project session kept alone (and leaving a session file it can't read, a newer geex's, alone).
+  One writer process per loop writes in order (ADR-0035: off the key loop): every 2 s while the
+  session changed and no write is on its way, counted kept only when the writer says it was
+  written, so a failure is tried again; on a quit, always, and the loop waits for it. Previews and
+  scratch buffers aren't kept; a file gone since, or one that can't be opened at start, is left
+  out and forgotten at the next keep; a pane left empty gives its room to its sibling. Opening the
+  files reopens their ledgers, so unsaved edits come back as ADR-0034 holds them; they open one
+  after another at startup, as `geex a b c`'s do. SIGTERM stops without asking the loop, so the
+  session is as last kept. A `geex FILE` instance writes the sizes by reading the file and writing
+  it back, unlocked: with a project instance open at once, one's write can be lost until its next
+  change. App gate `session_memory` (off under test), `sessions_dir` overrides.
 
 ## See
 

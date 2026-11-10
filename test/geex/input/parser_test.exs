@@ -165,6 +165,19 @@ defmodule Geex.Input.ParserTest do
       end
     end
 
+    test "Shift+Tab (back-tab, ESC [ Z) is a key (roadmap item 18.7)" do
+      assert Parser.parse("\e[Z") == {[{:key, :shift_tab}], ""}
+      assert Parser.parse("a\e[Zb") == {[{:char, "a"}, {:key, :shift_tab}, {:char, "b"}], ""}
+    end
+
+    test "Alt with an arrow is an Alt key (roadmap item 18.8); other modifiers stay dropped" do
+      assert Parser.parse("\e[1;3A\e[1;3B\e[1;3C\e[1;3D") ==
+               {[{:alt, :up}, {:alt, :down}, {:alt, :right}, {:alt, :left}], ""}
+
+      assert Parser.parse("\e[1;3") == {[], "\e[1;3"}
+      assert Parser.parse("\e[1;4A\e[1;7D") == {[], ""}
+    end
+
     test "text around a dropped sequence survives" do
       assert Parser.parse("a\e[2~b\e[4~c") ==
                {[{:char, "a"}, {:char, "b"}, {:key, :end}, {:char, "c"}], ""}

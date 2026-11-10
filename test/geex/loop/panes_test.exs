@@ -88,6 +88,7 @@ defmodule Geex.Loop.PanesTest do
   end
 
   test "in the tree, Alt+A and Alt+D act as Left and Right; Alt+W and Alt+S as Up and Down" do
+    # Lower case: Alt+Shift+W/A/S/D resize from anywhere (roadmap item 18.8).
     state = key(Loop.new_state(120, 30), {:alt, ?p}) |> key({:alt, ?p}) |> tree_read()
     state = key(state, {:alt, ?d})
     assert Enum.map(state.tree.rows, & &1.path) == ["lib", "lib/a.ex"]
@@ -96,8 +97,19 @@ defmodule Geex.Loop.PanesTest do
     assert state.tree.sel == 1
     state = key(state, {:alt, ?a})
     assert state.tree.sel == 0
+    state = key(state, {:alt, ?a})
+    assert Enum.map(state.tree.rows, & &1.path) == ["lib"]
+
+    # Alt+Shift+A is resizing (roadmap item 18.8): the tree's edge moves 4 columns left, the
+    # rows stay.
+    tree_w = fn st ->
+      Geex.Layout.resolve(st.w, st.h, %{tree: true, edits: false, tree_w: st.tree_w}).tree.w
+    end
+
+    before = tree_w.(state)
     state = key(state, {:alt, ?A})
     assert Enum.map(state.tree.rows, & &1.path) == ["lib"]
+    assert tree_w.(state) == before - 4
   end
 
   test "`open PATH` from the tree opens the file and gives the editor the keys", %{dir: dir} do

@@ -1,6 +1,6 @@
 # ADR-0019: File lifecycle & MCP operation tools
 
-- **Status:** Accepted; amended 2026-10-19 (the human gets create, delete and rename in the TUI)
+- **Status:** Accepted; amended 2026-10-19 (the human gets create, delete and rename in the TUI); amended 2026-11-09 (a final newline on save)
 - **Date:** 2026-06-04
 - **Refines:** [ADR-0014](0014-editor-state-and-dispatch-ownership.md), [ADR-0003](0003-one-shared-path.md); relates to [ADR-0017](0017-reconcile-file-watch.md), [ADR-0018](0018-mcp-transport-streamable-http.md)
 
@@ -153,3 +153,20 @@ coordinator session.
 (`start_file_op/2`, `file_op_done/2`, `tree_key/2`), `lib/geex/session.ex`;
 `test/geex/loop/file_ops_test.exs`, `test/geex/session_test.exs`, `test/geex/loop/verbs_test.exs`;
 [testing.md](../testing.md) 2026-10-19.
+
+## Amendment (2026-11-09): a final newline on save (roadmap item 18.4)
+
+A save in the TUI adds the final line break a non-empty text lacks, on every save, edited or
+not, when `settings.json`'s `final_newline` is true; it is off by default (ADR-0040's
+2026-11-09 amendment; the maintainer: "many companies want the newline at the end as their
+standard").
+It is a recorded `:human` `Insert` in the history, never a byte added on the way to disk: the
+buffer and the disk agree, and `Alt+Z` takes it back. It is made inside the buffer in the same
+step as the write (`Buffer.save/2`'s `final_newline:`), after the save has caught up with the
+disk (`Reconcile.save/2`), and kept only if the write succeeds: a clean buffer whose file an agent
+changed still fast-forwards (adding a line break first turned that into a merge with conflict
+markers), and a failed save (read-only, no path, behind) leaves no edit behind. The break is the
+file's own, CRLF when its last line ends in one, and a text ending in a bare `\r` (a CRLF file
+whose last break lost its `\n`) gets just the `\n`. Turned on, `Ctrl-O` on a file you didn't
+touch writes it with the line break, as intended. The frozen MCP `save_file` writes the text as
+it is.

@@ -1,6 +1,6 @@
 # ADR-0027: Grid command addressing — the coordinate model
 
-- **Status:** Accepted
+- **Status:** Accepted. **Amended 2026-11-09:** a tab draws to its stop, every tab-size columns.
 - **Date:** 2026-06-08
 - **Relates to:** [ADR-0002](0002-commands-as-values.md) / [ADR-0003](0003-one-shared-path.md)
   (commands are recorded, replayable values on one path), [ADR-0014](0014-editor-state-and-dispatch-ownership.md)
@@ -238,6 +238,18 @@ to make possible.
 Verified through the real protocol path (`tools/call goto` / `copy` via `Protocol.handle_request`) +
 `Geex.MCP.Grid` / `Geex.Command.Type` unit tests. `lib/geex/mcp/grid.ex`, `lib/geex/command/type.ex`,
 `lib/geex/mcp/schema.ex`, `lib/geex/mcp/protocol.ex`.
+
+
+## Amendment (2026-11-09): a tab draws to its stop (roadmap item 18.7, BUG-10)
+
+A tab is the one grapheme whose width depends on where it starts: it runs to the next stop of
+every `tab` columns, the tab-size setting (2, 4 or 8; default 2). `Geex.Width.advance/3`,
+`line/2` and `col_at_display/3` take the tab size, and every width walk over buffer text uses
+them (the painter, `Loop.cursor_xy/4`, `max_line_width/2`, the mouse's `text_pos/5`, grid mode's
+display-to-grapheme cast). It stays a render concern: a tab is one grapheme to every command, and
+the grid's display columns cast through the same walk the painter draws. Before this a tab drew
+zero columns wide and tab-indented files lost their indentation (BUG-10). The frozen MCP grid
+surface addresses graphemes and is unchanged. Not covered: the markdown preview's code blocks.
 
 ## See
 

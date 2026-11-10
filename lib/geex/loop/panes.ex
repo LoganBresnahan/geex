@@ -23,6 +23,10 @@ defmodule Geex.Loop.Panes do
     `elsewhere?/2`, `in_other_pane?/3`); `buffers/1` and `drop_buffer/2` count previews too, so
     the loop watches their buffer and a buffer that ends takes its previews with it.
 
+  - A pane's tab bar may be scrolled (roadmap item 18.5): `bar` is `{at, first}`, the bar
+    starting at tab `first` while tab `at` is shown. Showing a tab drops it, and the bar follows
+    the shown tab again (`bar_first/1`).
+
   Closing a pane's last tab closes the pane, unless it is the only one.
   """
 
@@ -44,7 +48,11 @@ defmodule Geex.Loop.Panes do
           rows_w: pos_integer() | nil
         }
   @type tab :: source_tab() | preview_tab()
-  @type pane :: %{tabs: [tab()], at: non_neg_integer()}
+  @type pane :: %{
+          required(:tabs) => [tab()],
+          required(:at) => non_neg_integer(),
+          optional(:bar) => {non_neg_integer(), non_neg_integer()}
+        }
   @type t :: %{
           split: Geex.Layout.split(),
           panes: %{pos_integer() => pane()},
@@ -68,6 +76,24 @@ defmodule Geex.Loop.Panes do
   @spec preview_tab(pid(), pos_integer()) :: preview_tab()
   def preview_tab(buffer, from),
     do: %{buffer: buffer, view: :preview, scroll: 0, from: from, rows_w: nil}
+
+  @doc """
+  Where pane `id`'s tab bar starts: scrolled to tab `first` while the tab shown now stays shown.
+
+      iex> t = Geex.Loop.Panes.new() |> Geex.Loop.Panes.scroll_bar(1, 3)
+      iex> Geex.Loop.Panes.bar_first(t.panes[1])
+      3
+      iex> Geex.Loop.Panes.bar_first(%{t.panes[1] | at: 1})
+      nil
+  """
+  @spec scroll_bar(t(), pos_integer(), non_neg_integer()) :: t()
+  def scroll_bar(t, id, first),
+    do: update_in(t.panes[id], &Map.put(&1, :bar, {&1.at, first}))
+
+  @doc "The tab pane's bar was scrolled to start at, or `nil` when it follows the shown tab."
+  @spec bar_first(pane()) :: non_neg_integer() | nil
+  def bar_first(%{bar: {at, first}, at: at}), do: first
+  def bar_first(_pane), do: nil
 
   @doc "Whether `tab` is a preview."
   @spec preview?(tab() | nil) :: boolean()
@@ -114,11 +140,11 @@ defmodule Geex.Loop.Panes do
 
     case Enum.find_index(tabs, &source_of?(&1, buffer)) do
       nil ->
-        pane = %{pane | tabs: tabs ++ [tab(buffer, cursor)], at: length(tabs)}
+        pane = show_at(%{pane | tabs: tabs ++ [tab(buffer, cursor)]}, length(tabs))
         {put_in(ps.panes[ps.pane], pane), :new}
 
       i ->
-        {put_in(ps.panes[ps.pane], %{pane | at: i}), :existing}
+        {put_in(ps.panes[ps.pane], show_at(pane, i)), :existing}
     end
   end
 
@@ -205,8 +231,12 @@ defmodule Geex.Loop.Panes do
   @spec select(t(), integer()) :: t()
   def select(ps, i) do
     %{tabs: tabs} = pane = ps.panes[ps.pane]
-    if i >= 0 and i < length(tabs), do: put_in(ps.panes[ps.pane], %{pane | at: i}), else: ps
+    if i >= 0 and i < length(tabs), do: put_in(ps.panes[ps.pane], show_at(pane, i)), else: ps
   end
+
+  # Pane showing tab `at`: a scrolled tab bar lapses, so it follows the shown tab again (the
+  # review of roadmap item 18.5: a scroll kept by `at` alone came back with the same tab).
+  defp show_at(pane, at), do: pane |> Map.put(:at, at) |> Map.delete(:bar)
 
   @doc "Show the current pane's next (`+1`) or previous (`-1`) tab, wrapping."
   @spec step(t(), integer()) :: t()

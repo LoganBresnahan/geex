@@ -54,6 +54,9 @@ defmodule Geex.Loop.Keymap do
           | :quit
           | :ignore
 
+  # The lines `indent_style/1` reads (roadmap item 18.7).
+  @indent_lines 1000
+
   @doc "Resolve a `Geex.Input.Parser` event against the cursor and buffer text."
   @spec resolve(tuple(), cursor(), String.t()) :: action()
   def resolve(event, cursor, text)
@@ -66,9 +69,10 @@ defmodule Geex.Loop.Keymap do
   def resolve({:key, :enter}, {line, col}, _text),
     do: {:edit, insert(line, col, "\n"), {line + 1, 0}}
 
-  # Tab → two spaces (minimal; width/expansion is configurable later).
-  def resolve({:key, :tab}, {line, col}, _text),
-    do: {:edit, insert(line, col, "  "), {line, col + 2}}
+  # Tab → the default tab size's spaces; the loop passes the setting and the file's indent
+  # style to `indent/3`. Shift+Tab → a real tab, always (roadmap item 18.7).
+  def resolve({:key, :tab}, cursor, _text), do: indent(cursor, 2, :spaces)
+  def resolve({:key, :shift_tab}, cursor, _text), do: indent(cursor, 2, :tabs)
 
   # Backspace within a line → delete the grapheme before the cursor.
   def resolve({:key, :backspace}, {line, col}, _text) when col > 0,
@@ -104,7 +108,8 @@ defmodule Geex.Loop.Keymap do
   def resolve({:key, :down}, cursor, text), do: {:move, vert(cursor, text, +1)}
 
   # Alt+M opens the minibuffer (ADR-0028); every other Alt+letter is motion — a left-hand
-  # cluster around WASD that needs no arrow keys (ADR-0026), case-insensitive:
+  # cluster around WASD that needs no arrow keys (ADR-0026), case-insensitive here, though the
+  # loop takes Alt+Shift+W/A/S/D for resizing first (`resize_dir/1`, roadmap item 18.8):
   #   W A S D — up / left / down / right
   #   Q   E   — word back / forward
   #   R   F   — line start / end
@@ -222,6 +227,83 @@ defmodule Geex.Loop.Keymap do
   defp last_line(text), do: length(lines(text)) - 1
   defp line_len(text, line), do: text |> lines() |> Enum.at(line, "") |> String.length()
   defp clamp(v, lo, hi), do: v |> max(lo) |> min(hi)
+
+  @doc """
+  The way a resizing key moves the focused pane's edge (roadmap item 18.8): Alt with an arrow,
+  or `Alt+Shift+W/A/S/D` (case-sensitive, as `Alt+Shift+Z` is). `nil` for any other key.
+
+      iex> Enum.map([{:alt, :left}, {:alt, ?W}, {:alt, ?w}, {:key, :up}], &Geex.Loop.Keymap.resize_dir/1)
+      [:left, :up, nil, nil]
+  """
+  @spec resize_dir(tuple()) :: :up | :down | :left | :right | nil
+  def resize_dir({:alt, dir}) when dir in [:up, :down, :left, :right], do: dir
+  def resize_dir({:alt, ?W}), do: :up
+  def resize_dir({:alt, ?A}), do: :left
+  def resize_dir({:alt, ?S}), do: :down
+  def resize_dir({:alt, ?D}), do: :right
+  def resize_dir(_event), do: nil
+
+  @doc """
+  What Tab does at `cursor` (roadmap item 18.7): a real tab in a file that indents with tabs
+  (`:tabs`), else `tab_size` spaces. Shift+Tab is `:tabs` whatever the file does.
+
+      iex> Geex.Loop.Keymap.indent({3, 1}, 4, :spaces) |> elem(2)
+      {3, 5}
+      iex> {:edit, %{text: "\\t"}, cursor} = Geex.Loop.Keymap.indent({3, 1}, 4, :tabs)
+      iex> cursor
+      {3, 2}
+  """
+  @spec indent(cursor(), pos_integer(), :tabs | :spaces) :: action()
+  def indent({line, col}, _tab_size, :tabs), do: {:edit, insert(line, col, "\t"), {line, col + 1}}
+
+  def indent({line, col}, tab_size, :spaces),
+    do: {:edit, insert(line, col, String.duplicate(" ", tab_size)), {line, col + tab_size}}
+
+  @doc """
+  What `text` indents with (roadmap item 18.7, the maintainer's "follows the file"): `:tabs`
+  when more of its indented lines start with a tab than with a space, else `:spaces` (so a file
+  with no indented line gets spaces). A line of only whitespace doesn't count. Only the first
+  #{@indent_lines} lines are read, so the cost doesn't grow with the file (ADR-0035).
+
+      iex> Geex.Loop.Keymap.indent_style("func f() {\\n\\tx := 1\\n\\ty := 2\\n  // aside\\n}")
+      :tabs
+      iex> Geex.Loop.Keymap.indent_style("def f\\n  x\\n\\ty\\n  z\\nend")
+      :spaces
+      iex> Geex.Loop.Keymap.indent_style("no indent at all\\n")
+      :spaces
+  """
+  @spec indent_style(String.t()) :: :tabs | :spaces
+  def indent_style(text) when is_binary(text) do
+    {tabs, spaces} =
+      text
+      |> String.split("\n", parts: @indent_lines + 1)
+      |> Enum.take(@indent_lines)
+      |> Enum.reduce({0, 0}, fn line, {t, s} ->
+        cond do
+          String.trim(line) == "" -> {t, s}
+          String.starts_with?(line, "\t") -> {t + 1, s}
+          String.starts_with?(line, " ") -> {t, s + 1}
+          true -> {t, s}
+        end
+      end)
+
+    if tabs > spaces, do: :tabs, else: :spaces
+  end
+
+  @doc """
+  What a key types over a selection (roadmap item 18.1): Backspace and Delete delete it (`""`),
+  a printable grapheme or Enter replaces it. `nil` for every other key, which acts as it does
+  without a selection (Tab among them: indenting a selection is its own decision).
+
+      iex> Enum.map([{:char, "x"}, {:key, :enter}, {:key, :backspace}, {:key, :delete}, {:key, :tab}],
+      ...>   &Geex.Loop.Keymap.over_selection/1)
+      ["x", "\\n", "", "", nil]
+  """
+  @spec over_selection(tuple()) :: String.t() | nil
+  def over_selection({:char, g}), do: g
+  def over_selection({:key, :enter}), do: "\n"
+  def over_selection({:key, k}) when k in [:backspace, :delete], do: ""
+  def over_selection(_event), do: nil
 
   ## Goal column — sticky horizontal position across vertical motion.
   #

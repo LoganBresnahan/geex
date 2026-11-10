@@ -181,7 +181,8 @@ defmodule Geex.Reconcile do
   if that merge left conflicts, nothing is written and the markers are in the buffer to
   resolve. A buffer still holding a conflict block (`Geex.Edit.GitMerge.unresolved/1`) isn't
   written either, unless `force: true` (the second `Ctrl-O` in a row): a file can legitimately
-  contain those lines.
+  contain those lines. `final_newline: true` goes to `Geex.Buffer.save/2`, after the catch-up:
+  a clean buffer whose file changed fast-forwards before any newline is considered.
 
   Returns `{:ok, path}`, `{:conflicts, n}`, `{:markers, line}` (0-based), or `{:error, reason}`
   (`Geex.Buffer.save/1`'s).
@@ -206,7 +207,7 @@ defmodule Geex.Reconcile do
 
     case marker && {:markers, marker} do
       nil ->
-        case Buffer.save(pid) do
+        case Buffer.save(pid, Keyword.take(opts, [:final_newline])) do
           # The disk changed again between the fast-forward and the write.
           {:error, :behind} when retries > 0 -> save(pid, opts, retries - 1)
           result -> result

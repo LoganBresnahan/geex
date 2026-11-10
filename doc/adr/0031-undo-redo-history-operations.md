@@ -1,6 +1,6 @@
 # ADR-0031: Undo/redo — history operations (replay-from-base)
 
-- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** `Alt+Shift+P` is the second case-sensitive chord.
+- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** `Alt+Shift+P` is the second case-sensitive chord. **Amended 2026-11-09:** every edit recomputes `dirty`.
 - **Date:** 2026-06-09 (Accepted 2026-06-09 when built + wired into `Alt+Z` / `Alt+Shift+Z`)
 - **Relates to:** [ADR-0014](0014-editor-state-and-dispatch-ownership.md) (the buffer owns the
   `EditorState` + the one history; the cursor is **view-local**), [ADR-0003](0003-one-shared-path.md)
@@ -111,6 +111,15 @@ an undo/redo can land **exactly on the saved content**, which is genuinely clean
 `Alt+Shift+Z` is no longer the one case-sensitive Alt chord: `Alt+Shift+P` toggles the markdown
 preview while `Alt+P` stays the next pane. As here, Caps Lock with the plain chord gives the
 shifted one.
+
+
+## Amendment — 2026-11-09: dirty follows the text (roadmap item 18.2)
+
+Every transition recomputes `dirty` against the synced text, a forward edit included: typing a
+space and deleting it by hand leaves the buffer clean, not only an undo back to the baseline.
+`History.differs?/2` compares sizes first, without a copy, and joins the text only when they are
+equal. A property pins the law: after any generated transition, `dirty` is whether the text
+differs from `synced`.
 
 ## See
 

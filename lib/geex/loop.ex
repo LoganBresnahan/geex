@@ -30,7 +30,7 @@ defmodule Geex.Loop do
 
   Needs a real terminal (`Geex.TerminalIO` over `:prim_tty`), so it starts only
   when the terminal is enabled — off under `mix test`, like `Geex.TerminalIO`. Its
-  pure render core (`cursor_xy/3`, `frame/7`) is testable without a terminal.
+  pure render core (`cursor_xy/4`, `frame/11`) is testable without a terminal.
   """
 
   use GenServer
@@ -67,6 +67,8 @@ defmodule Geex.Loop do
   alias Geex.Highlight.{Paint, Reactor}
   alias Geex.Markdown.{Place, Preview}
 
+  alias Geex.LastSession
+
   alias Geex.Loop.{
     EditsPane,
     FileOps,
@@ -94,6 +96,9 @@ defmodule Geex.Loop do
   # `scroll_for/4` along the column axis.
   @hscrolloff 8
 
+  # How often the last session is kept while it changes (roadmap item 18.9).
+  @session_ms 2_000
+
   # Most candidate rows the command palette (ADR-0028 §3) shows at once; a longer match list
   # scrolls to keep the highlighted row in view. The column the command name is padded to.
   @palette_rows 8
@@ -118,17 +123,22 @@ defmodule Geex.Loop do
   The on-screen `{x, y}` of the buffer cursor. `cursor` is `{line, col}` in
   **grapheme** coordinates (Doc semantics); `x` accounts for **display width** (a
   wide glyph before the cursor shifts it by two — [`Geex.Width`](`Geex.Width`)) and
-  `y` is the buffer line minus `scroll`.
+  `y` is the buffer line minus `scroll`. A tab before it runs to its stop, every `tab` columns
+  (roadmap item 18.7).
   """
-  @spec cursor_xy(String.t(), {non_neg_integer(), non_neg_integer()}, non_neg_integer()) ::
-          {non_neg_integer(), integer()}
-  def cursor_xy(text, {line, col}, scroll) do
+  @spec cursor_xy(
+          String.t(),
+          {non_neg_integer(), non_neg_integer()},
+          non_neg_integer(),
+          pos_integer()
+        ) :: {non_neg_integer(), integer()}
+  def cursor_xy(text, {line, col}, scroll, tab \\ 2) do
     x =
       text
       |> line_at(line)
       |> String.graphemes()
       |> Enum.take(col)
-      |> Enum.reduce(0, fn g, acc -> acc + Width.cells(g) end)
+      |> Enum.reduce(0, &(&2 + Width.advance(&1, &2, tab)))
 
     {x, line - scroll}
   end
@@ -145,7 +155,7 @@ defmodule Geex.Loop do
   `@hscrolloff` margin); the cursor's `x` is shifted by the gutter width and the horizontal
   scroll to match. Returns the resolved `hscroll` so the caller can persist it. With `follow?`
   false the given `hscroll` is kept even if the cursor is out of view (the mouse scrolled it,
-  ADR-0039).
+  ADR-0039). `tab` is the tab size a tab character draws to (roadmap item 18.7).
   """
   @spec frame(
           String.t(),
@@ -157,7 +167,8 @@ defmodule Geex.Loop do
           non_neg_integer(),
           non_neg_integer(),
           Selection.t() | nil,
-          boolean()
+          boolean(),
+          pos_integer()
         ) ::
           {Screen.t(), {non_neg_integer(), integer()}, non_neg_integer()}
   def frame(
@@ -170,16 +181,17 @@ defmodule Geex.Loop do
         scroll,
         hscroll \\ 0,
         selection \\ nil,
-        follow? \\ true
+        follow? \\ true,
+        tab \\ 2
       ) do
     gw = gutter_width(text)
     text_w = max(w - gw, 0)
-    {dcol, cy} = cursor_xy(text, cursor, scroll)
+    {dcol, cy} = cursor_xy(text, cursor, scroll, tab)
     hscroll = if follow?, do: scroll_for(hscroll, dcol, text_w, @hscrolloff), else: hscroll
 
     screen =
       text
-      |> Paint.to_screen(spans, theme, w, h, scroll, gw, hscroll, selection)
+      |> Paint.to_screen(spans, theme, w, h, scroll, gw, hscroll, selection, tab)
       |> draw_gutter(text, theme, h, scroll, gw, cursor_line)
       |> cursor_line_overlay(theme, w, cy, selection)
 
@@ -262,10 +274,13 @@ defmodule Geex.Loop do
     {:ok, schedule_repaint(adopt_active(state, active))}
   end
 
+  # The tab sizes the settings view offers (roadmap item 18.7).
+  @tab_sizes [2, 4, 8]
+
   @doc false
   # What the settings view kept (`Geex.Settings`, ADR-0040 §7), over the defaults: the theme,
-  # the mouse, and whether the tree and the edits pane start shown. Anything malformed is
-  # ignored.
+  # the mouse, whether the tree and the edits pane start shown, whether a save adds a final
+  # newline, and the tab size. Anything malformed is ignored.
   def apply_settings(state, settings) do
     state =
       case settings["theme"] do
@@ -276,12 +291,24 @@ defmodule Geex.Loop do
           state
       end
 
-    Enum.reduce([{"mouse", :mouse}, {"tree", :tree_shown}, {"edits", :edits_shown}], state, fn
+    [
+      {"mouse", :mouse},
+      {"tree", :tree_shown},
+      {"edits", :edits_shown},
+      {"final_newline", :final_newline}
+    ]
+    |> Enum.reduce(state, fn
       {key, field}, acc ->
         case settings[key] do
           on? when is_boolean(on?) -> Map.put(acc, field, on?)
           _ -> acc
         end
+    end)
+    |> then(fn state ->
+      case settings["tab_size"] do
+        n when n in @tab_sizes -> %{state | tab_size: n}
+        _ -> state
+      end
     end)
   end
 
@@ -324,6 +351,20 @@ defmodule Geex.Loop do
       settings_theme: nil,
       # What settings.json keeps, read when the view opens and after each change it makes.
       settings_saved: %{},
+      # A save adds a final newline the text lacks (roadmap item 18.4): settings.json's
+      # `final_newline`, off unless it says true.
+      final_newline: false,
+      # The tab size (roadmap item 18.7): how many spaces Tab inserts and how wide a tab
+      # character draws. settings.json's `tab_size`, 2 unless it says otherwise.
+      tab_size: 2,
+      # The last session (roadmap item 18.9, `Geex.LastSession`): `:project` keeps the panes and
+      # the sizes, `:sizes` (`geex FILE`) only the sizes, `nil` nothing; and what was kept last.
+      # `session_kept` is what the writer last confirmed (for a `:sizes` session, the sizes
+      # alone), `session_pending` what it was sent and hasn't answered, `session_writer` its pid.
+      session: nil,
+      session_kept: nil,
+      session_pending: nil,
+      session_writer: nil,
       installing: %{},
       hinted: [],
       # The file panes and their tabs (ADR-0038); `watched` every buffer in a tab: its monitor
@@ -419,6 +460,40 @@ defmodule Geex.Loop do
   def handle_info({:geex_active_buffer, pid}, state),
     do: {:noreply, schedule_repaint(adopt_active(state, pid))}
 
+  # What `Geex.open_paths/1` found of the last session (roadmap item 18.9): the panes to show,
+  # the sizes, and what this session keeps. Kept every couple of seconds from then on.
+  def handle_info({:geex_restore, r}, state) do
+    state = %{
+      state
+      | session: r.mode,
+        tree_w: r[:tree_w] || state.tree_w,
+        edits_h: r[:edits_h] || state.edits_h
+    }
+
+    state =
+      case r[:panes] do
+        nil -> state
+        panes -> state |> put_panes(panes) |> enter()
+      end
+
+    if LastSession.enabled?(), do: Process.send_after(self(), :geex_session_tick, @session_ms)
+    {:noreply, schedule_repaint(state)}
+  end
+
+  def handle_info(:geex_session_tick, state) do
+    Process.send_after(self(), :geex_session_tick, @session_ms)
+    {:noreply, keep_session(state, :tick)}
+  end
+
+  # The writer's answer: a session counts as kept only once it is written, so a failed write is
+  # tried again on the next tick (the review of roadmap item 18.9).
+  def handle_info({:geex_session_written, map, result}, state) do
+    key = session_key(state.session, map)
+    state = if result == :ok, do: %{state | session_kept: key}, else: state
+    state = if key == state.session_pending, do: %{state | session_pending: nil}, else: state
+    {:noreply, state}
+  end
+
   def handle_info({:geex_open_tabs, [_ | _] = pids}, state) do
     state = leave(state)
 
@@ -428,7 +503,10 @@ defmodule Geex.Loop do
     %{tabs: tabs} = pane = panes.panes[panes.pane]
     {given, others} = Enum.split_with(tabs, &(&1.buffer in pids))
     given = Enum.sort_by(given, fn tab -> Enum.find_index(pids, &(&1 == tab.buffer)) end)
-    panes = put_in(panes.panes[panes.pane], %{pane | tabs: given ++ others, at: 0})
+    # Tab 0 shown: a scrolled tab bar lapses, as `Panes` does when it shows a tab (18.5).
+    panes =
+      put_in(panes.panes[panes.pane], %{Map.delete(pane, :bar) | tabs: given ++ others, at: 0})
+
     {:noreply, schedule_repaint(state |> put_panes(panes) |> enter())}
   end
 
@@ -501,10 +579,7 @@ defmodule Geex.Loop do
   # End of input (terminal closed / Ctrl-D) → quit the editor. Stopping the loop
   # alone would just restart it (a permanent child), so stop the VM — the app's
   # shutdown restores the terminal.
-  def handle_info({:geex_io, :eof}, state) do
-    Geex.stop()
-    {:noreply, state}
-  end
+  def handle_info({:geex_io, :eof}, state), do: {:noreply, quit(state)}
 
   # The settings view (`Alt+Y`) takes the mouse while it is open (ADR-0040 §7, ADR-0039).
   def handle_info({:geex_io, {:mouse, m}}, %{settings: %Settings{} = view} = state) do
@@ -871,6 +946,10 @@ defmodule Geex.Loop do
       Minibuffer.active?(state.minibuffer) ->
         {:noreply, apply_minibuffer_key(event, state)}
 
+      # Resizing from the keyboard, whatever has focus (roadmap item 18.8).
+      Keymap.resize_dir(event) != nil ->
+        {:noreply, schedule_repaint(resize_by_key(state, Keymap.resize_dir(event)))}
+
       # A pane can have gone (hidden by a resize); then the keys are the editor's again.
       state.focus != :editor ->
         case focused(state, layout(state)) do
@@ -1014,6 +1093,57 @@ defmodule Geex.Loop do
     end
   end
 
+  # Keep the last session: on the tick, when it changed since it was last kept and no write is
+  # on its way, by the writer, off the key loop; on a quit (`:now`), always, waiting for the
+  # write (after any still on its way) before the VM stops.
+  defp keep_session(%{session: nil} = state, _how), do: state
+
+  defp keep_session(state, how) do
+    case safe_start().root do
+      nil ->
+        state
+
+      root ->
+        map = LastSession.encode(leave(state).panes, &path_of/1, state.tree_w, state.edits_h)
+        key = session_key(state.session, map)
+        opts = [sizes_only: state.session == :sizes]
+        state = session_writer(state)
+
+        cond do
+          how == :now ->
+            LastSession.keep_now(state.session_writer, root, map, opts, 2_000)
+            state
+
+          key in [state.session_kept, state.session_pending] ->
+            state
+
+          true ->
+            LastSession.keep(state.session_writer, root, map, opts)
+            %{state | session_pending: key}
+        end
+    end
+  end
+
+  # What a session's change is measured by: a `geex FILE` session keeps only the sizes, so only
+  # they count.
+  defp session_key(:sizes, map), do: Map.take(map, ["tree_w", "edits_h"])
+  defp session_key(_mode, map), do: map
+
+  defp session_writer(%{session_writer: pid} = state) when is_pid(pid) do
+    if Process.alive?(pid), do: state, else: session_writer(%{state | session_writer: nil})
+  end
+
+  defp session_writer(state), do: %{state | session_writer: LastSession.writer(self())}
+
+  defp path_of(pid), do: safe_status(pid)[:path]
+
+  # Leave the editor: the last session kept first, then the VM stops (`Geex.stop/0`).
+  defp quit(state) do
+    state = keep_session(state, :now)
+    Geex.stop()
+    state
+  end
+
   # Make the current tab Session's active buffer, at the cursor it had in this pane. A selection
   # and the goal column belong to the tab you left.
   defp enter(state) do
@@ -1061,6 +1191,13 @@ defmodule Geex.Loop do
     Session.buffers()
   catch
     :exit, _ -> []
+  end
+
+  # The last session `Geex.open_paths/1` found (roadmap item 18.9): what to show and keep.
+  @doc false
+  def restore(r) when is_map(r) do
+    if loop = Process.whereis(__MODULE__), do: send(loop, {:geex_restore, r})
+    :ok
   end
 
   # `geex a b c` (`Geex.open_paths/1`): the files as tabs in that order, the first shown. Their
@@ -1528,6 +1665,11 @@ defmodule Geex.Loop do
       end
 
     case region(state, m.x, m.y) do
+      # Over a tab bar the wheel scrolls the bar, a tab a notch, either axis (roadmap item 18.5).
+      {:file, id, %{y: y} = rect} when m.y == y ->
+        {dx, dy} = step
+        schedule_repaint(scroll_tab_bar(state, id, rect, if(dx + dy < 0, do: -1, else: 1)))
+
       {:file, id, rect} ->
         schedule_repaint(wheel(state, id, rect, step))
 
@@ -1590,7 +1732,7 @@ defmodule Geex.Loop do
     case pane_text(state, id) do
       {tab, text} when m.y > rect.y ->
         {{line, col} = pos, _edge} =
-          Mouse.text_pos(text, rect, {tab.scroll, tab.hscroll}, {m.x, m.y})
+          Mouse.text_pos(text, rect, {tab.scroll, tab.hscroll}, {m.x, m.y}, state.tab_size)
 
         cond do
           double? ->
@@ -1649,11 +1791,14 @@ defmodule Geex.Loop do
     with true <- id == state.panes.pane and not Minibuffer.active?(state.minibuffer),
          {^id, rect} <- pane_rect(state, id),
          {%{buffer: ^buffer} = tab, text} <- pane_text(state, id) do
-      {_pos, edge} = Mouse.text_pos(text, rect, {tab.scroll, tab.hscroll}, at)
-      moved = if why == :scroll, do: scrolled(tab, text, rect, edge), else: tab
+      {_pos, edge} = Mouse.text_pos(text, rect, {tab.scroll, tab.hscroll}, at, state.tab_size)
+      moved = if why == :scroll, do: scrolled(tab, text, rect, edge, state.tab_size), else: tab
       stuck? = why == :scroll and {moved.scroll, moved.hscroll} == {tab.scroll, tab.hscroll}
       state = %{state | panes: Panes.update_shown(state.panes, id, fn _ -> moved end)}
-      {pos, edge} = Mouse.text_pos(text, rect, {moved.scroll, moved.hscroll}, at)
+
+      {pos, edge} =
+        Mouse.text_pos(text, rect, {moved.scroll, moved.hscroll}, at, state.tab_size)
+
       state = select_to(state, {id, rect}, anchor, pos, text)
 
       cond do
@@ -1683,8 +1828,11 @@ defmodule Geex.Loop do
 
   defp wheel_text(state, id, rect, step) do
     case pane_text(state, id) do
-      {tab, text} -> hold_scroll(state, id, rect, scrolled(tab, text, rect, step), text)
-      nil -> state
+      {tab, text} ->
+        hold_scroll(state, id, rect, scrolled(tab, text, rect, step, state.tab_size), text)
+
+      nil ->
+        state
     end
   end
 
@@ -1716,7 +1864,10 @@ defmodule Geex.Loop do
   defp source_press(state, id, rect, m) do
     with {tab, text} <- pane_text(state, id),
          {bar, cell} <-
-           ScrollBar.hit(ScrollBar.layout(text, rect, {tab.scroll, tab.hscroll}), {m.x, m.y}) do
+           ScrollBar.hit(
+             ScrollBar.layout(text, rect, {tab.scroll, tab.hscroll}, state.tab_size),
+             {m.x, m.y}
+           ) do
       now = System.monotonic_time(:millisecond)
       state = %{enter_pane({:file, id}, state) | click: {now, m.x, m.y, :bar}}
       grab = ScrollBar.grab(bar, cell)
@@ -1746,7 +1897,10 @@ defmodule Geex.Loop do
     with {^id, rect} <- pane_rect(state, id),
          {%{buffer: ^buffer} = tab, text} <- pane_text(state, id),
          %ScrollBar{} = bar <-
-           Enum.find(ScrollBar.layout(text, rect, {tab.scroll, tab.hscroll}), &(&1.axis == axis)) do
+           Enum.find(
+             ScrollBar.layout(text, rect, {tab.scroll, tab.hscroll}, state.tab_size),
+             &(&1.axis == axis)
+           ) do
       at = if axis == :v, do: y - bar.y, else: x - bar.x
       offset = ScrollBar.offset_at(bar, at - grab)
       tab = if axis == :v, do: %{tab | scroll: offset}, else: %{tab | hscroll: offset}
@@ -1759,13 +1913,13 @@ defmodule Geex.Loop do
   # Scroll a tab by `{columns, lines}`: not above the top or left of the text, and not further
   # down than its last line at the bottom of the pane (nor right than its widest line), unless it
   # was already there.
-  defp scrolled(tab, text, rect, {dx, dy}) do
+  defp scrolled(tab, text, rect, {dx, dy}, tab_size) do
     rows = max(rect.h - 2, 1)
     lines = line_count(text)
     bottom = max(lines - rows, 0)
     # The text columns: after the gutter, before the vertical scroll bar when there is one.
     cols = max(rect.w - gutter_width(text) - if(lines > rows, do: 1, else: 0), 1)
-    right = max(max_line_width(text) - cols, 0)
+    right = max(max_line_width(text, tab_size) - cols, 0)
 
     %{
       tab
@@ -1780,9 +1934,10 @@ defmodule Geex.Loop do
 
   ## Resizing (ADR-0039 step 3, ADR-0038's amendment). The handles: each split's boundary (a
   ## side-by-side split's divider column; a stacked split's second half's top row, where the tab
-  ## bars have nothing), the tree's right edge and the edits pane's title row. An edge dragged
-  ## left and right shows `TabBar.handle(:cols)`, one dragged up and down `TabBar.handle(:rows)`.
-  ## Dragging one resizes; a double-click on one puts it back (an even split, the default size).
+  ## bars have nothing), the tree's right edge and the band's title row (the edits pane's, or the
+  ## output pane's while one is open). An edge dragged left and right shows
+  ## `TabBar.handle(:cols)`, one dragged up and down `TabBar.handle(:rows)`. Dragging one
+  ## resizes; a double-click on one puts it back (an even split, the default size).
 
   @handle_cols TabBar.handle(:cols)
   @handle_rows TabBar.handle(:rows)
@@ -1836,8 +1991,8 @@ defmodule Geex.Loop do
 
     state =
       case {target, region(state, m.x, m.y)} do
-        {:edits, _} -> %{state | focus: :edits}
-        {:output, _} -> %{state | focus: :output}
+        # The band's title row is one handle, whichever pane the band shows.
+        {:edits, _} -> %{state | focus: if(state.output, do: :output, else: :edits)}
         {:tree, _} -> %{state | focus: :tree}
         {{:split, _}, {:file, id, _rect}} -> enter_pane({:file, id}, state)
         _ -> state
@@ -1899,6 +2054,76 @@ defmodule Geex.Loop do
 
   defp ids(laid_out), do: Enum.map(laid_out, &elem(&1, 0))
 
+  # Resizing from the keyboard (roadmap item 18.8): Alt with an arrow, or Alt+Shift+W/A/S/D, moves
+  # the focused pane's nearest edge on that axis that way, by a fixed step, kept to the least
+  # sizes as a drag is. From a file pane: its innermost split of that direction, else the tree's
+  # edge (left and right) or the band's top (up and down). From the tree: its edge. From the
+  # edits or output pane: the band's top.
+  @resize_cols 4
+  @resize_rows 2
+
+  defp resize_by_key(state, dir) do
+    axis = if dir in [:left, :right], do: :cols, else: :rows
+    d = if dir in [:left, :up], do: -1, else: 1
+
+    case {focused(state, layout(state)), axis} do
+      {:tree, :cols} -> resize_tree(state, d * @resize_cols)
+      {band, :rows} when band in [:edits, :output] -> resize_band(state, -d * @resize_rows)
+      {:editor, axis} -> resize_pane(state, axis, d)
+      _ -> state
+    end
+  end
+
+  defp resize_pane(state, axis, d) do
+    l = layout(state)
+    path = pane_path(state.panes.split, state.panes.pane)
+
+    inner =
+      l.editor
+      |> Layout.handles(state.panes.split)
+      |> Enum.filter(&(&1.dir == axis and List.starts_with?(path || [], &1.path)))
+      |> Enum.max_by(&length(&1.path), fn -> nil end)
+
+    case {inner, axis} do
+      {%{path: p, node: node, at: at}, _} ->
+        step = if axis == :cols, do: @resize_cols, else: @resize_rows
+        ratio = Layout.ratio_at(node, split_at(state.panes.split, p), at + d * step)
+        %{state | panes: Panes.set_ratio(state.panes, p, ratio)}
+
+      {nil, :cols} ->
+        resize_tree(state, d * @resize_cols)
+
+      {nil, :rows} ->
+        resize_band(state, -d * @resize_rows)
+    end
+  end
+
+  defp resize_tree(state, dw) do
+    case layout(state).tree do
+      nil -> state
+      tree -> %{state | tree_w: layout(%{state | tree_w: tree.w + dw}).tree.w}
+    end
+  end
+
+  defp resize_band(state, dh) do
+    case layout(state).edits do
+      nil -> state
+      band -> %{state | edits_h: layout(%{state | edits_h: band.h + dh}).edits.h}
+    end
+  end
+
+  # Where pane `id` is in the split, as `split_at/2`'s path, or `nil`.
+  defp pane_path({:pane, id}, id), do: []
+  defp pane_path({:pane, _other}, _id), do: nil
+
+  defp pane_path({_dir, a, b, _r}, id) do
+    case {pane_path(a, id), pane_path(b, id)} do
+      {nil, nil} -> nil
+      {nil, p} -> [:b | p]
+      {p, _} -> [:a | p]
+    end
+  end
+
   defp split_at(split, []), do: split
   defp split_at({_dir, a, _b, _r}, [:a | path]), do: split_at(a, path)
   defp split_at({_dir, _a, b, _r}, [:b | path]), do: split_at(b, path)
@@ -1943,6 +2168,10 @@ defmodule Geex.Loop do
       # The pane you were in stays current, unless it is the one closing.
       :close_pane ->
         close_pane(state, id)
+
+      # A mark counting the hidden tabs: scroll the bar a tab that way.
+      {:scroll, d} ->
+        scroll_tab_bar(state, id, rect, d)
 
       # The tab already shown, in the current pane: nothing to switch (and the selection stays).
       {:tab, i} when i == pane.at and id == state.panes.pane ->
@@ -2286,7 +2515,7 @@ defmodule Geex.Loop do
     # painting assumes they are the same buffer version. A concurrent MCP/reconcile edit landing
     # between the two reads can briefly pair text@vN with spans@v(N+1); the overlay only ever
     # clips (Paint tolerates out-of-range spans) and the change's own repaint corrects it.
-    # Only the spans over the rows shown (`scroll` is final here: `frame/10` moves only the
+    # Only the spans over the rows shown (`scroll` is final here: `frame/11` moves only the
     # horizontal scroll), so the reactor copies a screen's spans, not the file's (ADR-0035).
     {_lines, from, to} = Paint.visible_lines(text, scroll, h_text)
 
@@ -2301,12 +2530,13 @@ defmodule Geex.Loop do
         scroll,
         tab.hscroll,
         if(current?, do: state.selection),
-        not held?
+        not held?,
+        state.tab_size
       )
 
     gw = gutter_width(text)
     text_w = max(tw - gw, 0)
-    content_w = max_line_width(text)
+    content_w = max_line_width(text, state.tab_size)
 
     screen =
       screen
@@ -2323,7 +2553,7 @@ defmodule Geex.Loop do
       |> Screen.translate_y(1)
 
     at =
-      case {focused?, cursor_target(est.w, h_text, cx, cy)} do
+      case {focused?, cursor_target(est.w, h_text, cx, cy, gw)} do
         {true, {x, y}} -> {x + rect.x, y + top + 1 + rect.y}
         _ -> :hidden
       end
@@ -2576,6 +2806,14 @@ defmodule Geex.Loop do
         Screen.draw_text(acc, rect.x + x, rect.y, palette_clip(label, bar.w - x), style)
       end)
 
+    # The marks counting the tabs out of view (roadmap item 18.5).
+    screen =
+      [bar.left, bar.right]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.reduce(screen, fn %{x: x, text: text}, acc ->
+        Screen.draw_text(acc, rect.x + x, rect.y, text, %Cell{fg: pal.accent, bg: pal.bg})
+      end)
+
     screen =
       case bar.handle do
         nil ->
@@ -2603,11 +2841,21 @@ defmodule Geex.Loop do
   # The tab bar's layout for a pane at `rect`: what is drawn, and what a click hits.
   # A pane below the editor's top row is the lower half of a stacked split: its bar keeps the
   # split's handle (ADR-0038 §6).
-  defp tab_bar(state, %{tabs: tabs, at: at}, rect) do
+  defp tab_bar(state, %{tabs: tabs, at: at} = pane, rect) do
     offered? = Geex.Markdown.available() == :ok
     names = Enum.map(tabs, &tab_name(&1, offered?))
     handle? = rect.y > layout(state).editor.y
-    TabBar.layout(names, at, rect.w, map_size(state.panes.panes) > 1, handle?)
+    first = Panes.bar_first(pane)
+    TabBar.layout(names, at, rect.w, map_size(state.panes.panes) > 1, handle?, first)
+  end
+
+  # Scroll pane `id`'s tab bar `d` tabs (the wheel over it, a click on a mark): from where it
+  # starts now, kept within the tabs by the layout (roadmap item 18.5).
+  defp scroll_tab_bar(state, id, rect, d) do
+    pane = state.panes.panes[id]
+    bar = tab_bar(state, pane, rect)
+    moved = tab_bar(state, Map.put(pane, :bar, {pane.at, bar.first + d}), rect)
+    %{state | panes: Panes.scroll_bar(state.panes, id, moved.first)}
   end
 
   # A tab's name on the bar: a markdown file's source tab carries the preview's glyph, while the
@@ -2754,6 +3002,7 @@ defmodule Geex.Loop do
         fg: pal.line_number,
         bg: pal.bg
       })
+      |> draw_band_handle({x, y, w}, Width.string(head), String.length(hint), pal)
 
     out
     |> Output.rows(h - 1)
@@ -2768,6 +3017,24 @@ defmodule Geex.Loop do
       |> Screen.fill_rect(x, row, w, 1, %Cell{char: " ", fg: fg, bg: bg, attrs: attrs})
       |> Screen.draw_text(x, row, palette_clip(text, w), %Cell{fg: fg, bg: bg, attrs: attrs})
     end)
+  end
+
+  # The band's handle (ADR-0038 §6), on the edits pane's and the output pane's title row: drag
+  # the row to resize. At the band's centre, so focusing the pane (a click on the title does) and
+  # its longer hint don't move it from under the pointer; kept within the rule, between the
+  # title's `name_w` columns and the hint's `hint_w`, when the band is too narrow.
+  defp draw_band_handle(screen, {x, y, w}, name_w, hint_w, pal) do
+    rule = max(w - name_w - hint_w, 0)
+    glyph_w = Geex.Width.string(@handle_rows)
+    mid = (x + div(w - glyph_w, 2)) |> max(x + name_w) |> min(x + name_w + rule - glyph_w)
+
+    if rule >= glyph_w,
+      do:
+        Screen.draw_text(screen, mid, y, @handle_rows, %Cell{
+          fg: pal.active_line_number,
+          bg: pal.bg
+        }),
+      else: screen
   end
 
   # The edits pane (ADR-0034 §6): a title row, then the entries, the highlighted one tinted
@@ -2789,21 +3056,7 @@ defmodule Geex.Loop do
       |> Screen.fill_rect(x, y, w, h, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
       |> Screen.draw_text(x, y, palette_clip(title, w), %Cell{fg: pal.line_number, bg: pal.bg})
 
-    # Its handle (ADR-0038 §6): drag the title row to resize. At the pane's centre, so focusing
-    # the pane (a click on the title does) and its longer hint don't move it from under the
-    # pointer; kept within the rule, between the name and the hint, when the pane is too narrow.
-    rule = max(w - 9 - String.length(hint), 0)
-    glyph_w = Geex.Width.string(@handle_rows)
-    mid = (x + div(w - glyph_w, 2)) |> max(x + 9) |> min(x + 9 + rule - glyph_w)
-
-    screen =
-      if rule >= glyph_w,
-        do:
-          Screen.draw_text(screen, mid, y, @handle_rows, %Cell{
-            fg: pal.active_line_number,
-            bg: pal.bg
-          }),
-        else: screen
+    screen = draw_band_handle(screen, {x, y, w}, 9, String.length(hint), pal)
 
     if entries == [] do
       Screen.draw_text(screen, x + 2, y + 1, palette_clip("no edits yet", w - 2), %Cell{
@@ -3023,6 +3276,7 @@ defmodule Geex.Loop do
     %{
       theme_id: state.theme_id,
       saved: state.settings_saved,
+      tab_size: state.tab_size,
       installing: MapSet.new(Map.keys(state.installing))
     }
   end
@@ -3087,6 +3341,24 @@ defmodule Geex.Loop do
     shown = not at_start(state, "edits", state.edits_shown)
     state = %{state | edits_shown: shown, focus: if(shown, do: state.focus, else: :editor)}
     keep(state, "edits", shown, "the edits pane is #{onoff(shown)} at start")
+  end
+
+  # Enter steps through the sizes, 2, 4, 8 and round again.
+  defp settings_action({:toggle, :tab_size}, state) do
+    i = Enum.find_index(@tab_sizes, &(&1 == state.tab_size)) || -1
+    n = Enum.at(@tab_sizes, rem(i + 1, length(@tab_sizes)))
+    keep(%{state | tab_size: n}, "tab_size", n, "the tab size is #{n}")
+  end
+
+  defp settings_action({:toggle, :final_newline}, state) do
+    on? = not state.final_newline
+
+    keep(
+      %{state | final_newline: on?},
+      "final_newline",
+      on?,
+      "a final newline on save is #{onoff(on?)}"
+    )
   end
 
   defp at_start(state, key, unset) do
@@ -4119,19 +4391,27 @@ defmodule Geex.Loop do
   # A line's display width is at most its byte length, so lines are measured longest (in
   # bytes) first, stopping at the first one shorter than the widest found: one line for ASCII
   # text, not every line each frame (ADR-0035).
-  @spec max_line_width(String.t()) :: non_neg_integer()
-  def max_line_width(text) do
+  #
+  # A tab can draw wider than its byte (roadmap item 18.7), so a line's bound is its byte length
+  # plus `tab - 1` for each tab in it; with no tab in the text the bound is the byte length.
+  @spec max_line_width(String.t(), pos_integer()) :: non_neg_integer()
+  def max_line_width(text, tab) do
     size = byte_size(text)
     ends = for({at, 1} <- :binary.matches(text, "\n"), do: at) ++ [size]
+    tabs = for({at, 1} <- :binary.matches(text, "\t"), do: at)
 
-    {spans, _} = Enum.map_reduce(ends, 0, fn stop, start -> {{start, stop - start}, stop + 1} end)
+    {spans, _} =
+      Enum.map_reduce(ends, {0, tabs}, fn stop, {start, tabs} ->
+        {mine, rest} = Enum.split_while(tabs, &(&1 < stop))
+        {{start, stop - start, stop - start + length(mine) * (tab - 1)}, {stop + 1, rest}}
+      end)
 
     spans
-    |> Enum.sort_by(&elem(&1, 1), :desc)
-    |> Enum.reduce_while(0, fn {start, len}, best ->
-      if len <= best,
+    |> Enum.sort_by(&elem(&1, 2), :desc)
+    |> Enum.reduce_while(0, fn {start, len, bound}, best ->
+      if bound <= best,
         do: {:halt, best},
-        else: {:cont, max(best, Width.string(binary_part(text, start, len)))}
+        else: {:cont, max(best, Width.line(binary_part(text, start, len), tab))}
     end)
   end
 
@@ -4187,8 +4467,12 @@ defmodule Geex.Loop do
     end
   end
 
-  defp cursor_target(w, h_text, x, y) when x >= 0 and x < w and y >= 0 and y < h_text, do: {x, y}
-  defp cursor_target(_w, _h_text, _x, _y), do: :hidden
+  # Hidden left of the text, too: a held scroll can leave the cursor's grapheme (a tab, a wide
+  # glyph) starting under the gutter.
+  defp cursor_target(w, h_text, x, y, gw) when x >= gw and x < w and y >= 0 and y < h_text,
+    do: {x, y}
+
+  defp cursor_target(_w, _h_text, _x, _y, _gw), do: :hidden
 
   # Grid mode is active iff the minibuffer is open in `:grid` mode — the trigger for the
   # contextual ruler + grid-line overlay (ADR-0027 §"Render": chrome only while composing).
@@ -4259,7 +4543,38 @@ defmodule Geex.Loop do
   # (`Geex.Loop.Verbs`) also apply through, so `copy` and `Alt+C` converge on one code
   # path (the ADR-0028 parity principle, ADR-0003 in miniature).
   defp apply_key(event, cursor, text, state) do
-    case Keymap.resolve(event, cursor, text) do
+    case over_selection(event, state.selection) do
+      nil -> resolve_key(event, cursor, text, state)
+      {range, typed} -> schedule_repaint(type_over(state, range, typed))
+    end
+  end
+
+  # A key that types over a selection (roadmap item 18.1): the range it replaces and with what,
+  # or `nil` when there is no selection (or a collapsed one) or the key acts as it would without.
+  defp over_selection(_event, nil), do: nil
+  defp over_selection(_event, %Selection{anchor: a, active: a}), do: nil
+
+  defp over_selection(event, %Selection{} = sel) do
+    case Keymap.over_selection(event) do
+      nil -> nil
+      typed -> {Selection.range(sel), typed}
+    end
+  end
+
+  # Replace the selection with what was typed, one recorded edit on the shared path; the cursor
+  # lands after it and the selection is gone.
+  defp type_over(state, {from, _to} = range, typed),
+    do: apply_clipboard_edit(state, replace_cmd(range, typed), cursor_after_insert(from, typed))
+
+  defp resolve_key(event, cursor, text, state) do
+    # Tab follows the file: a tab where it indents with tabs, else the tab size's spaces, which
+    # the keymap doesn't hold (roadmap item 18.7).
+    action =
+      if event == {:key, :tab},
+        do: Keymap.indent(cursor, state.tab_size, Keymap.indent_style(text)),
+        else: Keymap.resolve(event, cursor, text)
+
+    case action do
       :ignore ->
         state
 
@@ -4431,20 +4746,22 @@ defmodule Geex.Loop do
           else: schedule_repaint(%{state | notice: "no theme #{name} (`theme` lists them)"})
 
       :quit ->
-        Geex.stop()
-        state
+        quit(state)
     end
   end
 
   # Save the active buffer (Ctrl-O / the `save` verb) — an operation, not an edit
-  # (ADR-0019): no command, no history. Visible feedback is the status line's dirty
-  # marker clearing; `Buffer.save/1` emits no change event, so repaint explicitly. A buffer
+  # (ADR-0019): no command, no history, but for the final newline a buffer with unsaved edits
+  # may get, recorded in the same step as a successful write (`Buffer.save/2`, roadmap item
+  # 18.4). Visible feedback is the status line's dirty marker clearing; repaint explicitly. A buffer
   # that is behind merges first (ADR-0034 §3); a merge with conflicts doesn't write, and the
   # buffer's own notice says so. A failure (`{:error, :no_path}` on a scratch buffer, a posix
   # error) leaves the marker set — a real echo/message area is a deferred minibuffer slice.
   defp do_save(state) do
+    opts = [force: state.save_armed, final_newline: state.final_newline]
+
     state =
-      case on_active_buffer(&Reconcile.save(&1, force: state.save_armed)) do
+      case on_active_buffer(&Reconcile.save(&1, opts)) do
         {:ok, path} ->
           Edits.saved(path)
           %{state | save_armed: false}
@@ -4861,8 +5178,7 @@ defmodule Geex.Loop do
         %{close_minibuffer(state) | notice: "nothing done"}
 
       {:ctrl, c} when c in [?x, ?q, ?c] ->
-        Geex.stop()
-        state
+        quit(state)
 
       _ ->
         state
@@ -4913,8 +5229,7 @@ defmodule Geex.Loop do
 
       # The keymap's quit keys (`Keymap.resolve/3`).
       {:ctrl, c} when c in [?x, ?q, ?c] ->
-        Geex.stop()
-        state
+        quit(state)
 
       _ ->
         state
@@ -5064,7 +5379,7 @@ defmodule Geex.Loop do
 
   defp grid_goto(coord, state) do
     with {:ok, %{text: text}} <- safe_session_snapshot(),
-         {:ok, cursor} <- Coord.to_caret(cast_coord(coord, text), Doc.new(text)) do
+         {:ok, cursor} <- Coord.to_caret(cast_coord(coord, text, state.tab_size), Doc.new(text)) do
       set_cursor(cursor)
       %{state | goal: Keymap.goal_column(cursor, text), selection: nil}
     else
@@ -5074,7 +5389,8 @@ defmodule Geex.Loop do
 
   defp grid_clip(range, state, op) do
     with {:ok, %{text: text}} <- safe_session_snapshot(),
-         {:ok, {from, to}} <- Coord.to_span(cast_range(range, text), Doc.new(text)) do
+         {:ok, {from, to}} <-
+           Coord.to_span(cast_range(range, text, state.tab_size), Doc.new(text)) do
       if from == to do
         # Both endpoints clamped to the same caret (each overshot a short line, the "to end of
         # line" idiom on both ends) → a genuine no-op. Clear the selection so the next motion has
@@ -5096,11 +5412,11 @@ defmodule Geex.Loop do
   # Cast a display-column coordinate to a grapheme one against its target line (ADR-0027 §"display
   # ruler"). `y` past EOF leaves `x` cast against "" — harmless, since `to_caret`/`to_span` reject
   # the out-of-range `y` anyway.
-  defp cast_coord(%Coord{x: x, y: y}, text),
-    do: %Coord{x: Width.col_at_display(line_at(text, y - 1), x), y: y}
+  defp cast_coord(%Coord{x: x, y: y}, text, tab),
+    do: %Coord{x: Width.col_at_display(line_at(text, y - 1), x, tab), y: y}
 
-  defp cast_range(%Coord.Range{from: from, to: to} = range, text),
-    do: %{range | from: cast_coord(from, text), to: cast_coord(to, text)}
+  defp cast_range(%Coord.Range{from: from, to: to} = range, text, tab),
+    do: %{range | from: cast_coord(from, text, tab), to: cast_coord(to, text, tab)}
 
   # Go-to-line through the one shared resolution (ViewActions sets the cursor); on
   # success refresh the view-local goal from the landing. A jump clears the selection
