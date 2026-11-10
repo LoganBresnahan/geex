@@ -5723,3 +5723,11 @@ At the maintainer's word ("lets release"), once roadmap items 17–19 were on ma
 **Not tested yet:** the v0.5.0 tag's release run, its builds' smoke, the publish and the
 post-release smoke (followed below when they run); `geex self update` from 0.4.0 on the
 maintainer's machine.
+
+**0.5.0, the same night: released.** The v0.5.0 tag (on `6c21d9d`, after main CI went green on
+it) started release run 42759818048: the four builds (darwin-arm64 on macos-15, darwin-x64 on
+macos-15-intel, linux-x64 and linux-arm64 on ubuntu-22.04) each passed their smoke, the publish
+succeeded at 05:20 UTC, and all six post-release smoke runners (ubuntu-22.04, 24.04, both arm,
+macos-15, macos-15-intel) passed. `releases/latest` is v0.5.0. Tarballs: 13.5 MB (darwin-arm64),
+13.9 MB (darwin-x64), 15.5 MB (linux-arm64), 15.6 MB (linux-x64), the same as 0.4.0's to the
+tenth. Still not run: the maintainer's `geex self update` from 0.4.0.
