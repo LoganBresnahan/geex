@@ -443,6 +443,27 @@ defmodule Geex.Loop.SettingsTest do
       assert state.tab_size == 2
     end
 
+    test "General's Indent with steps follow, spaces, tabs (roadmap item 19)",
+         %{state: state, dir: dir} do
+      state = state |> send_io({:alt, ?y}) |> send_io({:key, :left})
+      rows = Settings.rows(state.settings, %{indent_with: state.indent_with})
+      at = Enum.find_index(rows, &(&1.name == :indent_with))
+      assert %{cells: ["Indent with", "follow the file", _]} = Enum.at(rows, at)
+
+      state = Enum.reduce(1..at, state, fn _, acc -> send_io(acc, {:key, :down}) end)
+      state = send_io(state, {:key, :enter})
+      assert state.indent_with == :spaces
+
+      assert JSON.decode!(File.read!(Path.join(dir, "settings.json"))) == %{
+               "indent_with" => "spaces"
+             }
+
+      state = send_io(state, {:key, :enter})
+      assert state.indent_with == :tabs
+      state = send_io(state, {:key, :enter})
+      assert state.indent_with == :follow
+    end
+
     test "a settings.json that isn't JSON is left alone, and the view says so",
          %{state: state, dir: dir} do
       file = Path.join(dir, "settings.json")

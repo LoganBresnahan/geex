@@ -693,7 +693,12 @@ defmodule Geex.Session do
   # out of range (a set_cursor racing a shrink; a buffer switch keeping the old position).
   defp clamp_cursor({line, col}, lines) do
     line = line |> max(0) |> min(length(lines) - 1)
-    col = col |> max(0) |> min(lines |> Enum.at(line, "") |> String.length())
+    # A CRLF line's trailing `\r` is its end: the caret goes before it, never after.
+    col =
+      col
+      |> max(0)
+      |> min(lines |> Enum.at(line, "") |> String.replace_suffix("\r", "") |> String.length())
+
     {line, col}
   end
 end

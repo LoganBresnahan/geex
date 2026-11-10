@@ -292,4 +292,253 @@ defmodule Geex.Loop.KeymapTest do
     text = String.duplicate("  x\n", 1000) <> String.duplicate("\tx\n", 2000)
     assert Keymap.indent_style(text) == :spaces
   end
+
+  # Roadmap item 19: a pair closed as you type it, then Backspace, gives back the text as it was.
+  property "an auto-closed pair and Backspace undo each other" do
+    check all(
+            line <- Geex.Gen.code_fragment(max_length: 12),
+            seed <- non_negative_integer(),
+            g <- member_of(["(", "[", "{", "'", "\"", "`"])
+          ) do
+      col = rem(seed, String.length(line) + 1)
+
+      with {:edit, cmd, cursor} = action <- Keymap.autoclose({:char, g}, {0, col}, line, []) do
+        pairs = Keymap.track([], {:char, g}, action, {0, col})
+        paired = apply_text(cmd, line)
+        {:edit, back, back_to} = Keymap.unpair(cursor, paired, pairs)
+        assert back_to == {0, col}
+        assert apply_text(back, paired) == line
+      end
+    end
+  end
+
+  # Roadmap item 19 (the review's ask): whatever is typed, Backspaced or moved over, every pair
+  # still tracked has its opener and its closer where it says, and the cursor between them; so a
+  # step-over or a Backspace on a tracked pair never acts on text geex didn't put there.
+  property "tracked pairs always sit on a real opener and closer, around the cursor" do
+    check all(
+            start <- Geex.Gen.code_fragment(max_length: 6),
+            keys <-
+              list_of(
+                frequency([
+                  {6, map(Geex.Gen.code_piece(), &{:char, &1})},
+                  {1, constant({:key, :backspace})},
+                  {1, constant({:key, :left})},
+                  {1, constant({:key, :right})}
+                ]),
+                max_length: 30
+              )
+          ) do
+      Enum.reduce(keys, {start, {0, String.length(start)}, []}, fn key, {text, cursor, pairs} ->
+        action =
+          case key do
+            {:char, _} -> Keymap.autoclose(key, cursor, text, pairs)
+            {:key, :backspace} -> Keymap.unpair(cursor, text, pairs)
+            _ -> nil
+          end || Keymap.resolve(key, cursor, text)
+
+        pairs = Keymap.track(pairs, key, action, cursor)
+
+        {text, cursor} =
+          case action do
+            {:edit, cmd, to} -> {apply_text(cmd, text), to}
+            {:move, to} -> {text, to}
+            _ -> {text, cursor}
+          end
+
+        {_, c} = cursor
+
+        for {0, o, cl} <- pairs do
+          open = String.at(text, o)
+
+          assert Map.get(
+                   %{"(" => ")", "[" => "]", "{" => "}", "'" => "'", "\"" => "\"", "`" => "`"},
+                   open
+                 ) ==
+                   String.at(text, cl),
+                 "#{inspect(text)}: #{inspect({o, cl})} isn't a pair"
+
+          assert o < c and c <= cl, "#{inspect(text)}: cursor #{c} outside #{inspect({o, cl})}"
+        end
+
+        {text, cursor, pairs}
+      end)
+    end
+  end
+
+  # The other half (the re-verify's ask): a pair typed and then filled, the cursor moved about
+  # inside it and back, is still tracked, so its closer steps over.
+  property "a pair geex closed stays tracked while the cursor stays inside" do
+    check all(
+            g <- member_of(["(", "[", "{"]),
+            fill <- string(Enum.concat([?a..?z, ?0..?9, [?\s]]), max_length: 8),
+            back <- non_negative_integer()
+          ) do
+      type = fn {text, cursor, pairs}, key ->
+        action = Keymap.autoclose(key, cursor, text, pairs) || Keymap.resolve(key, cursor, text)
+        pairs = Keymap.track(pairs, key, action, cursor)
+
+        case action do
+          {:edit, cmd, to} -> {apply_text(cmd, text), to, pairs}
+          {:move, to} -> {text, to, pairs}
+        end
+      end
+
+      run =
+        Enum.reduce(
+          [{:char, g} | for(c <- String.graphemes(fill), do: {:char, c})],
+          {"", {0, 0}, []},
+          &type.(&2, &1)
+        )
+
+      moves = rem(back, String.length(fill) + 1)
+
+      run =
+        Enum.reduce(
+          List.duplicate({:key, :left}, moves) ++ List.duplicate({:key, :right}, moves),
+          run,
+          &type.(&2, &1)
+        )
+
+      {text, _, _} = type.(run, {:char, Map.fetch!(%{"(" => ")", "[" => "]", "{" => "}"}, g)})
+      assert text == g <> fill <> Map.fetch!(%{"(" => ")", "[" => "]", "{" => "}"}, g)
+    end
+  end
+
+  # Roadmap item 19: Enter adds only line breaks and whitespace, and the new line starts with
+  # the indent before the cursor. The oracle is the line's construction: an indent of spaces and
+  # tabs, then a body that starts with a letter (the review: the property mustn't restate the
+  # code's own reading of the indent).
+  property "Enter with the indent kept adds only whitespace, and keeps the indent" do
+    check all(
+            indent <- map(list_of(member_of([" ", "\t"]), max_length: 6), &Enum.join/1),
+            body <- Geex.Gen.code_fragment(max_length: 10),
+            seed <- non_negative_integer(),
+            unit <- member_of(["  ", "    ", "\t"]),
+            colon <- boolean()
+          ) do
+      line = indent <> "a" <> body
+      col = rem(seed, String.length(line) + 1)
+      {:edit, cmd, {1, new_col}} = Keymap.newline({0, col}, line, unit, colon: colon)
+      [_first, second | _] = cmd |> apply_text(line) |> String.split("\n")
+
+      squash = &String.replace(&1, ~r/\s/u, "")
+      assert squash.(apply_text(cmd, line)) == squash.(line)
+
+      base = String.slice(indent, 0, col)
+      assert String.starts_with?(second, base)
+      assert new_col >= String.length(base)
+    end
+  end
+
+  defp apply_text(cmd, text) do
+    {:ok, editor} = Geex.Dispatch.apply_command(cmd, Geex.EditorState.new(text))
+    Geex.EditorState.text(editor)
+  end
+
+  # The review's planted bug (`inner = unit`): the opener's level is on top of the line's indent.
+  test "Enter after an opener on an indented line indents one level past it" do
+    assert {:edit, %{text: "\n      "}, {1, 6}} = Keymap.newline({0, 6}, "    f(", "  ")
+    assert {:edit, %{text: "\n\t\t\n\t"}, {1, 2}} = Keymap.newline({0, 3}, "\tf{}", "\t")
+
+    assert {:edit, %{text: "\n    "}, {1, 4}} =
+             Keymap.newline({0, 6}, "  def:", "  ", colon: true)
+  end
+
+  test "CRLF lines: the CR is the line's end, and the break is CRLF" do
+    text = "foo\r\nbar"
+
+    assert {:edit, %{text: "()", col: 3}, {0, 4}} =
+             Keymap.autoclose({:char, "("}, {0, 3}, text, [])
+
+    # A cursor after the CR counts as the line's end.
+    assert {:edit, %{text: "()", col: 3}, {0, 4}} =
+             Keymap.autoclose({:char, "("}, {0, 4}, text, [])
+
+    assert {:edit, %{text: "\r\n  "}, {1, 2}} = Keymap.newline({0, 5}, "  foo\r\nx", "  ")
+    # A line of only indent, its CR aside, is cleared.
+    assert {:edit, %Geex.Commands.Replace{text: "\r\n  "}, {2, 2}} =
+             Keymap.newline({1, 2}, "x\r\n  \r\ny", "  ")
+
+    assert {:edit, %{text: "\r\n", col: 0}, {2, 0}} = Keymap.newline({1, 1}, "a\r\n\r\nb", "  ")
+  end
+
+  test "string state spans all three quotes, backslashes escaping inside a string" do
+    assert {:edit, %{text: "''"}, _} =
+             Keymap.autoclose({:char, "'"}, {0, 16}, ~S|x = "it's" + |, [])
+
+    # An escaped quote keeps the string open; an escaped backslash doesn't.
+    assert Keymap.autoclose({:char, "'"}, {0, 8}, ~S|"it's \"|, []) == nil
+    assert {:edit, _, _} = Keymap.autoclose({:char, "'"}, {0, 9}, ~S|"it's \\"|, [])
+    assert Keymap.autoclose({:char, "\""}, {0, 6}, ~S|'say |, []) == nil
+    assert {:edit, _, _} = Keymap.autoclose({:char, "`"}, {0, 0}, "", [])
+    assert Keymap.autoclose({:char, "`"}, {0, 0}, "", [], backtick: false) == nil
+  end
+
+  test "quotes that would close a string, or follow a closer or an accented letter, don't pair" do
+    # print(f"{x}") — the opener after `f` doesn't pair; the closer after `}` mustn't either.
+    assert Keymap.autoclose({:char, "\""}, {0, 11}, "print(f\"{x}", []) == nil
+    assert Keymap.autoclose({:char, "`"}, {0, 18}, "css`color: red;", []) == nil
+    # An escaped quote inside a closed string doesn't count: the next one opens a string.
+    line = ~S(x = "a\"b" + )
+    assert {:edit, %{text: "\"\""}, _} = Keymap.autoclose({:char, "\""}, {0, 13}, line, [])
+    assert Keymap.autoclose({:char, "\""}, {0, 6}, ~S(x = "a\"), []) == nil
+    assert Keymap.autoclose({:char, "'"}, {0, 5}, "(cat)", []) == nil
+    assert Keymap.autoclose({:char, "'"}, {0, 4}, "José", []) == nil
+    assert Keymap.autoclose({:char, "'"}, {0, 0}, "", [], single_quote: false) == nil
+    assert {:edit, _, _} = Keymap.autoclose({:char, "\""}, {0, 0}, "", [], single_quote: false)
+  end
+
+  test "kind_opts/1: prose, Rust and Lisp keep `'`; Python, YAML and Makefiles open on `:`" do
+    assert Keymap.kind_opts("/p/a.rs")[:single_quote] == false
+    assert Keymap.kind_opts("/p/a.clj")[:single_quote] == false
+    assert Keymap.kind_opts("/p/a.ex")[:single_quote] == true
+    assert Keymap.kind_opts("/p/x.yml")[:colon] == true
+    assert Keymap.kind_opts("/p/Makefile.am")[:colon] == true
+    assert Keymap.kind_opts("/p/a.ex")[:colon] == false
+    assert Keymap.kind_opts("/p/d.tsv")[:indent] == false
+
+    assert Keymap.kind_opts(nil) == [
+             single_quote: true,
+             backtick: true,
+             colon: false,
+             indent: true
+           ]
+
+    assert Keymap.kind_opts("/p/a.el")[:backtick] == false
+    assert Keymap.kind_opts("/p/a.hs")[:single_quote] == false
+  end
+
+  # The property's first counterexample, shrunk: a combining accent right after the indent.
+  test "Enter's indent is counted by grapheme" do
+    line = "    \u0301aaaa"
+    {:edit, cmd, {1, 3}} = Keymap.newline({0, 4}, line, "  ")
+    assert cmd.text == "\n   "
+  end
+
+  # Roadmap item 19: the "Indent with" setting and the kinds of file that use tabs.
+  test "indent_with/3: Makefiles always tabs; Go, TSV and git config by kind; the rest follow" do
+    spaced = "x:\n  y\n"
+
+    for path <-
+          ~w(/p/Makefile /p/makefile /p/GNUmakefile /p/BSDmakefile /p/Makefile.am /p/Makefile.in /p/rules.mk /p/rules.mk.in /p/a.mak),
+        setting <- [:follow, :spaces, :tabs],
+        do: assert(Keymap.indent_with(spaced, path, setting) == :tabs, "#{path} #{setting}")
+
+    for path <- ~w(/p/main.go /p/go.mod /p/go.work /p/data.tsv /p/.gitmodules /home/u/.gitconfig) do
+      assert Keymap.indent_with(spaced, path, :follow) == :tabs, path
+      assert Keymap.indent_with("", path, :spaces) == :spaces, path
+    end
+
+    assert Keymap.indent_with(spaced, "/p/a.rb", :follow) == :spaces
+    assert Keymap.indent_with("\tx\n", "/p/a.rb", :follow) == :tabs
+    assert Keymap.indent_with(spaced, "/p/a.rb", :tabs) == :tabs
+    assert Keymap.indent_with(spaced, nil, :follow) == :spaces
+  end
+
+  # geex-d3's last note: only the line ending's `\r` is its end; one before it is text.
+  test "End stops before a CRLF line's CR, not before an extra one" do
+    assert Keymap.resolve({:key, :end}, {0, 0}, "foo\r\nbar") == {:move, {0, 3}}
+    assert Keymap.resolve({:key, :end}, {0, 0}, "a\r\r\nb") == {:move, {0, 2}}
+  end
 end

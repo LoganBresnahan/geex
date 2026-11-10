@@ -36,7 +36,7 @@ defmodule Geex.TerminalIO do
 
   require Logger
 
-  alias Geex.Input.Parser
+  alias Geex.Input.{Paste, Parser}
 
   ## Public API
 
@@ -78,6 +78,13 @@ defmodule Geex.TerminalIO do
   # 1005 and 1015 (other encodings) are turned off, in case something left them on.
   @mouse_on ["\e[?1005l", "\e[?1015l", "\e[?1000h", "\e[?1002h", "\e[?1006h"]
   @mouse_off ["\e[?1006l", "\e[?1002l", "\e[?1000l"]
+  # Bracketed paste (mode 2004, ADR-0026's 2026-11-09 amendment): the terminal marks a paste's
+  # start and end, so it arrives as one event, not as typed keys the typing assists would act on.
+  @paste_on "\e[?2004h"
+  @paste_off "\e[?2004l"
+  # How long a paste may stall with no end before what came is taken as the paste (a slow link
+  # gets this long; a broken terminal that never ends one costs this long of keys typed into it).
+  @paste_idle_ms 3_000
 
   # The query for the terminal's background (OSC 11), ended by ST, and how long after it a
   # bare `ESC ]` counts as the start of its answer rather than Alt+].
@@ -117,7 +124,7 @@ defmodule Geex.TerminalIO do
     # Belt-and-suspenders: also restore when the VM's main script ends on its own. A halt
     # (`:erlang.halt/0`, `System.halt/1`, the `+Bd` SIGINT halt) runs no `at_exit` hook, so after
     # one the terminal stays as geex left it, as after a `kill -9`.
-    System.at_exit(fn _ -> IO.write(:stdio, [@mouse_off, "\e[?25h", "\e[?1049l"]) end)
+    System.at_exit(fn _ -> IO.write(:stdio, [@mouse_off, @paste_off, "\e[?25h", "\e[?1049l"]) end)
 
     tty = :prim_tty.init(%{input: :raw, output: :raw})
     %{read: reader_ref} = :prim_tty.handles(tty)
@@ -133,6 +140,7 @@ defmodule Geex.TerminalIO do
       "\e[2J",
       "\e[H",
       @mouse_on,
+      @paste_on,
       if(ask_bg?, do: @ask_bg, else: [])
     ])
 
@@ -151,6 +159,8 @@ defmodule Geex.TerminalIO do
       esc_buf: <<>>,
       # The pending flush of `esc_buf` (a ref), stale once more bytes arrive.
       esc_flush: nil,
+      # A bracketed paste whose end hasn't come yet (`Geex.Input.Paste`), or nil.
+      paste: nil,
       # Until when (monotonic ms) the start of an OSC 11 answer is waited for, not flushed as
       # Alt+] (`Parser.osc_reply?/2`); and the answer once it came, for later subscribers.
       bg_asked_until: if(ask_bg?, do: now_ms() + @bg_wait_ms),
@@ -215,21 +225,36 @@ defmodule Geex.TerminalIO do
   end
 
   @impl true
-  def handle_info({ref, {:data, bytes}}, %{reader_ref: ref} = state) do
-    {events, leftover} = Parser.parse(state.esc_buf <> bytes)
-    Enum.each(events, fn ev -> publish({:geex_io, ev}, state) end)
-    :prim_tty.read(state.tty, 1024)
+  # A paste on its way in: fed to it, never re-parsed (the review of roadmap item 19); once its
+  # end came, what followed is input as usual.
+  def handle_info({ref, {:data, bytes}}, %{reader_ref: ref, paste: %Paste{} = paste} = state) do
+    case Paste.feed(paste, bytes) do
+      {:more, paste, events} ->
+        Enum.each(events, fn ev -> publish({:geex_io, ev}, state) end)
+        :prim_tty.read(state.tty, 1024)
+        {:noreply, %{state | paste: paste, esc_flush: flush_later(@paste_idle_ms)}}
 
-    bg_answer =
-      Enum.find(Enum.reverse(events), state.bg_answer, &match?({:osc, "11", _}, &1))
+      {:done, events, rest} ->
+        Enum.each(events, fn ev -> publish({:geex_io, ev}, state) end)
+        input(rest, %{state | paste: nil, esc_flush: nil})
+    end
+  end
 
-    {:noreply,
-     %{
-       state
-       | esc_buf: leftover,
-         esc_flush: schedule_flush(leftover, state.bg_asked_until),
-         bg_answer: bg_answer
-     }}
+  def handle_info({ref, {:data, bytes}}, %{reader_ref: ref} = state), do: input(bytes, state)
+
+  # OTP's `:prim_tty` reader met bytes that aren't UTF-8 (a paste of binary, a stray byte) and
+  # waits, blocked, for its parent to agree to read them as Latin-1. Unanswered (the catch-all
+  # below dropped it), the input went deaf, Ctrl-Q included. Answered as OTP's `user_drv` does,
+  # then back to UTF-8 for what follows (the review of roadmap item 19, BUG-11).
+  def handle_info({reader, :set_unicode_state, false}, state) when is_pid(reader) do
+    Logger.debug("geex terminal: input that isn't UTF-8, read as Latin-1")
+    {:noreply, %{state | tty: answer_unicode(state.tty, reader, &:prim_tty.unicode/2)}}
+  end
+
+  # A paste stalled @paste_idle_ms with no end: what came is the paste.
+  def handle_info({:flush_esc, ref}, %{esc_flush: ref, paste: %Paste{} = paste} = state) do
+    Enum.each(Paste.finish(paste), fn ev -> publish({:geex_io, ev}, state) end)
+    {:noreply, %{state | paste: nil, esc_flush: nil}}
   end
 
   # Nothing followed the leftover within @esc_timeout_ms: it was typed, not sent as one
@@ -259,6 +284,7 @@ defmodule Geex.TerminalIO do
     if signal == :sigcont and state.tty_dev, do: stty(state.tty_dev, ["-isig", "-ixon"])
     # A shell that took the terminal back while geex was stopped may have reset its modes.
     if signal == :sigcont and state.mouse, do: :prim_tty.write(new_tty, @mouse_on)
+    if signal == :sigcont, do: :prim_tty.write(new_tty, @paste_on)
 
     # `:prim_tty.window_size/1` returns {cols, rows}; the resize event carries
     # {rows, cols} (its documented order), so swap on the way out.
@@ -326,7 +352,9 @@ defmodule Geex.TerminalIO do
 
   defp restore_screen(tty) do
     %{write: writer_ref} = :prim_tty.handles(tty)
-    {:ok, monitor} = :prim_tty.write(tty, [@mouse_off, "\e[?25h", "\e[?1049l"], self())
+
+    {:ok, monitor} =
+      :prim_tty.write(tty, [@mouse_off, @paste_off, "\e[?25h", "\e[?1049l"], self())
 
     receive do
       {^writer_ref, :ok} -> :ok
@@ -342,6 +370,39 @@ defmodule Geex.TerminalIO do
 
   defp publish(message, state) do
     Enum.each(state.subscribers, fn pid -> send(pid, message) end)
+  end
+
+  # Bytes from the terminal, not in a paste: parsed; a paste's start whose end hasn't come goes to
+  # `Geex.Input.Paste`, which gathers it.
+  defp input(bytes, state) do
+    {events, leftover} = Parser.parse(state.esc_buf <> bytes)
+    Enum.each(events, fn ev -> publish({:geex_io, ev}, state) end)
+    :prim_tty.read(state.tty, 1024)
+
+    bg_answer =
+      Enum.find(Enum.reverse(events), state.bg_answer, &match?({:osc, "11", _}, &1))
+
+    state = %{state | bg_answer: bg_answer}
+
+    if Parser.paste?(leftover) do
+      {:more, paste, early} = Paste.start(leftover)
+      Enum.each(early, fn ev -> publish({:geex_io, ev}, state) end)
+
+      {:noreply, %{state | esc_buf: <<>>, paste: paste, esc_flush: flush_later(@paste_idle_ms)}}
+    else
+      {:noreply,
+       %{state | esc_buf: leftover, esc_flush: schedule_flush(leftover, state.bg_asked_until)}}
+    end
+  end
+
+  @doc false
+  # The reply to the reader's `{reader, :set_unicode_state, false}`: what OTP's `user_drv` does
+  # (`unicode` is `:prim_tty.unicode/2`, which tells the reader), then UTF-8 again. A function of
+  # its own so a test can drive it without a terminal.
+  def answer_unicode(tty, reader, unicode) do
+    tty = unicode.(tty, false)
+    send(reader, {self(), :set_unicode_state, true})
+    unicode.(tty, true)
   end
 
   # A terminal writes a whole control sequence at once, so a leftover that sits this long was

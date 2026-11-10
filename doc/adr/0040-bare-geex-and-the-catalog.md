@@ -553,7 +553,10 @@ One Dark and One Light (Atom's), Tokyo Night, Dracula, Nord and Kanagawa.
 - **General** gains **Tab size** (2, 4, 8; Enter steps; `tab_size`; Tab inserts that many spaces,
   following the file: a tab where the file indents with tabs, Shift+Tab always a tab; a tab
   character draws to its stop, ADR-0027's amendment) and **Final newline** (off unless
-  `final_newline` is true; on, every save; ADR-0019's amendment). Both apply this session and are
+  `final_newline` is true; on, every save; ADR-0019's amendment), and, with
+  [ADR-0045](0045-typing-assists.md), **Indent with** (follow the file, spaces, tabs;
+  `indent_with`), **Close pairs** and **Auto-indent** (on unless `auto_close` / `auto_indent`
+  are false). All apply this session and are
   kept in `settings.json`.
 
 ## See

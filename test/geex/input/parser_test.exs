@@ -159,10 +159,25 @@ defmodule Geex.Input.ParserTest do
             "\e[15~",
             "\e[<0;12M",
             "\e[<0;0;5M",
-            "\e[200~"
+            "\e[201~"
           ] do
         assert Parser.parse(bytes) == {[], ""}, inspect(bytes)
       end
+    end
+
+    # ADR-0026's 2026-11-09 amendment: a bracketed paste is one event, its line breaks and
+    # brackets text, not keys.
+    test "a bracketed paste is one event, however it arrives" do
+      assert Parser.parse("x\e[200~if (a) {\r  b\r}\e[201~y") ==
+               {[{:char, "x"}, {:paste, "if (a) {\r  b\r}"}, {:char, "y"}], ""}
+
+      assert {[], "\e[200~ab" = held} = Parser.parse("\e[200~ab")
+      assert Parser.paste?(held)
+      assert Parser.parse(held <> "c\e[201~z") == {[{:paste, "abc"}, {:char, "z"}], ""}
+      # Its end never came: what came is the paste.
+      assert Parser.flush("\e[200~half") == [{:paste, "half"}]
+      # Not UTF-8: replaced, never a crash later.
+      assert Parser.parse("\e[200~a" <> <<255>> <> "\e[201~") == {[{:paste, "a\uFFFD"}], ""}
     end
 
     test "Shift+Tab (back-tab, ESC [ Z) is a key (roadmap item 18.7)" do

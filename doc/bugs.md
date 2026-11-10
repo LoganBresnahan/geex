@@ -7,6 +7,24 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-11 — A byte that isn't UTF-8 makes the input go deaf, Ctrl-Q included  ✅ FIXED (2026-11-09)
+
+- **Status:** **FIXED** 2026-11-09 on the branch `editor-assist` (roadmap item 19), at the
+  maintainer's word; found the same day by session geex-d3's review of item 19, live in tmux.
+  Older than that branch (main at c3f6f58 has it). Verification is in the
+  [testing.md](testing.md) 2026-11-09 entry "typing assists: geex-d3's review answered".
+- **Symptom:** type `x` (it shows), send one byte `0xff` (`tmux send-keys -H ff`, or paste
+  binary), then `y`: the `y` never shows, and no key, Ctrl-Q included, is read again.
+- **Verified cause:** OTP's `:prim_tty` reader (28.1, `prim_tty.erl` `reader_read/2`), meeting
+  bytes that don't decode as UTF-8, sends its parent `{reader_pid, set_unicode_state, false}`
+  and blocks until it gets `{set_unicode_state, false}` and then `{parent, set_unicode_state, _}`.
+  `Geex.TerminalIO`, the parent, dropped the request in its catch-all `handle_info/2`.
+- **Fix:** answer it as OTP's `user_drv` does: `:prim_tty.unicode(tty, false)` (which tells the
+  reader), `{self(), :set_unicode_state, true}` to the reader, then `:prim_tty.unicode(tty, true)`
+  to read UTF-8 again (`TerminalIO.answer_unicode/3`). The stray byte arrives as its Latin-1
+  character.
+- **Ruled out:** the parser. The bytes never reached it; the reader was blocked before sending.
+
 ## BUG-10 — A tab character draws zero columns wide, so tab-indented files lose their indentation  ✅ FIXED (2026-11-09)
 
 - **Status:** **FIXED** 2026-11-09 by roadmap item 18.7 (ADR-0027's 2026-11-09 amendment), on the

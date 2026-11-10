@@ -13,7 +13,7 @@ defmodule Geex.Loop.Settings do
     * **Commands** — every command typed after `Alt+M` (`Geex.Command.Catalog`, the palette's
       list), how it is typed and what it does; typing filters it (roadmap item 18.6).
     * **General** — the mouse, whether the tree and the edits pane start shown, the tab size,
-      whether a save adds a final newline, and where geex keeps its settings, packages and
+      closing pairs and keeping the indent as you type, whether a save adds a final newline, and where geex keeps its settings, packages and
       caches.
 
   Esc or `Alt+Y` closes it; Tab, Left, Right, `Alt+A` and `Alt+D` move between tabs; Up, Down,
@@ -179,6 +179,30 @@ defmodule Geex.Loop.Settings do
         ]
       },
       %{
+        name: :indent_with,
+        cells: [
+          "Indent with",
+          indent_label(Map.get(ctx, :indent_with, :follow)),
+          "Tab and Enter; Makefiles always tabs; Enter: follow, spaces, tabs"
+        ]
+      },
+      %{
+        name: :auto_close,
+        cells: [
+          "Close pairs",
+          at_start.("auto_close", "on"),
+          "( [ { ' \" ` typed with their closer"
+        ]
+      },
+      %{
+        name: :auto_indent,
+        cells: [
+          "Auto-indent",
+          at_start.("auto_indent", "on"),
+          "Enter keeps the indent, one more after an opener"
+        ]
+      },
+      %{
         name: :final_newline,
         cells: [
           "Final newline",
@@ -195,6 +219,9 @@ defmodule Geex.Loop.Settings do
       }
     ]
   end
+
+  defp indent_label(:follow), do: "follow the file"
+  defp indent_label(other), do: Atom.to_string(other)
 
   # `~` for the home directory, so a path fits.
   defp tilde(path) do
@@ -264,6 +291,13 @@ defmodule Geex.Loop.Settings do
       {:key, :backspace} when view.tab in @searched ->
         {search(view, String.slice(view.query, 0..-2//1)), :none}
 
+      # A paste into the search: its first line (the review of roadmap item 19).
+      {:paste, text} when view.tab in @searched ->
+        line =
+          text |> String.split(["\r\n", "\r", "\n"], parts: 2) |> hd() |> String.slice(0, 200)
+
+        {search(view, view.query <> line), :none}
+
       {:char, g} when view.tab in @searched ->
         {search(view, view.query <> g), :none}
 
@@ -324,7 +358,17 @@ defmodule Geex.Loop.Settings do
       {:themes, %{name: name}} ->
         {:choose_theme, name}
 
-      {:general, %{name: id}} when id in [:mouse, :tree, :edits, :tab_size, :final_newline] ->
+      {:general, %{name: id}}
+      when id in [
+             :mouse,
+             :tree,
+             :edits,
+             :tab_size,
+             :indent_with,
+             :auto_close,
+             :auto_indent,
+             :final_newline
+           ] ->
         {:toggle, id}
 
       _ ->

@@ -5545,3 +5545,157 @@ file gets one; the bare-CR case; a clean buffer whose file changed catches up, t
 indenting a selection is undecided); terminals that send Shift+Tab other than `ESC [ Z`; with no
 left mark when the bar is too narrow for marks, the hidden tabs at the left have no count
 (geex-d3's note, accepted for panes that narrow).
+
+### 2026-11-09 — typing assists: pairs closed as you type them, the indent kept on Enter (roadmap item 19, ADR-0045)
+
+Built on the branch `editor-assist` (worktree `~/geex-comfort`, from main at c3f6f58),
+uncommitted. `Keymap.autoclose/3`, `unpair/2`, `wrap_closer/1`, `newline/3` and `dedent/3`, pure;
+the loop asks them while `auto_close` / `auto_indent` are on (both on by default, two General
+rows, two `settings.json` keys); each edit one command.
+
+**Hand-verified in tmux** (scratch XDG dirs, an empty `as.js`): typing `function f(a) {` gave
+`function f(a) {}` (the `(` paired, `)` stepped over its twin, `{` paired); Enter between the
+braces gave three lines, the cursor indented 2 and `}` on its own line; `return "hi` gave
+`return "hi"` with the cursor before the closing quote (status `2:13`); the saved file read so
+(`od -c`). `geex.log`: no error.
+
+**Automated.** New: `test/geex/loop/assist_test.exs` (10 through `handle_info/2`: pairing,
+stepping over, one `Alt+Z`, no pair before a word or after a letter, a quote pair and a fence of
+three backticks, Backspace on an empty pair, wrapping a selection twice, off; Enter's indent, an
+opener, a pair opening up, a whitespace-only line cleared, Backspace by a level, a tab-indented
+file, off; the settings), Keymap doctests, and two properties: an auto-closed pair and Backspace
+undo each other; Enter adds only whitespace and keeps the indent before the cursor. The second
+found, at 10,000 runs, a combining accent right after an indent (`"    ́aaaa"`): it joins the
+last space into a grapheme that isn't whitespace. The code counted it right by luck; the indent
+is now counted by grapheme in both the code and the property, and the shrunk case is an example
+test. `mix test` → **1382 tests + 24 properties + 135 doctests, 0 failures**, twice;
+`GEEX_PROPERTY_RUNS=10000 mix test --only property` → 24 properties, 0 failures;
+`mix compile --warnings-as-errors --force` clean in dev and test.
+
+**Found dogfooding, fixed in the slice: a paste was typed key by key.** `tmux paste-buffer` of
+`if (x) {` / `  y("a");` / `}` came out with its indent doubled and an extra `}`. Now
+`Geex.TerminalIO` turns on bracketed paste (mode 2004) and the parser reads a paste as one
+`{:paste, text}`; the editor inserts it as it is (one edit, `\r` as `\n`, over a selection too),
+the minibuffer its first line. Live: `tmux paste-buffer -p` of the same block into a fresh file
+saved exactly `if (x) {\n  y("a");\n}\n`. Tests: the parser (whole, in pieces, flushed, invalid
+UTF-8), the loop (as it is, one Alt+Z, over a selection, into the minibuffer). Totals after it:
+**1385 tests + 24 properties + 136 doctests, 0 failures**.
+
+**Indent with** (the maintainer's yes, built after): `Keymap.indent_with/3`, a General row
+(follow the file / spaces / tabs, Enter steps, `indent_with` kept), for Tab and Enter; Go,
+`.tsv`, `.gitconfig` and `.gitmodules` get tabs by kind when following; a Makefile (`Makefile`,
+`GNUmakefile`, `.mk` …) always. Tests: the kinds against each setting, Tab and Enter in a new
+Makefile, Go file and Python file, the setting forcing either way with a Makefile kept, the
+settings cycle and `settings.json`. Live: typing `all:`, Enter and `echo hi` in an empty
+`Makefile` saved `all:\n\techo hi` (`od -c`: Enter's level after `:` is a tab there). Final
+totals: **1390 tests + 24 properties + 137 doctests, 0 failures**, twice;
+`GEEX_PROPERTY_RUNS=10000 mix test --only property` → 24 properties, 0 failures;
+`mix compile --warnings-as-errors --force` clean in dev and test.
+
+**Not tested / deferred:** indent from the syntax tree (ADR-0045 §5); reading `.editorconfig`; Enter over a selection
+(a bare line break); a typed closer dedenting its line; terminals without bracketed paste (a
+paste is typed, assists and all); the minibuffer has no assists; Windows Terminal's paste
+checked only through tmux.
+
+### 2026-11-09 — typing assists: geex-d3's review answered (roadmap item 19, ADR-0045, ADR-0026, BUG-11)
+
+Session geex-d3's adversarial review of the branch found 13 problems, each run; all fixed here,
+still uncommitted on `editor-assist`. The maintainer decided the two design points ("yes do what
+vscode does and yes fix #7 bug"):
+1. **Quotes paired where they close a string** (`print(f"{x}")` → `…")")`): a quote doesn't pair
+   after an odd number of unescaped copies of it on the line, nor after a closer or an accented
+   letter; `'` doesn't pair in prose, Rust, OCaml or the Lisps.
+2. **Step-over swallowed closers the text needed**: VS Code's "auto" rule. The loop tracks the
+   pairs geex closed (`Keymap.track/4`, `closers` in the loop's state with the buffer and its
+   `seq`); only those are stepped over or deleted whole by Backspace.
+3. **CRLF**: a line's `\r` is its end (pairs close there, the cursor after it counts as the end,
+   an indent-only line is cleared), and every break the assists insert is the file's own.
+4. **A multi-line wrap re-blamed the lines between**: across lines it is two inserts now.
+5. **Alt+H then a closer moved and extended the selection**: no step-over while a selection is
+   live.
+6. **Paste**: (a) the minibuffer takes a paste in one insert, capped at 4096 graphemes (20k
+   graphemes took 13.9 s before); (b) `Geex.Input.Paste` gathers a split paste, searching only the
+   new bytes (16 MB was ~50 s of dead input before); (c) its line breaks follow the file.
+7. **BUG-11, input deaf after a byte that isn't UTF-8** (older than the branch): `TerminalIO`
+   answers `:prim_tty`'s handshake as `user_drv` does.
+8. **`:` indented in every file**: only Python, YAML and Makefiles (`Keymap.kind_opts/1`).
+9. **Test gaps**: `Geex.Gen.code_fragment/1` (weighted toward brackets, quotes and colons), the
+   Enter property's oracle is the line's construction now, examples on indented lines.
+The review's smaller items, taken: past 1 MB a paste is handed on in pieces, never typed; a
+stalled paste ends after 3 s; control characters dropped from a paste (not tabs or breaks); a
+pasted combining mark doesn't move the cursor too far (shared with `Alt+V`); a paste into a
+preview says why it's refused; the settings search takes a paste; `paste?/1`'s doctest escaped;
+quotes after combining marks; no auto-indent in `.tsv`/`.csv`; more Makefile names
+(`BSDmakefile`, `Makefile.am`/`.in`, `.mk.in`); a key reads the text only up to its line; the wrap
+sets the goal column; Backspace keeps a hand-typed pair's closer; a form feed isn't indent.
+
+**Planted bugs, each reverted:** the opener's level without the line's indent (`inner = unit`,
+the review's plant) fails 2; the tracking not shifting on inserts fails 4 (the tracking property
+among them); dropping the odd-quote rule fails 2.
+
+**Hand-verified in tmux** (scratch XDG dirs): BUG-11: `x`, `send-keys -H ff`, `y` showed `xÿy`, and
+Ctrl-Q quit (before: deaf); typing `print(f"{x}")` in a `.py` saved exactly that; a 1,982,000-byte
+paste (`paste-buffer -p`) showed in 0.21 s and saved byte for byte; `geex.log`: no error.
+
+**Automated.** New: `test/geex/input/paste_test.exs` (split at every byte through ESC, NUL, CRLF,
+é and the end marker; random reads as a property; the 1 MB hand-on; a stalled end; the unicode
+handshake driven with a stub), the tracking property (every tracked pair sits on a real opener
+and closer around the cursor, over generated typing, Backspace and moves), the review's cases
+through `handle_info/2` in `assist_test.exs`, and Keymap examples (CRLF, quotes, kinds).
+`mix test` → **1409 tests + 26 properties + 143 doctests, 0 failures**, twice;
+`GEEX_PROPERTY_RUNS=10000 mix test --only property` → 26 properties, 0 failures;
+`mix compile --warnings-as-errors --force` clean in dev and test.
+
+**Not tested / deferred:** a paste that stalls past 3 s keeps the rest as keys (assists and all);
+a broken terminal's unended paste swallows 3 s of keys; mode 2004 left on after a halt (as the
+mouse modes are); `'` in other languages where it isn't a quote; Enter over a selection; indent
+from the syntax tree.
+
+### 2026-11-09 — typing assists: geex-d3's re-verify answered (roadmap item 19, ADR-0045, ADR-0026)
+
+The re-verify confirmed the first list fixed and BUG-11 and paste working live, and found five
+more in the closer tracking, each run with the buffer's change notifications delivered as the
+live loop gets them (no test did that before). All fixed, still uncommitted on `editor-assist`:
+1. **Keys arriving together double-closed** (`(` and `x` in one read, then `)` → `f(x))`): each
+   key's own notification, behind the queued keys, dropped the pairs. The tracked pairs are now
+   checked against the buffer's version when each key arrives (`fresh_closers/2`, from the
+   session snapshot the key reads anyway), never on notifications.
+2. **A wrap's selection was cleared by its own notification**: the loop remembers the versions
+   its own edits made (`own_edits`), and a notification up to its newest one clears nothing.
+3. **A quote inside the other kind of string was counted** (`x = "it's" + '` didn't pair):
+   string state is read across all three quotes, a backslash in a string escaping what follows.
+4. **CRLF: End put the cursor after the `\r`**, so a paste or a wrap wrote past it: End, Right,
+   the vertical moves, a click past the end and the session's clamp stop before a trailing `\r`.
+   That also fixes Backspace and Delete joining CRLF lines (they left a stray `\r`, older than
+   the branch); Enter with auto-indent off, and over a selection, inserts the file's break.
+5. **A save between keys dropped the pairs**: actions that change neither text nor cursor keep
+   them.
+Lower items taken: `` ` `` doesn't pair in the Lisps, OCaml or LaTeX, nor `'` in F#, SML, Haskell
+or LaTeX; `:` ending a `#` comment doesn't indent; `Makefile.toml` isn't a Makefile; ADR-0045's
+cost claim and its See arities corrected. Accepted as limits (ADR-0045): mixed line endings, a
+lone combining mark inside a pair, a >1 MB minibuffer paste, a click keeping pairs.
+
+**Tests.** `assist_test.exs`'s keys now deliver the notifications they cause (`flush/1`), and a
+`burst/2` queues keys before them; new cases for each finding, moving inside a pair and out, and
+an agent's change whose notice comes late. A new property: a pair geex closed, filled, the cursor
+moved about inside and back, still steps over. **Planted, each reverted:** a move forgetting
+every pair fails 2 (the review's plant: before, 0); no version check at the key fails 1; dropping
+pairs on notifications again (the original #1) fails 1.
+
+**Hand-verified in tmux** (scratch XDG dirs): `f(x) and g("a", [1, 2]) + {k: v}` sent in one write
+(`send-keys -l`, the burst case) saved exactly that; in `foo\r\nbar`, End then a bracketed paste
+of `X\nY` saved `fooX\r\nY\r\nbar` (`od -c`). `geex.log`: no error.
+
+**Automated.** `mix test` → **1417 tests + 27 properties + 143 doctests, 0 failures**, twice;
+`GEEX_PROPERTY_RUNS=10000 mix test --only property` → 27 properties, 0 failures;
+`mix compile --warnings-as-errors --force` clean in dev and test.
+
+**Not tested / deferred:** as the entry before, and ADR-0045's known limits.
+
+geex-d3's third pass (seed 131, notifications delivered, live in tmux): all good. Its one optional
+note, taken: a line's end trims only the line ending's `\r` (`String.replace_suffix/3`, in
+`Keymap`, `Session`'s clamp and `Mouse.text_pos/5`), so on `a\r\r\nb` End stops at `{0, 2}`, before
+the last one only; an example test pins it. Re-run after it: see the totals just below.
+Totals after it: **1418 tests + 27 properties + 143 doctests, 0 failures**, twice;
+`GEEX_PROPERTY_RUNS=10000 mix test --only property` → 27 properties, 0 failures;
+`mix compile --warnings-as-errors --force` clean in dev and test.

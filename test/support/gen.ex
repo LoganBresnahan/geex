@@ -70,6 +70,28 @@ defmodule Geex.Gen do
     piece() |> list_of(max_length: Keyword.get(opts, :max_length, 12)) |> map(&Enum.join/1)
   end
 
+  # What code is mostly made of where the typing assists act (roadmap item 19, the review's ask:
+  # brackets, quotes, colons and the punctuation a pair closes before), with letters, a digit,
+  # `_`, spaces, a tab, a backslash and now and then a combining mark.
+  @code_pieces ~w|( ) [ ] { } ' " ` : ; . , = > a b x _ 1 \\| ++ [" ", " ", "\t", "\u0301"]
+
+  @doc """
+  A fragment of code-like text, up to `:max_length` (default 12) graphemes' worth of pieces
+  weighted toward brackets, quotes and punctuation, so properties over the typing assists
+  (ADR-0045) reach their triggers.
+  """
+  @spec code_fragment(keyword()) :: StreamData.t(String.t())
+  def code_fragment(opts \\ []) do
+    @code_pieces
+    |> member_of()
+    |> list_of(max_length: Keyword.get(opts, :max_length, 12))
+    |> map(&Enum.join/1)
+  end
+
+  @doc "One piece of `code_fragment/1`: a key to type."
+  @spec code_piece() :: StreamData.t(String.t())
+  def code_piece, do: member_of(@code_pieces -- ["\u0301"])
+
   @doc "A line: usually one of a small set that recurs, sometimes a fragment."
   @spec line() :: StreamData.t(String.t())
   def line, do: frequency([{3, member_of(@lines)}, {1, fragment()}])

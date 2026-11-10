@@ -44,6 +44,7 @@ defmodule Geex.Input.Parser do
                  x: col, y: row,        # 0-based, from the terminal's top-left
                  mods: [:shift | :alt | :ctrl]}}
       {:osc, ps, pt}             # a terminal's OSC answer, e.g. {"11", "rgb:1e1e/1e1e/2e2e"}
+      {:paste, text}             # a bracketed paste (mode 2004), as the terminal sent it
 
   ## Answers to queries ([ADR-0040](../../../doc/adr/0040-bare-geex-and-the-catalog.md) §1)
 
@@ -59,6 +60,9 @@ defmodule Geex.Input.Parser do
   @max_sequence 32
   # The longest incomplete OSC answer held; an OSC 11 answer is about 30 bytes.
   @max_osc 256
+  # The longest paste held while its end hasn't come (ADR-0026's 2026-11-09 amendment): past it,
+  # what came is the paste, and the rest arrives as keys.
+  @max_paste 16 * 1024 * 1024
 
   @type event ::
           {:key, atom()}
@@ -67,6 +71,7 @@ defmodule Geex.Input.Parser do
           | {:alt, byte() | :up | :down | :left | :right}
           | {:mouse, mouse()}
           | {:osc, binary(), binary()}
+          | {:paste, String.t()}
 
   @type mouse :: %{
           action: :press | :release | :drag | :wheel | :move,
@@ -112,6 +117,8 @@ defmodule Geex.Input.Parser do
   @spec flush(binary()) :: [event()]
 
   def flush(<<>>), do: []
+  # A paste whose end never came: what came is the paste.
+  def flush(<<"\e[200~", body::binary>>), do: [{:paste, String.replace_invalid(body)}]
   def flush(<<"\e", rest::binary>>), do: [{:key, :esc} | flush(rest)]
 
   def flush(bytes) do
@@ -139,6 +146,19 @@ defmodule Geex.Input.Parser do
   def mouse_report?(<<"\e[<", _::binary>>), do: true
   def mouse_report?(<<"\e[M", _::binary>>), do: true
   def mouse_report?(_leftover), do: false
+
+  @doc """
+  Whether a `leftover` is a bracketed paste still waiting for its end (`ESC [ 201 ~`). The caller
+  waits a second for the rest, then flushes what came as the paste.
+
+      iex> Geex.Input.Parser.paste?("\\e[200~half a line")
+      true
+      iex> Geex.Input.Parser.paste?("\\e[2")
+      false
+  """
+  @spec paste?(binary()) :: boolean()
+  def paste?(<<"\e[200~", _::binary>>), do: true
+  def paste?(_leftover), do: false
 
   @doc """
   Whether a `leftover` is the start of the terminal's answer to an OSC 11 query (ADR-0040), and
@@ -172,6 +192,23 @@ defmodule Geex.Input.Parser do
 
   defp do_parse(<<"\e[M", rest::binary>> = seq, acc) when byte_size(rest) < 3,
     do: {Enum.reverse(acc), seq}
+
+  # A bracketed paste (mode 2004): `ESC [ 200 ~`, the text, `ESC [ 201 ~`, read whole as one
+  # event, so its line breaks and brackets are text, not keys. Before the CSI clause, which would
+  # drop `200~` and type the rest. Its end not here yet → leftover, up to @max_paste.
+  defp do_parse(<<"\e[200~", rest::binary>> = seq, acc) do
+    case :binary.match(rest, "\e[201~") do
+      {at, 6} ->
+        <<body::binary-size(at), _end::binary-size(6), after_seq::binary>> = rest
+        do_parse(after_seq, [{:paste, String.replace_invalid(body)} | acc])
+
+      :nomatch when byte_size(seq) <= @max_paste ->
+        {Enum.reverse(acc), seq}
+
+      :nomatch ->
+        {Enum.reverse([{:paste, String.replace_invalid(rest)} | acc]), <<>>}
+    end
+  end
 
   defp do_parse(<<"\e[", rest::binary>> = seq, acc) do
     case csi_end(rest, 0) do

@@ -96,6 +96,9 @@ defmodule Geex.Loop do
   # `scroll_for/4` along the column axis.
   @hscrolloff 8
 
+  # The most of a paste's first line the minibuffer takes (roadmap item 19).
+  @paste_line 4096
+
   # How often the last session is kept while it changes (roadmap item 18.9).
   @session_ms 2_000
 
@@ -295,7 +298,9 @@ defmodule Geex.Loop do
       {"mouse", :mouse},
       {"tree", :tree_shown},
       {"edits", :edits_shown},
-      {"final_newline", :final_newline}
+      {"final_newline", :final_newline},
+      {"auto_close", :auto_close},
+      {"auto_indent", :auto_indent}
     ]
     |> Enum.reduce(state, fn
       {key, field}, acc ->
@@ -308,6 +313,15 @@ defmodule Geex.Loop do
       case settings["tab_size"] do
         n when n in @tab_sizes -> %{state | tab_size: n}
         _ -> state
+      end
+    end)
+    |> then(fn state ->
+      case settings["indent_with"] do
+        w when w in ["follow", "spaces", "tabs"] ->
+          %{state | indent_with: String.to_existing_atom(w)}
+
+        _ ->
+          state
       end
     end)
   end
@@ -357,6 +371,22 @@ defmodule Geex.Loop do
       # The tab size (roadmap item 18.7): how many spaces Tab inserts and how wide a tab
       # character draws. settings.json's `tab_size`, 2 unless it says otherwise.
       tab_size: 2,
+      # Typing assists (roadmap item 19, ADR-0045), settings.json's `auto_close` and
+      # `auto_indent`, on unless they say false: pairs closed as you type them, the indent kept on
+      # Enter.
+      auto_close: true,
+      auto_indent: true,
+      # What an indent level is (roadmap item 19): settings.json's `indent_with`, "follow" (the
+      # file's kind, else its indented lines), "spaces" or "tabs" (`Keymap.indent_with/3`).
+      indent_with: :follow,
+      # The pairs geex closed as they were typed and still tracks (roadmap item 19, VS Code's
+      # "auto" rule: only these are stepped over or deleted whole), `%{buffer, seq, pairs}` with
+      # `pairs` as `Keymap.track/4` keeps them, or nil. Dropped when the buffer changes under
+      # them (another `seq`), or another tab is entered.
+      closers: nil,
+      # The versions (`{buffer, seq}`) the loop's own last edits made, newest first, so their
+      # notifications don't undo what the loop kept (a wrap's selection, the review of item 19).
+      own_edits: [],
       # The last session (roadmap item 18.9, `Geex.LastSession`): `:project` keeps the panes and
       # the sizes, `:sizes` (`geex FILE`) only the sizes, `nil` nothing; and what was kept last.
       # `session_kept` is what the writer last confirmed (for a `:sizes` session, the sizes
@@ -514,11 +544,14 @@ defmodule Geex.Loop do
   # out-of-band edit (agent/reconcile) would otherwise leave a stale selection whose carets
   # no longer match the text — a later copy/cut would grab the wrong region.
   # Any pane showing the buffer repaints; only the current tab's selection is affected.
-  def handle_info({:geex_buffer_change, buffer, _v, _footprint}, %{watched: w} = state)
+  def handle_info({:geex_buffer_change, buffer, v, _footprint}, %{watched: w} = state)
       when is_map_key(w, buffer) do
     # A drag's anchor was in the text before the change: the drag ends with the selection.
+    # The loop's own edit is already reflected (a wrap keeps its selection); any other change
+    # drops it. The closers it tracks are checked against the buffer's version when the next key
+    # arrives (`fresh_closers/2`), so a notification late behind queued keys can't drop them.
     state =
-      if current_buffer(state) == buffer,
+      if current_buffer(state) == buffer and v > newest_own_edit(state, buffer),
         do: %{state | selection: nil, drag: nil},
         else: state
 
@@ -977,9 +1010,36 @@ defmodule Geex.Loop do
     state = %{state | panes: Panes.update_current(state.panes, &%{&1 | hold: nil})}
 
     case safe_session_snapshot() do
-      {:ok, %{text: text, cursor: cursor}} -> apply_key(event, cursor, text, state)
-      _ -> state
+      {:ok, %{text: text, cursor: cursor} = snap} ->
+        apply_key(event, cursor, text, fresh_closers(state, snap))
+
+      _ ->
+        state
     end
+  end
+
+  # The closers the loop tracks hold while the text is as the loop's own last edit left it: the
+  # buffer's version when this key arrives says (the review of item 19: checked here, not on the
+  # change notifications, which a burst of keys arrives ahead of).
+  defp fresh_closers(%{closers: %{seq: seq}} = state, %{seq: seq}), do: state
+  defp fresh_closers(%{closers: nil} = state, _snap), do: state
+  defp fresh_closers(state, _snap), do: %{state | closers: nil}
+
+  # Note an edit the loop made, by the version it made.
+  defp own_edit(state, %{seq: seq}) do
+    edit = {current_buffer(state), seq}
+    %{state | own_edits: Enum.take([edit | state.own_edits], 16)}
+  end
+
+  defp own_edit(state, _snap), do: state
+
+  # The newest version the loop's own edits made to `buffer` (-1 for none): a notification up to
+  # it is already reflected in what the loop did, the loop's own or one queued behind a key.
+  defp newest_own_edit(state, buffer) do
+    state.own_edits
+    |> Enum.filter(&match?({^buffer, _}, &1))
+    |> Enum.map(&elem(&1, 1))
+    |> Enum.max(fn -> -1 end)
   end
 
   # Post exactly one :repaint for a burst of dirtying events.
@@ -1161,7 +1221,7 @@ defmodule Geex.Loop do
         :ok
     end
 
-    %{state | selection: nil, goal: 0, drag: nil}
+    %{state | selection: nil, goal: 0, drag: nil, closers: nil}
   end
 
   # The only pane lost its only buffer some other way than Alt+K (an agent closed it, it
@@ -1334,6 +1394,9 @@ defmodule Geex.Loop do
     :quit,
     :toggle_preview
   ]
+
+  # A paste is an edit: refused, saying why, as other edit keys are (the review of item 19).
+  defp preview_key({:paste, _}, state), do: schedule_repaint(%{state | notice: @read_only})
 
   defp preview_key(event, state) do
     case preview_scroll(event) do
@@ -3277,6 +3340,7 @@ defmodule Geex.Loop do
       theme_id: state.theme_id,
       saved: state.settings_saved,
       tab_size: state.tab_size,
+      indent_with: state.indent_with,
       installing: MapSet.new(Map.keys(state.installing))
     }
   end
@@ -3350,6 +3414,40 @@ defmodule Geex.Loop do
     keep(%{state | tab_size: n}, "tab_size", n, "the tab size is #{n}")
   end
 
+  # Enter steps through follow the file, spaces, tabs.
+  defp settings_action({:toggle, :indent_with}, state) do
+    next = %{follow: :spaces, spaces: :tabs, tabs: :follow}[state.indent_with]
+
+    keep(
+      %{state | indent_with: next},
+      "indent_with",
+      Atom.to_string(next),
+      "indent with: #{indent_label(next)}"
+    )
+  end
+
+  defp settings_action({:toggle, :auto_close}, state) do
+    on? = not state.auto_close
+
+    keep(
+      %{state | auto_close: on?},
+      "auto_close",
+      on?,
+      "closing pairs as you type is #{onoff(on?)}"
+    )
+  end
+
+  defp settings_action({:toggle, :auto_indent}, state) do
+    on? = not state.auto_indent
+
+    keep(
+      %{state | auto_indent: on?},
+      "auto_indent",
+      on?,
+      "keeping the indent on Enter is #{onoff(on?)}"
+    )
+  end
+
   defp settings_action({:toggle, :final_newline}, state) do
     on? = not state.final_newline
 
@@ -3367,6 +3465,9 @@ defmodule Geex.Loop do
       _ -> unset
     end
   end
+
+  defp indent_label(:follow), do: "follow the file"
+  defp indent_label(other), do: Atom.to_string(other)
 
   defp onoff(true), do: "on"
   defp onoff(false), do: "off"
@@ -3912,7 +4013,7 @@ defmodule Geex.Loop do
           else: out
 
       {from, _to} = shell.range
-      landing = cursor_after_insert(from, out)
+      landing = cursor_after_insert(from, out, text)
       state = apply_clipboard_edit(state, replace_cmd(shell.range, out), landing)
       %{state | notice: "| #{shell.cmd} replaced the selection (Alt+Z takes it back)"}
     else
@@ -4542,10 +4643,77 @@ defmodule Geex.Loop do
   # through apply_action/4 — the **shared action vocabulary** the typed verbs
   # (`Geex.Loop.Verbs`) also apply through, so `copy` and `Alt+C` converge on one code
   # path (the ADR-0028 parity principle, ADR-0003 in miniature).
+  # A bracketed paste (ADR-0026's 2026-11-09 amendment): the text as it is, its line breaks the
+  # file's own, at the cursor or over the selection, one recorded edit, no typing assists.
+  defp apply_key({:paste, pasted}, cursor, text, state) do
+    pasted = paste_text(pasted, Keymap.eol(text))
+    state = %{state | closers: nil}
+
+    cond do
+      pasted == "" ->
+        state
+
+      match?(%Selection{anchor: a, active: b} when a != b, state.selection) ->
+        schedule_repaint(type_over(state, Selection.range(state.selection), pasted, text))
+
+      true ->
+        landing = cursor_after_insert(cursor, pasted, text)
+        schedule_repaint(apply_clipboard_edit(state, insert_cmd(cursor, pasted), landing))
+    end
+  end
+
   defp apply_key(event, cursor, text, state) do
-    case over_selection(event, state.selection) do
-      nil -> resolve_key(event, cursor, text, state)
-      {range, typed} -> schedule_repaint(type_over(state, range, typed))
+    case {over_selection(event, state.selection), wrap_closer(event, state)} do
+      {nil, _} ->
+        resolve_key(event, cursor, text, state)
+
+      {{range, g}, closer} when is_binary(closer) ->
+        schedule_repaint(wrap(%{state | closers: nil}, range, g, closer, text))
+
+      {{range, typed}, nil} ->
+        # Enter over a selection is the file's line break.
+        typed = if typed == "\n", do: Keymap.eol(text), else: typed
+        schedule_repaint(type_over(%{state | closers: nil}, range, typed, text))
+    end
+  end
+
+  # An opener or a quote typed over a selection wraps it, while pairs close as you type
+  # (roadmap item 19).
+  defp wrap_closer({:char, g}, %{auto_close: true}), do: Keymap.wrap_closer(g)
+  defp wrap_closer(_event, _state), do: nil
+
+  # Wrap the selection in `open`…`close`; the selection stays on what it held, moved in by the
+  # opener, with the cursor at its end. One recorded edit on one line; across lines two inserts,
+  # the closer then the opener (two Alt+Z), so the lines between keep who wrote them (blame
+  # spans whatever one command changes, the review of item 19).
+  defp wrap(state, {{l1, c1} = from, {l2, c2} = to} = range, open, close, text) do
+    {result, state} =
+      if l1 == l2 do
+        with {:ok, inner} <- Doc.slice(Doc.new(text), range),
+             {:ok, snap} = ok <- safe_dispatch(replace_cmd(range, open <> inner <> close)),
+             do: {ok, own_edit(state, snap)},
+             else: (other -> {other, state})
+      else
+        with {:ok, first} <- safe_dispatch(insert_cmd(to, close)),
+             {:ok, second} = ok <- safe_dispatch(insert_cmd(from, open)),
+             do: {ok, state |> own_edit(first) |> own_edit(second)},
+             else: (other -> {other, state})
+      end
+
+    case result do
+      {:ok, %{text: after_text}} ->
+        from = put_elem(from, 1, c1 + 1)
+        to = {l2, if(l1 == l2, do: c2 + 1, else: c2)}
+        set_cursor(to)
+
+        %{
+          state
+          | selection: Selection.new(from) |> Selection.extend(to),
+            goal: Keymap.goal_column(to, after_text)
+        }
+
+      _ ->
+        %{state | selection: nil}
     end
   end
 
@@ -4563,16 +4731,66 @@ defmodule Geex.Loop do
 
   # Replace the selection with what was typed, one recorded edit on the shared path; the cursor
   # lands after it and the selection is gone.
-  defp type_over(state, {from, _to} = range, typed),
-    do: apply_clipboard_edit(state, replace_cmd(range, typed), cursor_after_insert(from, typed))
+  defp type_over(state, {from, _to} = range, typed, text),
+    do:
+      apply_clipboard_edit(
+        state,
+        replace_cmd(range, typed),
+        cursor_after_insert(from, typed, text)
+      )
+
+  # The typing assists (roadmap item 19, ADR-0045), while their settings are on: an action for
+  # the key, or `nil` to let the keymap resolve it as it would without them.
+  defp assist({:char, _} = event, cursor, text, %{auto_close: true} = state, pairs),
+    do: Keymap.autoclose(event, cursor, text, pairs, Keymap.kind_opts(current_path(state)))
+
+  defp assist({:key, :backspace}, cursor, text, state, pairs) do
+    (state.auto_close && Keymap.unpair(cursor, text, pairs)) ||
+      (state.auto_indent && Keymap.dedent(cursor, text, state.tab_size)) || nil
+  end
+
+  defp assist({:key, :enter}, cursor, text, %{auto_indent: true} = state, _pairs) do
+    Keymap.newline(cursor, text, indent_unit(text, state), Keymap.kind_opts(current_path(state)))
+  end
+
+  defp assist(_event, _cursor, _text, _state, _pairs), do: nil
+
+  # The closers the loop tracks for the current tab, unless a selection is live (a step-over
+  # mustn't extend it, the review of item 19).
+  defp live_pairs(%{closers: %{buffer: b, pairs: pairs}, selection: nil} = state),
+    do: if(current_buffer(state) == b, do: pairs, else: [])
+
+  defp live_pairs(_state), do: []
+
+  defp current_path(state),
+    do: with(pid when is_pid(pid) <- current_buffer(state), do: safe_status(pid)[:path])
+
+  # One indent level for the current file holding `text`: a tab or the tab size's spaces, by the
+  # "Indent with" setting, the file's kind and its indented lines (`Keymap.indent_with/3`).
+  defp indent_unit(text, state) do
+    case indent_with(text, state) do
+      :tabs -> "\t"
+      :spaces -> String.duplicate(" ", state.tab_size)
+    end
+  end
+
+  defp indent_with(text, state),
+    do: Keymap.indent_with(text, current_path(state), state.indent_with)
 
   defp resolve_key(event, cursor, text, state) do
     # Tab follows the file: a tab where it indents with tabs, else the tab size's spaces, which
     # the keymap doesn't hold (roadmap item 18.7).
+    pairs = live_pairs(state)
+
     action =
       if event == {:key, :tab},
-        do: Keymap.indent(cursor, state.tab_size, Keymap.indent_style(text)),
-        else: Keymap.resolve(event, cursor, text)
+        do: Keymap.indent(cursor, state.tab_size, indent_with(text, state)),
+        else: assist(event, cursor, text, state, pairs) || Keymap.resolve(event, cursor, text)
+
+    # The tracked closers after this key; a move keeps them at the buffer's version, an edit
+    # takes the version it made (below), anything else drops them.
+    tracked = Keymap.track(pairs, event, action, cursor)
+    seen = state.closers
 
     case action do
       :ignore ->
@@ -4594,6 +4812,7 @@ defmodule Geex.Loop do
         schedule_repaint(%{state | minibuffer: Minibuffer.open(:palette)})
 
       {:move, new_cursor} ->
+        state = %{state | closers: (seen && tracked != [] && %{seen | pairs: tracked}) || nil}
         schedule_repaint(apply_move(state, event, new_cursor, text))
 
       {:edit, cmd, new_cursor} ->
@@ -4605,12 +4824,23 @@ defmodule Geex.Loop do
         # dispatch still refreshes.
         state =
           case safe_dispatch(cmd) do
-            {:ok, %{text: text_after}} ->
+            {:ok, %{text: text_after} = snap} ->
               set_cursor(new_cursor)
-              %{state | goal: Keymap.goal_column(new_cursor, text_after), selection: nil}
+
+              closers =
+                if tracked != [],
+                  do: %{buffer: current_buffer(state), seq: snap[:seq], pairs: tracked}
+
+              %{
+                state
+                | goal: Keymap.goal_column(new_cursor, text_after),
+                  selection: nil,
+                  closers: closers
+              }
+              |> own_edit(snap)
 
             _ ->
-              state
+              %{state | closers: nil}
           end
 
         schedule_repaint(state)
@@ -4648,7 +4878,7 @@ defmodule Geex.Loop do
         schedule_repaint(do_cut(state, text))
 
       :paste ->
-        schedule_repaint(do_paste(state, cursor))
+        schedule_repaint(do_paste(state, cursor, text))
 
       :undo ->
         schedule_repaint(do_undo(state))
@@ -4955,7 +5185,7 @@ defmodule Geex.Loop do
     TerminalIO.copy(text)
   end
 
-  defp do_paste(state, cursor) do
+  defp do_paste(state, cursor, text) do
     case Clipboard.top() do
       "" ->
         state
@@ -4965,10 +5195,10 @@ defmodule Geex.Loop do
           case state.selection do
             %Selection{} = sel ->
               {from, _to} = range = Selection.range(sel)
-              {replace_cmd(range, pasted), cursor_after_insert(from, pasted)}
+              {replace_cmd(range, pasted), cursor_after_insert(from, pasted, text)}
 
             nil ->
-              {insert_cmd(cursor, pasted), cursor_after_insert(cursor, pasted)}
+              {insert_cmd(cursor, pasted), cursor_after_insert(cursor, pasted, text)}
           end
 
         apply_clipboard_edit(state, cmd, landing)
@@ -5002,11 +5232,31 @@ defmodule Geex.Loop do
 
   # Where the cursor lands after inserting `text` at a caret — past the inserted bytes,
   # accounting for any newlines (a multi-line paste ends on the last inserted line).
-  defp cursor_after_insert({line, col}, text) do
-    case String.split(text, "\n") do
+  #
+  # Counted on the line as it ends up, so a pasted combining mark that joins the grapheme before
+  # it doesn't move the cursor a grapheme too far (the review of item 19).
+  # Without the text (a redo's landing): counted by the inserted graphemes alone.
+  defp cursor_after_insert({line, col}, inserted) do
+    case String.split(inserted, "\n") do
       [single] -> {line, col + String.length(single)}
       segments -> {line + length(segments) - 1, String.length(List.last(segments))}
     end
+  end
+
+  defp cursor_after_insert({line, col}, inserted, text) do
+    case String.split(inserted, "\n") do
+      [single] -> {line, String.length(String.slice(line_at(text, line), 0, col) <> single)}
+      segments -> {line + length(segments) - 1, String.length(List.last(segments))}
+    end
+  end
+
+  # A paste's text as it goes in: its line breaks the file's `eol`, and the control characters
+  # that would draw as nothing (escapes, NUL …) dropped, tabs and line breaks kept.
+  defp paste_text(pasted, eol) do
+    pasted
+    |> String.replace(~r/[\x{0}-\x{8}\x{B}\x{C}\x{E}-\x{1F}\x{7F}-\x{9F}]/u, "")
+    |> String.replace(["\r\n", "\r"], "\n")
+    |> then(&if(eol == "\r\n", do: String.replace(&1, "\n", "\r\n"), else: &1))
   end
 
   ## Undo/redo (ADR-0031). History operations on the active buffer — not recorded edits. The
@@ -5208,6 +5458,13 @@ defmodule Geex.Loop do
 
       {:char, g} ->
         schedule_repaint(refresh_matches(%{state | minibuffer: Minibuffer.insert(mb, g)}))
+
+      # A paste: its first line, at most @paste_line graphemes, in one insert (the minibuffer is
+      # one line, and inserting grapheme by grapheme re-splits the input every time).
+      {:paste, pasted} ->
+        line = pasted |> String.split(["\r\n", "\r", "\n"], parts: 2) |> hd()
+        line = line |> paste_text("\n") |> String.slice(0, @paste_line)
+        schedule_repaint(refresh_matches(%{state | minibuffer: Minibuffer.insert(mb, line)}))
 
       {:key, :backspace} ->
         schedule_repaint(refresh_matches(%{state | minibuffer: Minibuffer.backspace(mb)}))

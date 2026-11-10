@@ -1,6 +1,6 @@
 # ADR-0026: Terminal input model & keymap (one default, capability-gated extras)
 
-- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read.
+- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read; bracketed paste.
 - **Date:** 2026-06-08
 - **Refines:** [ADR-0025](0025-user-config-layer.md) (the keymap is user-config *data*),
   [ADR-0024](0024-tui-core-extractable.md) (the TUI core / `prim_tty`)
@@ -130,8 +130,37 @@ as Left and Right.
 Shift+Tab, back-tab (`ESC [ Z`), is read too, as `{:key, :shift_tab}`: it inserts a real tab
 whatever the file indents with, while Tab follows the file (`Keymap.indent_style/1`: the first
 1000 lines' indented ones vote, tab-led against space-led; a tie or none is spaces). Nothing else
-binds it: the tree, the edits and output panes, the settings view and the minibuffer ignore it. A
-pasted tab arrives as the Tab key, so in a tab-indented file it stays a tab.
+binds it: the tree, the edits and output panes, the settings view and the minibuffer ignore it.
+
+**Bracketed paste** (mode 2004, with [ADR-0045](0045-typing-assists.md)): `Geex.TerminalIO` turns
+it on at start (and after SIGCONT) and off on every orderly way out, beside the mouse modes (a
+halt leaves both on, as it leaves the alternate screen). The parser reads a paste that arrives
+whole, `ESC [ 200 ~` … `ESC [ 201 ~`, as one `{:paste, text}` (invalid UTF-8 replaced). One that
+doesn't is gathered by `Geex.Input.Paste`, which `TerminalIO` feeds each read: only the new bytes
+and the five before them are searched for the end, and the chunks are joined once, so a paste
+costs what its size does (a 2 MB paste appears in a fraction of a second). Past 1 MB with no end,
+what came is handed on as a paste of its own (cut where no character or CRLF is split), so the
+rest of a huge paste is never typed as keys; a paste that stalls 3 s with no end is what came
+(a broken terminal that never ends one costs 3 s of keys typed into it). The editor inserts a
+paste as it is: one recorded edit, at the cursor or over a selection, its line breaks the file's
+own, control characters but tabs and breaks dropped, the cursor counted on the line as it ends
+up (a pasted combining mark joins the grapheme before it), and no typing assist; the minibuffer
+takes its first line, up to 4096 graphemes, in one insert; the settings search takes it too; a
+preview refuses it, saying why. Without bracketed paste, a terminal paste was typed key by key,
+and the assists doubled its indents and added closers (found dogfooding ADR-0045). A terminal
+that doesn't do mode 2004 still types a paste key by key.
+
+**Input that isn't UTF-8** (BUG-11, found by the review of ADR-0045): OTP's `:prim_tty` reader,
+meeting such bytes, asks its parent to read them as Latin-1 and blocks until it answers.
+`TerminalIO` dropped the request, and the input went deaf, Ctrl-Q included. It now answers as
+OTP's `user_drv` does (`TerminalIO.answer_unicode/3`) and switches back to UTF-8, so the stray
+byte arrives as its Latin-1 character and what follows as usual.
+
+**A CRLF line's end** (the re-verify of ADR-0045): the cursor stops before a line's trailing
+`\r`, never after it: End, `Alt+F`, Right, the vertical moves, a click past a line's end
+(`Mouse.text_pos/5`) and the session's clamp all treat it as the line's end. Typing at End no
+longer writes past the `\r`, Backspace at a line's start and Delete at its end join CRLF lines
+whole, and Enter with auto-indent off, or over a selection, inserts the file's own break.
 
 ## See
 

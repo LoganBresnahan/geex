@@ -63,11 +63,12 @@ defmodule Geex.Loop.Mouse do
 
     if line >= length(lines) do
       last = length(lines) - 1
-      {{last, String.length(List.last(lines))}, {dx, dy}}
+      {{last, String.length(String.replace_suffix(List.last(lines), "\r", ""))}, {dx, dy}}
     else
       text_line = Enum.at(lines, line)
       g = Width.col_at_display(text_line, max(col, 0) + hscroll + 1, tab) - 1
-      {{line, min(g, String.length(text_line))}, {dx, dy}}
+      # Past a CRLF line's end is before its `\r`.
+      {{line, min(g, String.length(String.replace_suffix(text_line, "\r", "")))}, {dx, dy}}
     end
   end
 
