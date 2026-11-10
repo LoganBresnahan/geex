@@ -5699,3 +5699,27 @@ the last one only; an example test pins it. Re-run after it: see the totals just
 Totals after it: **1418 tests + 27 properties + 143 doctests, 0 failures**, twice;
 `GEEX_PROPERTY_RUNS=10000 mix test --only property` → 27 properties, 0 failures;
 `mix compile --warnings-as-errors --force` clean in dev and test.
+
+### 2026-11-09 — 0.5.0 (ADR-0041)
+
+At the maintainer's word ("lets release"), once roadmap items 17–19 were on main and pushed
+(`b8c0152`, CI green): `@version` 0.5.0, cut by session geex-d3. Since 0.4.0:
+- property tests with StreamData over the pure core (ADR-0044, roadmap item 17), which found
+  BUG-8 (an attestation missed a group's undone hunks) and, in a verify pass, BUG-9 (a checkpoint's
+  blame not relabelled); both fixed;
+- the maintainer's editor-comfort list (roadmap item 18, merged as `c3f6f58`): typing over a
+  selection, `[+]` that follows the text, the output pane's handle, an optional final newline on
+  save, a scrolling tab bar, `Alt+Y`'s Commands tab, tab stops (BUG-10), resizing from the
+  keyboard, and the last session brought back;
+- typing assists (ADR-0045, roadmap item 19, merged as `b8c0152`): pairs closed as you type them
+  (VS Code's rule for stepping over), Enter keeping the indent, "Indent with", Shift+Tab for a
+  real tab, bracketed paste, and BUG-11 (input deaf after a byte that isn't UTF-8);
+- `tree_sitter_wasm` stays at its pin (`89a8723`, pushed), the catalog at `catalog-v3`.
+
+**1418 tests + 27 properties + 143 doctests, 0 failures**, twice (17.8 s, 15.2 s);
+`GEEX_PROPERTY_RUNS=10000 mix test --only property --seed 141` → 27 properties, 0 failures;
+`mix compile --warnings-as-errors --force` clean in dev and test.
+
+**Not tested yet:** the v0.5.0 tag's release run, its builds' smoke, the publish and the
+post-release smoke (followed below when they run); `geex self update` from 0.4.0 on the
+maintainer's machine.

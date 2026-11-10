@@ -12,7 +12,7 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are (2026-06)
 
-**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14); shell commands run from the minibuffer (`!`, `!!`, `|`, item 15); both ship in 0.3.4. From 0.3.5 the captAInHook payload ships in each release, linked at `~/.local/share/geex/integrations/geex-attest.sh` (ADR-0041's amendment). **2026-11-06:** a read-only markdown preview (item 16, [adr/0043](adr/0043-markdown-preview.md)): `Alt+Shift+P` opens a markdown file's rendered preview beside it, re-rendered when the file on disk changes; it needs the `markdown_inline` companion grammar, published in `catalog-v3`. Merged to main after the maintainer's look and released in 0.4.0; 1314 tests + 116 doctests green. **2026-11-09:** property tests with StreamData (item 17, [adr/0044](adr/0044-property-tests-with-stream-data.md)): slice 1 moved six seeded loops over to generated, shrinking cases; slice 2 covered the attestation path and found and fixed BUG-8 (an attestation missed a group's undone hunks); slice 3 covered addressing and the parse round-trip; a verify pass completed BUG-8's fix and strengthened three properties, and found BUG-9, fixed the same day; 1313 tests + 19 properties + 118 doctests green. Later that day, on the branch `editor-comfort`: the maintainer's editor-comfort list (item 18): typing over a selection, `[+]` that follows the text, the output pane's handle, a final newline on save, a scrolling tab bar, `Alt+Y`'s Commands tab, the tab size (fixing BUG-10), resizing from the keyboard, and the last session brought back; 1370 tests + 22 properties + 130 doctests green; merged to main after geex-d3's verify and the maintainer's OK. Then the typing assists (item 19, [adr/0045](adr/0045-typing-assists.md)): pairs closed as you type them (VS Code's rule for stepping over), Enter keeping the indent, an "Indent with" setting, bracketed paste, and BUG-11 (input deaf after a byte that isn't UTF-8) fixed; 1418 tests + 27 properties + 143 doctests green, merged after three geex-d3 passes. Since the
+**Current (2026-10-18):** 1017 tests + 54 doctests green, `--warnings-as-errors` clean. geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14); shell commands run from the minibuffer (`!`, `!!`, `|`, item 15); both ship in 0.3.4. From 0.3.5 the captAInHook payload ships in each release, linked at `~/.local/share/geex/integrations/geex-attest.sh` (ADR-0041's amendment). **2026-11-06:** a read-only markdown preview (item 16, [adr/0043](adr/0043-markdown-preview.md)): `Alt+Shift+P` opens a markdown file's rendered preview beside it, re-rendered when the file on disk changes; it needs the `markdown_inline` companion grammar, published in `catalog-v3`. Merged to main after the maintainer's look and released in 0.4.0; 1314 tests + 116 doctests green. **2026-11-09:** property tests with StreamData (item 17, [adr/0044](adr/0044-property-tests-with-stream-data.md)): slice 1 moved six seeded loops over to generated, shrinking cases; slice 2 covered the attestation path and found and fixed BUG-8 (an attestation missed a group's undone hunks); slice 3 covered addressing and the parse round-trip; a verify pass completed BUG-8's fix and strengthened three properties, and found BUG-9, fixed the same day; 1313 tests + 19 properties + 118 doctests green. Later that day, on the branch `editor-comfort`: the maintainer's editor-comfort list (item 18): typing over a selection, `[+]` that follows the text, the output pane's handle, a final newline on save, a scrolling tab bar, `Alt+Y`'s Commands tab, the tab size (fixing BUG-10), resizing from the keyboard, and the last session brought back; 1370 tests + 22 properties + 130 doctests green; merged to main after geex-d3's verify and the maintainer's OK. Then the typing assists (item 19, [adr/0045](adr/0045-typing-assists.md)): pairs closed as you type them (VS Code's rule for stepping over), Enter keeping the indent, an "Indent with" setting, bracketed paste, and BUG-11 (input deaf after a byte that isn't UTF-8) fixed; 1418 tests + 27 properties + 143 doctests green, merged after three geex-d3 passes. All three items released in 0.5.0. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -541,7 +541,11 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    amendment), and ci.yml no longer runs on tags. **0.4.0** ships the read-only markdown preview
    (item 16, ADR-0043: `Alt+Shift+P`, merged to main as `f1ef1e7`), names the `catalog-v3`
    catalog (the `markdown_inline` companion grammar), and redraws the whole screen after a
-   terminal resize (BUG-7).
+   terminal resize (BUG-7). **0.5.0** ships property tests over the pure core (item 17,
+   ADR-0044, which found and fixed BUG-8 and BUG-9), the maintainer's editor-comfort list (item
+   18: typing over a selection, the last session brought back, tab stops fixing BUG-10, resizing
+   from the keyboard and more), and typing assists with bracketed paste (item 19, ADR-0045:
+   pairs closed as you type them, the indent kept on Enter, BUG-11 fixed).
    1. **Goal:** depend on Burrito less, then not at all. Until then, the patched fork
       (`LoganBresnahan/burrito`, fork-only, never upstream) is the stopgap.
    2. **Approach:** plain release tarballs per target, built in GitHub Actions.
@@ -630,7 +634,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      (3) 2026-11-09: addressing (`col_at_display/2` against a naive model and against
      `Loop.cursor_xy/3`; `Coord.to_span/2` through `Doc.slice`) and the parse round-trip (every
      registered command's `parse/1` over native, raw-string and MCP-JSON arguments; the grid's
-     human and agent surfaces). The three planned slices are built; §8.4's wait for consumers.
+     human and agent surfaces). The three planned slices are built, released in 0.5.0; §8.4's
+     wait for consumers.
    - **Verify pass** 2026-11-09 (session geex-d3): BUG-8's fix completed for a fully undone group
      (an attestation may match the newest undone group, then the newest applied one); a targeted
      BUG-8 property; the spool oracle pins the whole credited chain across harnesses; the relabel
@@ -642,7 +647,7 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
 18. **Editor comfort** — the maintainer's list from using geex, 2026-11-09, decided the same day.
    **Built 2026-11-09** on the branch `editor-comfort` (all nine; ADR-0038's, 0019's, 0026's,
    0027's, 0029's, 0031's and 0040's amendments; dogfooded in tmux), verified by session geex-d3
-   over three passes, and merged to main at the maintainer's word; releasing waits.
+   over three passes, merged to main at the maintainer's word, and released in 0.5.0.
    The maintainer's later answers (relayed by session geex-d3, 2026-11-09): the final newline is
    off by default and, on, applies to every save; Tab follows the file, Shift+Tab forces a tab
    (`Alt+Tab`, first asked for, never reaches a terminal on Windows or most desktops):
@@ -678,7 +683,7 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
 19. **Typing assists** ([adr/0045](adr/0045-typing-assists.md)) — the maintainer's asks 2026-11-09,
    with the rules proposed in the same conversation and accepted whole. **Built 2026-11-09** on
    the branch `editor-assist`, verified by session geex-d3 over three adversarial passes, and
-   merged to main at the maintainer's word; releasing waits:
+   merged to main at the maintainer's word, and released in 0.5.0:
    1. **Pairs close as you type them**: `( [ { ' " `` ` `` with the cursor between, a General
       setting on by default; only at a line's end or before a space or punctuation; quotes not
       after a word character or the same quote; a closer steps over its twin; Backspace takes an
