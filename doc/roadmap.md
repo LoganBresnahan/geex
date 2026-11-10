@@ -649,7 +649,7 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    0027's, 0029's, 0031's and 0040's amendments; dogfooded in tmux), verified by session geex-d3
    over three passes, merged to main at the maintainer's word, and released in 0.5.0.
    The maintainer's later answers (relayed by session geex-d3, 2026-11-09): the final newline is
-   off by default and, on, applies to every save; Tab follows the file, Shift+Tab forces a tab
+   off by default and, on, applies to every save; Tab follows the file, Shift+Tab forces a tab (since 2026-11-10 the other kind, 19.5)
    (`Alt+Tab`, first asked for, never reaches a terminal on Windows or most desktops):
    1. **Delete and Backspace over a selection delete it**, any selection (a mouse drag or
       `Alt+H`), as one undoable edit; typing over a selection replaces it.
@@ -670,8 +670,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       accepts is in it.
    7. **Tab size** — a General setting, default 2: a tab character draws to the next tab stop of
       that size (BUG-10: it drew zero columns wide), and Tab follows the file: a tab where the
-      file's indented lines mostly start with one, else that many spaces; Shift+Tab always
-      inserts a tab. Width stays a render concern (ADR-0027).
+      file's indented lines mostly start with one, else that many spaces; Shift+Tab inserts
+      the other kind (19.5). Width stays a render concern (ADR-0027).
    8. **Resize from the keyboard**: `Alt+arrows` and `Alt+Shift+W/A/S/D` move the focused pane's
       edge that way by a fixed step, kept to the least pane size. The parser learns modified
       arrows (`ESC [ 1 ; 3 A`); `Alt+Shift+W/A/S/D` become case-sensitive, as `Alt+Shift+Z` is
@@ -707,6 +707,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       default: Go, tab-separated data and git's config files get tabs by their kind, any other
       file as its indented lines say), spaces or tabs, for Tab and Enter; a Makefile gets tabs
       whatever it says.
+   5. **Shift+Tab inserts the other kind** (2026-11-10, the maintainer's word, ADR-0026's
+      amendment): a tab where Tab gives spaces, spaces where Tab gives a tab.
    - **Later, if wanted:** indent from the syntax tree (tree-sitter indent queries in the
      catalog's packages); reading `.editorconfig`.
 

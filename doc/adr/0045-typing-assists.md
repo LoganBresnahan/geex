@@ -79,7 +79,8 @@ tree, with per-language indent queries (Zed, Helix, Neovim's tree-sitter indent)
    lines' indented ones vote, a tie or none is spaces). `spaces` and `tabs` force one. A Makefile
    (`Makefile`, `makefile`, `GNUmakefile`, `BSDmakefile`, `Makefile.am`/`.in`, `.mk`, `.mk.in`,
    `.mak`, `.make`) gets tabs whatever the setting: a recipe indented with spaces doesn't run.
-   Shift+Tab inserts a tab whatever this says. An `.editorconfig` isn't read.
+   Shift+Tab inserts the other kind from Tab's (ADR-0026's 2026-11-10 amendment). An
+   `.editorconfig` isn't read.
 4. **Pure, and one command each.** Each assist is a pure function of the key, the cursor, the
    text and (for pairs) the tracked closers, returning the keymap's own action shape (or `nil` to
    let the plain keymap resolve the key); the loop asks them only while the setting is on. Every

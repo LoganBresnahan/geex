@@ -20,7 +20,7 @@ defmodule Geex.Loop.KeyHelp do
     {"Edit", "Enter",
      "a new line, keeping the indent; one more after an opener (Alt+Y turns it off)"},
     {"Edit", "Tab  Shift+Tab",
-     "indent: as the file does (Go and Makefiles get tabs) or as Alt+Y says; Shift+Tab always a tab"},
+     "indent: as the file does (Go and Makefiles get tabs) or as Alt+Y says; Shift+Tab the other kind"},
     {"Edit", "Alt+Z  Alt+Shift+Z", "undo, redo"},
     {"Edit", "Alt+U", "take back the change under the cursor (one hunk)"},
     {"Edit", "Ctrl-O", "save"},

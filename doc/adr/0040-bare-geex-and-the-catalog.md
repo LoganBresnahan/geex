@@ -551,7 +551,7 @@ One Dark and One Light (Atom's), Tokyo Night, Dracula, Nord and Kanagawa.
   (`no`, `!!`, `tab N`); a test reads the minibuffer parser's own source so a verb without an
   entry fails.
 - **General** gains **Tab size** (2, 4, 8; Enter steps; `tab_size`; Tab inserts that many spaces,
-  following the file: a tab where the file indents with tabs, Shift+Tab always a tab; a tab
+  following the file: a tab where the file indents with tabs, Shift+Tab always a tab (since 2026-11-10 the other kind, ADR-0026's amendment); a tab
   character draws to its stop, ADR-0027's amendment) and **Final newline** (off unless
   `final_newline` is true; on, every save; ADR-0019's amendment), and, with
   [ADR-0045](0045-typing-assists.md), **Indent with** (follow the file, spaces, tabs;

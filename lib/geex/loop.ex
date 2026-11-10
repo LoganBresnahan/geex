@@ -4782,10 +4782,19 @@ defmodule Geex.Loop do
     # the keymap doesn't hold (roadmap item 18.7).
     pairs = live_pairs(state)
 
+    # Tab inserts what the file indents with; Shift+Tab the other kind (ADR-0026's 2026-11-10
+    # amendment). The tab size and the file's kind are the loop's, not the keymap's.
     action =
-      if event == {:key, :tab},
-        do: Keymap.indent(cursor, state.tab_size, indent_with(text, state)),
-        else: assist(event, cursor, text, state, pairs) || Keymap.resolve(event, cursor, text)
+      case event do
+        {:key, :tab} ->
+          Keymap.indent(cursor, state.tab_size, indent_with(text, state))
+
+        {:key, :shift_tab} ->
+          Keymap.indent(cursor, state.tab_size, Keymap.other_indent(indent_with(text, state)))
+
+        _ ->
+          assist(event, cursor, text, state, pairs) || Keymap.resolve(event, cursor, text)
+      end
 
     # The tracked closers after this key; a move keeps them at the buffer's version, an edit
     # takes the version it made (below), anything else drops them.

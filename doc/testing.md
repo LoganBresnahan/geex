@@ -5731,3 +5731,21 @@ succeeded at 05:20 UTC, and all six post-release smoke runners (ubuntu-22.04, 24
 macos-15, macos-15-intel) passed. `releases/latest` is v0.5.0. Tarballs: 13.5 MB (darwin-arm64),
 13.9 MB (darwin-x64), 15.5 MB (linux-arm64), 15.6 MB (linux-x64), the same as 0.4.0's to the
 tenth. Still not run: the maintainer's `geex self update` from 0.4.0.
+
+### 2026-11-10 — Shift+Tab inserts the other kind of indent (ADR-0026's amendment, roadmap item 19.5)
+
+The maintainer's question, then word: Shift+Tab inserts whichever kind Tab doesn't, not always a
+tab. `Keymap.other_indent/1`; the loop resolves Shift+Tab by ADR-0045 §3's rule, flipped.
+Uncommitted on the branch `shift-tab-other`.
+
+**Hand-verified in tmux** (scratch XDG dirs): in an empty `st.go`, Tab then Shift+Tab then `x`
+saved `\t  x`; in an empty `st.py`, `  \tx` (`od -c`). `geex.log`: no error.
+
+**Automated.** The old "Shift+Tab always a tab" case now reads "a tab where Tab doesn't"; a new
+case: Shift+Tab inserts 4 spaces (tab size 4) in a new Go file, a Makefile, a tab-indented C
+file and a Python file with `Indent with: tabs`; `other_indent/1`'s doctest. `mix test` →
+**1419 tests + 27 properties + 144 doctests, 0 failures**, twice; `mix compile
+--warnings-as-errors --force` clean.
+
+**Not tested / deferred:** Shift+Tab as un-indent (rejected for now, ADR-0026's amendment);
+indenting a selection.

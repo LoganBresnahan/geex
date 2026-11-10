@@ -323,7 +323,7 @@ defmodule Geex.Input.Parser do
   defp csi_key(n, ?~) when n in ["4", "8"], do: {:key, :end}
   defp csi_key("3", ?~), do: {:key, :delete}
 
-  # Shift+Tab, back-tab (`ESC [ Z`): a real tab, whatever the file indents with (roadmap item 18.7).
+  # Shift+Tab, back-tab (`ESC [ Z`): the other kind of indent from Tab's (ADR-0026).
   defp csi_key("", ?Z), do: {:key, :shift_tab}
   # Alt with an arrow: xterm's modifier parameter 3 (roadmap item 18.8, resizing).
   defp csi_key("1;3", final) when final in ?A..?D,

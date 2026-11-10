@@ -70,7 +70,8 @@ defmodule Geex.Loop.Keymap do
     do: {:edit, insert(line, col, eol(text)), {line + 1, 0}}
 
   # Tab → the default tab size's spaces; the loop passes the setting and the file's indent
-  # style to `indent/3`. Shift+Tab → a real tab, always (roadmap item 18.7).
+  # style to `indent/3`. Shift+Tab → the other kind, which the loop works out the same way
+  # (`other_indent/1`); without the loop's context, a tab.
   def resolve({:key, :tab}, cursor, _text), do: indent(cursor, 2, :spaces)
   def resolve({:key, :shift_tab}, cursor, _text), do: indent(cursor, 2, :tabs)
 
@@ -258,7 +259,7 @@ defmodule Geex.Loop.Keymap do
 
   @doc """
   What Tab does at `cursor` (roadmap item 18.7): a real tab in a file that indents with tabs
-  (`:tabs`), else `tab_size` spaces. Shift+Tab is `:tabs` whatever the file does.
+  (`:tabs`), else `tab_size` spaces. Shift+Tab is the other kind (`other_indent/1`).
 
       iex> Geex.Loop.Keymap.indent({3, 1}, 4, :spaces) |> elem(2)
       {3, 5}
@@ -279,6 +280,18 @@ defmodule Geex.Loop.Keymap do
   # config files.
   @tabs_by_kind ~w(go.mod go.work .gitconfig .gitmodules)
   @tabs_by_kind_ext ~w(.go .tsv)
+
+  @doc """
+  What Shift+Tab inserts where Tab inserts `style` (ADR-0026's 2026-11-10 amendment): the other
+  kind, so a tab can be typed where Tab gives spaces, and spaces where it gives a tab (in Go, a
+  Makefile, a tab-indented file).
+
+      iex> {Geex.Loop.Keymap.other_indent(:spaces), Geex.Loop.Keymap.other_indent(:tabs)}
+      {:tabs, :spaces}
+  """
+  @spec other_indent(:tabs | :spaces) :: :tabs | :spaces
+  def other_indent(:spaces), do: :tabs
+  def other_indent(:tabs), do: :spaces
 
   @doc """
   What one indent level is in the file at `path` holding `text` (roadmap item 19), by the
