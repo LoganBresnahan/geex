@@ -1,7 +1,9 @@
 # ADR-0047: Every key runs a named command; the bindings are data
 
 - **Status:** Accepted 2026-11-11 (the maintainer's ask; built on the branch `named-keys`, accepted
-  at the maintainer's word the same day)
+  at the maintainer's word the same day); amended the same day by
+  [ADR-0048](0048-the-palette-ranks-names-keys-then-loose.md) (how a key finds its command in the
+  palette; `newline` is `line break`)
 - **Date:** 2026-11-11
 - **Amends:** [ADR-0028](0028-editor-shell-and-minibuffer.md) §2 (parity at the capability
   level, not one named command per key: now one per key), [ADR-0026](0026-terminal-input-model.md)
@@ -141,6 +143,15 @@ you.
   the assists, as Tab does (review, 2026-11-11). Only in the editor, for now: in the tree, the
   panes and the command line a chord bound to `newline` does nothing where Enter acts. No default
   binds one, so this waits for remapping, which must turn them into their keys in every view.
+
+## Amendment (2026-11-11): the palette's bands, and `line break` ([ADR-0048](0048-the-palette-ranks-names-keys-then-loose.md))
+
+The consequence above that only a chord reads as a key is replaced: any whole key counts again,
+bare ones too, and the palette and the Commands tab rank a command whose name matches well above
+the commands of the key the query names, and both above the loose matches. `delete` is still
+the `delete` command first; `enter`, which names no command, finds Enter's. Found by its key, an
+entry for several commands is the one that key runs (`alt+5` is `tab 5`). §2's `newline` is named
+`line break`, with `newline` kept as an alias; the command (`:newline`) and its key don't change.
 
 ## See
 

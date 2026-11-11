@@ -258,6 +258,14 @@ somewhere by number.
 taken them. `grid` opens grid mode; §3's overlay toggle (`grid`/`lines`) was never built. The catalog's descriptions no longer name keys: the palette and the
 Commands tab show each command's keys from the bindings (`Geex.Loop.Bindings`).
 
+## Amendment (2026-11-11): the palette ranks in bands ([ADR-0048](0048-the-palette-ranks-names-keys-then-loose.md))
+
+§3's palette "fuzzy-lists" the commands. It now lists them in three bands: a command whose name
+matches well (each word of the query starts a word of the name, in order), then the commands of
+the key the query names (`enter`, `alt+k`), then every other match, as before. `Geex.Fuzzy` is
+unchanged and orders within a band. The names line up at the longest one listed, as the buffer
+and file lists already did.
+
 ## See
 
 [ADR-0027](0027-grid-command-addressing.md) (the grid commands the minibuffer hosts),

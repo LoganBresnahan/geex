@@ -5861,3 +5861,31 @@ the palette's ordering, covered through the loop). Left: `enter` in the palette 
 name `indent other` (letters in order), a ranking result of the longer list, not key search; the
 palette's 14-column name runs into its keys (`delete forward`), as `theme terminal` did on main;
 `alt+5` hands off to `tab ` rather than running tab 5.
+
+### 2026-11-11 — the palette ranks names, then keys, then loose matches (ADR-0048)
+
+Built on `palette-ranks`, from main at fd826d6, after the maintainer asked what `enter` in the
+palette should pick ("the command the Enter key runs"). `Catalog.search/2` lists three bands: a
+command whose name matches well (each query word starts a name word, in order), then the commands
+of the key the query names (bare or a chord, `Bindings.named_command/3`), then every other match
+by `Geex.Fuzzy` as before; the Commands tab uses the same. Found by its key, `tab N` is narrowed
+to the tab that key shows and runs (`Catalog.narrow/2`). The palette's name column fits the
+longest name listed. `newline` is named `line break` (alias `newline`).
+
+Tests: a property for the bands (good names, then keyed, then the rest, each entry once, the set
+equal to search/1 plus the keyed), with the rule written apart from the code; examples for
+`enter`, `line e`, `sel al`, `delete`, `narrow/2`; through the loop: `delete` asks to delete the
+file, `tab` edits nothing, `enter`/`backspace`/`home` run their key's command, `alt+1` runs tab 1,
+`tab` still hands off, the Commands tab's first rows, and the drawn row `delete forward  Delete`.
+Planted here, each caught: keys above names, no good-name band, no narrowing, the fixed 14
+column.
+
+Live in tmux (100×24, scratch XDG dirs): `delete f` lists `delete forward  Delete · …` with the
+column fitted; `delete` lists the file command first and Enter asks "delete a.txt? (y/n)";
+`enter` lists `line break  Enter` first and Enter breaks the line; `alt+3` lists `tab 3  Alt+3`;
+Ctrl-X quits with the terminal restored.
+
+1461 tests + 31 properties + 155 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. Not tested: the Commands tab drawn live (its rows
+are tested as values). Left: a query naming no key and matching no name well still picks the best
+loose match.

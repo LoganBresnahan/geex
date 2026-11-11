@@ -106,8 +106,6 @@ defmodule Geex.Loop do
   # Most candidate rows the command palette (ADR-0028 §3) shows at once; a longer match list
   # scrolls to keep the highlighted row in view. The column the command name is padded to.
   @palette_rows 8
-  @palette_name_col 14
-
   # The most files the finder (Alt+O) keeps for a query: far more than the popup shows at once.
   @finder_limit 100
 
@@ -1014,7 +1012,7 @@ defmodule Geex.Loop do
   # A key for the editor: resolve it against the current text + cursor (read fresh from
   # Session).
   # A preview's keys go to a handler of their own: it is read-only (ADR-0043 §1).
-  # A command named for one of the editor's own keys (`newline` …, ADR-0047 §2) is that key.
+  # A command named for one of the editor's own keys (`line break` …, ADR-0047 §2) is that key.
   defp apply_editor_key(event, state) do
     event =
       with {:cmd, command} <- event,
@@ -4254,15 +4252,21 @@ defmodule Geex.Loop do
   # What the popup lists: the command catalog, the open buffers (ADR-0034), or the finder's
   # files, filtered by the input. Draw, Enter and the highlight moves all read it, so they agree
   # on what is where.
-  # A command's keys before what it does (ADR-0047), read from the bindings.
-  # Typing a chord (`alt+k`) finds the commands bound to it, first, then those its words find.
+  # A command's keys before what it does (ADR-0047), read from the bindings. Ranked in
+  # ADR-0048's bands: a good name match, then what the key the query names runs (`alt+k`,
+  # `enter`), then the loose matches. Found by its key, an entry for several commands is the
+  # one that key runs (`alt+5` is `tab 5`).
   defp candidates(%{minibuffer: %Minibuffer{mode: :palette} = mb} = state) do
     query = Minibuffer.value(mb)
+    key_of = &Bindings.named_command(state.keys, Catalog.commands(&1), query)
 
-    by_key =
-      Enum.filter(Catalog.all(), &Bindings.names_key?(state.keys, Catalog.commands(&1), query))
+    for entry <- Catalog.search(query, &(key_of.(&1) != nil)) do
+      entry =
+        case key_of.(entry) do
+          nil -> entry
+          command -> Catalog.narrow(entry, command)
+        end
 
-    for entry <- by_key ++ (Catalog.search(query) -- by_key) do
       commands = Catalog.commands(entry)
 
       case Bindings.labels(state.keys, commands, range: length(commands) > 1) do
@@ -4313,10 +4317,8 @@ defmodule Geex.Loop do
     end
   end
 
-  # Commands line up at a fixed column; buffer names at the longest one, up to half the width.
-  defp name_col(:palette, _candidates, _w), do: @palette_name_col
-
-  defp name_col(mode, candidates, w) when mode in [:buffers, :files] do
+  # Names line up at the longest one listed, plus two, up to half the width (ADR-0048 §3).
+  defp name_col(_mode, candidates, w) do
     longest = candidates |> Enum.map(&String.length(&1.name)) |> Enum.max(fn -> 0 end)
     min(longest + 2, max(div(w, 2), 1))
   end

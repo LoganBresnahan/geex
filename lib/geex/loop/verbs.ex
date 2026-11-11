@@ -46,7 +46,7 @@ defmodule Geex.Loop.Verbs do
 
     * every command that had only a key (ADR-0047): `up`, `word back`, `line start`, `page down`,
       `resize left`, `command line`, `palette`, `grid`, `settings`, `pane next`, `stop`,
-      `newline`, `indent`, `delete back` … — `{:command, command}`, which the loop runs as its
+      `line break`, `indent`, `delete back` … — `{:command, command}`, which the loop runs as its
       key would. Their names are the catalog's.
 
   Anything else is `:unknown` (a no-op today). The command **catalog**

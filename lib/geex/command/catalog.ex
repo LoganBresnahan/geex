@@ -313,7 +313,8 @@ defmodule Geex.Command.Catalog do
       invoke: {:command, {:resize, :right}}
     },
     %Entry{
-      name: "newline",
+      name: "line break",
+      aliases: ["newline"],
       description: "Break the line here, keeping the indent.",
       invoke: {:command, :newline}
     },
@@ -377,24 +378,57 @@ defmodule Geex.Command.Catalog do
   def all, do: @entries
 
   @doc """
-  The catalog filtered + ranked against `query` (`Geex.Fuzzy`). An empty/blank query returns
-  every command in canonical order. A **name** match always outranks a **description**-only match
-  (so typing `cl` finds `clipboard`-described verbs but never above a verb literally named `cl…`);
-  within a band, the fuzzy score orders them, ties keeping canonical order (stable sort).
+  The catalog filtered + ranked against `query` (ADR-0048), in three bands:
+
+  1. the commands whose **name matches well**: each word of the query starts a word of the name
+     or an alias, in order (`line e` → `line end`);
+  2. the commands `keyed?` says the query's key runs (`enter` → `line break`; the caller knows
+     the bindings, the catalog doesn't);
+  3. every other match (`Geex.Fuzzy`): a name match above a description-only one.
+
+  Within a band the fuzzy score orders, ties keeping canonical order (stable sort); a command
+  shows once, in its highest band. An empty/blank query returns every command in canonical order.
+
+      iex> Geex.Command.Catalog.search("line e") |> hd() |> Map.fetch!(:name)
+      "line end"
+      iex> Geex.Command.Catalog.search("enter", &(&1.name == "line break")) |> hd() |> Map.fetch!(:name)
+      "line break"
+      iex> Geex.Command.Catalog.search("delete", &(&1.name == "delete forward")) |> hd() |> Map.fetch!(:name)
+      "delete"
   """
-  @spec search(String.t()) :: [Entry.t()]
-  def search(query) when is_binary(query) do
+  @spec search(String.t(), (Entry.t() -> boolean())) :: [Entry.t()]
+  def search(query, keyed? \\ fn _ -> false end) when is_binary(query) do
     case String.trim(query) do
       "" ->
         @entries
 
       q ->
+        words = q |> String.downcase() |> String.split()
+
         @entries
-        |> Enum.map(fn entry -> {entry, rank(entry, q)} end)
-        |> Enum.reject(fn {_entry, r} -> is_nil(r) end)
-        |> Enum.sort_by(fn {_entry, r} -> -r end)
-        |> Enum.map(fn {entry, _r} -> entry end)
+        |> Enum.map(fn entry -> {entry, band(entry, words, keyed?), rank(entry, q)} end)
+        |> Enum.reject(fn {_entry, band, r} -> band == 3 and is_nil(r) end)
+        |> Enum.sort_by(fn {_entry, band, r} -> {band, -(r || 0)} end)
+        |> Enum.map(fn {entry, _band, _r} -> entry end)
     end
+  end
+
+  defp band(%Entry{name: name, aliases: aliases} = entry, words, keyed?) do
+    cond do
+      Enum.any?([name | aliases], &word_starts?(String.split(String.downcase(&1)), words)) -> 1
+      keyed?.(entry) -> 2
+      true -> 3
+    end
+  end
+
+  # Each query word starts a word of the name, in order: `sel al` in `select all`.
+  defp word_starts?(_name, []), do: true
+  defp word_starts?([], _words), do: false
+
+  defp word_starts?([n | name], [w | words] = all) do
+    if String.starts_with?(n, w),
+      do: word_starts?(name, words),
+      else: word_starts?(name, all)
   end
 
   # Name matches live in a high band (+1000) so they always sort above description-only matches;
@@ -405,4 +439,21 @@ defmodule Geex.Command.Catalog do
       scores -> Enum.max(scores) + 1000
     end
   end
+
+  @doc """
+  An entry narrowed to one of its commands, to run rather than hand off: `tab N` found by
+  `Alt+5` is `tab 5`, which shows tab 5 (ADR-0048 §2). An entry for one command is itself.
+  """
+  @spec narrow(Entry.t(), term()) :: Entry.t()
+  def narrow(%Entry{name: "tab"} = entry, {:tab, i} = command) do
+    %{
+      entry
+      | name: "tab #{i + 1}",
+        description: String.replace(entry.description, "tab N", "tab #{i + 1}"),
+        invoke: {:action, command},
+        binds: [command]
+    }
+  end
+
+  def narrow(%Entry{} = entry, _command), do: entry
 end

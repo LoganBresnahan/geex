@@ -56,12 +56,12 @@ defmodule Geex.Loop.NamedKeysTest do
       assert cursor() == {0, 0}
     end
 
-    test "the editor's own keys: `newline` is Enter, `delete back` is Backspace", %{
+    test "the editor's own keys: `line break` is Enter, `delete back` is Backspace", %{
       state: state,
       buf: buf
     } do
       Session.set_cursor({0, 5})
-      state = run(state, "newline")
+      state = run(state, "line break")
       assert text(buf) == "hello\n world\nline 2\n"
       assert cursor() == {1, 0}
       assert length(Buffer.history(buf)) == 1
@@ -237,36 +237,96 @@ defmodule Geex.Loop.NamedKeysTest do
       assert cursor() == {1, 6}
     end
 
-    # The second review, 2026-11-11: only a chord reads as a key. A bare key's name is a word,
-    # so `delete` is the command of that name (asking to delete the file), not Delete's.
-    test "in the palette, a bare key's name finds the command of that name", %{
-      state: state,
-      buf: buf
-    } do
+    test "the key help and the Commands tab show the moved key", %{state: state} do
+      state = moved(state) |> key({:alt, ?y})
+      ctx = %{keys: state.keys}
+      rows = Loop.Settings.rows(%{state.settings | tab: :commands, query: "up"}, ctx)
+      assert %{cells: ["up", "Alt+I ↑", _]} = Enum.find(rows, &(hd(&1.cells) == "up"))
+    end
+  end
+
+  # ADR-0048: a good name match, then the commands of the key the query names, then the rest.
+  describe "the palette ranks names, then keys, then loose matches (ADR-0048)" do
+    defp pick(state, query), do: state |> key({:alt, ?i}) |> type(query) |> key({:key, :enter})
+
+    test "a word is a command's name first: `delete` asks to delete the file, `tab` edits nothing",
+         %{state: state, buf: buf} do
       Session.set_cursor({0, 5})
-      asked = state |> key({:alt, ?i}) |> type("delete") |> key({:key, :enter})
+      asked = pick(state, "delete")
       # The file operation runs off the loop; its answer is the question.
       assert_receive {:geex_file_op, _, _} = msg, 5_000
       {:noreply, asked} = Loop.handle_info(msg, asked)
       assert asked.minibuffer.mode == :confirm
       assert text(buf) == "hello world\nline 2\n"
 
-      for word <- ~w(tab backspace) do
-        _ = state |> key({:alt, ?i}) |> type(word) |> key({:key, :enter})
-        assert text(buf) == "hello world\nline 2\n", word
-      end
-
-      view = key(state, {:alt, ?y}).settings
-      rows = Loop.Settings.rows(%{view | tab: :commands, query: "delete"}, %{keys: state.keys})
-      assert hd(hd(rows).cells) =~ ~r/^delete( |$)/
-      refute hd(hd(rows).cells) =~ "forward"
+      _ = pick(state, "tab")
+      assert text(buf) == "hello world\nline 2\n"
     end
 
-    test "the key help and the Commands tab show the moved key", %{state: state} do
-      state = moved(state) |> key({:alt, ?y})
-      ctx = %{keys: state.keys}
-      rows = Loop.Settings.rows(%{state.settings | tab: :commands, query: "up"}, ctx)
-      assert %{cells: ["up", "Alt+I ↑", _]} = Enum.find(rows, &(hd(&1.cells) == "up"))
+    test "a word no command is named is its key's: enter, backspace, home", %{
+      state: state,
+      buf: buf
+    } do
+      Session.set_cursor({0, 5})
+      state = pick(state, "enter")
+      assert text(buf) == "hello\n world\nline 2\n"
+      assert cursor() == {1, 0}
+
+      state = pick(state, "backspace")
+      assert text(buf) == "hello world\nline 2\n"
+      assert cursor() == {0, 5}
+
+      _ = pick(state, "home")
+      assert cursor() == {0, 0}
+    end
+
+    test "found by its key, `tab N` is the tab that key shows, run at once", %{
+      state: state,
+      dir: dir
+    } do
+      {:ok, b} = Session.open_file(Path.join(dir, "lib/b.ex"))
+      {:noreply, state} = Loop.handle_info({:geex_active_buffer, b}, state)
+      assert Path.basename(Buffer.status(elem(Session.active_buffer(), 1)).path) == "b.ex"
+
+      state = pick(state, "alt+1")
+      assert state.minibuffer.mode == :inactive
+      assert Path.basename(Buffer.status(elem(Session.active_buffer(), 1)).path) == "a.txt"
+
+      # Found by its words, it still asks for the number.
+      state = pick(state, "tab")
+      assert state.minibuffer.mode == :inactive
+      asked = state |> key({:alt, ?i}) |> type("tab ")
+      assert Minibuffer.value(asked.minibuffer) == "tab "
+    end
+
+    test "the Commands tab ranks the same", %{state: state} do
+      view = key(state, {:alt, ?y}).settings
+
+      first = fn q ->
+        hd(hd(Loop.Settings.rows(%{view | tab: :commands, query: q}, %{keys: state.keys})).cells)
+      end
+
+      assert first.("delete") == "delete"
+      assert first.("enter") == "line break, newline"
+      assert first.("alt+k") == "close"
+    end
+
+    test "the names line up past the longest one: `delete forward` doesn't run into its key", %{
+      state: state
+    } do
+      state = state |> key({:alt, ?i}) |> type("delete f")
+      {:noreply, state} = Loop.handle_info(:repaint, state)
+
+      rows =
+        for y <- 0..(state.h - 1),
+            do:
+              Enum.map_join(
+                0..(state.w - 1),
+                &Geex.Screen.get_cell(Geex.Renderer.current(), &1, y).char
+              )
+
+      row = Enum.find(rows, &String.starts_with?(&1, "delete forward"))
+      assert row =~ ~r/^delete forward  +Delete · /
     end
   end
 end

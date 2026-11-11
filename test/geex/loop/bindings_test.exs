@@ -236,7 +236,7 @@ defmodule Geex.Loop.BindingsTest do
     end
 
     test "the keymap runs every one, but those the loop takes first" do
-      # The editor's own commands are turned into their keys by the loop (`newline` is Enter),
+      # The editor's own commands are turned into their keys by the loop (`line break` is Enter),
       # so the keymap never resolves one itself.
       for command <- Bindings.own_commands(),
           do: assert(Keymap.resolve({:cmd, command}, {0, 1}, "ab") == :ignore)

@@ -140,13 +140,13 @@ defmodule Geex.Loop.Settings do
         do: %{name: nil, cells: [keys, what, group]}
   end
 
-  # Each command with its keys (ADR-0047); typing filters by a key it is bound to (`alt+k`,
-  # first), then by name, alias or what it does (best first).
+  # Each command with its keys (ADR-0047); typing ranks as the palette does (ADR-0048): a good
+  # name match, then the commands of the key the query names (`alt+k`, `enter`), then the rest.
   def rows(%__MODULE__{tab: :commands, query: query}, ctx) do
     b = bindings(ctx)
-    by_key = Enum.filter(Commands.all(), &Bindings.names_key?(b, Commands.commands(&1), query))
+    keyed? = &Bindings.names_key?(b, Commands.commands(&1), query)
 
-    for entry <- by_key ++ (Commands.search(query) -- by_key),
+    for entry <- Commands.search(query, keyed?),
         do: %{name: nil, cells: [Commands.typed(entry), keys_of(b, entry), entry.description]}
   end
 

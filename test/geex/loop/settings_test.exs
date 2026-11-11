@@ -137,7 +137,10 @@ defmodule Geex.Loop.SettingsTest do
                Enum.find(rows, &(hd(&1.cells) =~ "rename"))
 
       assert %{cells: ["up", "Alt+W ↑", _]} = Enum.find(rows, &(hd(&1.cells) == "up"))
-      assert %{cells: ["newline", "Enter", _]} = Enum.find(rows, &(hd(&1.cells) == "newline"))
+
+      assert %{cells: ["line break, newline", "Enter", _]} =
+               Enum.find(rows, &(hd(&1.cells) =~ "line break"))
+
       assert %{cells: ["tab N", "Alt+1 … Alt+9", _]} = Enum.find(rows, &(hd(&1.cells) == "tab N"))
 
       view =

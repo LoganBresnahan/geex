@@ -140,7 +140,7 @@ defmodule Geex.Loop.Keymap do
 
   # A command (ADR-0047): the loop turned a bound key into one (`Geex.Loop.Bindings`), or it
   # was typed. Motion moves the cursor; the rest are the loop's actions, run as they are. A
-  # command named for one of the editor's own keys (`newline` …) never gets here: the loop
+  # command named for one of the editor's own keys (`line break` …) never gets here: the loop
   # turns it into its key first, so the tab size, "Indent with" and the assists apply.
   def resolve({:cmd, command}, cursor, text) when command in @motions,
     do: {:move, motion(command, cursor, text)}

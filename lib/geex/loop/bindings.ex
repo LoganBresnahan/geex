@@ -174,7 +174,7 @@ defmodule Geex.Loop.Bindings do
   def translate(event, _bindings), do: event
 
   @doc """
-  The key a command named for one of the editor's own keys stands for (`newline` is Enter), or
+  The key a command named for one of the editor's own keys stands for (`line break` is Enter), or
   `nil`.
 
       iex> Geex.Loop.Bindings.own_key(:newline)
@@ -185,13 +185,13 @@ defmodule Geex.Loop.Bindings do
   @spec own_key(command()) :: {:key, atom()} | nil
   def own_key(command), do: Map.get(@own, command)
 
-  @doc "The commands named for the editor's own keys (`newline`, `indent` …)."
+  @doc "The commands named for the editor's own keys (`line break`, `indent` …)."
   @spec own_commands() :: [command()]
   def own_commands, do: Map.keys(@own)
 
   @doc """
   The keys that run `command` for a person to read: the bound ones (`keys/2`), then the
-  focused view's own key that does the same in the editor (Enter for `newline`, Esc for `no`).
+  focused view's own key that does the same in the editor (Enter for `line break`, Esc for `no`).
 
       iex> Geex.Loop.Bindings.shown_keys(Geex.Loop.Bindings.defaults(), :select_clear)
       [{:alt, ?n}, {:key, :esc}]
@@ -256,10 +256,8 @@ defmodule Geex.Loop.Bindings do
   Whether `query` names one of the keys of `commands`, whole: `alt+k` finds `close`, `alt+5` finds
   tab 5 (its own key, not the range the help writes), `alt+s` finds `down` and not
   `Alt+Shift+Z`. Case and spaces don't matter, `ctrl+o` is `Ctrl-O`, and `alt+left` is `Alt+←`.
-
-  Only a chord counts, a query starting with `alt` or `ctrl`: a bare key's name is a word, and
-  `delete`, `tab` or `enter` find the commands of those names, not the keys' (review,
-  2026-11-11).
+  A bare key counts too (`enter`, `home`): the palette ranks a command named like a key above
+  the key's (ADR-0048), so `delete` is still the `delete` command first.
 
       iex> b = Geex.Loop.Bindings.defaults()
       iex> {Geex.Loop.Bindings.names_key?(b, [:close], "alt+k"), Geex.Loop.Bindings.names_key?(b, [:redo], "alt+s")}
@@ -268,17 +266,33 @@ defmodule Geex.Loop.Bindings do
       true
       iex> Geex.Loop.Bindings.names_key?(b, [{:resize, :left}], "alt+left")
       true
-      iex> Geex.Loop.Bindings.names_key?(b, [:delete_forward], "delete")
-      false
+      iex> Geex.Loop.Bindings.names_key?(b, [:newline], "Enter")
+      true
   """
   @spec names_key?(t(), [command()], String.t()) :: boolean()
-  def names_key?(bindings, commands, query) do
-    q = written_form(query)
+  def names_key?(bindings, commands, query), do: named_command(bindings, commands, query) != nil
 
-    String.starts_with?(q, ["alt+", "ctrl+"]) and
-      Enum.any?(commands, fn command ->
-        Enum.any?(shown_keys(bindings, command), &(written_form(label(&1)) == q))
-      end)
+  @doc """
+  Which of `commands` the key `query` names runs, or `nil` (`names_key?/3`'s rule): `alt+5` of
+  the nine tab commands is `{:tab, 4}`.
+
+      iex> b = Geex.Loop.Bindings.defaults()
+      iex> Geex.Loop.Bindings.named_command(b, for(i <- 0..8, do: {:tab, i}), "alt+5")
+      {:tab, 4}
+      iex> Geex.Loop.Bindings.named_command(b, [:close], "tab")
+      nil
+  """
+  @spec named_command(t(), [command()], String.t()) :: command() | nil
+  def named_command(bindings, commands, query) do
+    case written_form(query) do
+      "" ->
+        nil
+
+      q ->
+        Enum.find(commands, fn command ->
+          Enum.any?(shown_keys(bindings, command), &(written_form(label(&1)) == q))
+        end)
+    end
   end
 
   @arrow_words %{"up" => "↑", "down" => "↓", "left" => "←", "right" => "→"}

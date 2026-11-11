@@ -1,5 +1,6 @@
 defmodule Geex.Command.CatalogTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Geex.Command.Catalog
   alias Geex.Command.Catalog.Entry
@@ -128,6 +129,88 @@ defmodule Geex.Command.CatalogTest do
 
     test "no match returns an empty list" do
       assert Catalog.search("zzzqqq") == []
+    end
+  end
+
+  # ADR-0048: a good name match (each query word starts a name word, in order), then what the
+  # query's key runs, then every other match.
+  describe "search/2" do
+    test "a good name match beats a better-scored loose one" do
+      # `enter` is scattered through `indent other`'s name; nothing is named `enter`.
+      keyed = &(&1.name == "line break")
+      assert hd(Catalog.search("enter", keyed)).name == "line break"
+      assert hd(Catalog.search("line e")).name == "line end"
+      assert hd(Catalog.search("sel al")).name == "select all"
+    end
+
+    test "a command named like the key comes before the key's command" do
+      results = Catalog.search("delete", &(&1.name == "delete forward"))
+      assert hd(results).name == "delete"
+      assert Enum.count(results, &(&1.name == "delete forward")) == 1
+    end
+
+    test "with nothing keyed, it is search/1" do
+      for q <- ["sa", "clip", "paste", "tab", "zzzqqq", "line"],
+          do: assert(Catalog.search(q, fn _ -> false end) == Catalog.search(q))
+    end
+
+    test "narrow/2: `tab N` found by Alt+5 is tab 5, run as picked" do
+      tab = Enum.find(Catalog.all(), &(&1.name == "tab"))
+
+      assert %Entry{name: "tab 5", invoke: {:action, {:tab, 4}}, description: d} =
+               Catalog.narrow(tab, {:tab, 4})
+
+      assert d == "Show the pane's tab 5."
+      copy = Enum.find(Catalog.all(), &(&1.name == "copy"))
+      assert Catalog.narrow(copy, :copy) == copy
+    end
+
+    # The words of every name, and pieces of them: the queries a person types.
+    defp query do
+      words = Catalog.all() |> Enum.flat_map(&String.split(&1.name)) |> Enum.uniq()
+
+      one_of([
+        map(list_of(member_of(words), min_length: 1, max_length: 3), &Enum.join(&1, " ")),
+        map(
+          tuple({member_of(words), integer(1..4)}),
+          fn {w, n} -> String.slice(w, 0, n) end
+        ),
+        string(:alphanumeric, min_length: 1, max_length: 6)
+      ])
+    end
+
+    # The rule, written apart from the code: every query word starts a name word, in order.
+    defp good?(entry, q) do
+      words = String.split(String.downcase(q))
+
+      Enum.any?([entry.name | entry.aliases], fn name ->
+        rest =
+          Enum.reduce_while(words, String.split(String.downcase(name)), fn w, name_words ->
+            case Enum.drop_while(name_words, &(not String.starts_with?(&1, w))) do
+              [] -> {:halt, :miss}
+              [_ | after_it] -> {:cont, after_it}
+            end
+          end)
+
+        rest != :miss
+      end)
+    end
+
+    property "the bands: good names, then keyed, then the rest; each entry once; nothing lost" do
+      check all(
+              q <- query(),
+              keyed_names <- list_of(member_of(Enum.map(Catalog.all(), & &1.name)), max_length: 4)
+            ) do
+        keyed? = &(&1.name in keyed_names)
+        results = Catalog.search(q, keyed?)
+        band = fn e -> if(good?(e, q), do: 1, else: if(keyed?.(e), do: 2, else: 3)) end
+
+        assert length(Enum.uniq(results)) == length(results)
+        assert Enum.map(results, band) == Enum.sort(Enum.map(results, band))
+
+        expected = MapSet.new(Catalog.search(q) ++ Enum.filter(Catalog.all(), keyed?))
+        assert MapSet.new(results) == expected
+      end
     end
   end
 end
