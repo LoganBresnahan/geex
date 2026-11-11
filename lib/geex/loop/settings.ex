@@ -140,14 +140,13 @@ defmodule Geex.Loop.Settings do
         do: %{name: nil, cells: [keys, what, group]}
   end
 
-  # Each command with its keys (ADR-0047); typing filters by name, alias or what it does (best
-  # first), then by a key it is bound to.
+  # Each command with its keys (ADR-0047); typing filters by a key it is bound to (`alt+k`,
+  # first), then by name, alias or what it does (best first).
   def rows(%__MODULE__{tab: :commands, query: query}, ctx) do
     b = bindings(ctx)
-    found = Commands.search(query)
-    by_key = for e <- Commands.all(), e not in found, key_match?(keys_of(b, e), query), do: e
+    by_key = Enum.filter(Commands.all(), &Bindings.names_key?(b, Commands.commands(&1), query))
 
-    for entry <- found ++ by_key,
+    for entry <- by_key ++ (Commands.search(query) -- by_key),
         do: %{name: nil, cells: [Commands.typed(entry), keys_of(b, entry), entry.description]}
   end
 
@@ -310,12 +309,6 @@ defmodule Geex.Loop.Settings do
     commands = Commands.commands(entry)
     Bindings.labels(bindings, commands, range: length(commands) > 1)
   end
-
-  # A query that names a key, `alt+k`, finds the commands bound to it.
-  defp key_match?(_keys, query) when query in ["", nil], do: false
-
-  defp key_match?(keys, query),
-    do: String.contains?(String.downcase(keys), String.downcase(String.trim(query)))
 
   defp switch(view, step) do
     i = Enum.find_index(@tabs, &(&1 == view.tab))

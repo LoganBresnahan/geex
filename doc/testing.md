@@ -5799,3 +5799,42 @@ clean.
 **Not tested / deferred:** remapping itself (no user file yet, roadmap 20.3); about fifteen
 notices still name a default key in their text; the preview's and the output pane's
 `Alt+R`/`Alt+F` by hand (tested through the loop).
+
+### 2026-11-11 — named keys: mod-verify's review, fixed; typed commands act on the editor (ADR-0047 §6)
+
+Session mod-verify reviewed `named-keys` (a1f128c, 5ccc7fb). It ran a differential harness:
+the same seeded key sequences through `Loop.handle_info` on main and on the branch, comparing a
+snapshot after every key. That was 69k random steps plus 480 scripted key/state pairs: the confirm
+prompt, an armed save, the output pane, a running `!`, the command line, grid, the palette, the
+settings view, the tree, the edits pane and a preview. Every divergence was one ADR-0047 declares,
+or the palette's longer list. Its findings, each fixed here:
+
+- **Typed commands disagreed on focus.** With the tree focused, the older typed verbs acted on the
+  editor's file and the new names on the tree. The maintainer's word, after the question: a typed
+  or picked command acts on the file you were last in, whatever has focus, and focus stays. Only
+  `settings`, `stop` and `resize …` follow the focus, as their keys do (§6 rewritten). This settles
+  the typed `newline` in a panel too.
+- **The palette no longer found a command by its key.** Main's descriptions had held "(Alt+K)".
+  The palette and the Commands tab now match a query that is a whole key (`alt+k`, `Alt+5`,
+  `ctrl+o`), first. Whole means `alt+s` is `down`, not `Alt+Shift+Z`
+  (`Bindings.names_key?/3`).
+- **The keymap resolved `indent` and `newline` itself** (two spaces, a bare `\n`), which a remapped
+  chord would have hit. The loop alone turns these into their keys now, and a test binds Ctrl-T to
+  `indent` with tab size 4.
+- **Test gaps.** New: the Caps Lock fallback never goes from lower to upper case; every key's label,
+  exactly; `bound_twice/1` against the defaults. The previous entry's "a key bound twice won't
+  compile" was only a compile-time check, never exercised; this entry corrects it. The bindings
+  generator now takes a random part of the defaults.
+- **Docs.** ADR-0043's amendment (`Alt+R`/`Alt+F` in a preview), ADR-0038's index row, the
+  roadmap's "Where we are", about twenty notices (not fifteen), and ADR-0028's wording. `catalog`
+  now opens the palette, as §3 said it would.
+
+Left as it is: `new line` (with a space) makes a file named `line`, as `new PATH` always has.
+
+**Automated.** `mix test` → **1448 tests + 30 properties + 153 doctests, 0 failures**, twice;
+`GEEX_PROPERTY_RUNS=10000 mix test --only property` → 30 properties, 0 failures; `mix compile
+--warnings-as-errors --force` clean. It caught `dispatch_palette/2` clauses split by the new helper,
+which `mix test` doesn't.
+
+**Not tested:** mod-verify's harness rerun on these fixes, and a tmux run of the tree-focused typed
+command (the loop test covers it).

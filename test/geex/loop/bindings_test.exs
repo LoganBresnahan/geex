@@ -45,16 +45,19 @@ defmodule Geex.Loop.BindingsTest do
   defp bindings do
     commands = Enum.uniq(Map.values(@defaults))
 
-    map(
-      list_of(tuple({event(), member_of(commands)}), max_length: 12),
-      fn extra ->
-        extra
-        |> Enum.filter(fn {chord, _} -> match?({k, _} when k in [:alt, :ctrl, :key], chord) end)
-        |> Enum.reject(fn {chord, _} -> chord in @own_keys end)
-        |> Map.new()
-        |> then(&Map.merge(Map.take(@defaults, Enum.take(Map.keys(@defaults), 20)), &1))
-      end
-    )
+    gen all(
+          base <- list_of(member_of(Map.keys(@defaults)), max_length: 40),
+          extra <- list_of(tuple({event(), member_of(commands)}), max_length: 12)
+        ) do
+      moved =
+        for {chord, _} = binding <- extra,
+            match?({k, _} when k in [:alt, :ctrl, :key], chord),
+            chord not in @own_keys,
+            into: %{},
+            do: binding
+
+      Map.merge(Map.take(@defaults, base), moved)
+    end
   end
 
   describe "translate/2" do
@@ -86,6 +89,10 @@ defmodule Geex.Loop.BindingsTest do
             :error -> assert Bindings.translate(upper, b) == upper
           end
         end
+
+        # Never the other way: an unbound lower case doesn't borrow the Shift chord's command.
+        unless Map.has_key?(b, {kind, c}),
+          do: assert(Bindings.translate({kind, c}, b) == {kind, c})
       end
     end
 
@@ -159,6 +166,41 @@ defmodule Geex.Loop.BindingsTest do
           do: assert(Bindings.translate(chord, @defaults) == {:cmd, command}, inspect(chord))
     end
 
+    test "the defaults bind no key twice" do
+      assert Bindings.bound_twice(Bindings.default_list()) == []
+      assert Bindings.bound_twice([{:up, [{:alt, ?w}]}, {:copy, [{:alt, ?w}]}]) == [{:alt, ?w}]
+    end
+
+    test "each key is written as a person reads it" do
+      written = %{
+        {:key, :enter} => "Enter",
+        {:key, :esc} => "Esc",
+        {:key, :tab} => "Tab",
+        {:key, :shift_tab} => "Shift+Tab",
+        {:key, :backspace} => "Backspace",
+        {:key, :delete} => "Delete",
+        {:key, :home} => "Home",
+        {:key, :end} => "End",
+        {:key, :page_up} => "PgUp",
+        {:key, :page_down} => "PgDn",
+        {:key, :up} => "↑",
+        {:key, :down} => "↓",
+        {:key, :left} => "←",
+        {:key, :right} => "→",
+        {:alt, :right} => "Alt+→",
+        {:alt, ?q} => "Alt+Q",
+        {:alt, ?P} => "Alt+Shift+P",
+        {:alt, ?-} => "Alt+-",
+        {:alt, ?9} => "Alt+9",
+        {:ctrl, ?x} => "Ctrl-X"
+      }
+
+      for {chord, label} <- written, do: assert(Bindings.label(chord) == label)
+
+      for {command, key} <- [newline: "Enter", delete_back: "Backspace", delete_forward: "Delete"],
+          do: assert(Bindings.labels(@defaults, [command]) == key)
+    end
+
     test "every key has its own label" do
       labels = Enum.map(Map.keys(@defaults), &Bindings.label/1)
       assert length(Enum.uniq(labels)) == length(labels)
@@ -185,7 +227,12 @@ defmodule Geex.Loop.BindingsTest do
     end
 
     test "the keymap runs every one, but those the loop takes first" do
-      for command <- Enum.uniq(Map.values(@defaults)) ++ Bindings.own_commands() do
+      # The editor's own commands are turned into their keys by the loop (`newline` is Enter),
+      # so the keymap never resolves one itself.
+      for command <- Bindings.own_commands(),
+          do: assert(Keymap.resolve({:cmd, command}, {0, 1}, "ab") == :ignore)
+
+      for command <- Enum.uniq(Map.values(@defaults)) do
         resolved = Keymap.resolve({:cmd, command}, {0, 1}, "ab")
 
         if command in @front,

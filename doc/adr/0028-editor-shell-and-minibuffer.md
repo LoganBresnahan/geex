@@ -250,10 +250,12 @@ addressing (`line N`, grid), since "you don't type 'move left one'". The maintai
 reason for a name is now the binding; typing it is a side benefit. ADR-0047 has the decision:
 `up`, `word back`, `line start`, `resize left`, `command line`, `palette`, `grid`, `settings`,
 `pane next`, `stop`, and the editor's own keys (`newline`, `indent`, `delete back` …) join the
-catalog; a typed one does what its key does where you are. Addressing stays the way to go
+catalog; a typed one does what its key does in the editor, on the file you were last in
+(ADR-0047 §6). Addressing stays the way to go
 somewhere by number.
 
-`palette` and `grid` can now be typed, as §3 said they would be (the parser didn't take them). The catalog's descriptions no longer name keys: the palette and the
+`palette` (and `catalog`, §3's other name for it) can now be typed, as §3 said; the parser hadn't
+taken them. `grid` opens grid mode; §3's overlay toggle (`grid`/`lines`) was never built. The catalog's descriptions no longer name keys: the palette and the
 Commands tab show each command's keys from the bindings (`Geex.Loop.Bindings`).
 
 ## See

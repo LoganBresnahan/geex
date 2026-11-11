@@ -10,8 +10,8 @@ defmodule Geex.Command.Catalog.Entry do
   all), and `aliases` the other names the minibuffer takes for it (`exit` for `quit`). The
   settings view's Commands tab shows both (roadmap item 18.6).
 
-  A `{:command, command}` runs as its key does where you are (ADR-0047): the loop takes it as
-  the key bound to it. `binds` lists the commands an entry's keys are found by when that isn't
+  A `{:command, command}` runs as its key does in the editor, on the file you were last in
+  (ADR-0047 §6). `binds` lists the commands an entry's keys are found by when that isn't
   its invoke (`tab N` is Alt+1 … Alt+9); `nil` reads them from the invoke.
   """
   @enforce_keys [:name, :description, :invoke]

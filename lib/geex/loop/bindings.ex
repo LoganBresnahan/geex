@@ -82,13 +82,25 @@ defmodule Geex.Loop.Bindings do
                 {:quit, [{:ctrl, ?x}, {:ctrl, ?q}, {:ctrl, ?c}]}
               ]
 
-  # A key bound twice would quietly run only one of its commands: refuse to compile.
+  @doc """
+  The keys listed under more than one command (or twice under one) in `list`, a list of
+  `{command, chords}` as the defaults are written. The defaults are checked with it as they
+  compile: a key bound twice would quietly run only one of its commands.
+
+      iex> Geex.Loop.Bindings.bound_twice([{:up, [{:alt, ?w}]}, {:down, [{:alt, ?s}, {:alt, ?w}]}])
+      [{:alt, ?w}]
+  """
+  @spec bound_twice([{command(), [chord()]}]) :: [chord()]
+  def bound_twice(list) do
+    chords = Enum.flat_map(list, &elem(&1, 1))
+    Enum.uniq(chords -- Enum.uniq(chords))
+  end
+
+  # A key bound twice would quietly run only one of its commands: refuse to compile (the same
+  # check as `bound_twice/1`, which can't be called from here).
   @default_chords Enum.flat_map(@defaults, &elem(&1, 1))
-  if length(@default_chords) != length(Enum.uniq(@default_chords)),
-    do:
-      raise(
-        "Geex.Loop.Bindings: a key bound twice: #{inspect(@default_chords -- Enum.uniq(@default_chords))}"
-      )
+  if @default_chords != Enum.uniq(@default_chords),
+    do: raise("Geex.Loop.Bindings: a key bound twice in the defaults")
 
   # Each default chord's place, so a command's keys list in the order above.
   @order @defaults
@@ -105,6 +117,10 @@ defmodule Geex.Loop.Bindings do
     delete_back: {:key, :backspace},
     delete_forward: {:key, :delete}
   }
+
+  @doc "The defaults as they are written: each command with its keys, in the help's order."
+  @spec default_list() :: [{command(), [chord()]}]
+  def default_list, do: @defaults
 
   @doc """
   The default bindings: every bound key and the command it runs.
@@ -235,6 +251,30 @@ defmodule Geex.Loop.Bindings do
   defp arrow(:down), do: "↓"
   defp arrow(:left), do: "←"
   defp arrow(:right), do: "→"
+
+  @doc """
+  Whether `query` names one of the keys of `commands`, whole: `alt+k` finds `close`, `alt+5` finds
+  tab 5 (its own key, not the range the help writes), `alt+s` finds `down` and not
+  `Alt+Shift+Z`. Case and spaces don't matter, and `ctrl+o` is `Ctrl-O`.
+
+      iex> b = Geex.Loop.Bindings.defaults()
+      iex> {Geex.Loop.Bindings.names_key?(b, [:close], "alt+k"), Geex.Loop.Bindings.names_key?(b, [:redo], "alt+s")}
+      {true, false}
+      iex> Geex.Loop.Bindings.names_key?(b, [{:tab, 4}], " Alt+5 ")
+      true
+  """
+  @spec names_key?(t(), [command()], String.t()) :: boolean()
+  def names_key?(bindings, commands, query) do
+    q = written_form(query)
+
+    q != "" and
+      Enum.any?(commands, fn command ->
+        Enum.any?(shown_keys(bindings, command), &(written_form(label(&1)) == q))
+      end)
+  end
+
+  defp written_form(text),
+    do: text |> String.downcase() |> String.replace(" ", "") |> String.replace("ctrl-", "ctrl+")
 
   @doc """
   The keys of each of `commands`, written for a person and joined: `"Alt+Z  Alt+Shift+Z"`. With

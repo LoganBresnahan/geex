@@ -970,7 +970,7 @@ defmodule Geex.Loop do
     {:noreply, dispatch_key(event, state)}
   end
 
-  # Where a key (or a typed or picked command, ADR-0047 §6) goes: the settings view while it's open,
+  # Where a key goes: the settings view while it's open,
   # then the keys that work from anywhere, then the minibuffer, then whatever has focus.
   defp dispatch_key(event, state) do
     cond do
@@ -4255,8 +4255,14 @@ defmodule Geex.Loop do
   # files, filtered by the input. Draw, Enter and the highlight moves all read it, so they agree
   # on what is where.
   # A command's keys before what it does (ADR-0047), read from the bindings.
+  # Typing a key (`alt+k`) finds the commands bound to it, first, then those its words find.
   defp candidates(%{minibuffer: %Minibuffer{mode: :palette} = mb} = state) do
-    for entry <- Catalog.search(Minibuffer.value(mb)) do
+    query = Minibuffer.value(mb)
+
+    by_key =
+      Enum.filter(Catalog.all(), &Bindings.names_key?(state.keys, Catalog.commands(&1), query))
+
+    for entry <- by_key ++ (Catalog.search(query) -- by_key) do
       commands = Catalog.commands(entry)
 
       case Bindings.labels(state.keys, commands, range: length(commands) > 1) do
@@ -5609,7 +5615,7 @@ defmodule Geex.Loop do
       :shell_again when state.last_shell == nil -> %{state | notice: "no ! command yet"}
       :shell_again -> run_shell(state, state.last_shell)
       {:pipe, cmd} -> run_pipe(state, cmd)
-      {:command, command} -> dispatch_key({:cmd, command}, state)
+      {:command, command} -> typed_command(command, state)
       {:action, action} -> apply_verb(action, state)
       :cancel -> state
       :unknown -> state
@@ -5659,12 +5665,21 @@ defmodule Geex.Loop do
   # complete — the palette is a launcher, the typed parser finishes the job.
   defp dispatch_palette({:action, action}, state), do: apply_verb(action, close_minibuffer(state))
 
-  # A command that had only a key (ADR-0047): as if its key were pressed, where you are.
+  # A command that had only a key (ADR-0047), picked: as if typed.
   defp dispatch_palette({:command, command}, state),
-    do: dispatch_key({:cmd, command}, close_minibuffer(state))
+    do: typed_command(command, close_minibuffer(state))
 
   defp dispatch_palette({:typed, prefix}, state),
     do: schedule_repaint(%{state | minibuffer: Minibuffer.open(:command, prefix <> " ")})
+
+  # A typed or picked command (ADR-0047 §6). Those whose keys work from anywhere (`settings`,
+  # `stop`, `resize …`) run as their key does, on what has focus; the rest act on the file you
+  # were last in, whatever has focus, as the older typed verbs do (`apply_verb/2`). Focus stays.
+  defp typed_command(command, state) do
+    if command in [:settings, :stop_shell] or match?({:resize, _}, command),
+      do: dispatch_key({:cmd, command}, state),
+      else: apply_editor_key({:cmd, command}, state)
+  end
 
   ## Grid commands (ADR-0027). The coordinates typed in `:grid` mode are **display columns**
   ## (the ruler is up); cast `x` to a grapheme against the target line, resolve to a caret /

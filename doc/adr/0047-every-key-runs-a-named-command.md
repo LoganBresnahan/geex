@@ -1,6 +1,7 @@
 # ADR-0047: Every key runs a named command; the bindings are data
 
-- **Status:** Proposed 2026-11-11 (the maintainer's ask; built on the branch `named-keys`)
+- **Status:** Accepted 2026-11-11 (the maintainer's ask; built on the branch `named-keys`, accepted
+  at the maintainer's word the same day)
 - **Date:** 2026-11-11
 - **Amends:** [ADR-0028](0028-editor-shell-and-minibuffer.md) §2 (parity at the capability
   level, not one named command per key: now one per key), [ADR-0026](0026-terminal-input-model.md)
@@ -88,10 +89,15 @@ Nothing else a key does changes.
 Caps Lock doesn't turn the keys off (each clause used to list both cases). The two bound
 themselves are `Alt+Shift+Z` (`redo`) and `Alt+Shift+P` (`preview`). `Ctrl` likewise.
 
-**6. Typing a command's name does what its key does.** The command line closes, then the command
-runs as its key would where you are: `up` typed with the tree focused moves the tree's
-highlight. The commands that were typed before (`undo`, `save`, `tab 3` …) keep their path,
-which ends in the same code.
+**6. A typed command acts on the file you were last in.** Typed in `Alt+M` or picked in the
+palette, a command closes the command line, then runs as its key would in the editor: on the
+current file pane (with two editors, the one you were last in), whatever has focus, and focus
+stays where it was. That is how the older typed verbs (`cut`, `undo`, `select all` …) always
+worked. Only the commands whose keys work from anywhere run on what has focus: `settings`,
+`stop`, and `resize …` (from the tree, `resize left` moves the tree's edge, as `Alt+←` does
+there). Typing `up` with the tree focused moves the editor's cursor, not the tree's highlight:
+the keys do that. The maintainer's word, 2026-11-11, after the review found the old and new
+names disagreeing.
 
 **7. The bindings are a value, not code.** The loop holds them (`state.keys`), the defaults from
 `Bindings.defaults/0`; the key help, the Commands tab, the palette and the settings view's
@@ -117,12 +123,18 @@ you.
   command then.
 - A user's keymap file needs a written form for a chord (`alt+shift+z`); this slice only shows
   them (`Alt+Shift+Z`). The parser and its round-trip property come with the remapping slice.
-- About fifteen notices still name a default key in their text ("behind disk (Alt+J)", "the
+- About twenty notices still name a default key in their text ("behind disk (Alt+J)", "the
   preview is read-only (Alt+Shift+P closes it)", "Alt+Y" after a grammar hint), some made outside
-  the loop (`Geex.Reconcile`, `Geex.Markdown`). They are right until a key is moved; the
+  the loop (`Geex.Reconcile`, `Geex.Markdown`, the file operations, the tree's watcher). They are right until a key is moved; the
   remapping slice makes them read the bindings.
 - The palette's longer list matches more by description: typing `vsplit` lists `vsplit`, then
   `up` (its description has the letters in order). A name match still ranks first.
+- Descriptions no longer name keys, so the palette and the Commands tab find a command by its
+  keys instead: a query that is a whole key (`alt+k`, `Alt+5`, `ctrl+o`) lists the commands bound
+  to it first. Whole, so `alt+s` is `down` and not `Alt+Shift+Z` (review, 2026-11-11).
+- The keymap never resolves `newline`, `indent` and the editor's other own commands: the loop
+  turns each into its key first, so a chord bound to `indent` gets the tab size, "Indent with" and
+  the assists, as Tab does (review, 2026-11-11).
 
 ## See
 

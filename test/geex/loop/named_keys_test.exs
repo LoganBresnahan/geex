@@ -82,6 +82,30 @@ defmodule Geex.Loop.NamedKeysTest do
       assert run(state, "resize left").tree_w == 26
     end
 
+    # The maintainer's word, 2026-11-11: typed commands act on the file you were last in, as the
+    # older typed verbs do; only those whose keys work from anywhere follow the focus.
+    test "with the tree focused, a typed command acts on the editor's file; focus stays", %{
+      state: state,
+      buf: buf
+    } do
+      tree = %{state | tree_shown: true, tree_w: 30, focus: :tree}
+      tree = put_in(tree.tree.rows, [%{path: "a.txt", dir?: false}, %{path: "lib", dir?: true}])
+      tree = put_in(tree.tree.sel, 1)
+
+      Session.set_cursor({0, 5})
+      tree = run(tree, "newline")
+      assert text(buf) == "hello\n world\nline 2\n"
+      assert {tree.focus, tree.tree.sel} == {:tree, 1}
+
+      tree = run(tree, "up")
+      assert cursor() == {0, 0}
+      assert tree.tree.sel == 1
+
+      # `resize left` is one that follows the focus: the tree's edge moves, as Alt+← does there.
+      assert run(tree, "resize left").tree_w == 26
+      assert run(tree, "pane next").focus != :tree
+    end
+
     test "`stop` with nothing running does nothing", %{state: state, buf: buf} do
       state = run(state, "stop")
       assert state.shell == nil
@@ -180,6 +204,25 @@ defmodule Geex.Loop.NamedKeysTest do
       keys = Bindings.defaults() |> Map.delete({:alt, ?y}) |> Map.put({:ctrl, ?e}, :settings)
       keys = Map.drop(keys, [{:alt, ?a}, {:alt, ?d}])
       assert footer.(keys) =~ "← → tabs · Esc or Ctrl-E closes"
+    end
+
+    test "a chord bound to `indent` indents as Tab does: the tab size, the file's kind", %{
+      state: state,
+      buf: buf
+    } do
+      state = %{state | keys: Map.put(state.keys, {:ctrl, ?t}, :indent), tab_size: 4}
+      _ = key(state, {:ctrl, ?t})
+      assert text(buf) == "    hello world\nline 2\n"
+    end
+
+    test "the palette finds a command by its key, whole, first", %{state: state} do
+      # Alt+E is `word forward`; Enter runs the top row.
+      state = state |> key({:alt, ?i}) |> type("alt+e") |> key({:key, :enter})
+      assert cursor() == {0, 6}
+
+      # Alt+S is `down`, not the Alt+Shift+… keys that start the same.
+      _ = state |> key({:alt, ?i}) |> type("Alt+S") |> key({:key, :enter})
+      assert cursor() == {1, 6}
     end
 
     test "the key help and the Commands tab show the moved key", %{state: state} do

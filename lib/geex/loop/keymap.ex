@@ -139,20 +139,14 @@ defmodule Geex.Loop.Keymap do
   def resolve({:key, :esc}, _cursor, _text), do: :select_clear
 
   # A command (ADR-0047): the loop turned a bound key into one (`Geex.Loop.Bindings`), or it
-  # was typed. Motion moves the cursor; a command named for one of the editor's own keys
-  # (`newline` …) does what that key does; the rest are the loop's actions, run as they are.
+  # was typed. Motion moves the cursor; the rest are the loop's actions, run as they are. A
+  # command named for one of the editor's own keys (`newline` …) never gets here: the loop
+  # turns it into its key first, so the tab size, "Indent with" and the assists apply.
   def resolve({:cmd, command}, cursor, text) when command in @motions,
     do: {:move, motion(command, cursor, text)}
 
   def resolve({:cmd, {:tab, i}}, _cursor, _text), do: {:tab, i}
   def resolve({:cmd, command}, _cursor, _text) when command in @actions, do: command
-
-  def resolve({:cmd, command}, cursor, text) do
-    case Geex.Loop.Bindings.own_key(command) do
-      nil -> :ignore
-      key -> resolve(key, cursor, text)
-    end
-  end
 
   # A chord bound to nothing, and any other event: nothing.
   def resolve(_event, _cursor, _text), do: :ignore

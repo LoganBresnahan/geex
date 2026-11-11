@@ -154,7 +154,13 @@ defmodule Geex.Loop.SettingsTest do
 
     test "Commands filters by a key, and shows the keys the bindings give" do
       view = %{Settings.open() | tab: :commands, query: "alt+k"}
-      assert [%{cells: ["close", "Alt+K", _]}] = Settings.rows(view, %{})
+      assert [%{cells: ["close", "Alt+K", _]} | _] = Settings.rows(view, %{})
+
+      # Whole keys: Alt+5 is tab 5's though the row says "Alt+1 … Alt+9"; Alt+S is `down`, not
+      # the Alt+Shift+ keys.
+      assert [%{cells: ["tab N" | _]} | _] = Settings.rows(%{view | query: "alt+5"}, %{})
+      assert [%{cells: ["down" | _]} | _] = Settings.rows(%{view | query: "alt+s"}, %{})
+      assert [%{cells: ["save" | _]} | _] = Settings.rows(%{view | query: "ctrl+o"}, %{})
 
       # Bindings the view is handed, not the defaults: up moved to Alt+I.
       keys = Bindings.defaults() |> Map.delete({:alt, ?w}) |> Map.put({:alt, ?i}, :up)

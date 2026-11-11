@@ -210,7 +210,7 @@ defmodule Geex.Command.Catalog do
       binds: for(i <- 0..8, do: {:tab, i})
     },
     # The commands that had only a key until ADR-0047: typed, or picked here, they do what
-    # their key does where you are.
+    # their key does in the editor (ADR-0047 §6).
     %Entry{
       name: "command line",
       description: "Type a command (this line).",
@@ -218,6 +218,7 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "palette",
+      aliases: ["catalog"],
       description: "Pick a command from this list.",
       invoke: {:command, :palette}
     },
