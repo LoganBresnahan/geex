@@ -255,26 +255,43 @@ defmodule Geex.Loop.Bindings do
   @doc """
   Whether `query` names one of the keys of `commands`, whole: `alt+k` finds `close`, `alt+5` finds
   tab 5 (its own key, not the range the help writes), `alt+s` finds `down` and not
-  `Alt+Shift+Z`. Case and spaces don't matter, and `ctrl+o` is `Ctrl-O`.
+  `Alt+Shift+Z`. Case and spaces don't matter, `ctrl+o` is `Ctrl-O`, and `alt+left` is `Alt+←`.
+
+  Only a chord counts, a query starting with `alt` or `ctrl`: a bare key's name is a word, and
+  `delete`, `tab` or `enter` find the commands of those names, not the keys' (review,
+  2026-11-11).
 
       iex> b = Geex.Loop.Bindings.defaults()
       iex> {Geex.Loop.Bindings.names_key?(b, [:close], "alt+k"), Geex.Loop.Bindings.names_key?(b, [:redo], "alt+s")}
       {true, false}
       iex> Geex.Loop.Bindings.names_key?(b, [{:tab, 4}], " Alt+5 ")
       true
+      iex> Geex.Loop.Bindings.names_key?(b, [{:resize, :left}], "alt+left")
+      true
+      iex> Geex.Loop.Bindings.names_key?(b, [:delete_forward], "delete")
+      false
   """
   @spec names_key?(t(), [command()], String.t()) :: boolean()
   def names_key?(bindings, commands, query) do
     q = written_form(query)
 
-    q != "" and
+    String.starts_with?(q, ["alt+", "ctrl+"]) and
       Enum.any?(commands, fn command ->
         Enum.any?(shown_keys(bindings, command), &(written_form(label(&1)) == q))
       end)
   end
 
-  defp written_form(text),
-    do: text |> String.downcase() |> String.replace(" ", "") |> String.replace("ctrl-", "ctrl+")
+  @arrow_words %{"up" => "↑", "down" => "↓", "left" => "←", "right" => "→"}
+
+  defp written_form(text) do
+    text
+    |> String.downcase()
+    |> String.replace(" ", "")
+    |> String.replace("ctrl-", "ctrl+")
+    |> String.replace(~r/\+(up|down|left|right)$/, fn m ->
+      "+" <> @arrow_words[String.trim_leading(m, "+")]
+    end)
+  end
 
   @doc """
   The keys of each of `commands`, written for a person and joined: `"Alt+Z  Alt+Shift+Z"`. With

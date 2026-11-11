@@ -4255,7 +4255,7 @@ defmodule Geex.Loop do
   # files, filtered by the input. Draw, Enter and the highlight moves all read it, so they agree
   # on what is where.
   # A command's keys before what it does (ADR-0047), read from the bindings.
-  # Typing a key (`alt+k`) finds the commands bound to it, first, then those its words find.
+  # Typing a chord (`alt+k`) finds the commands bound to it, first, then those its words find.
   defp candidates(%{minibuffer: %Minibuffer{mode: :palette} = mb} = state) do
     query = Minibuffer.value(mb)
 
@@ -4846,14 +4846,14 @@ defmodule Geex.Loop do
 
       :grid ->
         # Open the minibuffer in grid mode; the repaint shows the ruler + grid-line overlay
-        # (ADR-0027). Handled here (not apply_action) so it is never reached from a typed verb,
-        # where submit_minibuffer's trailing close would immediately clobber the mode.
+        # (ADR-0027). Handled here, not in apply_action: a typed `grid` reaches it too (ADR-0047
+        # §6), after submit_minibuffer has closed the command line, so nothing clobbers the mode.
         schedule_repaint(%{state | minibuffer: Minibuffer.open(:grid)})
 
       :palette ->
         # Open the command palette (ADR-0028 §3): the repaint shows the fuzzy candidate popup
-        # over `Geex.Command.Catalog`. Like grid, handled here (not apply_action) so it is a
-        # chord-only opener, never re-entered from a typed verb.
+        # over `Geex.Command.Catalog`. Like grid, handled here; a typed `palette` reaches it
+        # once the command line has closed.
         schedule_repaint(%{state | minibuffer: Minibuffer.open(:palette)})
 
       {:move, new_cursor} ->
@@ -5674,7 +5674,9 @@ defmodule Geex.Loop do
 
   # A typed or picked command (ADR-0047 §6). Those whose keys work from anywhere (`settings`,
   # `stop`, `resize …`) run as their key does, on what has focus; the rest act on the file you
-  # were last in, whatever has focus, as the older typed verbs do (`apply_verb/2`). Focus stays.
+  # were last in, whatever has focus, as the older typed verbs do (`apply_verb/2`), and focus
+  # stays. `pane next` reads the focus too (it goes to the pane after the focused one), since
+  # moving focus is what it does.
   defp typed_command(command, state) do
     if command in [:settings, :stop_shell] or match?({:resize, _}, command),
       do: dispatch_key({:cmd, command}, state),

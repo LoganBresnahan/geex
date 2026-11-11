@@ -730,7 +730,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       `named-keys`.
    3. **Remapping**: your changes to the bindings kept in `settings.json`, edited in `Alt+Y`'s
       Commands tab (Enter on a row, press the new key, a clash refused); a chord's written form
-      and its parser; the notices that name a key read the bindings. ADR-0047 §7 has the rules.
+      and its parser; the notices that name a key read the bindings; a chord bound to an own
+      command (`newline`, `indent` …) acting as its key in every view, not only the editor.
+      ADR-0047 §7 has the rules.
    4. **New defaults**, with the maintainer, once 3 lands. Ideas on the table: `Alt+N` goes
       (Esc does it reliably since the 40 ms flush), the motion cluster (WASD, ESDF, IJKL),
       presets for the left or the right hand. The macOS terminals that take `Option+←/→`

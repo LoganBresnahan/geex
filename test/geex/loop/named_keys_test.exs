@@ -117,6 +117,18 @@ defmodule Geex.Loop.NamedKeysTest do
       assert state.minibuffer.mode == :inactive
       assert cursor() == {0, 11}
     end
+
+    test "picked from the palette with the tree focused, it acts on the editor's file too", %{
+      state: state
+    } do
+      tree = %{state | tree_shown: true, tree_w: 30, focus: :tree}
+      tree = put_in(tree.tree.rows, [%{path: "a.txt", dir?: false}, %{path: "lib", dir?: true}])
+      tree = put_in(tree.tree.sel, 1)
+
+      tree = tree |> key({:alt, ?i}) |> type("line end") |> key({:key, :enter})
+      assert cursor() == {0, 11}
+      assert {tree.focus, tree.tree.sel} == {:tree, 1}
+    end
   end
 
   describe "a command means what it means where it runs (§4)" do
@@ -223,6 +235,31 @@ defmodule Geex.Loop.NamedKeysTest do
       # Alt+S is `down`, not the Alt+Shift+… keys that start the same.
       _ = state |> key({:alt, ?i}) |> type("Alt+S") |> key({:key, :enter})
       assert cursor() == {1, 6}
+    end
+
+    # The second review, 2026-11-11: only a chord reads as a key. A bare key's name is a word,
+    # so `delete` is the command of that name (asking to delete the file), not Delete's.
+    test "in the palette, a bare key's name finds the command of that name", %{
+      state: state,
+      buf: buf
+    } do
+      Session.set_cursor({0, 5})
+      asked = state |> key({:alt, ?i}) |> type("delete") |> key({:key, :enter})
+      # The file operation runs off the loop; its answer is the question.
+      assert_receive {:geex_file_op, _, _} = msg, 5_000
+      {:noreply, asked} = Loop.handle_info(msg, asked)
+      assert asked.minibuffer.mode == :confirm
+      assert text(buf) == "hello world\nline 2\n"
+
+      for word <- ~w(tab backspace) do
+        _ = state |> key({:alt, ?i}) |> type(word) |> key({:key, :enter})
+        assert text(buf) == "hello world\nline 2\n", word
+      end
+
+      view = key(state, {:alt, ?y}).settings
+      rows = Loop.Settings.rows(%{view | tab: :commands, query: "delete"}, %{keys: state.keys})
+      assert hd(hd(rows).cells) =~ ~r/^delete( |$)/
+      refute hd(hd(rows).cells) =~ "forward"
     end
 
     test "the key help and the Commands tab show the moved key", %{state: state} do

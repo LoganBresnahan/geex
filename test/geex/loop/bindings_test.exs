@@ -106,6 +106,15 @@ defmodule Geex.Loop.BindingsTest do
       assert Enum.sort(shifted) == [?P, ?Z]
     end
 
+    # The property's "never the other way" needs a lower case dropped and its Shift chord kept,
+    # rare in a random subset of the defaults: pinned here.
+    test "an unbound lower case doesn't borrow its Shift chord's command" do
+      for c <- [?z, ?p] do
+        b = Map.delete(@defaults, {:alt, c})
+        assert Bindings.translate({:alt, c}, b) == {:alt, c}
+      end
+    end
+
     test "an unbound chord arrives as it came" do
       assert Bindings.translate({:alt, ?9}, Map.delete(@defaults, {:alt, ?9})) == {:alt, ?9}
       assert Bindings.translate({:ctrl, ?b}, @defaults) == {:ctrl, ?b}

@@ -132,6 +132,23 @@ defmodule Geex.Loop.ShellTest do
       assert state.notice == nil
     end
 
+    # ADR-0047 §6: `stop` typed, or picked, stops it as Ctrl-G does, from anywhere.
+    test "typed `stop` stops it, as Ctrl-G does", %{root: root} do
+      {state, _} = editing(Path.join(root, "notes.txt"))
+      state = typed(state, "!echo go; sleep 30")
+      state = typed(state, "stop")
+      assert state.shell.stopping
+      assert ran(state).output.status == {:exit, 143}
+    end
+
+    test "`stop` picked in the palette stops it too", %{root: root} do
+      {state, _} = editing(Path.join(root, "notes.txt"))
+      state = typed(state, "!echo go; sleep 30")
+      state = state |> key({:alt, ?i}) |> type("stop") |> key({:key, :enter})
+      assert state.shell.stopping
+      assert ran(state).output.status == {:exit, 143}
+    end
+
     test "a program that wants a terminal is stopped, and says so", %{root: root} do
       {state, _} = editing(Path.join(root, "notes.txt"))
       state = typed(state, ~S|!printf '\033[?1049h'; sleep 30|) |> ran()

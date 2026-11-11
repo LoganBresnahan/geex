@@ -95,7 +95,8 @@ current file pane (with two editors, the one you were last in), whatever has foc
 stays where it was. That is how the older typed verbs (`cut`, `undo`, `select all` …) always
 worked. Only the commands whose keys work from anywhere run on what has focus: `settings`,
 `stop`, and `resize …` (from the tree, `resize left` moves the tree's edge, as `Alt+←` does
-there). Typing `up` with the tree focused moves the editor's cursor, not the tree's highlight:
+there). `pane next` reads the focus too, since moving it is what it does: from the tree it goes
+to the first file pane. Typing `up` with the tree focused moves the editor's cursor, not the tree's highlight:
 the keys do that. The maintainer's word, 2026-11-11, after the review found the old and new
 names disagreeing.
 
@@ -130,11 +131,16 @@ you.
 - The palette's longer list matches more by description: typing `vsplit` lists `vsplit`, then
   `up` (its description has the letters in order). A name match still ranks first.
 - Descriptions no longer name keys, so the palette and the Commands tab find a command by its
-  keys instead: a query that is a whole key (`alt+k`, `Alt+5`, `ctrl+o`) lists the commands bound
-  to it first. Whole, so `alt+s` is `down` and not `Alt+Shift+Z` (review, 2026-11-11).
+  keys instead: a query that is a whole key (`alt+k`, `Alt+5`, `ctrl+o`, `alt+left`) lists the
+  commands bound to it first. Whole, so `alt+s` is `down` and not `Alt+Shift+Z` (review,
+  2026-11-11). Only a chord, starting with `Alt` or `Ctrl`: a bare key's name is a word, so
+  `delete` finds the `delete` command (deleting a file), not `delete forward`, Delete's (second
+  review, the same day).
 - The keymap never resolves `newline`, `indent` and the editor's other own commands: the loop
   turns each into its key first, so a chord bound to `indent` gets the tab size, "Indent with" and
-  the assists, as Tab does (review, 2026-11-11).
+  the assists, as Tab does (review, 2026-11-11). Only in the editor, for now: in the tree, the
+  panes and the command line a chord bound to `newline` does nothing where Enter acts. No default
+  binds one, so this waits for remapping, which must turn them into their keys in every view.
 
 ## See
 

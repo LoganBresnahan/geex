@@ -5838,3 +5838,26 @@ which `mix test` doesn't.
 
 **Not tested:** mod-verify's harness rerun on these fixes, and a tmux run of the tree-focused typed
 command (the loop test covers it).
+
+### 2026-11-11 — named keys: mod-verify's second review, fixed (ADR-0047)
+
+mod-verify re-ran its main-vs-branch harness on e1b9e02. The random walk and the scripted pairs
+were byte-identical to the earlier run, and every typed and picked command matched its key under
+§6. One regression: the palette and the Commands tab read a bare key's name as that key, so
+`delete` + Enter ran `delete forward` (main asks to delete the file), and `tab`, `backspace`
+indented and deleted. Fixed: only a chord (`alt+…`, `ctrl+…`) reads as a key; `alt+left` now
+reads as `Alt+←`. `pane next` added to §6's commands that read the focus; the stale "never from a
+typed verb" comments on grid and palette corrected; roadmap 20.3 notes that a chord bound to an
+own command acts as its key only in the editor so far.
+
+Tests added for the review's uncaught plants: typed and picked `stop` stopping a running `!`
+(P8), the palette with the tree focused (P16), an unbound lower case not borrowing its Shift
+chord's command (P1, pinned as an example), and bare key names in the palette and the Commands
+tab. P8 and P16 re-planted here: each now fails its new test.
+
+1453 tests + 30 properties + 153 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. Not tested: no tmux pass for this change (it is
+the palette's ordering, covered through the loop). Left: `enter` in the palette fuzzy-matches the
+name `indent other` (letters in order), a ranking result of the longer list, not key search; the
+palette's 14-column name runs into its keys (`delete forward`), as `theme terminal` did on main;
+`alt+5` hands off to `tab ` rather than running tab 5.
