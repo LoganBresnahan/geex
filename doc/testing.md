@@ -5889,3 +5889,20 @@ Ctrl-X quits with the terminal restored.
 `mix compile --warnings-as-errors --force` clean. Not tested: the Commands tab drawn live (its rows
 are tested as values). Left: a query naming no key and matching no name well still picks the best
 loose match.
+
+### 2026-11-11 — palette ranks: mod-verify's review, fixed (ADR-0048)
+
+mod-verify reviewed 0b3510c against main: the random walk and the scripted pairs byte-identical
+to main, the §6 oracles identical but for the rename, and over 571 queries the palette's top pick
+changed in 29, all declared or better (`lb` → `line break`). Two gaps fixed:
+
+- The order within a band was unpinned (sorting by band alone changed 128 top picks and failed
+  no test). Pinned by four examples where the catalog's order and the score disagree
+  (`clipboard` → paste, `clear` → no, `create` → new, `character` → delete back) and by the band
+  property, now also checking the score never rises within a band (`Geex.Fuzzy` as its oracle).
+- On a terminal narrower than about 32 columns the name column is half the width and a longer
+  name ran into its keys. A name is now clipped to leave one space; a test at 26 columns pins the
+  cap and the clip.
+
+Planted here, each caught: sort by band only, no clip, no cap. 1463 tests + 31 properties + 155
+doctests green twice; `mix compile --warnings-as-errors --force` clean.

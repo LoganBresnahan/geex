@@ -149,6 +149,18 @@ defmodule Geex.Command.CatalogTest do
       assert Enum.count(results, &(&1.name == "delete forward")) == 1
     end
 
+    # Where the catalog's order and the score disagree: the score orders within a band
+    # (mod-verify's review of ADR-0048, which planted "band only" and saw no test fail).
+    test "within a band, the better score first, not the catalog's order" do
+      for {q, top} <- [
+            {"clipboard", "paste"},
+            {"clear", "no"},
+            {"create", "new"},
+            {"character", "delete back"}
+          ],
+          do: assert(hd(Catalog.search(q)).name == top, q)
+    end
+
     test "with nothing keyed, it is search/1" do
       for q <- ["sa", "clip", "paste", "tab", "zzzqqq", "line"],
           do: assert(Catalog.search(q, fn _ -> false end) == Catalog.search(q))
@@ -179,6 +191,16 @@ defmodule Geex.Command.CatalogTest do
       ])
     end
 
+    # A name match above a description-only one, as Catalog's rank; no match scores 0.
+    defp score(entry, q) do
+      case [entry.name | entry.aliases]
+           |> Enum.map(&Geex.Fuzzy.score(&1, q))
+           |> Enum.reject(&is_nil/1) do
+        [] -> Geex.Fuzzy.score(entry.description, q) || 0
+        scores -> Enum.max(scores) + 1000
+      end
+    end
+
     # The rule, written apart from the code: every query word starts a name word, in order.
     defp good?(entry, q) do
       words = String.split(String.downcase(q))
@@ -207,6 +229,12 @@ defmodule Geex.Command.CatalogTest do
 
         assert length(Enum.uniq(results)) == length(results)
         assert Enum.map(results, band) == Enum.sort(Enum.map(results, band))
+
+        # Within a band the score never rises (the scorer is the oracle; the sort is the claim).
+        for {_band, entries} <- Enum.chunk_by(results, band) |> Enum.map(&{band.(hd(&1)), &1}) do
+          scores = Enum.map(entries, &score(&1, q))
+          assert scores == Enum.sort(scores, :desc), inspect({q, Enum.map(entries, & &1.name)})
+        end
 
         expected = MapSet.new(Catalog.search(q) ++ Enum.filter(Catalog.all(), keyed?))
         assert MapSet.new(results) == expected

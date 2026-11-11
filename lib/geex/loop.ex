@@ -4328,7 +4328,9 @@ defmodule Geex.Loop do
   defp draw_palette_row(screen, entry, y, selected?, %{w: w, theme: %Theme{palette: pal}}, col) do
     {bg, attrs} = if selected?, do: {pal.active_line_bg, pal.mark}, else: {pal.bg, []}
     name_fg = if selected?, do: pal.fg, else: pal.active_line_number
-    label = String.pad_trailing(entry.name, col)
+    # A name longer than the column (a narrow terminal caps it at half the width) is clipped
+    # to leave one space before its keys.
+    label = entry.name |> String.slice(0, max(col - 1, 0)) |> String.pad_trailing(col)
 
     screen
     |> Screen.fill_rect(0, y, w, 1, %Cell{char: " ", fg: pal.fg, bg: bg, attrs: attrs})

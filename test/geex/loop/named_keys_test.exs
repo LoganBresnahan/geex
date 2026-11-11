@@ -328,5 +328,18 @@ defmodule Geex.Loop.NamedKeysTest do
       row = Enum.find(rows, &String.starts_with?(&1, "delete forward"))
       assert row =~ ~r/^delete forward  +Delete · /
     end
+
+    test "on a narrow terminal the column is half the width, and a longer name is clipped", %{
+      state: state
+    } do
+      state = %{state | w: 26} |> key({:alt, ?i}) |> type("delete f")
+      {:noreply, state} = Loop.handle_info(:repaint, state)
+
+      rows =
+        for y <- 0..(state.h - 1),
+            do: Enum.map_join(0..25, &Geex.Screen.get_cell(Geex.Renderer.current(), &1, y).char)
+
+      assert Enum.find(rows, &String.starts_with?(&1, "delete forwa")) =~ ~r/^delete forwa Delete/
+    end
   end
 end
