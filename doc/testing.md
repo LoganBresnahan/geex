@@ -5762,3 +5762,40 @@ directory and the tree's width stays. `mix test` → **1419 tests + 27 propertie
 0 failures**.
 
 **Not tested:** live, on its own (it rode the next entry's tmux run).
+
+### 2026-11-11 — Every key runs a named command; the bindings are data (ADR-0047, roadmap item 20.2)
+
+The maintainer's ask: every key gets a named command, typed in `Alt+M`, so keys can be remapped.
+`Geex.Loop.Bindings` holds the default bindings; the loop translates a bound key into
+`{:cmd, command}` as it arrives, and the keymap, the tree, the edits and output panes, the
+preview, the minibuffer and the settings view match commands. 25 new catalog names; the key
+help, the Commands tab (a keys column, searchable by key), the palette and the settings footer
+read the keys from the bindings. Branch `named-keys`.
+
+**Hand-verified in tmux** (scratch XDG dirs, the worktree's build): `Alt+Y`'s Commands tab lists
+each command with its keys (`up  Alt+W ↑`, `redo  Alt+Shift+Z`, `tab N  Alt+1 … Alt+9`), and
+typing `alt+w` leaves only `up`; the Keys tab writes its rows from the bindings, and its footer
+reads "← → or Alt+A Alt+D tabs · Esc or Alt+Y closes"; the palette shows `word forward  Alt+E ·
+Move to the start of the next word.`, and picking it moved the cursor to 1:7; in the command
+line `abc`, `Alt+A` twice then `X` gave `aXbc`; typed `line end` moved the cursor to 1:12.
+`geex.log`: no error.
+
+**Automated.** `bindings_test.exs`: properties (translating twice is translating once; a bound
+key runs its command, the view's own keys, characters and pastes pass; Caps Lock: an unbound
+Alt+Shift+letter runs Alt+letter's command, or arrives as it came), every pre-ADR key runs what
+it ran, every bound command has a catalog name that parses to it and that the keymap runs (or
+the loop's front takes), every label distinct, a key bound twice won't compile.
+`named_keys_test.exs` (through the loop): typed motions, `newline` and `delete back` (one
+history entry), `settings`, `palette`, `grid`, `resize left`, `stop` with nothing running, a
+command picked from the palette; `Alt+A`/`Alt+D`/`Alt+W`/`Alt+S` in the command line; `Alt+R`/
+`Alt+F` in the output pane and a preview; `up` moved to `Alt+I`: it runs in the editor, a picker, the tree and
+the settings view, and `Alt+W` does nothing; the footer and the Commands tab show moved keys.
+The keymap, settings, revert and hold tests give chords through the default bindings. Planted
+bugs (no Caps Lock fallback; the minibuffer reading the raw ←) failed 5 tests. `mix test` →
+**1443 tests + 30 properties + 151 doctests, 0 failures**, twice; `GEEX_PROPERTY_RUNS=10000 mix
+test --only property` → 30 properties, 0 failures; `mix compile --warnings-as-errors --force`
+clean.
+
+**Not tested / deferred:** remapping itself (no user file yet, roadmap 20.3); about fifteen
+notices still name a default key in their text; the preview's and the output pane's
+`Alt+R`/`Alt+F` by hand (tested through the loop).

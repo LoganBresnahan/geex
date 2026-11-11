@@ -1,9 +1,10 @@
 defmodule Geex.Loop.Keymap do
   @moduledoc """
-  The **minimal hardcoded keymap**: a key event + the current cursor + the buffer
-  text → an action. Pure, so it is unit-tested without a terminal. The
-  *configurable* keymap (from the user-config TOML,
-  [ADR-0025](../../../doc/adr/0025-user-config-layer.md)) supersedes this later.
+  The **editor's keymap**: a command or one of the editor's own keys + the current cursor + the
+  buffer text → an action. Pure, so it is unit-tested without a terminal. Which key runs which
+  command is `Geex.Loop.Bindings`' (data, ADR-0047); the loop translates a bound key before it
+  gets here, so this module never sees a chord, only `{:cmd, command}` and the keys that are
+  the editor's own (characters, Enter, Tab, Shift+Tab, Backspace, Delete, Esc).
 
   Edits map to `%Command{}`s dispatched on the **one shared path**
   ([ADR-0003](../../../doc/adr/0003-one-shared-path.md)), so a human keystroke and
@@ -12,9 +13,8 @@ defmodule Geex.Loop.Keymap do
     * `{:edit, command, new_cursor}` — dispatch the (unstamped) command, then move
       the cursor to `new_cursor`.
     * `{:move, new_cursor}` — a view-local cursor move, no edit.
-    * `:minibuffer` — open the minibuffer (the command surface, ADR-0028).
-    * `:quit` — exit the editor.
-    * `:ignore` — an unhandled key.
+    * an action the loop runs (`:undo`, `:minibuffer`, `{:tab, 2}` …).
+    * `:ignore` — nothing to do.
 
   Cursor coordinates are `{line, col}`, 0-based, `col` in **graphemes** (Doc
   semantics); motion is clamped to the text and wraps at line ends.
@@ -41,6 +41,7 @@ defmodule Geex.Loop.Keymap do
           | :revert_call
           | :fast_forward
           | :next_pane
+          | :toggle_preview
           | :find_file
           | :close
           | :toggle_tree
@@ -57,7 +58,43 @@ defmodule Geex.Loop.Keymap do
   # The lines `indent_style/1` reads (roadmap item 18.7).
   @indent_lines 1000
 
-  @doc "Resolve a `Geex.Input.Parser` event against the cursor and buffer text."
+  # The commands that move the cursor (ADR-0026's arrows and Alt cluster, ADR-0047's names).
+  @motions [:up, :down, :left, :right, :word_back, :word_forward, :line_start, :line_end]
+
+  # The commands that are the loop's actions as they are (`Geex.Loop`'s `apply_action/4`, and
+  # the openers its `resolve_key/4` handles).
+  @actions [
+    :minibuffer,
+    :grid,
+    :palette,
+    :select_start,
+    :select_all,
+    :select_clear,
+    :copy,
+    :cut,
+    :paste,
+    :undo,
+    :redo,
+    :revert_hunk,
+    :fast_forward,
+    :next_pane,
+    :toggle_preview,
+    :find_file,
+    :close,
+    :toggle_tree,
+    :toggle_edits,
+    :split_rows,
+    :split_cols,
+    :tab_prev,
+    :tab_next,
+    :save,
+    :quit
+  ]
+
+  @doc """
+  Resolve a command (`{:cmd, command}`, ADR-0047) or one of the editor's own keys against the
+  cursor and buffer text.
+  """
   @spec resolve(tuple(), cursor(), String.t()) :: action()
   def resolve(event, cursor, text)
 
@@ -98,85 +135,26 @@ defmodule Geex.Loop.Keymap do
     end
   end
 
-  # Home / End → the start or end of the line (the same as Alt+R / Alt+F).
-  def resolve({:key, :home}, cursor, _text), do: {:move, line_start(cursor)}
-  def resolve({:key, :end}, cursor, text), do: {:move, line_end(cursor, text)}
-
-  # Arrows → move the cursor, clamped to the text, wrapping at line ends.
-  def resolve({:key, :left}, cursor, text), do: {:move, left(cursor, text)}
-  def resolve({:key, :right}, cursor, text), do: {:move, right(cursor, text)}
-  def resolve({:key, :up}, cursor, text), do: {:move, vert(cursor, text, -1)}
-  def resolve({:key, :down}, cursor, text), do: {:move, vert(cursor, text, +1)}
-
-  # Alt+M opens the minibuffer (ADR-0028); every other Alt+letter is motion — a left-hand
-  # cluster around WASD that needs no arrow keys (ADR-0026), case-insensitive (Caps Lock):
-  #   W A S D — up / left / down / right
-  #   Q   E   — word back / forward
-  #   R   F   — line start / end
-  def resolve({:alt, c}, _cursor, _text) when c in [?m, ?M], do: :minibuffer
-  # Grid mode (ADR-0027): Alt+G opens the minibuffer in `:grid` mode and shows the
-  # display-column ruler + grid-line overlay for picking coordinates.
-  def resolve({:alt, c}, _cursor, _text) when c in [?g, ?G], do: :grid
-  # Command palette (ADR-0028 §3; on Alt+I since ADR-0037): opens the minibuffer in `:palette`
-  # mode — a fuzzy browser over `Geex.Command.Catalog`. Inside it, Alt+W/Alt+S (the editor's
-  # own up/down) move the highlight; the loop owns that, not the keymap.
-  def resolve({:alt, c}, _cursor, _text) when c in [?i, ?I], do: :palette
-  # Undo / redo (ADR-0031): Alt+Z undoes, Alt+Shift+Z redoes — these are case-*sensitive*
-  # (the terminal sends `M-z` vs `M-Z`), as Alt+P and Alt+Shift+P are (ADR-0043): the two Alt
-  # chords where shift means something other than the same action. History operations, not edits; the loop runs them on the buffer.
-  def resolve({:alt, ?z}, _cursor, _text), do: :undo
-  def resolve({:alt, ?Z}, _cursor, _text), do: :redo
-
-  # Revert the agent's (or outside) change under the cursor, one hunk, keeping later edits
-  # (ADR-0033 §7). `revert-call` (the whole tool call) is typed or picked from the palette.
-  def resolve({:alt, c}, _cursor, _text) when c in [?u, ?U], do: :revert_hunk
-  # The panes and files (ADR-0037):
-  #   Alt+P — the next pane (tree · editor · edits); Alt+Shift+P — a markdown file's preview
-  #           (ADR-0043), case-sensitive like Alt+Shift+Z, so Caps Lock with Alt+P gives it too
-  #   Alt+O — open a file (Alt+Shift+O can't arrive: it sends `ESC O`, an SS3 prefix)
-  #   Alt+K — close the file (refused with unsaved edits)
-  #   Alt+T — show or hide the file tree;  Alt+L — show or hide the edits pane
-  #   Alt+J — fast-forward: take in the file's change on disk, which an open buffer holds until
-  #           you ask (ADR-0034 §1), merging your unsaved edits
-  def resolve({:alt, ?p}, _cursor, _text), do: :next_pane
-  def resolve({:alt, ?P}, _cursor, _text), do: :toggle_preview
-  def resolve({:alt, c}, _cursor, _text) when c in [?o, ?O], do: :find_file
-  def resolve({:alt, c}, _cursor, _text) when c in [?k, ?K], do: :close
-  def resolve({:alt, c}, _cursor, _text) when c in [?t, ?T], do: :toggle_tree
-  def resolve({:alt, c}, _cursor, _text) when c in [?l, ?L], do: :toggle_edits
-  def resolve({:alt, c}, _cursor, _text) when c in [?j, ?J], do: :fast_forward
-  # Split panes and tabs (ADR-0038):
-  #   Alt+-  split the pane top and bottom;  Alt+=  split it side by side
-  #   Alt+,  the previous tab;  Alt+.  the next tab;  Alt+1..9  tab 1 to 9
-  def resolve({:alt, ?-}, _cursor, _text), do: :split_rows
-  def resolve({:alt, ?=}, _cursor, _text), do: :split_cols
-  def resolve({:alt, ?,}, _cursor, _text), do: :tab_prev
-  def resolve({:alt, ?.}, _cursor, _text), do: :tab_next
-  def resolve({:alt, d}, _cursor, _text) when d in ?1..?9, do: {:tab, d - ?1}
-  # Selection (ADR-0029): Alt+H starts a selection at the cursor (motion then extends it),
-  # Alt+B selects the whole buffer ("highlight all"), Alt+N / Esc clear. The loop owns the
-  # live selection.
-  def resolve({:alt, c}, _cursor, _text) when c in [?h, ?H], do: :select_start
-  def resolve({:alt, c}, _cursor, _text) when c in [?b, ?B], do: :select_all
-  # Clear the selection: Alt+N (the reliable, atomic "no/cancel" — a bare Esc lingers in
-  # the parser's leftover, so it only lands when the next key arrives) and Esc.
-  def resolve({:alt, c}, _cursor, _text) when c in [?n, ?N], do: :select_clear
+  # Esc clears the selection, as the `no` command (Alt+N) does.
   def resolve({:key, :esc}, _cursor, _text), do: :select_clear
-  # Clipboard (ADR-0015): copy/cut act on the selection (or do nothing), paste inserts at
-  # the cursor — or replaces the selection. Alt+X is distinct from Ctrl-X (quit).
-  def resolve({:alt, c}, _cursor, _text) when c in [?c, ?C], do: :copy
-  def resolve({:alt, c}, _cursor, _text) when c in [?x, ?X], do: :cut
-  def resolve({:alt, c}, _cursor, _text) when c in [?v, ?V], do: :paste
-  def resolve({:alt, c}, cursor, text), do: alt_motion(lower(c), cursor, text)
 
-  # Save (ADR-0026 reserved Ctrl-O for it — the CUA Ctrl-S is XOFF/flow-control, which froze
-  # the tty until `Geex.TerminalIO` turned flow control off). An operation, not an edit.
-  def resolve({:ctrl, c}, _cursor, _text) when c in [?o, ?O], do: :save
+  # A command (ADR-0047): the loop turned a bound key into one (`Geex.Loop.Bindings`), or it
+  # was typed. Motion moves the cursor; a command named for one of the editor's own keys
+  # (`newline` …) does what that key does; the rest are the loop's actions, run as they are.
+  def resolve({:cmd, command}, cursor, text) when command in @motions,
+    do: {:move, motion(command, cursor, text)}
 
-  # Quit. Ctrl-Q (XON) and Ctrl-C (SIGINT) reach geex because `Geex.TerminalIO` turns the
-  # tty's flow control and signal keys off; where it can't, Ctrl-X still works.
-  def resolve({:ctrl, c}, _cursor, _text) when c in [?x, ?q, ?c], do: :quit
+  def resolve({:cmd, {:tab, i}}, _cursor, _text), do: {:tab, i}
+  def resolve({:cmd, command}, _cursor, _text) when command in @actions, do: command
 
+  def resolve({:cmd, command}, cursor, text) do
+    case Geex.Loop.Bindings.own_key(command) do
+      nil -> :ignore
+      key -> resolve(key, cursor, text)
+    end
+  end
+
+  # A chord bound to nothing, and any other event: nothing.
   def resolve(_event, _cursor, _text), do: :ignore
 
   ## Command builders — Insert/Delete/Replace.parse are pure (validate → struct).
@@ -240,17 +218,6 @@ defmodule Geex.Loop.Keymap do
     do: text |> lines() |> Enum.at(line, "") |> String.replace_suffix("\r", "") |> String.length()
 
   defp clamp(v, lo, hi), do: v |> max(lo) |> min(hi)
-
-  @doc """
-  The way a resizing key moves the focused pane's edge (roadmap item 18.8): Alt with an arrow.
-  `nil` for any other key (`Alt+Shift+W/A/S/D` resized until 2026-11-11).
-
-      iex> Enum.map([{:alt, :left}, {:alt, ?W}, {:alt, ?w}, {:key, :up}], &Geex.Loop.Keymap.resize_dir/1)
-      [:left, nil, nil, nil]
-  """
-  @spec resize_dir(tuple()) :: :up | :down | :left | :right | nil
-  def resize_dir({:alt, dir}) when dir in [:up, :down, :left, :right], do: dir
-  def resize_dir(_event), do: nil
 
   @doc """
   What Tab does at `cursor` (roadmap item 18.7): a real tab in a file that indents with tabs
@@ -712,9 +679,7 @@ defmodule Geex.Loop.Keymap do
 
   @doc "Is `event` a vertical motion (up/down, incl. Alt+W/S)? Vertical moves keep the goal."
   @spec vertical?(tuple()) :: boolean()
-  def vertical?({:key, :up}), do: true
-  def vertical?({:key, :down}), do: true
-  def vertical?({:alt, c}) when c in [?w, ?W, ?s, ?S], do: true
+  def vertical?({:cmd, command}), do: command in [:up, :down]
   def vertical?(_event), do: false
 
   @doc """
@@ -736,20 +701,16 @@ defmodule Geex.Loop.Keymap do
   def apply_goal({line, _col}, goal, text) when is_integer(goal),
     do: {line, min(goal, line_len(text, line))}
 
-  ## Alt-letter motion (the arrow-free clusters).
+  ## Motion commands.
 
-  defp alt_motion(?w, cursor, text), do: {:move, vert(cursor, text, -1)}
-  defp alt_motion(?a, cursor, text), do: {:move, left(cursor, text)}
-  defp alt_motion(?s, cursor, text), do: {:move, vert(cursor, text, +1)}
-  defp alt_motion(?d, cursor, text), do: {:move, right(cursor, text)}
-  defp alt_motion(?q, cursor, text), do: {:move, word_back(cursor, text)}
-  defp alt_motion(?e, cursor, text), do: {:move, word_forward(cursor, text)}
-  defp alt_motion(?r, cursor, _text), do: {:move, line_start(cursor)}
-  defp alt_motion(?f, cursor, text), do: {:move, line_end(cursor, text)}
-  defp alt_motion(_c, _cursor, _text), do: :ignore
-
-  defp lower(c) when c in ?A..?Z, do: c + 32
-  defp lower(c), do: c
+  defp motion(:up, cursor, text), do: vert(cursor, text, -1)
+  defp motion(:down, cursor, text), do: vert(cursor, text, +1)
+  defp motion(:left, cursor, text), do: left(cursor, text)
+  defp motion(:right, cursor, text), do: right(cursor, text)
+  defp motion(:word_back, cursor, text), do: word_back(cursor, text)
+  defp motion(:word_forward, cursor, text), do: word_forward(cursor, text)
+  defp motion(:line_start, cursor, _text), do: line_start(cursor)
+  defp motion(:line_end, cursor, text), do: line_end(cursor, text)
 
   defp line_start({line, _col}), do: {line, 0}
   defp line_end({line, _col}, text), do: {line, line_len(text, line)}

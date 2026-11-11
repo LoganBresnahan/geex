@@ -44,6 +44,11 @@ defmodule Geex.Loop.Verbs do
     * `no` — the typed twin of `Alt+N`: clears a live selection (a plain cancel when
       nothing is selected). An empty line just cancels.
 
+    * every command that had only a key (ADR-0047): `up`, `word back`, `line start`, `page down`,
+      `resize left`, `command line`, `palette`, `grid`, `settings`, `pane next`, `stop`,
+      `newline`, `indent`, `delete back` … — `{:command, command}`, which the loop runs as its
+      key would. Their names are the catalog's.
+
   Anything else is `:unknown` (a no-op today). The command **catalog**
   ([`Geex.Command.Catalog`](../command/catalog.ex)) now backs the **palette** (ADR-0028 §3, built); the
   remaining consolidation — having *this* parser resolve against that catalog instead of the
@@ -53,12 +58,19 @@ defmodule Geex.Loop.Verbs do
 
   alias Geex.Coord
 
+  # The names of the commands that run as their key does (ADR-0047), from the catalog.
+  @commands for %{invoke: {:command, command}} = entry <- Geex.Command.Catalog.all(),
+                name <- [entry.name | entry.aliases],
+                into: %{},
+                do: {name, command}
+
   @type verb ::
           {:line, non_neg_integer()}
           | {:action, atom() | {:tab, non_neg_integer()}}
           | {:open, String.t()}
           | {:new | :mkdir | :rename, String.t()}
           | {:shell | :pipe, String.t()}
+          | {:command, term()}
           | :shell_again
           | :cancel
           | :unknown
@@ -159,6 +171,9 @@ defmodule Geex.Loop.Verbs do
       _ -> :unknown
     end
   end
+
+  defp do_parse(name) when is_map_key(@commands, name),
+    do: {:command, Map.fetch!(@commands, name)}
 
   defp do_parse(""), do: :cancel
   # `no` is the true Alt+N twin: it *clears* a live selection (then the minibuffer closes

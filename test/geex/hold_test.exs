@@ -309,8 +309,18 @@ defmodule Geex.HoldTest do
   end
 
   test "Alt+J, the `fast-forward` verb and the palette entry are one action" do
-    assert Geex.Loop.Keymap.resolve({:alt, ?j}, {0, 0}, "a") == :fast_forward
-    assert Geex.Loop.Keymap.resolve({:alt, ?J}, {0, 0}, "a") == :fast_forward
+    assert Geex.Loop.Keymap.resolve(
+             Geex.Loop.Bindings.translate({:alt, ?j}, Geex.Loop.Bindings.defaults()),
+             {0, 0},
+             "a"
+           ) == :fast_forward
+
+    assert Geex.Loop.Keymap.resolve(
+             Geex.Loop.Bindings.translate({:alt, ?J}, Geex.Loop.Bindings.defaults()),
+             {0, 0},
+             "a"
+           ) == :fast_forward
+
     assert Geex.Loop.Verbs.parse("fast-forward") == {:action, :fast_forward}
 
     assert %{invoke: {:action, :fast_forward}} =

@@ -70,6 +70,7 @@ defmodule Geex.Loop do
   alias Geex.LastSession
 
   alias Geex.Loop.{
+    Bindings,
     EditsPane,
     FileOps,
     Keymap,
@@ -351,6 +352,8 @@ defmodule Geex.Loop do
       h: h,
       goal: 0,
       selection: nil,
+      # Which command each bound key runs (ADR-0047), the defaults until remapping lands.
+      keys: Bindings.defaults(),
       theme: Theme.default(),
       # The theme's name, as `theme NAME` takes it, and the terminal's background once it has
       # answered OSC 11 (`{:rgb, r, g, b}`), which the built-in terminal theme tints from
@@ -768,16 +771,21 @@ defmodule Geex.Loop do
 
   def handle_info({:geex_io, {:osc, _ps, _pt}}, state), do: {:noreply, state}
 
-  # A key. When the minibuffer is open it captures input; otherwise resolve the key against
-  # the current text + cursor (read fresh from Session) and apply via the one shared path
-  # (edits) or a view-local cursor move.
-  # Page Up/Down are a preview's keys: anywhere else they do nothing at all, not even what any
-  # key does (dismiss a notice, end a mouse hold, disarm a refused save).
-  def handle_info({:geex_io, {:key, k}}, state) when k in [:page_up, :page_down] do
-    if pages_preview?(state), do: io_event({:key, k}, state), else: {:noreply, state}
-  end
+  # A key. A bound key becomes the command it runs here, before anything reads it (ADR-0047);
+  # the focused view's own keys come as they are. When the minibuffer is open it captures
+  # input; otherwise resolve the key against the current text + cursor (read fresh from
+  # Session) and apply via the one shared path (edits) or a view-local cursor move.
+  # Page Up/Down are a preview's: anywhere else they do nothing at all, not even what any key
+  # does (dismiss a notice, end a mouse hold, disarm a refused save).
+  def handle_info({:geex_io, event}, state) do
+    case Bindings.translate(event, state.keys) do
+      {:cmd, page} when page in [:page_up, :page_down] ->
+        if pages_preview?(state), do: io_event({:cmd, page}, state), else: {:noreply, state}
 
-  def handle_info({:geex_io, event}, state), do: io_event(event, state)
+      event ->
+        io_event(event, state)
+    end
+  end
 
   # The tree's files, from the process reload_tree/1 started. An answer from any other process
   # (a read that was superseded) falls through to the catch-all.
@@ -954,12 +962,17 @@ defmodule Geex.Loop do
 
   # A key the editor takes.
   defp io_event(event, state) do
-    # Any key dismisses a notice (it has been seen), and any key but Ctrl-O disarms a refused save.
+    # Any key dismisses a notice (it has been seen), and any key but save's disarms a refused save.
     # A key ends a drag (ADR-0039): what it does may take the drag's pane or text away.
     state = if state.notice, do: schedule_repaint(%{state | notice: nil}), else: state
     state = stop_drag(state)
-    state = %{state | save_armed: state.save_armed and event in [{:ctrl, ?o}, {:ctrl, ?O}]}
+    state = %{state | save_armed: state.save_armed and event == {:cmd, :save}}
+    {:noreply, dispatch_key(event, state)}
+  end
 
+  # Where a key (or a typed or picked command, ADR-0047 §6) goes: the settings view while it's open,
+  # then the keys that work from anywhere, then the minibuffer, then whatever has focus.
+  defp dispatch_key(event, state) do
     cond do
       # The settings view, while it is open, takes every key (ADR-0040 §7).
       state.settings != nil ->
@@ -967,40 +980,48 @@ defmodule Geex.Loop do
           Settings.key(state.settings, event, settings_rows(state.settings, state), state.h)
 
         state = %{state | settings: same_tab_or_reselect(state.settings, view, state)}
-        {:noreply, schedule_repaint(settings_action(action, state))}
+        schedule_repaint(settings_action(action, state))
 
-      event in [{:alt, ?y}, {:alt, ?Y}] and not Minibuffer.active?(state.minibuffer) ->
-        {:noreply, schedule_repaint(open_settings(state))}
+      event == {:cmd, :settings} and not Minibuffer.active?(state.minibuffer) ->
+        schedule_repaint(open_settings(state))
 
       # Ctrl-G stops the shell command running, from anywhere (ADR-0042).
-      event in [{:ctrl, ?g}, {:ctrl, ?G}] and state.shell != nil ->
-        {:noreply, schedule_repaint(stop_shell(state))}
+      event == {:cmd, :stop_shell} and state.shell != nil ->
+        schedule_repaint(stop_shell(state))
 
       Minibuffer.active?(state.minibuffer) ->
-        {:noreply, apply_minibuffer_key(event, state)}
+        apply_minibuffer_key(event, state)
 
       # Resizing from the keyboard, whatever has focus (roadmap item 18.8).
-      Keymap.resize_dir(event) != nil ->
-        {:noreply, schedule_repaint(resize_by_key(state, Keymap.resize_dir(event)))}
+      match?({:cmd, {:resize, _}}, event) ->
+        {:cmd, {:resize, dir}} = event
+        schedule_repaint(resize_by_key(state, dir))
 
       # A pane can have gone (hidden by a resize); then the keys are the editor's again.
       state.focus != :editor ->
         case focused(state, layout(state)) do
-          :output -> {:noreply, apply_output_key(event, state)}
-          :edits -> {:noreply, apply_edits_key(event, state)}
-          :tree -> {:noreply, apply_tree_key(event, state)}
-          :editor -> {:noreply, apply_editor_key(event, %{state | focus: :editor})}
+          :output -> apply_output_key(event, state)
+          :edits -> apply_edits_key(event, state)
+          :tree -> apply_tree_key(event, state)
+          :editor -> apply_editor_key(event, %{state | focus: :editor})
         end
 
       true ->
-        {:noreply, apply_editor_key(event, state)}
+        apply_editor_key(event, state)
     end
   end
 
   # A key for the editor: resolve it against the current text + cursor (read fresh from
   # Session).
   # A preview's keys go to a handler of their own: it is read-only (ADR-0043 §1).
+  # A command named for one of the editor's own keys (`newline` …, ADR-0047 §2) is that key.
   defp apply_editor_key(event, state) do
+    event =
+      with {:cmd, command} <- event,
+           key when key != nil <- Bindings.own_key(command),
+           do: key,
+           else: (_ -> event)
+
     if preview_current?(state), do: preview_key(event, state), else: source_key(event, state)
   end
 
@@ -1422,14 +1443,12 @@ defmodule Geex.Loop do
     end
   end
 
-  defp preview_scroll({:key, :up}), do: -1
-  defp preview_scroll({:key, :down}), do: 1
-  defp preview_scroll({:alt, c}) when c in [?w, ?W], do: -1
-  defp preview_scroll({:alt, c}) when c in [?s, ?S], do: 1
-  defp preview_scroll({:key, :page_up}), do: :page_up
-  defp preview_scroll({:key, :page_down}), do: :page_down
-  defp preview_scroll({:key, :home}), do: :top
-  defp preview_scroll({:key, :end}), do: :bottom
+  defp preview_scroll({:cmd, :up}), do: -1
+  defp preview_scroll({:cmd, :down}), do: 1
+  defp preview_scroll({:cmd, :page_up}), do: :page_up
+  defp preview_scroll({:cmd, :page_down}), do: :page_down
+  defp preview_scroll({:cmd, :line_start}), do: :top
+  defp preview_scroll({:cmd, :line_end}), do: :bottom
   defp preview_scroll(_event), do: nil
 
   # Scroll pane `id`'s preview tab: by rows, a page (its text rows less one), or to the top or
@@ -2442,7 +2461,13 @@ defmodule Geex.Loop do
   # The settings view covers the whole screen while it is open (ADR-0040 §7).
   defp repaint(%{settings: %Settings{} = view} = state) do
     screen =
-      Settings.draw(view, settings_rows(view, state), state.theme.palette, {state.w, state.h})
+      Settings.draw(
+        view,
+        settings_rows(view, state),
+        state.theme.palette,
+        {state.w, state.h},
+        state.keys
+      )
 
     Renderer.flush(screen, :hidden)
     state
@@ -3341,7 +3366,8 @@ defmodule Geex.Loop do
       saved: state.settings_saved,
       tab_size: state.tab_size,
       indent_with: state.indent_with,
-      installing: MapSet.new(Map.keys(state.installing))
+      installing: MapSet.new(Map.keys(state.installing)),
+      keys: state.keys
     }
   end
 
@@ -3659,16 +3685,10 @@ defmodule Geex.Loop do
     %{state | focus: :editor}
   end
 
-  # Keys while the tree has focus: move, Enter opens a file or opens/closes a directory,
-  # Right opens one, Left closes one (or, on a file, goes up to its directory), Esc goes back.
-  # Alt+W/A/S/D act as the arrows, as they do in the editor. The panel chords work as in the
-  # edits pane (`panel_chord/2`); other keys do nothing.
-  defp apply_tree_key({:alt, c}, state) when c in [?a, ?A],
-    do: apply_tree_key({:key, :left}, state)
-
-  defp apply_tree_key({:alt, c}, state) when c in [?d, ?D],
-    do: apply_tree_key({:key, :right}, state)
-
+  # Keys while the tree has focus: up and down move, Enter opens a file or opens/closes a
+  # directory, right opens one, left closes one (or, on a file, goes up to its directory), Esc
+  # goes back. The motion commands are whatever keys run them (the arrows, Alt+W/A/S/D). The
+  # panel chords work as in the edits pane (`panel_chord/2`); other keys do nothing.
   defp apply_tree_key(event, state) do
     # A key shows the highlighted row again, wherever the wheel left the list (ADR-0039).
     tree_key(event, put_in(state.tree.hold, nil))
@@ -3679,10 +3699,10 @@ defmodule Geex.Loop do
     row = Enum.at(tree.rows, min(tree.sel, count - 1))
 
     case event do
-      e when e in [{:key, :up}, {:alt, ?w}, {:alt, ?W}] ->
+      {:cmd, :up} ->
         schedule_repaint(put_in(state.tree.sel, max(min(tree.sel, count - 1) - 1, 0)))
 
-      e when e in [{:key, :down}, {:alt, ?s}, {:alt, ?S}] ->
+      {:cmd, :down} ->
         schedule_repaint(put_in(state.tree.sel, min(tree.sel + 1, max(count - 1, 0))))
 
       {:key, :enter} when is_map(row) and row.dir? ->
@@ -3693,14 +3713,14 @@ defmodule Geex.Loop do
           do_open(Path.join(safe_start().root, row.path), %{state | focus: :editor})
         )
 
-      {:key, :right} when is_map(row) and row.dir? ->
+      {:cmd, :right} when is_map(row) and row.dir? ->
         schedule_repaint(set_open(state, row.path, true))
 
-      {:key, :left} when is_map(row) and row.dir? and row.open? ->
+      {:cmd, :left} when is_map(row) and row.dir? and row.open? ->
         schedule_repaint(set_open(state, row.path, false))
 
       # On a file or a closed directory, Left goes up to the directory it is in.
-      {:key, :left} when is_map(row) ->
+      {:cmd, :left} when is_map(row) ->
         parent = Path.dirname(row.path)
         i = Enum.find_index(tree.rows, &(&1.path == parent))
         schedule_repaint(if i, do: put_in(state.tree.sel, i), else: state)
@@ -4021,20 +4041,21 @@ defmodule Geex.Loop do
     end
   end
 
-  # Keys while the output pane has focus: move, Enter opens the `path:line` on the highlighted
-  # line, `!` runs the command again, `q` closes the pane (stopping the command), Esc goes back.
+  # Keys while the output pane has focus: up and down move, line start and end go to the top and
+  # the bottom, Enter opens the `path:line` on the highlighted line, `!` runs the command again,
+  # `q` closes the pane (stopping the command), Esc goes back.
   defp apply_output_key(event, %{output: out} = state) do
     case event do
-      e when e in [{:key, :up}, {:alt, ?w}, {:alt, ?W}] ->
+      {:cmd, :up} ->
         schedule_repaint(%{state | output: Output.move(out, -1)})
 
-      e when e in [{:key, :down}, {:alt, ?s}, {:alt, ?S}] ->
+      {:cmd, :down} ->
         schedule_repaint(%{state | output: Output.move(out, +1)})
 
-      {:key, :home} ->
+      {:cmd, :line_start} ->
         schedule_repaint(%{state | output: Output.move(out, -out.sel)})
 
-      {:key, :end} ->
+      {:cmd, :line_end} ->
         schedule_repaint(%{state | output: Output.move(out, Output.size(out))})
 
       {:key, :enter} ->
@@ -4128,11 +4149,11 @@ defmodule Geex.Loop do
     count = length(entries)
 
     case event do
-      e when e in [{:key, :up}, {:alt, ?w}, {:alt, ?W}] ->
+      {:cmd, :up} ->
         sel = max(min(state.edits_sel, count - 1) - 1, 0)
         schedule_repaint(%{state | edits_sel: past_divider(entries, sel, -1)})
 
-      e when e in [{:key, :down}, {:alt, ?s}, {:alt, ?S}] ->
+      {:cmd, :down} ->
         sel = min(state.edits_sel + 1, max(count - 1, 0))
         schedule_repaint(%{state | edits_sel: past_divider(entries, sel, +1)})
 
@@ -4233,8 +4254,17 @@ defmodule Geex.Loop do
   # What the popup lists: the command catalog, the open buffers (ADR-0034), or the finder's
   # files, filtered by the input. Draw, Enter and the highlight moves all read it, so they agree
   # on what is where.
-  defp candidates(%{minibuffer: %Minibuffer{mode: :palette} = mb}),
-    do: Catalog.search(Minibuffer.value(mb))
+  # A command's keys before what it does (ADR-0047), read from the bindings.
+  defp candidates(%{minibuffer: %Minibuffer{mode: :palette} = mb} = state) do
+    for entry <- Catalog.search(Minibuffer.value(mb)) do
+      commands = Catalog.commands(entry)
+
+      case Bindings.labels(state.keys, commands, range: length(commands) > 1) do
+        "" -> entry
+        keys -> %{entry | description: keys <> " · " <> entry.description}
+      end
+    end
+  end
 
   defp candidates(%{minibuffer: %Minibuffer{mode: :buffers} = mb}),
     do: buffer_candidates(Minibuffer.value(mb))
@@ -5423,7 +5453,7 @@ defmodule Geex.Loop do
   end
 
   # A y/n question before a file operation (`Geex.Loop.FileOps`): `y` runs it; `n`, Enter, Esc
-  # and Alt+N don't. Other keys wait for an answer; the quit keys still quit.
+  # and `no` (Alt+N) don't. Other keys wait for an answer; quitting still quits.
   defp apply_minibuffer_key(event, %{minibuffer: %Minibuffer{mode: :confirm}} = state) do
     case event do
       {:char, c} when c in ["y", "Y"] ->
@@ -5433,10 +5463,10 @@ defmodule Geex.Loop do
       e when e in [{:char, "n"}, {:char, "N"}, {:key, :enter}, {:key, :esc}] ->
         %{close_minibuffer(state) | notice: "nothing done"}
 
-      {:alt, c} when c in [?n, ?N] ->
+      {:cmd, :select_clear} ->
         %{close_minibuffer(state) | notice: "nothing done"}
 
-      {:ctrl, c} when c in [?x, ?q, ?c] ->
+      {:cmd, :quit} ->
         quit(state)
 
       _ ->
@@ -5444,25 +5474,25 @@ defmodule Geex.Loop do
     end
   end
 
-  # Keys while the minibuffer is open go to its input; Enter submits, Alt+N / Esc cancels,
-  # and Ctrl-X still quits (so you are never trapped). Everything else is ignored.
+  # Keys while the minibuffer is open go to its input; Enter submits, Esc / `no` (Alt+N)
+  # cancels, and quitting still quits (so you are never trapped). Everything else is ignored.
   #
-  # In `:palette` mode two extra chords navigate the candidate list — **Alt+W/Alt+S** (the
-  # editor's own up/down, ADR-0028 §3) and the arrow Up/Down alias — handled *before* the
-  # text-input cases so they move the highlight instead of typing. A plain `w`/`s` still types
-  # into the fuzzy filter; the Alt modifier is what separates "move" from "type".
+  # The motion commands are the editor's (ADR-0047), whatever keys run them: in a picker, up and
+  # down move the highlight; elsewhere they bring back what was entered before; left and right
+  # move the input's cursor. A plain `w`/`s` still types into the filter: only a bound key is a
+  # command.
   defp apply_minibuffer_key(event, %{minibuffer: mb} = state) do
     case event do
-      _ when mb.mode in @pickers and event in [{:alt, ?w}, {:alt, ?W}, {:key, :up}] ->
+      {:cmd, :up} when mb.mode in @pickers ->
         move_palette(state, -1)
 
-      _ when mb.mode in @pickers and event in [{:alt, ?s}, {:alt, ?S}, {:key, :down}] ->
+      {:cmd, :down} when mb.mode in @pickers ->
         move_palette(state, +1)
 
-      {:key, :up} when is_map_key(state.recall, mb.mode) ->
+      {:cmd, :up} when is_map_key(state.recall, mb.mode) ->
         recall(state, :older)
 
-      {:key, :down} when is_map_key(state.recall, mb.mode) ->
+      {:cmd, :down} when is_map_key(state.recall, mb.mode) ->
         recall(state, :newer)
 
       {:char, g} ->
@@ -5478,10 +5508,10 @@ defmodule Geex.Loop do
       {:key, :backspace} ->
         schedule_repaint(refresh_matches(%{state | minibuffer: Minibuffer.backspace(mb)}))
 
-      {:key, :left} ->
+      {:cmd, :left} ->
         schedule_repaint(%{state | minibuffer: Minibuffer.left(mb)})
 
-      {:key, :right} ->
+      {:cmd, :right} ->
         schedule_repaint(%{state | minibuffer: Minibuffer.right(mb)})
 
       {:key, :enter} ->
@@ -5490,11 +5520,10 @@ defmodule Geex.Loop do
       {:key, :esc} ->
         close_minibuffer(state)
 
-      {:alt, c} when c in [?n, ?N] ->
+      {:cmd, :select_clear} ->
         close_minibuffer(state)
 
-      # The keymap's quit keys (`Keymap.resolve/3`).
-      {:ctrl, c} when c in [?x, ?q, ?c] ->
+      {:cmd, :quit} ->
         quit(state)
 
       _ ->
@@ -5519,11 +5548,11 @@ defmodule Geex.Loop do
   end
 
   # The palette: Enter runs the **highlighted** candidate. Re-derive the candidate list from
-  # the current input (the same pure `Catalog.search` the popup renders, so what Enter runs is
+  # the current input (the same `candidates/1` the popup renders, so what Enter runs is
   # exactly what is highlighted), pick the `sel`-th, and dispatch it (`dispatch_palette/2`).
   # No match under the cursor (empty list) just closes.
   defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :palette} = mb} = state) do
-    pick(Enum.at(Catalog.search(Minibuffer.value(mb)), mb.sel), state)
+    pick(Enum.at(candidates(state), mb.sel), state)
   end
 
   # The buffer picker: Enter shows the highlighted buffer.
@@ -5580,6 +5609,7 @@ defmodule Geex.Loop do
       :shell_again when state.last_shell == nil -> %{state | notice: "no ! command yet"}
       :shell_again -> run_shell(state, state.last_shell)
       {:pipe, cmd} -> run_pipe(state, cmd)
+      {:command, command} -> dispatch_key({:cmd, command}, state)
       {:action, action} -> apply_verb(action, state)
       :cancel -> state
       :unknown -> state
@@ -5628,6 +5658,10 @@ defmodule Geex.Loop do
   # **hand off** to `:command` mode pre-filled with the verb (e.g. `line `) for the user to
   # complete — the palette is a launcher, the typed parser finishes the job.
   defp dispatch_palette({:action, action}, state), do: apply_verb(action, close_minibuffer(state))
+
+  # A command that had only a key (ADR-0047): as if its key were pressed, where you are.
+  defp dispatch_palette({:command, command}, state),
+    do: dispatch_key({:cmd, command}, close_minibuffer(state))
 
   defp dispatch_palette({:typed, prefix}, state),
     do: schedule_repaint(%{state | minibuffer: Minibuffer.open(:command, prefix <> " ")})

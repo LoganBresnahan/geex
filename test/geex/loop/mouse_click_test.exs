@@ -329,8 +329,9 @@ defmodule Geex.Loop.MouseClickTest do
       state = Enum.reduce(String.graphemes("vsplit"), state, &send_io(&2, {:char, &1}))
       assert state.minibuffer.sel == 0
 
-      # The popup's rows end just above the input row (29): one match, on row 28.
-      state = click(state, 3, 28)
+      # The popup's rows end just above the input row (29), the best match on top: `vsplit` by
+      # name, then any whose description matches.
+      state = click(state, 3, 29 - length(Geex.Command.Catalog.search("vsplit")))
       assert state.minibuffer.mode == :inactive
       assert state.panes.split == {:cols, {:pane, 1}, {:pane, 2}, 0.5}
     end

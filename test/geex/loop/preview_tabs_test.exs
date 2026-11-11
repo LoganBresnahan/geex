@@ -305,6 +305,12 @@ defmodule Geex.Loop.PreviewTabsTest do
       state = key(state, {:key, :down})
       assert scroll.(state) == bottom
       assert scroll.(key(state, {:key, :home})) == 0
+
+      # Alt+R and Alt+F run `line start` and `line end` too, which a preview reads as its top
+      # and bottom (ADR-0047 §4).
+      state = key(state, {:alt, ?r})
+      assert scroll.(state) == 0
+      assert scroll.(key(state, {:alt, ?f})) == bottom
     end
 
     test "an edit above the reader keeps their row, and so does the user's save", ctx do

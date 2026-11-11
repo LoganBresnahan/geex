@@ -1,0 +1,204 @@
+defmodule Geex.Loop.BindingsTest do
+  # The key bindings (ADR-0047): which command each bound key runs, as data. Pure.
+  use ExUnit.Case, async: true
+  use ExUnitProperties
+
+  doctest Geex.Loop.Bindings
+
+  alias Geex.Command.Catalog
+  alias Geex.Loop.{Bindings, Keymap, Verbs}
+
+  @defaults Bindings.defaults()
+
+  # The focused view's own keys, never bound (ADR-0047 §1).
+  @own_keys [
+    {:key, :enter},
+    {:key, :esc},
+    {:key, :tab},
+    {:key, :shift_tab},
+    {:key, :backspace},
+    {:key, :delete}
+  ]
+
+  # The commands the loop's front takes before the keymap (`Geex.Loop`'s `dispatch_key/2`, and
+  # the preview for the page keys): the keymap resolves them to nothing.
+  @front [:settings, :stop_shell, :page_up, :page_down] ++
+           for(d <- [:up, :down, :left, :right], do: {:resize, d})
+
+  # Any key event the parser hands over, bound or not.
+  defp event do
+    one_of([
+      tuple({constant(:alt), one_of([integer(?a..?z), integer(?A..?Z), integer(?0..?9)])}),
+      tuple({constant(:alt), member_of([:up, :down, :left, :right, ?-, ?=, ?,, ?.])}),
+      tuple({constant(:ctrl), integer(?a..?z)}),
+      tuple(
+        {constant(:key),
+         member_of([:up, :down, :left, :right, :home, :end, :page_up, :page_down])}
+      ),
+      member_of(@own_keys),
+      map(string(:alphanumeric, length: 1), &{:char, &1}),
+      map(string(:printable, max_length: 8), &{:paste, &1})
+    ])
+  end
+
+  # Bindings as a user might make them: some of the default keys, some moved to other chords.
+  defp bindings do
+    commands = Enum.uniq(Map.values(@defaults))
+
+    map(
+      list_of(tuple({event(), member_of(commands)}), max_length: 12),
+      fn extra ->
+        extra
+        |> Enum.filter(fn {chord, _} -> match?({k, _} when k in [:alt, :ctrl, :key], chord) end)
+        |> Enum.reject(fn {chord, _} -> chord in @own_keys end)
+        |> Map.new()
+        |> then(&Map.merge(Map.take(@defaults, Enum.take(Map.keys(@defaults), 20)), &1))
+      end
+    )
+  end
+
+  describe "translate/2" do
+    property "translating twice is translating once" do
+      check all(b <- bindings(), e <- event()) do
+        once = Bindings.translate(e, b)
+        assert Bindings.translate(once, b) == once
+      end
+    end
+
+    property "a bound key runs its command; the view's own keys, characters and pastes pass" do
+      check all(b <- bindings(), e <- event()) do
+        case Map.fetch(b, e) do
+          {:ok, command} -> assert Bindings.translate(e, b) == {:cmd, command}
+          :error when e in @own_keys -> assert Bindings.translate(e, b) == e
+          :error when elem(e, 0) in [:char, :paste] -> assert Bindings.translate(e, b) == e
+          :error -> :ok
+        end
+      end
+    end
+
+    property "Caps Lock: Alt+Shift+letter not bound itself runs Alt+letter's command" do
+      check all(b <- bindings(), c <- integer(?a..?z), kind <- member_of([:alt, :ctrl])) do
+        upper = {kind, c - 32}
+
+        unless Map.has_key?(b, upper) do
+          case Map.fetch(b, {kind, c}) do
+            {:ok, command} -> assert Bindings.translate(upper, b) == {:cmd, command}
+            :error -> assert Bindings.translate(upper, b) == upper
+          end
+        end
+      end
+    end
+
+    test "Alt+Shift+Z and Alt+Shift+P are the Shift chords bound themselves" do
+      assert Bindings.translate({:alt, ?Z}, @defaults) == {:cmd, :redo}
+      assert Bindings.translate({:alt, ?z}, @defaults) == {:cmd, :undo}
+      assert Bindings.translate({:alt, ?P}, @defaults) == {:cmd, :toggle_preview}
+      assert Bindings.translate({:alt, ?p}, @defaults) == {:cmd, :next_pane}
+
+      shifted = for {{:alt, c}, _} <- @defaults, c in ?A..?Z, do: c
+      assert Enum.sort(shifted) == [?P, ?Z]
+    end
+
+    test "an unbound chord arrives as it came" do
+      assert Bindings.translate({:alt, ?9}, Map.delete(@defaults, {:alt, ?9})) == {:alt, ?9}
+      assert Bindings.translate({:ctrl, ?b}, @defaults) == {:ctrl, ?b}
+    end
+  end
+
+  describe "the defaults" do
+    test "no view's own key is bound, and only bound keys are" do
+      for chord <- Map.keys(@defaults) do
+        refute chord in @own_keys
+        assert match?({k, _} when k in [:alt, :ctrl, :key], chord)
+      end
+    end
+
+    test "the keys geex had before ADR-0047 run what they ran" do
+      expected = %{
+        {:alt, ?w} => :up,
+        {:alt, ?a} => :left,
+        {:alt, ?s} => :down,
+        {:alt, ?d} => :right,
+        {:alt, ?q} => :word_back,
+        {:alt, ?e} => :word_forward,
+        {:alt, ?r} => :line_start,
+        {:alt, ?f} => :line_end,
+        {:key, :home} => :line_start,
+        {:key, :end} => :line_end,
+        {:alt, ?m} => :minibuffer,
+        {:alt, ?g} => :grid,
+        {:alt, ?i} => :palette,
+        {:alt, ?y} => :settings,
+        {:alt, ?u} => :revert_hunk,
+        {:alt, ?o} => :find_file,
+        {:alt, ?k} => :close,
+        {:alt, ?t} => :toggle_tree,
+        {:alt, ?l} => :toggle_edits,
+        {:alt, ?j} => :fast_forward,
+        {:alt, ?h} => :select_start,
+        {:alt, ?b} => :select_all,
+        {:alt, ?n} => :select_clear,
+        {:alt, ?c} => :copy,
+        {:alt, ?x} => :cut,
+        {:alt, ?v} => :paste,
+        {:alt, ?-} => :split_rows,
+        {:alt, ?=} => :split_cols,
+        {:alt, ?,} => :tab_prev,
+        {:alt, ?.} => :tab_next,
+        {:alt, ?1} => {:tab, 0},
+        {:alt, ?9} => {:tab, 8},
+        {:alt, :left} => {:resize, :left},
+        {:ctrl, ?o} => :save,
+        {:ctrl, ?g} => :stop_shell,
+        {:ctrl, ?x} => :quit,
+        {:ctrl, ?q} => :quit,
+        {:ctrl, ?c} => :quit
+      }
+
+      for {chord, command} <- expected,
+          do: assert(Bindings.translate(chord, @defaults) == {:cmd, command}, inspect(chord))
+    end
+
+    test "every key has its own label" do
+      labels = Enum.map(Map.keys(@defaults), &Bindings.label/1)
+      assert length(Enum.uniq(labels)) == length(labels)
+    end
+  end
+
+  # ADR-0047 §2: every command a key runs has a name, typed in Alt+M, that runs it.
+  describe "every bound command has a name" do
+    test "in the catalog" do
+      named = Enum.flat_map(Catalog.all(), &Catalog.commands/1)
+
+      for command <- Enum.uniq(Map.values(@defaults)) ++ Bindings.own_commands(),
+          do: assert(command in named, "#{inspect(command)} has no catalog entry")
+    end
+
+    test "typed, it parses to the command its key runs" do
+      for %{name: name} = entry <- Catalog.all(),
+          command <- Catalog.commands(entry),
+          not match?({:tab, _}, command) do
+        assert Verbs.parse(name) in [{:command, command}, {:action, command}], name
+      end
+
+      assert Verbs.parse("tab 3") == {:action, {:tab, 2}}
+    end
+
+    test "the keymap runs every one, but those the loop takes first" do
+      for command <- Enum.uniq(Map.values(@defaults)) ++ Bindings.own_commands() do
+        resolved = Keymap.resolve({:cmd, command}, {0, 1}, "ab")
+
+        if command in @front,
+          do: assert(resolved == :ignore, inspect(command)),
+          else: refute(resolved == :ignore, inspect(command))
+      end
+    end
+  end
+
+  test "labels/3 follows the bindings it is given" do
+    moved = @defaults |> Map.delete({:alt, ?w}) |> Map.put({:alt, ?i}, :up)
+    assert Bindings.labels(moved, [:up]) == "Alt+I ↑"
+    assert Bindings.labels(moved, [:palette]) == ""
+    assert Bindings.labels(@defaults, [:newline, :select_clear]) == "Enter  Alt+N Esc"
+  end
+end

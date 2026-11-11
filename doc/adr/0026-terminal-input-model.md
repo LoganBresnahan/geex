@@ -1,6 +1,6 @@
 # ADR-0026: Terminal input model & keymap (one default, capability-gated extras)
 
-- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read; bracketed paste. **Amended 2026-11-10:** Shift+Tab inserts the other kind of indent from Tab's. **Amended 2026-11-11:** `Alt+Shift+W/A/S/D` no longer resize; Alt with an arrow does.
+- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read; bracketed paste. **Amended 2026-11-10:** Shift+Tab inserts the other kind of indent from Tab's. **Amended 2026-11-11:** `Alt+Shift+W/A/S/D` no longer resize; Alt with an arrow does. **Amended 2026-11-11 by [ADR-0047](0047-every-key-runs-a-named-command.md):** the keymap is data: each bound key runs a named command.
 - **Date:** 2026-06-08
 - **Refines:** [ADR-0025](0025-user-config-layer.md) (the keymap is user-config *data*),
   [ADR-0024](0024-tui-core-extractable.md) (the TUI core / `prim_tty`)
@@ -190,6 +190,16 @@ Some macOS terminals don't send Alt with ← and → by default: Ghostty and Ter
 `Option+←/→` to the shell's word jumps (`ESC b`, `ESC f`), which arrive as `Alt+B` and `Alt+F`.
 The fix is the terminal's (in Ghostty, `keybind = alt+left=unbind` and the same for `alt+right`);
 geex can't tell those bytes from the keys they copy. Telling users so is roadmap work.
+
+
+## Amendment — 2026-11-11: the keymap is data ([ADR-0047](0047-every-key-runs-a-named-command.md))
+
+§6 said the Alt keys "stay remappable via config"; §3–4 planned a keymap file. The base for
+that is built: `Geex.Loop.Bindings` holds which command each bound key runs (every chord and
+the navigation keys), the loop translates a key into its command as it arrives, and nothing
+after that matches a chord. One default keymap still (§1). The keymap file, the validation of
+§4 and the reserved-chord table of §5 come with the remapping slice; the file will be the
+settings file ([ADR-0040](0040-bare-geex-and-the-catalog.md) §7), not ADR-0025's TOML.
 
 ## See
 

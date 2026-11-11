@@ -714,6 +714,25 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    - **Later, if wanted:** indent from the syntax tree (tree-sitter indent queries in the
      catalog's packages); reading `.editorconfig`.
 
+20. **Keys you can move** ([adr/0047](adr/0047-every-key-runs-a-named-command.md)) — the
+   maintainer, 2026-11-11: every key gets a named command you can type, so keys can be remapped;
+   the defaults change after that, to what feels right ("wasd seemed like a good idea because
+   its classic for gamers but i'm not even a gamer"). In this order:
+   1. **`Alt+Shift+W/A/S/D` stop resizing** (decided 2026-11-10, "alt arrow keys is enough"):
+      they move the cursor again, like their lower case. **Built 2026-11-11** on `named-keys`.
+   2. **Every key runs a named command; the bindings are data** (ADR-0047). `Geex.Loop.Bindings`,
+      the loop translating a key into its command as it arrives, every view reading commands,
+      about 25 new catalog names, the key help, the Commands tab, the palette and the settings
+      footer reading the keys from the bindings. No default changed. **Built 2026-11-11** on
+      `named-keys`.
+   3. **Remapping**: your changes to the bindings kept in `settings.json`, edited in `Alt+Y`'s
+      Commands tab (Enter on a row, press the new key, a clash refused); a chord's written form
+      and its parser; the notices that name a key read the bindings. ADR-0047 §7 has the rules.
+   4. **New defaults**, with the maintainer, once 3 lands. Ideas on the table: `Alt+N` goes
+      (Esc does it reliably since the 40 ms flush), the motion cluster (WASD, ESDF, IJKL),
+      presets for the left or the right hand. The macOS terminals that take `Option+←/→`
+      (ADR-0026's 2026-11-11 amendment) want a note in `Alt+Y` and install.md.
+
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the
 tty) is **FIXED** (2026-10-16), and BUG-4 (a deploy removed a running geex's unpack) is **FIXED** (2026-10-18); BUG-5 and BUG-6 are **FIXED** (2026-10-18). BUG-7 (stale text after a terminal resize, found

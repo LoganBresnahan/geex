@@ -9,7 +9,10 @@ defmodule Geex.Command.Catalog do
   zero-arg `{:action, atom}` dispatched straight through the loop's shared `apply_action/4`
   vocabulary (the same path `Alt+C`/a typed `copy` take), or a `{:typed, prefix}` that drops the
   user into `:command` mode pre-filled with the verb so they can supply its argument (e.g.
-  `line `).
+  `line `), or a `{:command, command}`: since ADR-0047 every key runs a named command, and the
+  ones that had only a key (motion, resizing, the command surfaces) run as their key does.
+  An entry's keys aren't written into it: they are read from the bindings
+  (`Geex.Loop.Bindings`, `commands/1`).
 
   **Scope (ADR-0028 §3, decision "A").** v1 lists the **human command vocabulary that exists
   today** — the clipboard / history / selection verbs, `save`, `quit`, and `line`. It deliberately
@@ -45,7 +48,7 @@ defmodule Geex.Command.Catalog do
     %Entry{
       name: "revert",
       description:
-        "Take back the agent's (or outside) change under the cursor, keeping later edits (Alt+U).",
+        "Take back the agent's (or outside) change under the cursor, keeping later edits.",
       invoke: {:action, :revert_hunk}
     },
     %Entry{
@@ -57,7 +60,7 @@ defmodule Geex.Command.Catalog do
       name: "open",
       usage: "open [PATH]",
       aliases: ["find"],
-      description: "Find a file by name and open it, or switch to it (Alt+O).",
+      description: "Find a file by name and open it, or switch to it.",
       invoke: {:action, :find_file}
     },
     %Entry{
@@ -67,7 +70,7 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "close",
-      description: "Close this tab; the buffer too, unless it has unsaved changes (Alt+K).",
+      description: "Close this tab; the buffer too, unless it has unsaved changes.",
       invoke: {:action, :close}
     },
     %Entry{
@@ -110,38 +113,37 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "tree",
-      description: "Show or hide the file tree (Alt+T; Alt+P moves into it).",
+      description: "Show or hide the file tree (`pane next` moves into it).",
       invoke: {:action, :toggle_tree}
     },
     %Entry{
       name: "edits",
-      description: "Show or hide the edits pane: who changed which file, and when (Alt+L).",
+      description: "Show or hide the edits pane: who changed which file, and when.",
       invoke: {:action, :toggle_edits}
     },
     %Entry{
       name: "preview",
-      description:
-        "Show or hide a markdown file's rendered preview beside it (Alt+Shift+P; read-only).",
+      description: "Show or hide a markdown file's rendered preview beside it (read-only).",
       invoke: {:action, :toggle_preview}
     },
     %Entry{
       name: "split",
-      description: "Split the pane top and bottom (Alt+-).",
+      description: "Split the pane top and bottom.",
       invoke: {:action, :split_rows}
     },
     %Entry{
       name: "vsplit",
-      description: "Split the pane side by side (Alt+=).",
+      description: "Split the pane side by side.",
       invoke: {:action, :split_cols}
     },
     %Entry{
       name: "tab next",
-      description: "Show the pane's next tab (Alt+.; Alt+1..9 jumps to one).",
+      description: "Show the pane's next tab.",
       invoke: {:action, :tab_next}
     },
     %Entry{
       name: "tab prev",
-      description: "Show the pane's previous tab (Alt+,).",
+      description: "Show the pane's previous tab.",
       invoke: {:action, :tab_prev}
     },
     %Entry{
@@ -157,12 +159,13 @@ defmodule Geex.Command.Catalog do
     %Entry{
       name: "theme",
       usage: "theme [NAME]",
-      description: "Use an installed theme, for this session (Alt+Y installs and keeps one).",
+      description:
+        "Use an installed theme, for this session (`settings` installs and keeps one).",
       invoke: {:typed, "theme"}
     },
     %Entry{
       name: "fast-forward",
-      description: "Take in the file's change on disk, merging your unsaved edits (Alt+J).",
+      description: "Take in the file's change on disk, merging your unsaved edits.",
       invoke: {:action, :fast_forward}
     },
     %Entry{
@@ -191,7 +194,7 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "no",
-      description: "Clear the selection (Alt+N, Esc).",
+      description: "Clear the selection; in the command line, close it.",
       invoke: {:action, :select_clear}
     },
     %Entry{
@@ -202,8 +205,137 @@ defmodule Geex.Command.Catalog do
     %Entry{
       name: "tab",
       usage: "tab N",
-      description: "Show the pane's tab N (Alt+1 … Alt+9).",
-      invoke: {:typed, "tab"}
+      description: "Show the pane's tab N.",
+      invoke: {:typed, "tab"},
+      binds: for(i <- 0..8, do: {:tab, i})
+    },
+    # The commands that had only a key until ADR-0047: typed, or picked here, they do what
+    # their key does where you are.
+    %Entry{
+      name: "command line",
+      description: "Type a command (this line).",
+      invoke: {:command, :minibuffer}
+    },
+    %Entry{
+      name: "palette",
+      description: "Pick a command from this list.",
+      invoke: {:command, :palette}
+    },
+    %Entry{
+      name: "grid",
+      description: "Grid mode: pick a place or a range by row and column.",
+      invoke: {:command, :grid}
+    },
+    %Entry{
+      name: "settings",
+      description: "Languages, themes, keys, commands and settings.",
+      invoke: {:command, :settings}
+    },
+    %Entry{
+      name: "pane next",
+      description: "Move to the next pane: the tree, the editor's panes, the edits pane.",
+      invoke: {:command, :next_pane}
+    },
+    %Entry{
+      name: "stop",
+      description: "Stop the shell command running.",
+      invoke: {:command, :stop_shell}
+    },
+    %Entry{
+      name: "up",
+      description: "Move up a line; in a list, up a row; in the command line, an earlier entry.",
+      invoke: {:command, :up}
+    },
+    %Entry{
+      name: "down",
+      description: "Move down a line; in a list, down a row; in the command line, a later entry.",
+      invoke: {:command, :down}
+    },
+    %Entry{
+      name: "left",
+      description: "Move left; in the tree, close a directory or go up to it.",
+      invoke: {:command, :left}
+    },
+    %Entry{
+      name: "right",
+      description: "Move right; in the tree, open a directory.",
+      invoke: {:command, :right}
+    },
+    %Entry{
+      name: "word back",
+      description: "Move to the start of the word before.",
+      invoke: {:command, :word_back}
+    },
+    %Entry{
+      name: "word forward",
+      description: "Move to the start of the next word.",
+      invoke: {:command, :word_forward}
+    },
+    %Entry{
+      name: "line start",
+      description: "Move to the line's start; in the output pane or a preview, the top.",
+      invoke: {:command, :line_start}
+    },
+    %Entry{
+      name: "line end",
+      description: "Move to the line's end; in the output pane or a preview, the bottom.",
+      invoke: {:command, :line_end}
+    },
+    %Entry{
+      name: "page up",
+      description: "Scroll a preview up a page.",
+      invoke: {:command, :page_up}
+    },
+    %Entry{
+      name: "page down",
+      description: "Scroll a preview down a page.",
+      invoke: {:command, :page_down}
+    },
+    %Entry{
+      name: "resize up",
+      description: "Move the focused pane's edge up.",
+      invoke: {:command, {:resize, :up}}
+    },
+    %Entry{
+      name: "resize down",
+      description: "Move the focused pane's edge down.",
+      invoke: {:command, {:resize, :down}}
+    },
+    %Entry{
+      name: "resize left",
+      description: "Move the focused pane's edge left.",
+      invoke: {:command, {:resize, :left}}
+    },
+    %Entry{
+      name: "resize right",
+      description: "Move the focused pane's edge right.",
+      invoke: {:command, {:resize, :right}}
+    },
+    %Entry{
+      name: "newline",
+      description: "Break the line here, keeping the indent.",
+      invoke: {:command, :newline}
+    },
+    %Entry{
+      name: "indent",
+      description: "Insert one indent level, as the file indents.",
+      invoke: {:command, :indent}
+    },
+    %Entry{
+      name: "indent other",
+      description:
+        "Insert the other kind of indent: a tab where `indent` gives spaces, or spaces.",
+      invoke: {:command, :indent_other}
+    },
+    %Entry{
+      name: "delete back",
+      description: "Delete the character before the cursor (or the selection).",
+      invoke: {:command, :delete_back}
+    },
+    %Entry{
+      name: "delete forward",
+      description: "Delete the character under the cursor (or the selection).",
+      invoke: {:command, :delete_forward}
     },
     %Entry{
       name: "quit",
@@ -223,6 +355,21 @@ defmodule Geex.Command.Catalog do
   """
   @spec typed(Entry.t()) :: String.t()
   def typed(%Entry{} = entry), do: Enum.join([entry.usage || entry.name | entry.aliases], ", ")
+
+  @doc """
+  The commands `entry` runs, by which its keys are found (`Geex.Loop.Bindings`, ADR-0047): its
+  action or command, or the ones it lists (`tab` is `{:tab, 0}` … `{:tab, 8}`); none for a verb
+  that needs what you type.
+
+      iex> Geex.Command.Catalog.all() |> Enum.find(&(&1.name == "undo")) |> Geex.Command.Catalog.commands()
+      [:undo]
+      iex> Geex.Command.Catalog.all() |> Enum.find(&(&1.name == "word back")) |> Geex.Command.Catalog.commands()
+      [:word_back]
+  """
+  @spec commands(Entry.t()) :: [term()]
+  def commands(%Entry{binds: binds}) when is_list(binds), do: binds
+  def commands(%Entry{invoke: {kind, command}}) when kind in [:action, :command], do: [command]
+  def commands(%Entry{}), do: []
 
   @doc "Every catalog command, in its canonical (declaration) order."
   @spec all() :: [Entry.t()]

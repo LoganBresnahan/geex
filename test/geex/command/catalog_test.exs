@@ -23,7 +23,8 @@ defmodule Geex.Command.CatalogTest do
       for %Entry{invoke: invoke} <- Catalog.all() do
         assert match?({:action, a} when is_atom(a), invoke) or
                  match?({:action, {:theme, name}} when is_binary(name), invoke) or
-                 match?({:typed, p} when is_binary(p), invoke)
+                 match?({:typed, p} when is_binary(p), invoke) or
+                 match?({:command, _}, invoke)
       end
     end
   end
@@ -66,17 +67,31 @@ defmodule Geex.Command.CatalogTest do
           do: refute(Geex.Loop.Verbs.parse(name) == :unknown, "#{name} doesn't parse")
     end
 
+    # ADR-0047 §6: a command that had only a key, typed, is the command picking it runs.
+    test "every command that runs as its key does parses, typed, to that command" do
+      for %Entry{name: name, aliases: aliases, invoke: {:command, c}} <- Catalog.all(),
+          typed <- [name | aliases],
+          do: assert(Geex.Loop.Verbs.parse(typed) == {:command, c}, typed)
+    end
+
     test "an alias finds its command" do
       assert [%Entry{name: "quit"} | _] = Catalog.search("exit")
       assert [%Entry{name: "rename"} | _] = Catalog.search("mv")
     end
   end
 
-  test "the palette lists `preview`, naming its key (ADR-0043 §1)" do
-    assert %Entry{invoke: {:action, :toggle_preview}, description: d} =
-             Enum.find(Catalog.all(), &(&1.name == "preview"))
+  test "the palette lists `preview`; its key comes from the bindings (ADR-0043 §1, ADR-0047)" do
+    assert %Entry{invoke: {:action, :toggle_preview}} =
+             entry = Enum.find(Catalog.all(), &(&1.name == "preview"))
 
-    assert d =~ "Alt+Shift+P"
+    keys = Geex.Loop.Bindings.defaults()
+    assert Geex.Loop.Bindings.labels(keys, Catalog.commands(entry)) == "Alt+Shift+P"
+  end
+
+  # ADR-0047: no description names a key; the keys are the bindings', shown beside it.
+  test "no description names a key" do
+    for %Entry{name: name, description: d} <- Catalog.all(),
+        do: refute(d =~ ~r/\b(Alt|Ctrl)[+-]/, "#{name}'s description names a key: #{d}")
   end
 
   describe "search/1" do

@@ -11,7 +11,8 @@ defmodule Geex.Loop.Settings do
       puts the theme back.
     * **Keys** — every key (`Geex.Loop.KeyHelp`); typing filters it.
     * **Commands** — every command typed after `Alt+M` (`Geex.Command.Catalog`, the palette's
-      list), how it is typed and what it does; typing filters it (roadmap item 18.6).
+      list), how it is typed, its keys (`Geex.Loop.Bindings`, ADR-0047) and what it does;
+      typing filters it, by a key too (roadmap item 18.6).
     * **General** — the mouse, whether the tree and the edits pane start shown, the tab size,
       closing pairs and keeping the indent as you type, whether a save adds a final newline, and where geex keeps its settings, packages and
       caches.
@@ -26,7 +27,7 @@ defmodule Geex.Loop.Settings do
 
   alias Geex.{Catalog, Cell, Installed, Screen, Width}
   alias Geex.Command.Catalog, as: Commands
-  alias Geex.Loop.KeyHelp
+  alias Geex.Loop.{Bindings, KeyHelp}
 
   @tabs [:languages, :themes, :keys, :commands, :general]
   @labels %{
@@ -134,13 +135,20 @@ defmodule Geex.Loop.Settings do
     end
   end
 
-  def rows(%__MODULE__{tab: :keys, query: query}, _ctx) do
-    for {group, keys, what} <- KeyHelp.search(query), do: %{name: nil, cells: [keys, what, group]}
+  def rows(%__MODULE__{tab: :keys, query: query}, ctx) do
+    for {group, keys, what} <- KeyHelp.search(query, bindings(ctx)),
+        do: %{name: nil, cells: [keys, what, group]}
   end
 
-  def rows(%__MODULE__{tab: :commands, query: query}, _ctx) do
-    for entry <- Commands.search(query),
-        do: %{name: nil, cells: [Commands.typed(entry), entry.description]}
+  # Each command with its keys (ADR-0047); typing filters by name, alias or what it does (best
+  # first), then by a key it is bound to.
+  def rows(%__MODULE__{tab: :commands, query: query}, ctx) do
+    b = bindings(ctx)
+    found = Commands.search(query)
+    by_key = for e <- Commands.all(), e not in found, key_match?(keys_of(b, e), query), do: e
+
+    for entry <- found ++ by_key,
+        do: %{name: nil, cells: [Commands.typed(entry), keys_of(b, entry), entry.description]}
   end
 
   # What geex starts with, as `settings.json` keeps it (`ctx.saved`): not this session's state,
@@ -242,7 +250,8 @@ defmodule Geex.Loop.Settings do
 
   @doc """
   A key in the view: the view as it is now, and what the editor should do. `rows` are the
-  rows shown, `h` the screen's height (for scrolling).
+  rows shown, `h` the screen's height (for scrolling). A bound key comes as the command it runs
+  (`{:cmd, :up}`, ADR-0047); the view's own keys (Enter, Esc, Tab, typing) as they are.
   """
   @spec key(t(), tuple(), [map()], pos_integer()) :: {t(), action()}
   def key(view, event, rows, h) do
@@ -250,39 +259,27 @@ defmodule Geex.Loop.Settings do
       {:key, :esc} ->
         {view, :close}
 
-      {:alt, c} when c in [?y, ?Y] ->
+      {:cmd, :settings} ->
         {view, :close}
 
-      {:ctrl, c} when c in [?x, ?q, ?c] ->
+      {:cmd, :quit} ->
         {view, :quit}
 
       {:key, :tab} ->
         {switch(view, +1), :none}
 
-      # Alt+D and Alt+A as well, the editor's right and left (ADR-0026); an Alt chord is never
-      # typed into the Keys search.
-      {:key, :right} ->
+      # The editor's motion commands, whatever keys run them (ADR-0047): right and left switch
+      # tabs, up and down move the highlight. A bound key is never typed into the search.
+      {:cmd, :right} ->
         {switch(view, +1), :none}
 
-      {:alt, c} when c in [?d, ?D] ->
-        {switch(view, +1), :none}
-
-      {:key, :left} ->
+      {:cmd, :left} ->
         {switch(view, -1), :none}
 
-      {:alt, c} when c in [?a, ?A] ->
-        {switch(view, -1), :none}
-
-      {:key, :up} ->
+      {:cmd, :up} ->
         move(view, -1, rows, h)
 
-      {:key, :down} ->
-        move(view, +1, rows, h)
-
-      {:alt, c} when c in [?w, ?W] ->
-        move(view, -1, rows, h)
-
-      {:alt, c} when c in [?s, ?S] ->
+      {:cmd, :down} ->
         move(view, +1, rows, h)
 
       {:key, :enter} ->
@@ -305,6 +302,20 @@ defmodule Geex.Loop.Settings do
         {view, :none}
     end
   end
+
+  defp bindings(ctx), do: Map.get(ctx, :keys) || Bindings.defaults()
+
+  # An entry's keys; a family (`tab N`'s nine) as its first and last.
+  defp keys_of(bindings, entry) do
+    commands = Commands.commands(entry)
+    Bindings.labels(bindings, commands, range: length(commands) > 1)
+  end
+
+  # A query that names a key, `alt+k`, finds the commands bound to it.
+  defp key_match?(_keys, query) when query in ["", nil], do: false
+
+  defp key_match?(keys, query),
+    do: String.contains?(String.downcase(keys), String.downcase(String.trim(query)))
 
   defp switch(view, step) do
     i = Enum.find_index(@tabs, &(&1 == view.tab))
@@ -447,8 +458,9 @@ defmodule Geex.Loop.Settings do
   is in the palette's `accent` colour, highlighted or not: the highlight is its background
   (or reverse video), so both show.
   """
-  @spec draw(t(), [map()], Geex.Theme.Palette.t(), {pos_integer(), pos_integer()}) :: Screen.t()
-  def draw(view, rows, pal, {w, h}) do
+  @spec draw(t(), [map()], Geex.Theme.Palette.t(), {pos_integer(), pos_integer()}, Bindings.t()) ::
+          Screen.t()
+  def draw(view, rows, pal, {w, h}, bindings \\ Bindings.defaults()) do
     plain = %Cell{char: " ", fg: pal.fg, bg: pal.bg}
     dim = %Cell{fg: pal.line_number, bg: pal.bg}
     picked = %Cell{fg: pal.fg, bg: pal.active_line_bg, attrs: pal.mark}
@@ -503,12 +515,12 @@ defmodule Geex.Loop.Settings do
           }),
         else: screen
 
-    Screen.draw_text(screen, 0, h - 1, clip(help(view.tab), w), %Cell{
+    Screen.draw_text(screen, 0, h - 1, clip(help(view.tab, bindings), w), %Cell{
       fg: pal.fg,
       bg: pal.bg,
       attrs: [:reverse]
     })
-    |> Screen.fill_rect(Width.string(clip(help(view.tab), w)), h - 1, w, 1, %Cell{
+    |> Screen.fill_rect(Width.string(clip(help(view.tab, bindings), w)), h - 1, w, 1, %Cell{
       char: " ",
       fg: pal.fg,
       bg: pal.bg,
@@ -516,17 +528,26 @@ defmodule Geex.Loop.Settings do
     })
   end
 
-  defp help(:languages),
-    do: " Enter installs or updates · ← → or Alt+A Alt+D tabs · Esc or Alt+Y closes "
+  # The footer names the keys the bindings give (ADR-0047): the arrows always, then any chord
+  # bound to left and right, and to `settings`.
+  defp help(tab, b) do
+    tabs = "← →" <> also(b, [:left, :right]) <> " tabs"
+    closes = "Esc" <> also(b, [:settings]) <> " closes"
 
-  defp help(:themes),
-    do: " ↑ ↓ preview · Enter chooses · Esc puts it back · ← → or Alt+A Alt+D tabs "
+    case tab do
+      :languages -> " Enter installs or updates · #{tabs} · #{closes} "
+      :themes -> " ↑ ↓ preview · Enter chooses · Esc puts it back · #{tabs} "
+      :general -> " Enter turns it on or off · #{tabs} · #{closes} "
+      _searched -> " type to search · #{tabs} · #{closes} "
+    end
+  end
 
-  defp help(tab) when tab in @searched,
-    do: " type to search · ← → or Alt+A Alt+D tabs · Esc or Alt+Y closes "
-
-  defp help(:general),
-    do: " Enter turns it on or off · ← → or Alt+A Alt+D tabs · Esc or Alt+Y closes "
+  defp also(b, commands) do
+    case for(c <- commands, k <- Bindings.keys(b, c), not match?({:key, _}, k), do: k) do
+      [] -> ""
+      chords -> " or " <> Enum.map_join(chords, " ", &Bindings.label/1)
+    end
+  end
 
   # Each column as wide as its widest cell, the last taking what's left.
   defp column_widths([], _w), do: []

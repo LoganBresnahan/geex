@@ -4,54 +4,61 @@ defmodule Geex.Loop.KeyHelp do
   §7): what each chord does, grouped, as `Geex.Loop.Keymap` and the loop resolve them
   ([ADR-0026](../../../doc/adr/0026-terminal-input-model.md), [ADR-0037](../../../doc/adr/0037-pane-and-file-keys.md),
   [ADR-0038](../../../doc/adr/0038-split-panes-and-tabs.md), [ADR-0039](../../../doc/adr/0039-mouse.md)).
-  Pure data, kept beside the keymap; `search/1` filters it.
+  Pure data, kept beside the keymap; `search/2` filters it. A row about a command shows the keys
+  the bindings give it ([ADR-0047](../../../doc/adr/0047-every-key-runs-a-named-command.md)), so a
+  changed binding changes the help.
   """
 
+  alias Geex.Loop.Bindings
+
+  # `{group, keys, what}`: `keys` is the commands whose keys to show (`Geex.Loop.Bindings`,
+  # ADR-0047), with `range: true` for a run like Alt+1 … Alt+9, or a string for the keys that
+  # aren't bound (a view's own keys, the mouse).
   @entries [
-    {"Move", "Alt+W  Alt+A  Alt+S  Alt+D", "up, left, down, right (or the arrows)"},
-    {"Move", "Alt+Q  Alt+E", "a word back, a word forward"},
-    {"Move", "Alt+R  Alt+F", "the line's start, its end (or Home, End)"},
-    {"Select", "Alt+H", "start a selection at the cursor; moving extends it"},
-    {"Select", "Alt+B", "select the whole file"},
-    {"Select", "Alt+N  Esc", "clear the selection"},
-    {"Edit", "Alt+C  Alt+X  Alt+V", "copy, cut, paste (copy also to the system clipboard)"},
+    {"Move", {[:up, :left, :down, :right]}, "up, left, down, right"},
+    {"Move", {[:word_back, :word_forward]}, "a word back, a word forward"},
+    {"Move", {[:line_start, :line_end]}, "the line's start, its end"},
+    {"Select", {[:select_start]}, "start a selection at the cursor; moving extends it"},
+    {"Select", {[:select_all]}, "select the whole file"},
+    {"Select", {[:select_clear]}, "clear the selection"},
+    {"Edit", {[:copy, :cut, :paste]}, "copy, cut, paste (copy also to the system clipboard)"},
     {"Edit", "( [ { ' \" `",
-     "typed with its closer, the cursor between; over a selection, wraps it (Alt+Y turns it off)"},
+     "typed with its closer, the cursor between; over a selection, wraps it (a setting turns it off)"},
     {"Edit", "Enter",
-     "a new line, keeping the indent; one more after an opener (Alt+Y turns it off)"},
+     "a new line, keeping the indent; one more after an opener (a setting turns it off)"},
     {"Edit", "Tab  Shift+Tab",
-     "indent: as the file does (Go and Makefiles get tabs) or as Alt+Y says; Shift+Tab the other kind"},
-    {"Edit", "Alt+Z  Alt+Shift+Z", "undo, redo"},
-    {"Edit", "Alt+U", "take back the change under the cursor (one hunk)"},
-    {"Edit", "Ctrl-O", "save"},
-    {"Files", "Alt+O", "open a file: the fuzzy finder"},
-    {"Files", "Alt+K", "close the file (not with unsaved edits)"},
-    {"Files", "Alt+J", "take in the file's change on disk, merging your edits"},
+     "indent: as the file does (Go and Makefiles get tabs) or as the settings say; Shift+Tab the other kind"},
+    {"Edit", {[:undo, :redo]}, "undo, redo"},
+    {"Edit", {[:revert_hunk]}, "take back the change under the cursor (one hunk)"},
+    {"Edit", {[:save]}, "save"},
+    {"Files", {[:find_file]}, "open a file: the fuzzy finder"},
+    {"Files", {[:close]}, "close the file (not with unsaved edits)"},
+    {"Files", {[:fast_forward]}, "take in the file's change on disk, merging your edits"},
     {"Files", "a  d  r",
      "in the tree: add a file (a trailing / makes a directory), delete, rename"},
-    {"Files", "Alt+M new  delete  rename",
-     "type a file operation: `new PATH`, `mkdir DIR`, `delete`, `rename PATH`"},
-    {"Panes", "Alt+T", "show or hide the file tree"},
-    {"Panes", "Alt+L", "show or hide the edits pane"},
-    {"Panes", "Alt+P", "the next pane: tree, editor, edits"},
-    {"Panes", "Alt+-  Alt+=", "split the pane top and bottom, side by side"},
-    {"Panes", "Alt+arrows",
+    {"Files", {[:minibuffer]},
+     "then type a file operation: `new PATH`, `mkdir DIR`, `delete`, `rename PATH`"},
+    {"Panes", {[:toggle_tree]}, "show or hide the file tree"},
+    {"Panes", {[:toggle_edits]}, "show or hide the edits pane"},
+    {"Panes", {[:next_pane]}, "the next pane: tree, editor, edits"},
+    {"Panes", {[:split_rows, :split_cols]}, "split the pane top and bottom, side by side"},
+    {"Panes", {[{:resize, :up}, {:resize, :down}, {:resize, :left}, {:resize, :right}]},
      "resize: move the focused pane's edge that way (a split, the tree, the edits pane)"},
-    {"Panes", "Alt+,  Alt+.", "the previous tab, the next tab"},
-    {"Panes", "Alt+1 … Alt+9", "tab 1 to 9"},
-    {"Panes", "Alt+Shift+P", "a markdown file's preview, beside it: show or hide"},
-    {"Commands", "Alt+M", "type a command (`theme`, `open`, `mouse`, `quit` …)"},
-    {"Commands", "↑  ↓", "in the command line: what was entered before"},
-    {"Commands", "Alt+M !cmd  !!  |cmd",
-     "run a shell command (its output below), the last again, pipe the selection through one"},
-    {"Commands", "Ctrl-G", "stop the shell command running"},
+    {"Panes", {[:tab_prev, :tab_next]}, "the previous tab, the next tab"},
+    {"Panes", {for(i <- 0..8, do: {:tab, i}), range: true}, "tab 1 to 9"},
+    {"Panes", {[:toggle_preview]}, "a markdown file's preview, beside it: show or hide"},
+    {"Commands", {[:minibuffer]}, "type a command (`theme`, `open`, `mouse`, `quit` …)"},
+    {"Commands", {[:up, :down]}, "in the command line: what was entered before"},
+    {"Commands", "!cmd  !!  |cmd",
+     "typed: run a shell command (its output below), the last again, pipe the selection through one"},
+    {"Commands", {[:stop_shell]}, "stop the shell command running"},
     {"Commands", "Enter  !  q", "in the output: open its path:line, run it again, close it"},
-    {"Commands", "Alt+I", "the command palette"},
-    {"Commands", "Alt+G", "grid mode: pick by row and column"},
-    {"Commands", "Alt+Y", "these settings"},
-    {"Settings", "Alt+A  Alt+D  ← →", "in these settings: the tab to the left, to the right"},
-    {"Settings", "Alt+W  Alt+S  ↑ ↓", "in these settings: move the highlight"},
-    {"Commands", "Ctrl-X  Ctrl-Q  Ctrl-C", "quit"},
+    {"Commands", {[:palette]}, "the command palette"},
+    {"Commands", {[:grid]}, "grid mode: pick by row and column"},
+    {"Commands", {[:settings]}, "these settings"},
+    {"Settings", {[:left, :right]}, "in these settings: the tab to the left, to the right"},
+    {"Settings", {[:up, :down]}, "in these settings: move the highlight"},
+    {"Commands", {[:quit]}, "quit"},
     {"Mouse", "click", "place the cursor; a tab, a tree row, an edit: open it"},
     {"Mouse", "drag", "select; past the edge it scrolls"},
     {"Mouse", "Shift+click  Alt+click", "extend the selection"},
@@ -67,9 +74,14 @@ defmodule Geex.Loop.KeyHelp do
 
   @type entry :: {String.t(), String.t(), String.t()}
 
-  @doc "Every entry: `{group, keys, what it does}`."
-  @spec all() :: [entry()]
-  def all, do: @entries
+  @doc "Every entry: `{group, keys, what it does}`, the keys written from `bindings`."
+  @spec all(Bindings.t()) :: [entry()]
+  def all(bindings \\ Bindings.defaults()),
+    do: for({group, keys, what} <- @entries, do: {group, written(keys, bindings), what})
+
+  defp written(keys, _bindings) when is_binary(keys), do: keys
+  defp written({commands}, bindings), do: Bindings.labels(bindings, commands)
+  defp written({commands, opts}, bindings), do: Bindings.labels(bindings, commands, opts)
 
   @doc """
   The entries whose group, keys or description contain every word of `query`, ignoring case.
@@ -79,11 +91,11 @@ defmodule Geex.Loop.KeyHelp do
       iex> length(Geex.Loop.KeyHelp.search("")) == length(Geex.Loop.KeyHelp.all())
       true
   """
-  @spec search(String.t()) :: [entry()]
-  def search(query) do
+  @spec search(String.t(), Bindings.t()) :: [entry()]
+  def search(query, bindings \\ Bindings.defaults()) do
     words = query |> String.downcase() |> String.split()
 
-    Enum.filter(@entries, fn {group, keys, what} ->
+    Enum.filter(all(bindings), fn {group, keys, what} ->
       text = String.downcase(group <> " " <> keys <> " " <> what)
       Enum.all?(words, &String.contains?(text, &1))
     end)

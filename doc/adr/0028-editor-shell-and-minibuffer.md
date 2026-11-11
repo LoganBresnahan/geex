@@ -1,7 +1,7 @@
 # ADR-0028: The editor shell — screen regions, the minibuffer, and the buffer/view/pane model
 
 - **Status:** Accepted. **Keys amended** 2026-10-17 by [ADR-0037](0037-pane-and-file-keys.md):
-  the palette is `Alt+I` (`Alt+P` is now the next pane). **Amended 2026-11-09 (recorded 2026-11-10):** catalog entries carry `usage` and `aliases`, and the catalog covers every typed verb (for `Alt+Y`'s Commands tab). **Amended** 2026-10-17: the file finder
+  the palette is `Alt+I` (`Alt+P` is now the next pane). **Amended 2026-11-09 (recorded 2026-11-10):** catalog entries carry `usage` and `aliases`, and the catalog covers every typed verb (for `Alt+Y`'s Commands tab). **Amended 2026-11-11 by [ADR-0047](0047-every-key-runs-a-named-command.md):** parity is per key now: every key runs a named command, typed in `Alt+M`. **Amended** 2026-10-17: the file finder
   is built (`Alt+O`). Tabs and splits built 2026-10-17 by
   [ADR-0038](0038-split-panes-and-tabs.md).
 - **Date:** 2026-06-08
@@ -241,6 +241,20 @@ catalog itself:
   command's name nor an alias. Command mode only: grid mode's verbs aren't commands.
 The typed parser still resolves its own clauses (this ADR's "decision A" stands); the catalog is
 now held to them by that test.
+
+## Amendment (2026-11-11): every key runs a named command ([ADR-0047](0047-every-key-runs-a-named-command.md))
+
+The 2026-06-08 amendment's §2 chose parity at the capability level: motion's typed form was
+addressing (`line N`, grid), since "you don't type 'move left one'". The maintainer's word,
+2026-11-11: every key gets a named command you can type, so that keys can be remapped. The
+reason for a name is now the binding; typing it is a side benefit. ADR-0047 has the decision:
+`up`, `word back`, `line start`, `resize left`, `command line`, `palette`, `grid`, `settings`,
+`pane next`, `stop`, and the editor's own keys (`newline`, `indent`, `delete back` …) join the
+catalog; a typed one does what its key does where you are. Addressing stays the way to go
+somewhere by number.
+
+`palette` and `grid` can now be typed, as §3 said they would be (the parser didn't take them). The catalog's descriptions no longer name keys: the palette and the
+Commands tab show each command's keys from the bindings (`Geex.Loop.Bindings`).
 
 ## See
 

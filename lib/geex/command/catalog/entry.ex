@@ -9,16 +9,24 @@ defmodule Geex.Command.Catalog.Entry do
   `usage` is how it is typed when it takes an argument (`new PATH`; `nil` when the name is
   all), and `aliases` the other names the minibuffer takes for it (`exit` for `quit`). The
   settings view's Commands tab shows both (roadmap item 18.6).
+
+  A `{:command, command}` runs as its key does where you are (ADR-0047): the loop takes it as
+  the key bound to it. `binds` lists the commands an entry's keys are found by when that isn't
+  its invoke (`tab N` is Alt+1 … Alt+9); `nil` reads them from the invoke.
   """
   @enforce_keys [:name, :description, :invoke]
-  defstruct [:name, :description, :invoke, usage: nil, aliases: []]
+  defstruct [:name, :description, :invoke, usage: nil, aliases: [], binds: nil]
 
-  @type invoke :: {:action, atom() | {:theme, String.t()}} | {:typed, String.t()}
+  @type invoke ::
+          {:action, atom() | {:theme, String.t()}}
+          | {:typed, String.t()}
+          | {:command, term()}
   @type t :: %__MODULE__{
           name: String.t(),
           description: String.t(),
           invoke: invoke(),
           usage: String.t() | nil,
-          aliases: [String.t()]
+          aliases: [String.t()],
+          binds: [term()] | nil
         }
 end

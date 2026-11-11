@@ -6,9 +6,13 @@ defmodule Geex.Loop.SettingsTest do
   @moduletag :capture_log
 
   alias Geex.{Installed, Loop, Screen, Session}
-  alias Geex.Loop.{KeyHelp, Settings}
+  alias Geex.Loop.{Bindings, KeyHelp, Settings}
 
   doctest KeyHelp
+
+  # A key as the loop hands it to the view: a bound key as the command it runs (ADR-0047).
+  defp key(view, event, rows, h),
+    do: Settings.key(view, Bindings.translate(event, Bindings.defaults()), rows, h)
 
   setup do
     dir = Path.join(System.tmp_dir!(), "geex_settings_#{Geex.Fixtures.uniq()}")
@@ -68,23 +72,23 @@ defmodule Geex.Loop.SettingsTest do
       assert %{cells: [_, _, "installed"]} = Enum.find(rows, &(&1.name == "elixir"))
 
       rust = Enum.find_index(rows, &(&1.name == "rust"))
-      assert {_, {:install, "rust"}} = Settings.key(%{view | sel: rust}, {:key, :enter}, rows, 30)
+      assert {_, {:install, "rust"}} = key(%{view | sel: rust}, {:key, :enter}, rows, 30)
       elixir = Enum.find_index(rows, &(&1.name == "elixir"))
-      assert {_, :none} = Settings.key(%{view | sel: elixir}, {:key, :enter}, rows, 30)
+      assert {_, :none} = key(%{view | sel: elixir}, {:key, :enter}, rows, 30)
     end
 
     test "Alt+A and Alt+D change tabs, and never type into the Keys search" do
       view = Settings.open()
-      {view, :none} = Settings.key(view, {:alt, ?d}, [], 30)
+      {view, :none} = key(view, {:alt, ?d}, [], 30)
       assert view.tab == :themes
-      {view, :none} = Settings.key(view, {:alt, ?A}, [], 30)
-      {view, :none} = Settings.key(view, {:alt, ?a}, [], 30)
+      {view, :none} = key(view, {:alt, ?A}, [], 30)
+      {view, :none} = key(view, {:alt, ?a}, [], 30)
       assert view.tab == :general
-      {view, :none} = Settings.key(view, {:alt, ?a}, [], 30)
+      {view, :none} = key(view, {:alt, ?a}, [], 30)
       assert {view.tab, view.query} == {:commands, ""}
-      {view, :none} = Settings.key(view, {:alt, ?a}, [], 30)
+      {view, :none} = key(view, {:alt, ?a}, [], 30)
       assert {view.tab, view.query} == {:keys, ""}
-      {view, :none} = Settings.key(view, {:alt, ?D}, [], 30)
+      {view, :none} = key(view, {:alt, ?D}, [], 30)
       assert {view.tab, view.query} == {:commands, ""}
       assert Enum.any?(Geex.Loop.KeyHelp.search("alt+a"), &(elem(&1, 0) == "Settings"))
       # The markdown preview's chord and glyph (ADR-0043 §1).
@@ -99,47 +103,66 @@ defmodule Geex.Loop.SettingsTest do
 
     test "tabs, moving, closing; Keys filters as you type" do
       view = Settings.open()
-      {view, :none} = Settings.key(view, {:key, :tab}, [], 30)
+      {view, :none} = key(view, {:key, :tab}, [], 30)
       assert view.tab == :themes
-      {view, :none} = Settings.key(view, {:key, :left}, [], 30)
-      {view, :none} = Settings.key(view, {:key, :left}, [], 30)
+      {view, :none} = key(view, {:key, :left}, [], 30)
+      {view, :none} = key(view, {:key, :left}, [], 30)
       assert view.tab == :general
-      {view, :none} = Settings.key(view, {:key, :left}, [], 30)
-      {view, :none} = Settings.key(view, {:key, :left}, [], 30)
+      {view, :none} = key(view, {:key, :left}, [], 30)
+      {view, :none} = key(view, {:key, :left}, [], 30)
       assert view.tab == :keys
 
       view =
         Enum.reduce(String.graphemes("redo"), view, fn g, v ->
-          elem(Settings.key(v, {:char, g}, [], 30), 0)
+          elem(key(v, {:char, g}, [], 30), 0)
         end)
 
       assert [%{cells: ["Alt+Z  Alt+Shift+Z", _, _]}] = Settings.rows(view, %{})
-      {view, :none} = Settings.key(view, {:key, :backspace}, [], 30)
+      {view, :none} = key(view, {:key, :backspace}, [], 30)
       assert view.query == "red"
 
-      for key <- [{:key, :esc}, {:alt, ?y}],
-          do: assert({_, :close} = Settings.key(view, key, [], 30))
+      for k <- [{:key, :esc}, {:alt, ?y}],
+          do: assert({_, :close} = key(view, k, [], 30))
 
-      assert {_, :quit} = Settings.key(view, {:ctrl, ?x}, [], 30)
+      assert {_, :quit} = key(view, {:ctrl, ?x}, [], 30)
     end
 
-    test "Commands lists every typed command, how it is typed, and filters as you type" do
-      # Roadmap item 18.6.
+    test "Commands lists every typed command, how it is typed, its keys, and filters as you type" do
+      # Roadmap item 18.6; the keys column, ADR-0047.
       view = %{Settings.open() | tab: :commands}
       rows = Settings.rows(view, %{})
       assert length(rows) == length(Geex.Command.Catalog.all())
 
-      assert %{cells: ["rename [PATH], mv", "Rename or move this file" <> _]} =
+      assert %{cells: ["rename [PATH], mv", "", "Rename or move this file" <> _]} =
                Enum.find(rows, &(hd(&1.cells) =~ "rename"))
+
+      assert %{cells: ["up", "Alt+W ↑", _]} = Enum.find(rows, &(hd(&1.cells) == "up"))
+      assert %{cells: ["newline", "Enter", _]} = Enum.find(rows, &(hd(&1.cells) == "newline"))
+      assert %{cells: ["tab N", "Alt+1 … Alt+9", _]} = Enum.find(rows, &(hd(&1.cells) == "tab N"))
 
       view =
         Enum.reduce(String.graphemes("exit"), view, fn g, v ->
-          elem(Settings.key(v, {:char, g}, [], 30), 0)
+          elem(key(v, {:char, g}, [], 30), 0)
         end)
 
-      assert [%{cells: ["quit, exit", "Leave the editor."]} | _] = Settings.rows(view, %{})
-      {view, :none} = Settings.key(view, {:key, :backspace}, [], 30)
+      assert [%{cells: ["quit, exit", "Ctrl-X Ctrl-Q Ctrl-C", "Leave the editor."]} | _] =
+               Settings.rows(view, %{})
+
+      {view, :none} = key(view, {:key, :backspace}, [], 30)
       assert view.query == "exi"
+    end
+
+    test "Commands filters by a key, and shows the keys the bindings give" do
+      view = %{Settings.open() | tab: :commands, query: "alt+k"}
+      assert [%{cells: ["close", "Alt+K", _]}] = Settings.rows(view, %{})
+
+      # Bindings the view is handed, not the defaults: up moved to Alt+I.
+      keys = Bindings.defaults() |> Map.delete({:alt, ?w}) |> Map.put({:alt, ?i}, :up)
+      rows = Settings.rows(%{view | query: ""}, %{keys: keys})
+      assert %{cells: ["up", "Alt+I ↑", _]} = Enum.find(rows, &(hd(&1.cells) == "up"))
+
+      keys_rows = Settings.rows(%{view | tab: :keys, query: "up, left"}, %{keys: keys})
+      assert [%{cells: ["Alt+I ↑  Alt+A ←  Alt+S ↓  Alt+D →", _, "Move"]}] = keys_rows
     end
 
     test "Markdown's companion is listed after it as the preview's, not as a language" do
@@ -203,9 +226,9 @@ defmodule Geex.Loop.SettingsTest do
 
       assert Enum.at(rows, view.sel).name == "birds-of-paradise"
 
-      {view, action} = Settings.key(%{view | sel: 1}, {:key, :up}, rows, 30)
+      {view, action} = key(%{view | sel: 1}, {:key, :up}, rows, 30)
       assert {view.sel, action} == {0, {:preview_theme, "terminal"}}
-      assert {_, {:choose_theme, "terminal"}} = Settings.key(view, {:key, :enter}, rows, 30)
+      assert {_, {:choose_theme, "terminal"}} = key(view, {:key, :enter}, rows, 30)
     end
 
     test "the mouse: a tab, a row (acting as Enter), the wheel" do
