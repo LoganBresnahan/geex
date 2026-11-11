@@ -5749,3 +5749,16 @@ file and a Python file with `Indent with: tabs`; `other_indent/1`'s doctest. `mi
 
 **Not tested / deferred:** Shift+Tab as un-indent (rejected for now, ADR-0026's amendment);
 indenting a selection.
+
+### 2026-11-11 — `Alt+Shift+W/A/S/D` stop resizing (ADR-0026's amendment, roadmap item 20.1)
+
+The maintainer, 2026-11-10: "lets remove alt+shift+wasd for resizing, alt arrow keys is enough".
+`Keymap.resize_dir/1` keeps only Alt with an arrow; `Alt+Shift+W/A/S/D` move the cursor like their
+lower case, and in the tree `Alt+Shift+A`/`D` are Left and Right again. Branch `named-keys`.
+
+**Automated.** The resize test now drives `Alt+←`/`Alt+↑` only; a new case: `Alt+D`, `Alt+Shift+D`,
+`Alt+Shift+A` move the cursor and leave the sizes alone; in the tree, `Alt+Shift+D` opens a
+directory and the tree's width stays. `mix test` → **1419 tests + 27 properties + 144 doctests,
+0 failures**.
+
+**Not tested:** live, on its own (it rode the next entry's tmux run).

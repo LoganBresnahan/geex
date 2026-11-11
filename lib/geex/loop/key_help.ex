@@ -35,7 +35,7 @@ defmodule Geex.Loop.KeyHelp do
     {"Panes", "Alt+L", "show or hide the edits pane"},
     {"Panes", "Alt+P", "the next pane: tree, editor, edits"},
     {"Panes", "Alt+-  Alt+=", "split the pane top and bottom, side by side"},
-    {"Panes", "Alt+arrows  Alt+Shift+W/A/S/D",
+    {"Panes", "Alt+arrows",
      "resize: move the focused pane's edge that way (a split, the tree, the edits pane)"},
     {"Panes", "Alt+,  Alt+.", "the previous tab, the next tab"},
     {"Panes", "Alt+1 … Alt+9", "tab 1 to 9"},

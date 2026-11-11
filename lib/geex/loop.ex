@@ -2117,8 +2117,8 @@ defmodule Geex.Loop do
 
   defp ids(laid_out), do: Enum.map(laid_out, &elem(&1, 0))
 
-  # Resizing from the keyboard (roadmap item 18.8): Alt with an arrow, or Alt+Shift+W/A/S/D, moves
-  # the focused pane's nearest edge on that axis that way, by a fixed step, kept to the least
+  # Resizing from the keyboard (roadmap item 18.8): Alt with an arrow moves the focused
+  # pane's nearest edge on that axis that way, by a fixed step, kept to the least
   # sizes as a drag is. From a file pane: its innermost split of that direction, else the tree's
   # edge (left and right) or the band's top (up and down). From the tree: its edge. From the
   # edits or output pane: the band's top.

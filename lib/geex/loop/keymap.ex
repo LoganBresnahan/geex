@@ -109,8 +109,7 @@ defmodule Geex.Loop.Keymap do
   def resolve({:key, :down}, cursor, text), do: {:move, vert(cursor, text, +1)}
 
   # Alt+M opens the minibuffer (ADR-0028); every other Alt+letter is motion — a left-hand
-  # cluster around WASD that needs no arrow keys (ADR-0026), case-insensitive here, though the
-  # loop takes Alt+Shift+W/A/S/D for resizing first (`resize_dir/1`, roadmap item 18.8):
+  # cluster around WASD that needs no arrow keys (ADR-0026), case-insensitive (Caps Lock):
   #   W A S D — up / left / down / right
   #   Q   E   — word back / forward
   #   R   F   — line start / end
@@ -243,18 +242,14 @@ defmodule Geex.Loop.Keymap do
   defp clamp(v, lo, hi), do: v |> max(lo) |> min(hi)
 
   @doc """
-  The way a resizing key moves the focused pane's edge (roadmap item 18.8): Alt with an arrow,
-  or `Alt+Shift+W/A/S/D` (case-sensitive, as `Alt+Shift+Z` is). `nil` for any other key.
+  The way a resizing key moves the focused pane's edge (roadmap item 18.8): Alt with an arrow.
+  `nil` for any other key (`Alt+Shift+W/A/S/D` resized until 2026-11-11).
 
       iex> Enum.map([{:alt, :left}, {:alt, ?W}, {:alt, ?w}, {:key, :up}], &Geex.Loop.Keymap.resize_dir/1)
-      [:left, :up, nil, nil]
+      [:left, nil, nil, nil]
   """
   @spec resize_dir(tuple()) :: :up | :down | :left | :right | nil
   def resize_dir({:alt, dir}) when dir in [:up, :down, :left, :right], do: dir
-  def resize_dir({:alt, ?W}), do: :up
-  def resize_dir({:alt, ?A}), do: :left
-  def resize_dir({:alt, ?S}), do: :down
-  def resize_dir({:alt, ?D}), do: :right
   def resize_dir(_event), do: nil
 
   @doc """

@@ -1,6 +1,6 @@
 # ADR-0026: Terminal input model & keymap (one default, capability-gated extras)
 
-- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read; bracketed paste. **Amended 2026-11-10:** Shift+Tab inserts the other kind of indent from Tab's.
+- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read; bracketed paste. **Amended 2026-11-10:** Shift+Tab inserts the other kind of indent from Tab's. **Amended 2026-11-11:** `Alt+Shift+W/A/S/D` no longer resize; Alt with an arrow does.
 - **Date:** 2026-06-08
 - **Refines:** [ADR-0025](0025-user-config-layer.md) (the keymap is user-config *data*),
   [ADR-0024](0024-tui-core-extractable.md) (the TUI core / `prim_tty`)
@@ -175,6 +175,21 @@ Shift+Tab gives spaces too: asked for by a key of its own, unlike Tab.
 Rejected for now: Shift+Tab as un-indent (VS Code's and Sublime's). geex has no un-indent;
 Backspace in leading spaces already takes a level (ADR-0045). If selections get indent and
 un-indent, Tab and Shift+Tab can do it while a selection is live without clashing with this.
+
+
+## Amendment — 2026-11-11: only Alt with an arrow resizes
+
+The maintainer, 2026-11-10: "lets remove alt+shift+wasd for resizing, alt arrow keys is enough".
+`Alt+Shift+W/A/S/D` are the same as `Alt+W/A/S/D` again, everywhere: they move the cursor, the
+tree's Left and Right are back on `Alt+Shift+A`/`D`, and Caps Lock no longer turns motion into
+resizing. Alt with an arrow (`ESC [ 1 ; 3 A`–`D`) still resizes the focused pane (ADR-0038's
+2026-11-09 amendment). `Alt+Shift+Z` and `Alt+Shift+P` stay the only Alt chords where Shift
+means something else.
+
+Some macOS terminals don't send Alt with ← and → by default: Ghostty and Terminal.app bind
+`Option+←/→` to the shell's word jumps (`ESC b`, `ESC f`), which arrive as `Alt+B` and `Alt+F`.
+The fix is the terminal's (in Ghostty, `keybind = alt+left=unbind` and the same for `alt+right`);
+geex can't tell those bytes from the keys they copy. Telling users so is roadmap work.
 
 ## See
 

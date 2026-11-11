@@ -672,7 +672,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       that size (BUG-10: it drew zero columns wide), and Tab follows the file: a tab where the
       file's indented lines mostly start with one, else that many spaces; Shift+Tab inserts
       the other kind (19.5). Width stays a render concern (ADR-0027).
-   8. **Resize from the keyboard**: `Alt+arrows` and `Alt+Shift+W/A/S/D` move the focused pane's
+   8. **Resize from the keyboard** (`Alt+Shift+W/A/S/D` dropped 2026-11-11, the maintainer:
+      "alt arrow keys is enough"): `Alt+arrows` and `Alt+Shift+W/A/S/D` move the focused pane's
       edge that way by a fixed step, kept to the least pane size. The parser learns modified
       arrows (`ESC [ 1 ; 3 A`); `Alt+Shift+W/A/S/D` become case-sensitive, as `Alt+Shift+Z` is
       (with Caps Lock on they resize; the maintainer accepted that).

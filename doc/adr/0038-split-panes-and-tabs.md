@@ -202,8 +202,8 @@ The maintainer's list from using geex, decided 2026-11-09:
   so switching tabs brings the shown one back. A tab too wide for the bar alone is still cut, with
   no mark unless tabs follow it, and a bar too narrow for both marks and a column of tab has none. No list of a pane's tabs:
   the `buffers` picker is enough, and `Alt+,`/`Alt+.` stay the keys.
-- **Resizing from the keyboard** (§6): `Alt` with an arrow, or `Alt+Shift+W/A/S/D`, moves the
-  focused pane's nearest edge on that axis that way, 4 columns or 2 rows a press, kept to the least
+- **Resizing from the keyboard** (§6): `Alt` with an arrow (and `Alt+Shift+W/A/S/D` until
+  2026-11-11, ADR-0026's amendment of that date) moves the focused pane's nearest edge on that axis that way, 4 columns or 2 rows a press, kept to the least
   sizes as a drag is. From a file pane: its innermost split of that direction, else the tree's
   edge (left, right) or the band's top (up, down); from the tree, its edge; from the edits or
   output pane, the band's top. Anything else does nothing. tmux's rule: the edge moves the way the

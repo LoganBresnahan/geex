@@ -507,12 +507,12 @@ defmodule Geex.Loop.ComfortTest do
       assert sizes(state) == {30, 9}
       state = key(state, {:alt, :right})
       assert sizes(state) == {34, 9}
-      state = key(state, {:alt, ?A})
+      state = key(state, {:alt, :left})
       assert sizes(state) == {30, 9}
       # Down moves the editor's bottom edge down: the band shrinks; Up grows it.
       state = key(state, {:alt, :down})
       assert sizes(state) == {30, 7}
-      state = state |> key({:alt, ?W}) |> key({:alt, :up})
+      state = state |> key({:alt, :up}) |> key({:alt, :up})
       assert sizes(state) == {30, 11}
     end
 
@@ -544,9 +544,16 @@ defmodule Geex.Loop.ComfortTest do
       assert sizes(state) == {34, 11}
     end
 
-    test "lower case Alt+W/A/S/D still move the cursor", %{state: state} do
+    test "Alt+W/A/S/D move the cursor, Shift or not: only Alt with an arrow resizes", %{
+      state: state
+    } do
+      # Alt+Shift+W/A/S/D resized until 2026-11-11 (the maintainer: "alt arrow keys is enough").
       state = panels(state)
       state = key(state, {:alt, ?d})
+      assert cursor() == {0, 1}
+      state = key(state, {:alt, ?D})
+      assert cursor() == {0, 2}
+      state = key(state, {:alt, ?A})
       assert cursor() == {0, 1}
       assert sizes(state) == {30, 9}
     end
