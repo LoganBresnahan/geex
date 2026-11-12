@@ -17,8 +17,14 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 stop resizing, and every key runs a named command from one table of bindings, typed in `Alt+M`.
 Then the palette ranks a good name match, then the key the query names, then the loose matches
 ([adr/0048](adr/0048-the-palette-ranks-names-keys-then-loose.md)), and the default keys moved to
-IJKL ([adr/0049](adr/0049-ijkl-default-keys.md)), each merged after mod-verify's review;
-remapping is next. Since the
+IJKL ([adr/0049](adr/0049-ijkl-default-keys.md)), each merged after mod-verify's review.
+**2026-11-12:** Tab indents a selection and Shift+Tab un-indents
+([adr/0050](adr/0050-tab-indents-a-selection-shift-tab-unindents.md)), the panes go both ways on
+`Alt+<`/`Alt+>` with the digits left free ([adr/0051](adr/0051-panes-on-alt-angle-brackets-digits-free.md)),
+and the editing keys (duplicate, select a character, word or line, the matching bracket,
+comments, moving lines and text, [adr/0052](adr/0052-editing-keys.md)), merged after four
+mod-verify passes; 1531 tests + 38 properties + 169 doctests green. Search
+([adr/0053](adr/0053-search.md), accepted) and remapping are next. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -753,17 +759,17 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    6. **Tab over a selection** (ADR-0050, the maintainer, 2026-11-11): Tab indents the selected
       lines, Shift+Tab un-indents (always, the cursor's line without a selection), and the other
       kind of indent moves from Shift+Tab to `Alt+1` (first `` Alt+` ``, which GNOME and KDE take;
-      moved by ADR-0051). **Built 2026-11-11** on `indent-keys`.
+      moved by ADR-0051). **Built 2026-11-11**, merged 2026-11-12 after mod-verify's review.
    7. **The panes both ways, the digits free** (ADR-0051, the maintainer, 2026-11-12): `Alt+>` the
       next pane, `Alt+<` the new `pane prev`; `Alt+P` the markdown preview; `Alt+1` `indent
       other`; `Alt+2` … `Alt+0` left for the user (`tab N` typed until remapping binds them);
-      `Alt+Shift+R` `revert-call`. **Built 2026-11-12** on `indent-keys`.
+      `Alt+Shift+R` `revert-call`. **Built 2026-11-12**, merged after mod-verify's review.
    8. **Editing keys** (ADR-0052, the maintainer, 2026-11-12): `Alt+2` duplicates the line or the
       selection's lines; `Alt+7`, `Alt+8`, `Alt+9` select a character, a word, a line (again takes
       in the next); `` Alt+\ `` the matching bracket; `Alt+/` comments lines out and back;
       `Alt+Shift+I/K` move lines; `Alt+Shift+J/L/U/O/H/;` move selected text along its line. Caps
       Lock makes the motion cluster the moves in the editor; elsewhere a move is its motion.
-      **Built 2026-11-12** on `editing-keys`. Next: multiple cursors (`Alt+5`, `Alt+Shift+N`),
+      **Built 2026-11-12**, merged after mod-verify's reviews (BUG-12 left: long lines). Next: multiple cursors (`Alt+5`, `Alt+Shift+N`),
       their own ADR.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
@@ -775,7 +781,8 @@ relabel a compacted ledger's checkpoint blame, found by the verify pass) is **FI
 (2026-11-09). BUG-10 (a tab character drew zero columns wide, found looking at item 18.7) is
 **FIXED** (2026-11-09, on the `editor-comfort` branch). BUG-11 (a byte that isn't UTF-8 made the
 input go deaf, found by geex-d3's review of item 19) is **FIXED** (2026-11-09, on the
-`editor-assist` branch); the shelf is clear again.
+`editor-assist` branch). BUG-12 (far into a very long line, the word motions and editing keys stall
+the key loop; found by mod-verify's review of ADR-0052, 2026-11-12) is **open**.
 
 ---
 

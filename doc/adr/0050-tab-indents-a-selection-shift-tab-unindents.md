@@ -1,7 +1,8 @@
 # ADR-0050: Tab indents a selection, Shift+Tab un-indents, Alt+1 the other kind
 
 - **Status:** Accepted 2026-11-11 (the maintainer's ask; built on the branch `indent-keys`,
-  accepted at the maintainer's word the same day). §5 changed in place 2026-11-12, before the
+  accepted at the maintainer's word the same day; merged to main 2026-11-12 after mod-verify's
+  reviews). §5 changed in place 2026-11-12, before the
   branch was merged: the other kind moved from `` Alt+` `` to `Alt+1` ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md)). **Amended 2026-11-12 by [ADR-0052](0052-editing-keys.md):** `\`
   can be read as an Alt chord (`Alt+\`, the matching bracket).
 - **Date:** 2026-11-11

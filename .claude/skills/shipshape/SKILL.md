@@ -9,8 +9,9 @@ Four gates: **Tests**, **Docs**, **Conventions**, **Deps**. Check all four even
 if one fails early — the deliverable is the full report, not the first failure.
 Propose fixes; do **not** apply them unless the user asks.
 
-geex has **no CI**. This skill is the only gate between a change and `main`, so
-don't skip a step because "CI will catch it" — nothing will.
+`ci.yml` runs `mix compile --warnings-as-errors` and the suite on every push, but only after the
+push: this skill is the gate before a change reaches `main`, and CI checks nothing of the docs,
+conventions or deps gates. Don't skip a step because "CI will catch it".
 
 ## 0. Scope the audit
 

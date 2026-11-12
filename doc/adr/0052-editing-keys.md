@@ -1,7 +1,8 @@
 # ADR-0052: Editing keys: duplicate, select a word or a line, the matching bracket, comments, moving text
 
 - **Status:** Accepted 2026-11-12 (the maintainer's keys, "all good" with `Alt+7`/`8`/`9` for
-  selecting; built the same day on the branch `editing-keys`)
+  selecting; built the same day on the branch `editing-keys`; merged to main 2026-11-12 after four
+  mod-verify passes)
 - **Date:** 2026-11-12
 - **Amends:** [ADR-0026](0026-terminal-input-model.md) (`Alt+\` and `Alt+:` read),
   [ADR-0050](0050-tab-indents-a-selection-shift-tab-unindents.md) (its note that `\` can't be read
