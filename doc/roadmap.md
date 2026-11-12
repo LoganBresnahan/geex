@@ -775,6 +775,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       `Alt+Shift+Z` move what one action applied together (a fast-forward's hunks, a revert's), so
       a `revert-call` of three hunks comes back in one press; typing stays a step per key. The
       ledger keeps one entry per command. **Built 2026-11-12** on `save-undo`.
+   10. **Trim trailing whitespace on save** ([ADR-0054](adr/0054-trim-trailing-whitespace-on-save.md),
+      the maintainer, 2026-11-12): a General setting, on by default; every save trims each line's
+      trailing spaces and tabs, but Markdown, diffs and patches keep theirs; one step with the
+      final newline. **Built 2026-11-12** on `save-undo`.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the

@@ -85,7 +85,9 @@ defmodule Geex.Buffer do
   the undo history, with one exception: `final_newline: true` adds the final line break a
   non-empty text lacks, on every save (roadmap item 18.4, ADR-0019's 2026-11-09 amendment). It
   is a recorded `:human` insert, in the file's own line ending, made in the same step as the write
-  and kept only if the write succeeds: a failed save leaves the buffer as it was.
+  and kept only if the write succeeds: a failed save leaves the buffer as it was. And
+  `trim_trailing_whitespace: true` takes every line's trailing spaces and tabs off the same way
+  (ADR-0054), one replace per line, with the final newline one group, one undo step.
   """
   @spec save(GenServer.server(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def save(server, opts \\ []), do: GenServer.call(server, {:save, opts})
@@ -482,12 +484,12 @@ defmodule Geex.Buffer do
     do: {:reply, {:error, :no_path}, state}
 
   def handle_call({:save, opts}, _from, state) do
-    {history, newline} = final_newline(state.history, opts[:final_newline] == true)
+    {history, edits} = save_edits(state.history, opts)
 
     with :ok <- not_behind(state),
          :ok <- File.write(state.path, History.text(history)) do
-      # The final newline is kept now the write it went out with succeeded.
-      state = if newline, do: applied(state, history, newline), else: state
+      # The save's own edits are kept now the write they went out with succeeded.
+      state = keep_save_edits(state, history, edits)
       # disk now equals the written text — that is the new in-sync baseline.
       state = %{state | history: History.sync(state.history)} |> record_sync()
       state = state |> set_behind(nil) |> notify_synced()
@@ -506,6 +508,80 @@ defmodule Geex.Buffer do
     new_state = record(%{state | history: history}, {:cmd, command})
     notify_change(new_state, footprint)
     new_state
+  end
+
+  # What a save changes before it writes (ADR-0019's 2026-11-09 amendment, ADR-0054): trailing
+  # whitespace trimmed and the final line break, the history with them applied and the edits.
+  # The trims and the newline together are one group, one undo step (ADR-0031's 2026-11-12
+  # amendment); a newline alone is dispatched as before. `{history, []}` when there is nothing.
+  defp save_edits(history, opts) do
+    trims = trim_commands(history, opts[:trim_trailing_whitespace] == true)
+
+    case trims do
+      [] ->
+        case final_newline(history, opts[:final_newline] == true) do
+          {history, nil} -> {history, []}
+          {with_newline, cmd} -> {with_newline, {:cmd, cmd}}
+        end
+
+      trims ->
+        {:ok, trimmed} = History.group(history, trims, nil)
+
+        case final_newline(trimmed, opts[:final_newline] == true) do
+          {_, nil} ->
+            {trimmed, {:group, trims}}
+
+          {_, cmd} ->
+            {:ok, both} = History.group(history, trims ++ [cmd], nil)
+            {both, {:group, trims ++ [cmd]}}
+        end
+    end
+  end
+
+  defp keep_save_edits(state, _history, []), do: state
+  defp keep_save_edits(state, history, {:cmd, cmd}), do: applied(state, history, cmd)
+
+  defp keep_save_edits(state, history, {:group, commands}) do
+    footprint = Footprint.between(History.text(state.history), History.text(history))
+    entry = group_entry(:group, history, length(commands), nil)
+    new_state = record(%{state | history: history}, entry)
+    notify_change(new_state, footprint)
+    new_state
+  end
+
+  # One replace per line with trailing spaces or tabs (ADR-0054 §2), bottom up: each takes them
+  # off, before a CRLF line's `\r`, so a line of only whitespace becomes empty. A form feed or a
+  # no-break space is text. `:human`, as the save is yours.
+  defp trim_commands(_history, false), do: []
+
+  defp trim_commands(history, true) do
+    history.editor
+    |> EditorState.lines()
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {line, i} ->
+      body = String.replace_suffix(line, "\r", "")
+
+      case Regex.run(~r/[ \t]+\z/, body, return: :index) do
+        [{at, _len}] ->
+          from = body |> binary_part(0, at) |> String.length()
+          to = String.length(body)
+
+          {:ok, cmd} =
+            Geex.Commands.Replace.parse(%{
+              start_line: i,
+              start_col: from,
+              end_line: i,
+              end_col: to,
+              text: ""
+            })
+
+          [Geex.Command.put_meta(cmd, Geex.Command.Meta.human())]
+
+        nil ->
+          []
+      end
+    end)
+    |> Enum.reverse()
   end
 
   # A save's final newline (roadmap item 18.4): the history with the line break a non-empty text

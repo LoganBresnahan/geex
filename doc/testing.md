@@ -6158,3 +6158,23 @@ After an undo the cursor goes to the step's topmost edit; a step of several says
 
 1537 tests + 39 properties + 170 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
 `mix compile --warnings-as-errors --force` clean.
+
+### 2026-11-12 — Trim trailing whitespace on save (ADR-0054)
+
+Built on `save-undo` at the maintainer's word: a General setting, "Trim whitespace"
+(`trim_trailing_whitespace` in settings.json, on unless it says false); a save trims every line's
+trailing spaces and tabs (before a CRLF's `\r`; a whitespace-only line becomes empty; a form feed
+or a no-break space stays), except in Markdown, diffs and patches (`Keymap.trims_on_save?/1`).
+The edits are made inside `Buffer.save/2` in the same step as the write, kept only if it succeeds:
+one `:human` `Replace` per line, with the final newline, as one group, one undo step.
+
+- Through the loop: trims and one `Alt+Z` gives them all back ("undid 4 edits"); blame marks only
+  the trimmed line; CRLF, form feed and no-break space; each of `.md`, `.markdown`, `.mdx`,
+  `.diff`, `.patch` kept; with the final newline on, one step; nothing to trim, no edit; the
+  cursor past a trimmed end clamps to it; a failed save (read-only) leaves no edit; off writes the
+  text as it is; settings.json's key read, and the General row turns it over and keeps it.
+- The ledger: a trimming save with the final newline replays to the live history and undoes in
+  one step after a reopen.
+
+1549 tests + 39 properties + 171 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean.

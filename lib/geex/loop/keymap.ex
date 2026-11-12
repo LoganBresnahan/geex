@@ -381,6 +381,25 @@ defmodule Geex.Loop.Keymap do
   # config files.
   @tabs_by_kind ~w(go.mod go.work .gitconfig .gitmodules)
   @tabs_by_kind_ext ~w(.go .tsv)
+  # Files whose trailing whitespace is content, kept whatever the trim-on-save setting says
+  # (ADR-0054 §3): Markdown's two trailing spaces are a line break; a diff's are part of a line.
+  @keeps_trailing_ext ~w(.md .markdown .mdx .diff .patch)
+
+  @doc """
+  Whether a save trims the file at `path`'s trailing whitespace when the setting is on
+  (ADR-0054 §3): every file but Markdown, diffs and patches. A buffer with no path, never.
+
+      iex> alias Geex.Loop.Keymap
+      iex> {Keymap.trims_on_save?("/p/a.ex"), Keymap.trims_on_save?("/p/README.md")}
+      {true, false}
+      iex> {Keymap.trims_on_save?("/p/fix.PATCH"), Keymap.trims_on_save?(nil)}
+      {false, false}
+  """
+  @spec trims_on_save?(String.t() | nil) :: boolean()
+  def trims_on_save?(nil), do: false
+
+  def trims_on_save?(path),
+    do: String.downcase(Path.extname(path)) not in @keeps_trailing_ext
 
   @doc """
   What `indent other` (`Alt+1`, ADR-0050) inserts where Tab inserts `style`: the other

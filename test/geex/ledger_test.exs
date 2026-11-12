@@ -566,6 +566,24 @@ defmodule Geex.LedgerTest do
       close(buf)
     end
 
+    test "a trimming save replays from the ledger, its trims and newline one step (ADR-0054)",
+         ctx do
+      File.write!(ctx.doc, "a  \nb\t\nc ")
+      buf = open(ctx)
+
+      {:ok, _} =
+        Buffer.save(buf, trim_trailing_whitespace: true, final_newline: true)
+
+      assert File.read!(ctx.doc) == "a\nb\nc\n"
+      before = live(buf)
+      close(buf)
+
+      buf = open(ctx)
+      assert live(buf) == before
+      assert {:ok, %{text: "a  \nb\t\nc ", step: 4}, _} = Buffer.undo(buf)
+      close(buf)
+    end
+
     test "a ledger written before steps replays as it did, its groups undoing by step", ctx do
       File.write!(ctx.doc, "1\n2\n3\n")
       buf = open(ctx)

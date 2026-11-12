@@ -468,6 +468,25 @@ defmodule Geex.Loop.SettingsTest do
       assert %{cells: ["Final newline", "on", _]} = Enum.at(rows, at)
     end
 
+    test "General's trim whitespace turns over, kept in settings.json (ADR-0054)",
+         %{state: state, dir: dir} do
+      state = state |> send_io({:alt, ?y}) |> send_io({:key, :left})
+      rows = Settings.rows(state.settings, %{saved: state.settings_saved})
+      at = Enum.find_index(rows, &(&1.name == :trim_whitespace))
+      assert %{cells: ["Trim whitespace", "on", _]} = Enum.at(rows, at)
+
+      state = Enum.reduce(1..at, state, fn _, acc -> send_io(acc, {:key, :down}) end)
+      state = send_io(state, {:key, :enter})
+      assert state.trim_whitespace == false
+
+      assert JSON.decode!(File.read!(Path.join(dir, "settings.json"))) == %{
+               "trim_trailing_whitespace" => false
+             }
+
+      rows = Settings.rows(state.settings, %{saved: state.settings_saved})
+      assert %{cells: ["Trim whitespace", "off", _]} = Enum.at(rows, at)
+    end
+
     test "General's tab size steps 2, 4, 8 and round, kept in settings.json (roadmap item 18.7)",
          %{state: state, dir: dir} do
       state = state |> send_io({:alt, ?y}) |> send_io({:key, :left})

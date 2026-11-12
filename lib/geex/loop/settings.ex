@@ -217,6 +217,14 @@ defmodule Geex.Loop.Settings do
           "every save adds one if missing"
         ]
       },
+      %{
+        name: :trim_whitespace,
+        cells: [
+          "Trim whitespace",
+          at_start.("trim_trailing_whitespace", "on"),
+          "every save trims trailing spaces and tabs; not Markdown, diffs or patches"
+        ]
+      },
       %{name: nil, cells: ["Settings", tilde(Geex.Settings.path()), ""], left_cut: 1},
       %{name: nil, cells: ["Packages", tilde(Installed.root()), ""], left_cut: 1},
       %{
@@ -371,7 +379,8 @@ defmodule Geex.Loop.Settings do
              :indent_with,
              :auto_close,
              :auto_indent,
-             :final_newline
+             :final_newline,
+             :trim_whitespace
            ] ->
         {:toggle, id}
 

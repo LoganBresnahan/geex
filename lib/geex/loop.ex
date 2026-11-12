@@ -298,6 +298,7 @@ defmodule Geex.Loop do
       {"tree", :tree_shown},
       {"edits", :edits_shown},
       {"final_newline", :final_newline},
+      {"trim_trailing_whitespace", :trim_whitespace},
       {"auto_close", :auto_close},
       {"auto_indent", :auto_indent}
     ]
@@ -369,6 +370,9 @@ defmodule Geex.Loop do
       # A save adds a final newline the text lacks (roadmap item 18.4): settings.json's
       # `final_newline`, off unless it says true.
       final_newline: false,
+      # A save trims trailing whitespace (ADR-0054): settings.json's `trim_trailing_whitespace`,
+      # on unless it says false; Markdown, diffs and patches keep theirs.
+      trim_whitespace: true,
       # The tab size (roadmap item 18.7): how many spaces Tab inserts and how wide a tab
       # character draws. settings.json's `tab_size`, 2 unless it says otherwise.
       tab_size: 2,
@@ -3478,6 +3482,17 @@ defmodule Geex.Loop do
     )
   end
 
+  defp settings_action({:toggle, :trim_whitespace}, state) do
+    on? = not state.trim_whitespace
+
+    keep(
+      %{state | trim_whitespace: on?},
+      "trim_trailing_whitespace",
+      on?,
+      "trimming trailing whitespace on save is #{onoff(on?)}"
+    )
+  end
+
   defp settings_action({:toggle, :final_newline}, state) do
     on? = not state.final_newline
 
@@ -5240,7 +5255,12 @@ defmodule Geex.Loop do
   # buffer's own notice says so. A failure (`{:error, :no_path}` on a scratch buffer, a posix
   # error) leaves the marker set — a real echo/message area is a deferred minibuffer slice.
   defp do_save(state) do
-    opts = [force: state.save_armed, final_newline: state.final_newline]
+    opts = [
+      force: state.save_armed,
+      final_newline: state.final_newline,
+      trim_trailing_whitespace:
+        state.trim_whitespace and Keymap.trims_on_save?(current_path(state))
+    ]
 
     state =
       case on_active_buffer(&Reconcile.save(&1, opts)) do

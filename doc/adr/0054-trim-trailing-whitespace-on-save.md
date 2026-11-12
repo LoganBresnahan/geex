@@ -1,6 +1,7 @@
 # ADR-0054: Trim trailing whitespace on save
 
-- **Status:** Accepted 2026-11-12 (the maintainer's ask, accepted at their word; not built yet)
+- **Status:** Accepted 2026-11-12 (the maintainer's ask, accepted at their word); built the same
+  day on the branch `save-undo`
 - **Date:** 2026-11-12
 - **Amends:** [ADR-0019](0019-file-lifecycle-and-operation-tools.md) (its 2026-11-09 amendment, a
   final newline on save: a save makes one more edit), [ADR-0040](0040-bare-geex-and-the-catalog.md)
@@ -40,6 +41,13 @@ gives every space back (ADR-0031's 2026-11-12 amendment). With the final line br
 are the same step. The frozen MCP `save_file` writes the text as it is.
 
 **5. The cursor.** A cursor past a trimmed line's new end goes to that end.
+
+**As built.** The loop decides whether a save trims: the setting, and the file kind by
+`Keymap.trims_on_save?/1` (beside the indent table), passed as `trim_trailing_whitespace:` through
+`Reconcile.save/2` to `Buffer.save/2`, which makes the edits: one `Replace` per line, bottom up,
+then the final newline, as one `History.group/3`; a newline with nothing to trim is dispatched
+alone, as before. The extension check ignores case (`.PATCH`). The cursor needs nothing of its
+own: the loop's clamp puts it at a trimmed line's end.
 
 ## Consequences
 
