@@ -67,7 +67,47 @@ defmodule Geex.Ledger.Restore do
 
   defp fold([], acc, _verified), do: Map.put(acc, :stopped, nil)
 
-  defp fold([{line, line_end} | rest], acc, verified) do
+  # A run of `undo` entries (a step of several, written one per command, ADR-0031's 2026-11-12
+  # amendment) replays as one: `History.undo_many/2` pops them all and replays once, the value
+  # that many single undos give. One replay per entry cost a full replay each: a step of 1,000
+  # took over 12 s to reopen (mod-verify's review). A run longer than the history falls back to
+  # one at a time, so the failing entry is the one replay stops before.
+  defp fold([{line, _} | _] = lines, acc, verified) when line != "" do
+    # Only an entry that can be an undo is looked at twice.
+    run = if String.contains?(line, ~s("undo")), do: undo_run(lines, 0, nil), else: nil
+
+    case run do
+      {k, last_end, rest} when k > 1 and k <= length(acc.history.commands) ->
+        {:ok, history, _taken} = History.undo_many(acc.history, k)
+
+        acc = %{
+          acc
+          | history: history,
+            entries: acc.entries + k,
+            valid_bytes: last_end,
+            clean: false
+        }
+
+        fold(rest, acc, verified)
+
+      _ ->
+        fold_one(lines, acc, verified)
+    end
+  end
+
+  defp fold(lines, acc, verified), do: fold_one(lines, acc, verified)
+
+  # How many entries from the start are `undo`s, where the last ends, and what follows.
+  defp undo_run([{line, line_end} | rest] = lines, k, last_end) do
+    case Codec.decode(line) do
+      {:ok, :undo} -> undo_run(rest, k + 1, line_end)
+      _ -> {k, last_end, lines}
+    end
+  end
+
+  defp undo_run([], k, last_end), do: {k, last_end, []}
+
+  defp fold_one([{line, line_end} | rest], acc, verified) do
     with {:ok, entry} <- Codec.decode(line),
          {:ok, history, path, check} <- step(entry, acc.history, acc.path) do
       acc = %{

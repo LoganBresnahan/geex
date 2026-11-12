@@ -9,9 +9,13 @@ defmodule Geex.Blame do
   relabel the group's lines in place (`relabel/3`).
 
   A command's lines are the ones between the longest common prefix and the longest common
-  suffix of the document's lines before and after it. So an agent's hunk marks exactly the
-  lines it rewrote, pressing Enter at the end of a line marks only the new line, and typing
-  on an agent's line makes that line yours, as in `git blame`. An undone command's lines lose
+  suffix of the document's lines before and after it. When that middle has as many lines after
+  as before, only the lines that differ are the command's: a line it left as it was keeps its
+  writer, position by position (ADR-0032's 2026-11-12 amendment), so trimming a file's trailing
+  whitespace or indenting a selection with a blank line in it marks only the lines it changed.
+  So an agent's hunk marks exactly the lines it rewrote, pressing Enter at the end of a line
+  marks only the new line, and typing on an agent's line makes that line yours, as in
+  `git blame`. An undone command's lines lose
   its mark because the blame is rebuilt from the remaining history (`replay/2`).
 
   Pure: `value -> value`, like the dispatch core.
@@ -38,21 +42,37 @@ defmodule Geex.Blame do
 
   @doc """
   Advance `blame` across one command that turned `before` lines into `after` lines: the
-  changed lines take `writer`; the common prefix and suffix keep theirs.
+  changed lines take `writer`; the common prefix and suffix keep theirs, and so does a line
+  between them that the command left as it was, when it kept the line count of that middle.
 
       iex> Geex.Blame.step([nil, nil, nil], ["a", "b", "c"], ["a", "B", "c"], {:human, nil})
       [nil, {:human, nil}, nil]
 
       iex> Geex.Blame.step([nil, nil], ["a", "b"], ["a", "", "b"], {:human, nil})
       [nil, {:human, nil}, nil]
+
+      iex> agent = {:external, 3}
+      iex> Geex.Blame.step([nil, agent, nil], ["a ", "b", "c "], ["a", "b", "c"], {:human, nil})
+      [{:human, nil}, {:external, 3}, {:human, nil}]
   """
   @spec step(t(), [String.t()], [String.t()], writer()) :: t()
   def step(blame, before, after_lines, writer) do
     {prefix, old_rest, new_rest} = split_common_prefix(before, after_lines, 0)
     suffix = common_suffix_length(old_rest, new_rest)
-    changed = length(new_rest) - suffix
+    old_mid = length(old_rest) - suffix
+    new_mid = length(new_rest) - suffix
     {head, rest} = Enum.split(blame, prefix)
-    head ++ List.duplicate(writer, changed) ++ Enum.take(rest, -suffix)
+
+    middle =
+      if old_mid == new_mid do
+        # The same number of lines: position by position, a line left as it was keeps its writer.
+        [Enum.take(old_rest, old_mid), Enum.take(new_rest, new_mid), Enum.take(rest, old_mid)]
+        |> Enum.zip_with(fn [old, new, was] -> if old == new, do: was, else: writer end)
+      else
+        List.duplicate(writer, new_mid)
+      end
+
+    head ++ middle ++ Enum.take(rest, -suffix)
   end
 
   @doc """

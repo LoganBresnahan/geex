@@ -28,7 +28,8 @@ defmodule Geex.Command.Meta do
     * `step`        — the undo step it belongs to: every command one `Geex.History.group/3`
                       applied shares an id, stamped by the history, so undo and redo move them
                       together (ADR-0031's 2026-11-12 amendment). `nil` for a command applied
-                      alone. Never written to the ledger: replaying a group stamps it again
+                      alone. Written to the ledger when set, and kept on replay, so a reopened
+                      file undoes by step
 
   `at` is stamped at creation and **preserved** when a recorded command is
   replayed — replay re-runs the same values, it does not re-stamp them. That is

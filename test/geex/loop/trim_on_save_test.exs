@@ -50,19 +50,37 @@ defmodule Geex.Loop.TrimOnSaveTest do
 
     assert File.read!(path) == "a\nb\n\nc\nd\n"
     refute Buffer.status(buf).dirty
-    assert length(Buffer.history(buf)) == 4
+    # One replace, however many lines it trims (ADR-0054 §4).
+    assert length(Buffer.history(buf)) == 1
     assert Enum.all?(Buffer.history(buf), &(&1.meta.actor == :human))
 
     state = key(state, {:alt, ?z})
     assert Buffer.get_text(buf) == text
-    assert state.notice == "undid 4 edits"
+    assert state.notice == nil
   end
 
-  test "blame marks only the lines trimmed", %{state: state, dir: dir} do
-    {state, buf, _path} = open_file(state, dir, "b.txt", "keep\ntrim  \nkeep\n")
+  test "blame marks only the lines trimmed, not the ones between (ADR-0032's amendment)", %{
+    state: state,
+    dir: dir
+  } do
+    {state, buf, _path} = open_file(state, dir, "b.txt", "trim  \nkeep\nkeep\ntrim \nkeep\n")
     _ = save(state)
     blame = :sys.get_state(buf).history.blame
-    assert Enum.map(blame, &(&1 != nil)) == [false, true, false, false]
+    assert Enum.map(blame, &(&1 != nil)) == [true, false, false, true, false, false]
+  end
+
+  # mod-verify's review: a space a Prepend character joins to is one grapheme with it, not
+  # trailing whitespace; the old per-line trim recorded an empty replace on every save.
+  test "a space joined to a Prepend character stays, and no edit is recorded", %{
+    state: state,
+    dir: dir
+  } do
+    text = "x\u0600 \ny\u0D4E \n"
+    {state, buf, path} = open_file(state, dir, "p.txt", text)
+    state = save(state)
+    _ = save(state)
+    assert File.read!(path) == text
+    assert Buffer.history(buf) == []
   end
 
   test "a CRLF line keeps its \\r; a form feed and a no-break space are text", %{

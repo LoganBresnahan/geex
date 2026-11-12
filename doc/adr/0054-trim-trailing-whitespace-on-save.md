@@ -35,19 +35,23 @@ extension beside the indent table.
 
 **4. A recorded edit, made as the save writes.** As the final line break is: made inside the buffer
 in the same step as the write (`Buffer.save/2`), after the save has caught up with the disk, kept
-only if the write succeeds, so a failed save leaves no edit behind. It is one `:human` command per
-changed line, applied as one group, so blame marks only the lines that changed and one `Alt+Z`
-gives every space back (ADR-0031's 2026-11-12 amendment). With the final line break also on, both
-are the same step. The frozen MCP `save_file` writes the text as it is.
+only if the write succeeds, so a failed save leaves no edit behind. It is one `:human` replace from
+the first changed line's start to the last's end, applied with the final line break as one group
+(a step of at most two commands, one `Alt+Z`, ADR-0031's 2026-11-12 amendment), so a save costs
+the document once however many lines it trims; blame marks only the lines that changed
+(ADR-0032's 2026-11-12 amendment). Lines are trimmed by grapheme: a space a Prepend character
+joins to (`x؀ `) is one grapheme with it, not trailing whitespace, and a line left as it was makes
+no command. (Built first as one command per line, which mod-verify's review found quadratic: a
+20,000-line save took 29 s.) The frozen MCP `save_file` writes the text as it is.
 
 **5. The cursor.** A cursor past a trimmed line's new end goes to that end.
 
 **As built.** The loop decides whether a save trims: the setting, and the file kind by
 `Keymap.trims_on_save?/1` (beside the indent table), passed as `trim_trailing_whitespace:` through
-`Reconcile.save/2` to `Buffer.save/2`, which makes the edits: one `Replace` per line, bottom up,
-then the final newline, as one `History.group/3`; a newline with nothing to trim is dispatched
-alone, as before. The extension check ignores case (`.PATCH`). The cursor needs nothing of its
-own: the loop's clamp puts it at a trimmed line's end.
+`Reconcile.save/2` to `Buffer.save/2`, which makes the edits: the trim as one replace (§4), then
+the final newline worked out on the trimmed text, applied together as one `History.group/3`; a
+newline with nothing to trim is dispatched alone, as before. The extension check ignores case
+(`.PATCH`). The cursor needs nothing of its own: the loop's clamp puts it at a trimmed line's end.
 
 ## Consequences
 

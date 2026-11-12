@@ -30,7 +30,7 @@ defmodule Geex.History do
     * `next_group` — the id the next reconcile group gets. `group/3` stamps it, so ids come
       from the history itself and survive a restart through the ledger (ADR-0033 §2).
     * `next_step` — the undo step id the next group gets (`meta.step`, ADR-0031's 2026-11-12
-      amendment). Not written to the ledger: replaying the groups stamps them again.
+      amendment). Later ids pass any id a replayed command carries (`group/4`'s `keep_steps:`).
   """
 
   alias Geex.{Blame, Dispatch, EditorState}
@@ -247,17 +247,32 @@ defmodule Geex.History do
   def undo_step(%__MODULE__{commands: []}), do: {:error, :nothing_to_undo}
 
   def undo_step(%__MODULE__{commands: [newest | _] = commands} = h) do
-    {taken, rest} = take_step(commands, step_of(newest))
+    {taken, _rest} = take_step(commands, step_of(newest))
+    undo_many(h, length(taken))
+  end
+
+  @doc """
+  Undo the newest `k` commands at once: one replay, the value `k` `undo/1`s give, the change
+  clock advanced as far. The ledger's replay folds a run of `undo` entries through it
+  (`Geex.Ledger.Restore`). Returns the undone commands, newest first; `{:error,
+  :nothing_to_undo}` when fewer than `k` (or none) are applied.
+  """
+  @spec undo_many(t(), pos_integer()) :: {:ok, t(), [struct()]} | {:error, :nothing_to_undo}
+  def undo_many(%__MODULE__{commands: commands} = h, k)
+      when is_integer(k) and k > 0 and length(commands) >= k do
+    {taken, rest} = Enum.split(commands, k)
 
     case Blame.replay(h.base, Enum.reverse(rest), h.base_blame) do
       {:ok, editor, blame} ->
         h = revert(h, editor, blame, rest, Enum.reverse(taken) ++ h.redo)
-        {:ok, %{h | seq: h.seq - 1 + length(taken)}, taken}
+        {:ok, %{h | seq: h.seq - 1 + k}, taken}
 
       {:error, _reason} ->
         {:error, :nothing_to_undo}
     end
   end
+
+  def undo_many(%__MODULE__{}, _k), do: {:error, :nothing_to_undo}
 
   @doc """
   Redo the newest undone **step**: every command on top of the redo stack sharing its

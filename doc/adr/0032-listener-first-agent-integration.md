@@ -2,7 +2,8 @@
 
 - **Status:** Accepted (amended 2026-10-14: attestation safety + write completion; 2026-10-18: a
   created file is sent as `created`; 2026-11-09: an attestation credits the group's undone
-  commands too, and can match the newest write's group when fully undone). For open
+  commands too, and can match the newest write's group when fully undone; 2026-11-12: a command
+  that keeps the line count marks only the lines it changed). For open
   buffers, step b's disk-wins merge and the pending table are superseded by
   [ADR-0034](0034-panes-tree-edits-hold.md) (buffers hold; `git merge-file`; held attestations)
 - **Date:** 2026-10-14
@@ -462,6 +463,26 @@ ADR-0031 history is linear. Built to the approved mockup:
   semantics over "marked until the agent's text is gone"). Enter at the end of an agent's line
   marks only the new line.
 - **A late attestation repaints at once:** the TUI now handles `{:geex_buffer_attested, …}`.
+
+## Amendment — 2026-11-12: a command that keeps the line count marks only the lines it changed
+
+**Context.** Step (e)'s rule gives a command every line between the common prefix and suffix. A
+trim-on-save of a whole file as one replace (ADR-0054 §4), or Tab over a selection with a blank
+line in it (ADR-0050 §3), would then claim lines it left as they were: every line between the
+first and last it touched. mod-verify's review of `save-undo` found the per-line commands that
+avoided this quadratic (20,000 lines took 29 s), and the coordinator chose one replace and a
+finer blame.
+
+**Decision.** After the common prefix and suffix, when the middle has as many lines after the
+command as before, a line the command left equal keeps its writer, position by position; only
+the lines that differ take the command's. A middle that grows or shrinks is marked whole, as
+before. Still linear in the lines, still pure (`Geex.Blame.step/4`). Blame is derived, so a
+history replayed (an undo, a reopened ledger, a checkpoint's base) gets the finer marks too: a
+checkpoint's stored `base_blame` keeps the marks it was written with.
+
+**Consequences.** A trimming save, Tab and Shift+Tab over a selection, and any replace that
+rewrites a block line for line mark only the lines they changed. An older history's blame can
+become finer on replay; nothing stored changes.
 
 ## Amendment — 2026-10-18: a file the agent creates is sent, as `created`
 

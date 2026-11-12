@@ -6178,3 +6178,26 @@ one `:human` `Replace` per line, with the final newline, as one group, one undo 
 
 1549 tests + 39 properties + 171 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
 `mix compile --warnings-as-errors --force` clean.
+
+### 2026-11-12 — `save-undo` review fixes (mod-verify's review of a974b34 and 3c71a21)
+
+- **A reopen after undoing a big step timed out:** restore replayed each `undo` entry through
+  `History.undo/1`, a full replay each (a step of 1,000: over 12 s; `Session.open_file` waits
+  5 s). `Geex.Ledger.Restore` now folds a run of `undo` entries into one `History.undo_many/2`
+  (one replay, the value that many single undos give: a new property). A reopen after undoing a
+  1,000-hunk step: under 3 s bound, measured well under 1 s; 49.6 s with the fold planted away.
+- **A big trimming save was quadratic** (one command per line, each costing the document: 20,000
+  lines took 29 s and timed out), and applied the trims twice with the final newline on. The trim
+  is now one replace from the first changed line to the last, applied once with the newline, a
+  step of at most two. `Geex.Blame.step/4` keeps the writer of a line a same-line-count middle
+  left equal (ADR-0032's 2026-11-12 amendment), so blame still marks only the trimmed lines, and
+  Tab over a selection no longer marks a blank line between (ADR-0050 §3 amended). A 20,000-line
+  trim save, its `Alt+Z` and the reopen after: each under its bound in `save_undo_perf_test`.
+- **Compaction could keep half a step:** `Compact.entries` moves its cut back to a step boundary,
+  keeping the step whole; a property (each kept step has all its commands; the check passes) and
+  mod-verify's repro (a 3-hunk write, compact to 2, reopen: one `Alt+Z` gives all 3 back), which
+  also needs the codec to write `step`.
+- **A space joined to a Prepend character** (`x؀ `, `yൎ `) recorded an empty replace on every
+  save: lines are trimmed by grapheme now, and a line left as it was makes no command.
+- A codec round trip of a command with a step; stale docs in `meta.ex` and `history.ex`; ADR-0019's
+  status separator; ADR-0054 §4 and ADR-0031's amendment say the above.

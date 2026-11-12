@@ -4,7 +4,7 @@
   accepted at the maintainer's word the same day; merged to main 2026-11-12 after mod-verify's
   reviews). §5 changed in place 2026-11-12, before the
   branch was merged: the other kind moved from `` Alt+` `` to `Alt+1` ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md)). **Amended 2026-11-12 by [ADR-0052](0052-editing-keys.md):** `\`
-  can be read as an Alt chord (`Alt+\`, the matching bracket).
+  can be read as an Alt chord (`Alt+\`, the matching bracket). **Amended 2026-11-12 by [ADR-0032](0032-listener-first-agent-integration.md)'s amendment:** §3, blame marks only the changed lines.
 - **Date:** 2026-11-11
 - **Amends:** [ADR-0026](0026-terminal-input-model.md) (its 2026-11-10 amendment: Shift+Tab
   inserted the other kind of indent; `` Alt+` `` read), [ADR-0045](0045-typing-assists.md) §3
@@ -47,8 +47,8 @@ with their text, never past the line's start.
 
 **3. One edit.** Indenting or un-indenting lines is one recorded command on the shared path, one
 `Alt+Z`: a replace from the first changed line's start to the last's end. Blame marks the lines
-between the first and last changed, as for any hunk (`Geex.Blame`): an empty or unindented line
-between them is marked too.
+that changed: an empty or unindented line between the first and last changed keeps its writer
+(ADR-0032's 2026-11-12 amendment; before it, those lines were marked too).
 
 **4. A selection's ends follow their text.** An end on a changed line moves by what was inserted
 or taken there, except an end at column 0, which stays at 0, so a selection of whole lines stays

@@ -83,7 +83,9 @@ defmodule Geex.LedgerTest do
           Meta.new({:llm, "m"}, at: at, prompt_hash: "p", origin: %{turn_id: "t", seq: 2})
         ),
         Command.put_meta(rep, Meta.new(@agent, at: at, reconcile: stamp)),
-        Command.put_meta(edit, Meta.new(:external, at: at))
+        Command.put_meta(edit, Meta.new(:external, at: at)),
+        # An undo step id rides along (ADR-0031's 2026-11-12 amendment).
+        Command.put_meta(ins, %{Meta.new(:human, at: at) | step: 7})
       ]
 
       entries = [
@@ -580,7 +582,8 @@ defmodule Geex.LedgerTest do
 
       buf = open(ctx)
       assert live(buf) == before
-      assert {:ok, %{text: "a  \nb\t\nc ", step: 4}, _} = Buffer.undo(buf)
+      # The trim is one replace, the newline one insert: a step of two.
+      assert {:ok, %{text: "a  \nb\t\nc ", step: 2}, _} = Buffer.undo(buf)
       close(buf)
     end
 

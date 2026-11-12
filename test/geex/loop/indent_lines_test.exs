@@ -75,6 +75,17 @@ defmodule Geex.Loop.IndentLinesTest do
       assert Buffer.get_text(buf) == "  one\n\n  two\nthree\n"
     end
 
+    test "blame marks the indented lines, not the blank one between (ADR-0032's amendment)", %{
+      dir: dir
+    } do
+      {state, buf} = open(dir, "a.txt", "one\n\ntwo\n")
+      state = select(state, [{:alt, ?k}, {:alt, ?k}, {:alt, ?l}])
+      _ = key(state, {:key, :tab})
+      assert Buffer.get_text(buf) == "  one\n\n  two\n"
+      blame = :sys.get_state(buf).history.blame
+      assert Enum.map(blame, &(&1 != nil)) == [true, false, true, false]
+    end
+
     test "a last line reached only at column 0 is left out; whole lines stay whole", %{dir: dir} do
       {state, buf} = open(dir, "a.txt", "one\ntwo\nthree\n")
       state = select(state, [{:alt, ?k}, {:alt, ?k}])

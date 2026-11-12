@@ -145,7 +145,11 @@ the partial state ADR-0033 refuses to create (mod-verify's review of ADR-0051). 
    per command, as those single undos do). The codec writes a command's `step` when it has one,
    and restore keeps it (`History.group/4`'s `keep_steps:`), so a reopened file undoes by step and
    a compaction's kept commands keep theirs; a group recorded before steps existed gets a fresh
-   id as it is replayed. Later ids pass any id a replayed command carries.
+   id as it is replayed. Later ids pass any id a replayed command carries. Restore folds a run
+   of `undo` entries into one replay (`History.undo_many/2`, the value that many single undos
+   give): one replay per entry made a reopen after undoing a step of 1,000 take over 12 s
+   (mod-verify's review). Compaction moves its cut back to a step boundary, keeping a step it
+   would split whole (a few more commands than asked).
 4. **Never half a step.** Undo and redo move a whole step or nothing. An attestation (ADR-0032)
    relabels a group's commands wherever they are; it doesn't change their step.
 5. **The view.** After an undo the cursor goes to the start of the step's topmost command (a

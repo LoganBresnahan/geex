@@ -322,6 +322,29 @@ defmodule Geex.HistoryTest do
     end
   end
 
+  # ADR-0031's 2026-11-12 amendment, mod-verify's review: compaction never cuts an undo step in
+  # two. Every step the compacted ledger kept is kept whole, as many commands as the live history
+  # has of it, and the restore still matches the live history.
+  property "compaction keeps an undo step whole" do
+    check all(
+            {base, ops} <- transitions(),
+            keep_seed <- non_negative_integer()
+          ) do
+      h = Enum.reduce(ops, History.new(base), &run_op/2)
+      keep = rem(keep_seed, length(h.commands) + 1)
+      restored = compact(h, keep)
+
+      assert Compact.check(restored, h) == :ok
+      assert length(restored.commands) >= keep
+
+      count = fn commands, step -> Enum.count(commands, &(&1.meta.step == step)) end
+
+      for step <- restored.commands |> Enum.map(& &1.meta.step) |> Enum.uniq(), step != nil do
+        assert count.(restored.commands, step) == count.(h.commands, step)
+      end
+    end
+  end
+
   # `h` compacted to its last `keep` commands and restored, as `mix geex.ledger compact` does.
   # The line split mirrors `Geex.Ledger`'s private `split_lines/1`; keep the two alike.
   defp compact(h, keep) do
@@ -382,6 +405,34 @@ defmodule Geex.HistoryTest do
 
         h
       end)
+    end
+  end
+
+  # mod-verify's review: the ledger's replay folds a run of `undo` entries into one
+  # `History.undo_many/2`, which must be the value that many single undos give.
+  property "undo_many is that many single undos" do
+    check all(
+            {base, ops} <- transitions(),
+            k_seed <- positive_integer()
+          ) do
+      h = Enum.reduce(ops, History.new(base), &run_op/2)
+      n = length(h.commands)
+
+      if n == 0 do
+        assert History.undo_many(h, 1) == {:error, :nothing_to_undo}
+      else
+        k = rem(k_seed - 1, n) + 1
+
+        singles =
+          Enum.reduce(1..k, h, fn _, acc ->
+            {:ok, acc, _} = History.undo(acc)
+            acc
+          end)
+
+        assert {:ok, ^singles, taken} = History.undo_many(h, k)
+        assert length(taken) == k
+        assert History.undo_many(h, n + 1) == {:error, :nothing_to_undo}
+      end
     end
   end
 

@@ -118,6 +118,25 @@ defmodule Geex.LedgerAdminTest do
       close(buf)
     end
 
+    # mod-verify's review: cutting by command count kept 2 of a 3-hunk step, and one Alt+Z after
+    # the reopen gave back only those 2. The step is kept whole, and the kept commands carry
+    # their step through the codec (without it, the check refuses: "kept commands differ").
+    test "a compaction that falls inside a step keeps the step whole", ctx do
+      File.write!(ctx.doc, "1\n2\n3\n4\n5\n")
+      buf = open(ctx)
+      File.write!(ctx.doc, "ONE\n2\nTHREE\n4\nFIVE\n")
+      {:reconciled, _} = Reconcile.reconcile(buf, "ONE\n2\nTHREE\n4\nFIVE\n")
+      close(buf)
+
+      file = Ledger.file(ctx.ledger, ctx.doc)
+      {:ok, _} = Ledger.compact(file, 2)
+
+      buf = open(ctx)
+      assert length(Buffer.history(buf)) == 3
+      assert {:ok, %{text: "1\n2\n3\n4\n5\n", step: 3}, _} = Buffer.undo(buf)
+      close(buf)
+    end
+
     test "refused while a running geex has the file open", ctx do
       busy_ledger(ctx)
       buf = open(ctx)

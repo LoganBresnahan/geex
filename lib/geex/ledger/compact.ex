@@ -6,7 +6,8 @@ defmodule Geex.Ledger.Compact do
   was cut, and replay would fail. So a compacted ledger is written from the restored history
   value instead:
 
-    1. a `checkpoint`: the text as it was before the last `keep` commands, with the blame it had
+    1. a `checkpoint`: the text as it was before the last `keep` commands (more, when the cut
+       would split an undo step: the step is kept whole), with the blame it had
        (who wrote each line survives compaction), and the next reconcile group id;
     2. those last `keep` commands, as `cmd` entries, with their final actors (attestations
        already applied);
@@ -27,6 +28,7 @@ defmodule Geex.Ledger.Compact do
   def entries(%History{} = h, path, keep, geex) when keep >= 0 do
     commands = History.commands_oldest_first(h)
     {dropped, kept} = Enum.split(commands, max(length(commands) - keep, 0))
+    {dropped, kept} = whole_steps(Enum.reverse(dropped), kept)
     {:ok, base, base_blame} = Blame.replay(h.base, dropped, h.base_blame)
     text = EditorState.text(base)
 
@@ -52,6 +54,23 @@ defmodule Geex.Ledger.Compact do
 
     [checkpoint | Enum.map(kept, &{:cmd, &1})] ++ [synced, close]
   end
+
+  # Move the cut back to a step boundary (ADR-0031's 2026-11-12 amendment): a step cut in two
+  # would leave its kept half to come back with one `Alt+Z` and its other half in the checkpoint,
+  # past undo. So a step the cut falls in is kept whole, and the ledger keeps a few more commands
+  # than asked (mod-verify's review). `dropped_rev` is newest first.
+  defp whole_steps([last | dropped_rev], [first | _] = kept) do
+    step = step_of(first)
+
+    if step != nil and step_of(last) == step,
+      do: whole_steps(dropped_rev, [last | kept]),
+      else: {Enum.reverse([last | dropped_rev]), kept}
+  end
+
+  defp whole_steps(dropped_rev, kept), do: {Enum.reverse(dropped_rev), kept}
+
+  defp step_of(%{meta: %{step: step}}), do: step
+  defp step_of(_command), do: nil
 
   @doc """
   Whether `restored` (the compacted ledger, replayed) matches `live`: the same text, blame,

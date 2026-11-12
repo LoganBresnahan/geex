@@ -516,25 +516,22 @@ defmodule Geex.Buffer do
   # amendment); a newline alone is dispatched as before. `{history, []}` when there is nothing.
   defp save_edits(history, opts) do
     trims = trim_commands(history, opts[:trim_trailing_whitespace] == true)
+    newline = opts[:final_newline] == true
 
     case trims do
       [] ->
-        case final_newline(history, opts[:final_newline] == true) do
+        case final_newline(history, newline) do
           {history, nil} -> {history, []}
           {with_newline, cmd} -> {with_newline, {:cmd, cmd}}
         end
 
       trims ->
-        {:ok, trimmed} = History.group(history, trims, nil)
-
-        case final_newline(trimmed, opts[:final_newline] == true) do
-          {_, nil} ->
-            {trimmed, {:group, trims}}
-
-          {_, cmd} ->
-            {:ok, both} = History.group(history, trims ++ [cmd], nil)
-            {both, {:group, trims ++ [cmd]}}
-        end
+        # The newline goes where the trimmed text ends: work it out on the trimmed editor, then
+        # apply the trim and it as one group (at most two commands, one step).
+        {:ok, trimmed_editor} = Geex.Dispatch.apply_command(hd(trims), history.editor)
+        commands = trims ++ List.wrap(newline_command(trimmed_editor, newline))
+        {:ok, both} = History.group(history, commands, nil)
+        {both, {:group, commands}}
     end
   end
 
@@ -549,39 +546,75 @@ defmodule Geex.Buffer do
     new_state
   end
 
-  # One replace per line with trailing spaces or tabs (ADR-0054 §2), bottom up: each takes them
-  # off, before a CRLF line's `\r`, so a line of only whitespace becomes empty. A form feed or a
-  # no-break space is text. `:human`, as the save is yours.
+  # The trim (ADR-0054 §2, §4): one replace from the first line with trailing spaces or tabs to
+  # the last, each line's taken off by grapheme, before a CRLF line's `\r`, so a line of only
+  # whitespace becomes empty, a form feed or a no-break space stays, and a space a Prepend
+  # character joins to stays (one grapheme, not whitespace). One command, so a save costs the
+  # document once however many lines it trims (mod-verify's review: one per line was quadratic);
+  # blame still marks only the trimmed lines (`Geex.Blame.step/4`). `[]` when nothing changes.
   defp trim_commands(_history, false), do: []
 
   defp trim_commands(history, true) do
-    history.editor
-    |> EditorState.lines()
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {line, i} ->
-      body = String.replace_suffix(line, "\r", "")
+    lines = EditorState.lines(history.editor)
 
-      case Regex.run(~r/[ \t]+\z/, body, return: :index) do
-        [{at, _len}] ->
-          from = body |> binary_part(0, at) |> String.length()
-          to = String.length(body)
+    changed =
+      lines
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {line, i} ->
+        case trim_line(line) do
+          ^line -> []
+          trimmed -> [{i, trimmed}]
+        end
+      end)
 
-          {:ok, cmd} =
-            Geex.Commands.Replace.parse(%{
-              start_line: i,
-              start_col: from,
-              end_line: i,
-              end_col: to,
-              text: ""
-            })
+    case changed do
+      [] ->
+        []
 
-          [Geex.Command.put_meta(cmd, Geex.Command.Meta.human())]
+      [{first, _} | _] ->
+        {last, _} = List.last(changed)
+        trimmed = Map.new(changed)
 
-        nil ->
-          []
-      end
-    end)
-    |> Enum.reverse()
+        text =
+          lines
+          |> Enum.slice(first..last)
+          |> Enum.with_index(first)
+          |> Enum.map_join("\n", fn {line, i} -> Map.get(trimmed, i, line) end)
+
+        {:ok, cmd} =
+          Geex.Commands.Replace.parse(%{
+            start_line: first,
+            start_col: 0,
+            end_line: last,
+            end_col: String.length(Enum.at(lines, last)),
+            text: text
+          })
+
+        [Geex.Command.put_meta(cmd, Geex.Command.Meta.human())]
+    end
+  end
+
+  # A line without its trailing space and tab graphemes, its CRLF `\r` kept. A line that
+  # doesn't end in a space or tab byte is returned as it is, unsplit.
+  defp trim_line(line) do
+    {body, cr} =
+      if String.ends_with?(line, "\r"),
+        do: {binary_part(line, 0, byte_size(line) - 1), "\r"},
+        else: {line, ""}
+
+    if String.ends_with?(body, [" ", "\t"]) do
+      kept =
+        body
+        |> String.graphemes()
+        |> Enum.reverse()
+        |> Enum.drop_while(&(&1 in [" ", "\t"]))
+        |> Enum.reverse()
+        |> Enum.join()
+
+      kept <> cr
+    else
+      line
+    end
   end
 
   # A save's final newline (roadmap item 18.4): the history with the line break a non-empty text
@@ -590,10 +623,26 @@ defmodule Geex.Buffer do
   # last line ends in one, else LF; a text that already ends in a bare `\r` (a CRLF file whose
   # last line break lost its `\n`) gets just the `\n`.
   defp final_newline(history, true) do
-    text = History.text(history)
+    case newline_command(history.editor, true) do
+      nil ->
+        {history, nil}
+
+      cmd ->
+        {:ok, with_newline} = History.dispatch(history, cmd)
+        {with_newline, cmd}
+    end
+  end
+
+  defp final_newline(history, false), do: {history, nil}
+
+  # The insert that adds the final line break `editor`'s text lacks, or `nil`.
+  defp newline_command(_editor, false), do: nil
+
+  defp newline_command(editor, true) do
+    text = EditorState.text(editor)
 
     if text != "" and not String.ends_with?(text, "\n") do
-      lines = EditorState.lines(history.editor)
+      lines = EditorState.lines(editor)
 
       eol =
         cond do
@@ -609,15 +658,9 @@ defmodule Geex.Buffer do
           text: eol
         })
 
-      cmd = Geex.Command.put_meta(cmd, Geex.Command.Meta.human())
-      {:ok, with_newline} = History.dispatch(history, cmd)
-      {with_newline, cmd}
-    else
-      {history, nil}
+      Geex.Command.put_meta(cmd, Geex.Command.Meta.human())
     end
   end
-
-  defp final_newline(history, false), do: {history, nil}
 
   # The file is still what the buffer last synced (or gone, or unreadable: nothing to lose).
   # Read at the write, so a change the watcher hasn't reported yet is caught too (ADR-0034 §3).
