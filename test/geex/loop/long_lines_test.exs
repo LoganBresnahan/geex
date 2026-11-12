@@ -158,11 +158,11 @@ defmodule Geex.Loop.LongLinesTest do
       %{text: "x(\n" <> line <> "\n)\n", c: n - 10}
     end
 
-    defp fast(fun) do
+    defp fast(fun, bound \\ 50) do
       # The fastest of three, so a loaded machine's pause doesn't count; before BUG-12's window
       # each of these took 0.3–0.7 s.
       ms = for(_ <- 1..3, do: elem(:timer.tc(fun), 0)) |> Enum.min() |> div(1000)
-      assert ms < 50, "#{ms} ms"
+      assert ms < bound, "#{ms} ms"
     end
 
     test "Alt+O, Alt+U, Alt+8 and Alt+8 again near its end", %{text: text, c: c} do
@@ -179,8 +179,10 @@ defmodule Geex.Loop.LongLinesTest do
     end
 
     test "Alt+\\ near its end, and from the line below it", %{text: text, c: c} do
-      fast(fn -> Keymap.matching_bracket({1, c}, text) end)
-      fast(fn -> Keymap.matching_bracket({2, 0}, text) end)
+      # Alt+\\ may read its whole 200,000-character budget (ADR-0052 §4), so it costs that, not a
+      # window: ~30 ms here, 60–110 ms on CI's runner, 0.66–0.9 s before BUG-12's fix.
+      fast(fn -> Keymap.matching_bracket({1, c}, text) end, 250)
+      fast(fn -> Keymap.matching_bracket({2, 0}, text) end, 250)
     end
   end
 

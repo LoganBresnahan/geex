@@ -70,7 +70,10 @@ defmodule Geex.Loop.LongLineLoopTest do
           {:key, :backspace}
         ] do
       {key, paint} = fast(state, at, event)
-      assert key < 50, "#{inspect(event)}: key #{key} ms"
+      # Alt+\\ may read its whole 200,000-character budget (ADR-0052 §4): ~30 ms here, 60 ms on
+      # CI's runner, 0.9 s before BUG-12's fix. Every other key reads a window.
+      bound = if event == {:alt, ?\\}, do: 250, else: 50
+      assert key < bound, "#{inspect(event)}: key #{key} ms"
       assert paint < 100, "#{inspect(event)}: repaint #{paint} ms"
     end
   end
