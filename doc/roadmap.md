@@ -400,8 +400,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      needs to decode the modifier (`ESC [ 1 ; 5 C`). Small.
    - **Shift+arrows.** The common convention is "extend the selection" (selection exists,
      `Alt+S`, ADR-0049). Decide whether to adopt it. Small to medium.
-   - **Alt + a digit or symbol** (`Alt+1` sends `ESC 1`). Still emits Esc and types the `1`. Read
-     it as an Alt chord, or drop it. Tiny.
+   - **Alt + a digit or symbol** (`Alt+1` sends `ESC 1`). Done: digits since ADR-0038, symbols as
+     they got commands (`Alt+;`, `Alt+<`, `Alt+>`; ADR-0049, ADR-0051).
    - **F-keys, Insert.** Nothing to bind them to yet (no overwrite mode). Leave them dropped until
      something wants one.
    - **The Esc timeout** (40 ms, `Geex.TerminalIO`). Watch for slow remote (SSH) links that split a

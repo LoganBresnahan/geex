@@ -1,6 +1,6 @@
 # ADR-0031: Undo/redo — history operations (replay-from-base)
 
-- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** `Alt+Shift+P` is the second case-sensitive chord. **Amended 2026-11-09:** every edit recomputes `dirty`.
+- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** `Alt+Shift+P` is the second case-sensitive chord. **Amended 2026-11-09:** every edit recomputes `dirty`. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+P` is the preview now, and `Alt+Shift+R` (`revert-call`) the second case-sensitive chord.
 - **Date:** 2026-06-09 (Accepted 2026-06-09 when built + wired into `Alt+Z` / `Alt+Shift+Z`)
 - **Relates to:** [ADR-0014](0014-editor-state-and-dispatch-ownership.md) (the buffer owns the
   `EditorState` + the one history; the cursor is **view-local**), [ADR-0003](0003-one-shared-path.md)

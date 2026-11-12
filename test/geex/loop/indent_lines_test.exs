@@ -185,6 +185,15 @@ defmodule Geex.Loop.IndentLinesTest do
       assert Buffer.get_text(buf) == "  a\n   \n  b\n"
     end
 
+    test "Tab then Shift+Tab gives a blank line back: neither touches it", %{dir: dir} do
+      text = "def f():\n    a\n    \n    b\n"
+      {state, buf} = open(dir, "a.py", text)
+      state = key(state, {:cmd, :select_all})
+      state = key(state, {:key, :tab})
+      _ = key(state, {:key, :shift_tab})
+      assert Buffer.get_text(buf) == text
+    end
+
     test "the goal column follows the cursor", %{dir: dir} do
       {state, _buf} = open(dir, "a.txt", "    abc\nxxxxxxxxxx\n", {0, 6})
       state = key(state, {:key, :shift_tab})

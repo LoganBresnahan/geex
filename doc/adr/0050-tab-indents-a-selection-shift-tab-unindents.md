@@ -32,14 +32,15 @@ and where a terminal does pass one, `ESC ESC [ Z` can't be told from Esc then Sh
 inserts one indent level, as the file indents, at the start of every line the selection touches,
 and the selection stays, so Tab again indents again. The lines are the selection's first through
 its last, except a last line the selection only reaches at column 0 (a drag down to the start of
-a line, which selects the lines above it). A blank line (empty, or only spaces and tabs) is left
-alone, so no trailing whitespace is added.
+a line, which selects the lines above it). A blank line (empty, or only spaces and tabs; a form feed
+or a no-break space isn't blank) is left alone, so no trailing whitespace is added.
 
 **2. Shift+Tab un-indents, always.** It takes one level from the start of every line the
 selection touches, or of the cursor's line with no selection: a leading tab, or leading spaces
 back to the previous tab stop (the tab size's spaces, or fewer to reach a stop), as Backspace in
-leading spaces already does (ADR-0045). A line with no leading whitespace is left alone; when no
-line has any, nothing changes and nothing is recorded. The cursor and the selection move left
+leading spaces already does (ADR-0045). A line with no leading whitespace is left alone, and so
+is a blank line, as Tab leaves it, so Tab then Shift+Tab gives every line back; when no line has
+anything to take, nothing changes and nothing is recorded. The cursor and the selection move left
 with their text, never past the line's start.
 
 **3. One edit.** Indenting or un-indenting lines is one recorded command on the shared path, one

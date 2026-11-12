@@ -218,6 +218,27 @@ defmodule Geex.Loop.PreviewTabsTest do
     end
   end
 
+  describe "ADR-0051: the pane keys work from a preview" do
+    test "Alt+<, Alt+> and their typed names move out of it, never refused", ctx do
+      {state, _buf} = start(ctx.dir)
+      state = Loop.toggle_preview(state)
+      # Alt+> moves into the preview's pane, beside the source.
+      state = key(state, {:alt, ?>})
+      assert state.panes.pane == 2 and Panes.preview?(Panes.current(state.panes))
+
+      for event <- [{:alt, ?<}, {:alt, ?>}, {:typed, "pane prev"}, {:typed, "pane next"}] do
+        s =
+          case event do
+            {:typed, verb} -> type(state, verb)
+            key_event -> key(state, key_event)
+          end
+
+        refute s.notice && s.notice =~ "read-only", inspect(event)
+        assert s.panes.pane == 1, inspect(event)
+      end
+    end
+  end
+
   describe "F4/F7: a preview has no cursor" do
     test "entering and leaving one leaves Session's cursor as it was; a frame draws it", ctx do
       {state, _buf} = start(ctx.dir, 24)

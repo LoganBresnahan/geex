@@ -234,12 +234,14 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "pane next",
+      aliases: ["next pane"],
       description: "Move to the next pane: the tree, the editor's panes, the edits pane.",
       invoke: {:command, :next_pane}
     },
     %Entry{
       name: "pane prev",
-      description: "Move to the pane before: the edits pane, the editor's panes, the tree.",
+      aliases: ["previous pane"],
+      description: "Move to the previous pane: the edits pane, the editor's panes, the tree.",
       invoke: {:command, :prev_pane}
     },
     %Entry{

@@ -73,7 +73,7 @@ defmodule Geex.Loop.PanesTest do
     assert state.tree.rows |> Enum.map(& &1.path) == ["lib"]
     assert key(state, {:alt, ?>}).focus == :editor
 
-    # Back the other way, from the editor: edits, then the tree (ADR-0051).
+    # Back the other way, from the editor: the tree, then edits (ADR-0051).
     state = Loop.new_state(120, 30)
     state = key(state, {:alt, ?<}) |> tree_read()
     assert state.focus == :tree

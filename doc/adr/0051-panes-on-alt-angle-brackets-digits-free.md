@@ -8,9 +8,10 @@
   [ADR-0038](0038-split-panes-and-tabs.md) (`Alt+1` … `Alt+9` showed tab N),
   [ADR-0043](0043-markdown-preview.md) §1 (the preview was `Alt+Shift+P`),
   [ADR-0049](0049-ijkl-default-keys.md) (the defaults), [ADR-0050](0050-tab-indents-a-selection-shift-tab-unindents.md)
-  §5 (`indent other` was `` Alt+` ``)
+  §5 (`indent other` was `` Alt+` ``), [ADR-0033](0033-durable-ledger.md) (`revert-call` had no
+  key)
 - **Relates to:** [ADR-0047](0047-every-key-runs-a-named-command.md) (every key runs a named
-  command), [ADR-0033](0033-durable-ledger.md) §7 (revert a hunk, revert a call),
+  command),
   roadmap item 20.3 (remapping)
 
 ## Context
@@ -61,6 +62,10 @@ plan on indent-keys").
   `Alt+M tab 5`. The tab bar keeps its numbers, which `tab N` uses.
 - `Alt+P` no longer moves between panes; muscle memory breaks once.
 - `` Alt+` `` and the digits are left for the user; `Alt+Shift+P` is free to bind.
+- With Caps Lock on, `Alt+R` arrives as `Alt+Shift+R` and takes back the whole tool call, not one
+  hunk, as `Alt+Z` becomes redo. One `Alt+Z` after a `revert-call` of several hunks gives back one
+  of them, since each hunk is its own recorded command (ADR-0031 §3); undoing a revert as one step
+  is roadmap work, not this ADR's.
 
 ## See
 

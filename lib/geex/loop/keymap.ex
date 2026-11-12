@@ -311,13 +311,19 @@ defmodule Geex.Loop.Keymap do
     end
   end
 
-  # How many graphemes a line gains (indent) or loses (un-indent, negative).
-  defp line_shift(l, {:indent, unit}),
-    do: if(String.trim(l) == "", do: 0, else: String.length(unit))
+  # How many graphemes a line gains (indent) or loses (un-indent, negative). A blank line (only
+  # spaces and tabs, and a CRLF's \r) neither gains nor loses, so Tab then Shift+Tab gives every
+  # line back (ADR-0050 §1).
+  defp line_shift(l, how) do
+    if blank_line?(l), do: 0, else: shift_of(l, how)
+  end
 
-  defp line_shift("\t" <> _, {:unindent, _tab_size}), do: -1
+  defp blank_line?(l), do: String.match?(l, ~r/\A[ \t]*\r?\z/)
 
-  defp line_shift(l, {:unindent, tab_size}) do
+  defp shift_of(_l, {:indent, unit}), do: String.length(unit)
+  defp shift_of("\t" <> _, {:unindent, _tab_size}), do: -1
+
+  defp shift_of(l, {:unindent, tab_size}) do
     spaces = byte_size(l) - byte_size(String.trim_leading(l, " "))
     back = if rem(spaces, tab_size) == 0, do: tab_size, else: rem(spaces, tab_size)
     -min(back, spaces)

@@ -6,7 +6,7 @@
   the screen clickable (§6), and Alt+click extends a selection (§3). **Step 3, 2026-10-17:**
   resizing by drag handles, which amends [ADR-0038](0038-split-panes-and-tabs.md) §6.
   **Amended 2026-10-18:** the scroll bars take the mouse (§7), and the edits pane's handle no
-  longer moves when the pane takes focus. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** the mouse in a markdown preview, and its glyph on the tab bar. **Amended 2026-11-09 (recorded 2026-11-10):** the tab bar's wheel and marks, the output pane's handle, a CRLF line's end.
+  longer moves when the pane takes focus. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** the mouse in a markdown preview, and its glyph on the tab bar. **Amended 2026-11-09 (recorded 2026-11-10):** the tab bar's wheel and marks, the output pane's handle, a CRLF line's end. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** a list is focused by `Alt+<` / `Alt+>`, not `Alt+P`.
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0026](0026-terminal-input-model.md) (the terminal input model),
   [ADR-0027](0027-grid-command-addressing.md) (width never addresses), [ADR-0029](0029-selection-primitive.md)

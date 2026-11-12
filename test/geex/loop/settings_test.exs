@@ -543,6 +543,17 @@ defmodule Geex.Loop.SettingsTest do
     end
   end
 
+  test "the Keys tab shows every key the defaults bind (ADR-0051)" do
+    shown = Geex.Loop.KeyHelp.all()
+
+    for {chord, command} <- Bindings.defaults() do
+      label = Bindings.label(chord)
+
+      assert Enum.any?(shown, fn {_group, keys, _what} -> label in String.split(keys, ~r/\s+/) end),
+             "#{label} (#{inspect(command)}) is in no row of the Keys tab"
+    end
+  end
+
   test "a catalog install already up to date fetches nothing; --force would" do
     entry = Geex.Catalog.grammar("rust")
     dir = Installed.dir(:grammar, "rust")

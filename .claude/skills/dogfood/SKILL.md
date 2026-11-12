@@ -63,8 +63,8 @@ Drive and observe:
 ```sh
 tmux -L geexdf send-keys -t g "text"          # literal typing
 tmux -L geexdf send-keys -t g Enter BSpace Left  # named keys
-tmux -L geexdf send-keys -t g M-m             # Alt+<key> (minibuffer); M-b palette, M-p next pane, M-f open, M-g grid, M-s highlight;
-                                              # M-- / M-= split, M-, / M-. tabs, M-1..9 tab N, M-w close;
+tmux -L geexdf send-keys -t g M-m             # Alt+<key> (minibuffer); M-b palette, M-> / M-< next / previous pane, M-f open, M-g grid, M-s highlight;
+                                              # M-- / M-= split, M-, / M-. tabs, M-p preview, M-1 indent other, M-w close;
                                               # motion M-i/j/k/l, M-u/M-o word, M-h line start;
                                               # Alt+; (line end) as raw hex: send-keys -H 1b 3b (tmux reads ; as a separator)
 tmux -L geexdf capture-pane -t g -p           # the rendered grid as text — READ it

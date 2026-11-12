@@ -1,7 +1,7 @@
 # ADR-0048: The palette ranks names, then keys, then loose matches
 
 - **Status:** Accepted 2026-11-11 (the maintainer's ask, after the reviews of ADR-0047; built on the
-  branch `palette-ranks`, accepted at the maintainer's word the same day)
+  branch `palette-ranks`, accepted at the maintainer's word the same day) **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** no key shows tab N by default, so `tab 5` is no longer found by `Alt+5`.
 - **Date:** 2026-11-11
 - **Amends:** [ADR-0028](0028-editor-shell-and-minibuffer.md) §3 (the palette "fuzzy-lists" the
   commands: now in three bands), [ADR-0047](0047-every-key-runs-a-named-command.md) (finding a

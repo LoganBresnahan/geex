@@ -6028,3 +6028,28 @@ back to `Alt+P`) closed it. An outside write to `n.md` taken in with `Alt+D`, th
 1492 tests + 32 properties + 159 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
 `mix compile --warnings-as-errors --force` clean. Not tested: `Alt+<`/`Alt+>` on a layout where
 `<` isn't Shift+`,` (German), or in a macOS terminal.
+
+### 2026-11-12 — ADR-0050/0051 review fixes (mod-verify's review of f054a0a and 5d1b05a)
+
+- **Tab then Shift+Tab didn't give a whitespace-only line back:** Tab left `"    "` alone but
+  Shift+Tab took a level from it. Now neither touches a blank line, so the two always round-trip
+  (ADR-0050 §1, §2). "Blank" is exactly spaces and tabs (and a CRLF's `\r`): a form feed or a
+  no-break space is text. The property checks both directions; its generator takes `\f` and
+  U+00A0; an example test pins mod-verify's probe.
+- **Tests for plants the suite didn't catch**, each failing with its plant:
+  - `Alt+<`, `Alt+>`, `pane prev` and `pane next` move out of a preview, never refused;
+  - the preview's read-only notice and the edits and output panes' titles name the bound keys;
+  - every key the defaults bind appears in a Keys tab row (it found Page Up/Down missing: added).
+- `pane prev` and `pane next` take the aliases `previous pane` and `next pane`; the Keys row says
+  "the previous pane, the next pane".
+- Docs:
+  - ADR-0051 amends ADR-0033 and notes Caps Lock turning `Alt+R` into `revert-call`, and one
+    `Alt+Z` giving back one hunk of a `revert-call`;
+  - amendment pointers in ADR-0031, 0033, 0039, 0042 and 0048, and the index;
+  - the dogfood skill's tmux keys; the roadmap's stale "Alt + a digit" item; a backwards comment
+    in `panes_test`.
+
+Not changed: undoing a `revert-call` of several hunks as one step (noted in ADR-0051, for later).
+
+1497 tests + 32 properties + 159 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean.

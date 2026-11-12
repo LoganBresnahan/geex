@@ -314,7 +314,10 @@ defmodule Geex.Loop.KeymapTest do
         "\r",
         "é",
         "  👍🏽 e\u0301",
-        " \t\r"
+        " \t\r",
+        "\f",
+        "\u00A0x",
+        "  \u00A0"
       ])
 
   defp apply_shift(text, nil), do: text
@@ -338,13 +341,10 @@ defmodule Geex.Loop.KeymapTest do
       back = apply_shift(indented, Keymap.shift_lines(indented, {a, b}, {:unindent, tab_size}))
 
       # Spaces come back off only from a line whose leading spaces were whole levels; a tab always.
-      # A blank line gains nothing, so it comes back only if it had nothing to take.
+      # A blank line (spaces and tabs only) is never touched either way, so it always comes back.
       whole? = fn l ->
         n = byte_size(l) - byte_size(String.trim_leading(l, " "))
-
-        if String.trim(l) == "",
-          do: l in ["", "\r"],
-          else: unit == "\t" or rem(n, tab_size) == 0
+        blank?(l) or unit == "\t" or rem(n, tab_size) == 0
       end
 
       if Enum.all?(Enum.slice(lines, a..b), whole?), do: assert(back == text)
@@ -355,12 +355,21 @@ defmodule Geex.Loop.KeymapTest do
       for {{old, new}, i} <- Enum.with_index(Enum.zip(lines, new_lines)) do
         cond do
           i < a or i > b -> assert new == old
-          String.trim(old) == "" -> assert new == old
+          blank?(old) -> assert new == old
           true -> assert new == unit <> old
         end
       end
+
+      # Un-indenting never touches a blank line either.
+      unindented = apply_shift(text, Keymap.shift_lines(text, {a, b}, {:unindent, tab_size}))
+
+      for {old, new} <- Enum.zip(lines, String.split(unindented, "\n")),
+          blank?(old),
+          do: assert(new == old)
     end
   end
+
+  defp blank?(l), do: String.match?(l, ~r/\A[ \t]*\r?\z/)
 
   test "indent_style/1 reads only the first 1000 lines" do
     text = String.duplicate("  x\n", 1000) <> String.duplicate("\tx\n", 2000)
