@@ -1,6 +1,6 @@
 # ADR-0031: Undo/redo — history operations (replay-from-base)
 
-- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** `Alt+Shift+P` is the second case-sensitive chord. **Amended 2026-11-09:** every edit recomputes `dirty`. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+P` is the preview now, and `Alt+Shift+R` (`revert-call`) the second case-sensitive chord.
+- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** `Alt+Shift+P` is the second case-sensitive chord. **Amended 2026-11-09:** every edit recomputes `dirty`. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+P` is the preview now, and `Alt+Shift+R` (`revert-call`) the second case-sensitive chord. **Amended 2026-11-12:** undo and redo take back what one action applied together (§3).
 - **Date:** 2026-06-09 (Accepted 2026-06-09 when built + wired into `Alt+Z` / `Alt+Shift+Z`)
 - **Relates to:** [ADR-0014](0014-editor-state-and-dispatch-ownership.md) (the buffer owns the
   `EditorState` + the one history; the cursor is **view-local**), [ADR-0003](0003-one-shared-path.md)
@@ -120,6 +120,43 @@ space and deleting it by hand leaves the buffer clean, not only an undo back to 
 `History.differs?/2` compares sizes first, without a copy, and joins the text only when they are
 equal. A property pins the law: after any generated transition, `dirty` is whether the text
 differs from `synced`.
+
+## Amendment — 2026-11-12: undo and redo by what one action applied together
+
+**Context.** §3 made every command its own undo step. Some actions apply several commands at once,
+as one atomic group (`History.group/3`): an outside writer's change taken in by a fast-forward or a
+save (one command per hunk, ADR-0034), and a revert (`Alt+R`, `Alt+Shift+R`, ADR-0033 §7). One
+`Alt+Z` after a `revert-call` of three hunks gave back one of them, leaving the call half reverted,
+the partial state ADR-0033 refuses to create (mod-verify's review of ADR-0051). The maintainer,
+2026-11-12: "yes", undoing "per group … rather than per edit" where an action made the group.
+
+**Decision.**
+
+1. **A step is what one action applied.** Undo takes back every command one `History.group/3` call
+   applied, newest first, as one step; redo puts them all back. A command applied alone (a key, a
+   typed verb, an agent's MCP edit) is a step of one, as before: typing is unchanged.
+2. **The history marks the step.** `History.group/3` stamps each command it applies with the same
+   step id (`meta.step`, from a counter in the history); `History.dispatch/2` leaves it `nil`, a
+   step of one. Like the rest of `meta` it never feeds `run/2`, so replay and the §15c cassette are
+   unaffected.
+3. **The ledger replays as before.** A step of three is written as three `undo` (or `redo`)
+   entries, one per command, as before, so every ledger, old or new, replays to the same history
+   (`Geex.Ledger.Restore` steps one command per entry, and a step advances the change clock once
+   per command, as those single undos do). The codec writes a command's `step` when it has one,
+   and restore keeps it (`History.group/4`'s `keep_steps:`), so a reopened file undoes by step and
+   a compaction's kept commands keep theirs; a group recorded before steps existed gets a fresh
+   id as it is replayed. Later ids pass any id a replayed command carries.
+4. **Never half a step.** Undo and redo move a whole step or nothing. An attestation (ADR-0032)
+   relabels a group's commands wherever they are; it doesn't change their step.
+5. **The view.** After an undo the cursor goes to the start of the step's topmost command (a
+   group's hunks run bottom up, so a line above the others keeps its coordinates in the text the
+   undo left); after a redo, where its newest command left off; for one command, as before (§4).
+   A step of several says so in a notice ("undid 3 edits").
+
+**Consequences.** A fast-forward or revert of several hunks is one `Alt+Z`, as it was one key. An
+`Alt+Z` that used to take back one hunk of an outside change now takes back the whole change; to
+keep part of it, revert hunks one at a time with `Alt+R`. A save that trims trailing whitespace
+(ADR-0054) is one step for the same reason.
 
 ## See
 

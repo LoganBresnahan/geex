@@ -6132,3 +6132,29 @@ screen showed `beta gamma alpha` and the file on disk is `beta gamma alpha\r\nne
 `mix compile --warnings-as-errors --force` clean. Live-verified via tmux: `alpha beta gamma`,
 `Alt+O`, `Alt+S`, `Alt+O` (selecting `beta `), `Alt+Shift+O` gave `alpha gamma beta`; `Alt+Z` gave
 the line back.
+
+### 2026-11-12 — Undo by step (ADR-0031's 2026-11-12 amendment)
+
+Built on `save-undo` at the maintainer's word: `History.group/3` stamps each command it applies
+with one step id (`meta.step`); `History.undo_step/1` and `redo_step/1` move a whole step (a
+command applied alone is a step of one), and `Geex.Buffer`'s undo and redo use them, writing one
+ledger `undo`/`redo` entry per command so every ledger replays through the single-command
+`undo/1`/`redo/1` as before. A step advances the change clock once per command, so a replayed
+ledger lands on the live history. The codec writes `step` when there is one and restore keeps it
+(`History.group/4`'s `keep_steps:`); a group recorded before steps gets a fresh id as it replays.
+After an undo the cursor goes to the step's topmost edit; a step of several says "undid N edits" /
+"redid N edits".
+
+- A property: with step-wise undo and redo, no step is ever split between the history and the
+  redo stack; a step undone is the same history as that many single undos; undone then redone is
+  the history it was (its clock aside). Fails with a half-step undo planted.
+- Examples: a two-hunk fast-forward is one `Alt+Z` and one `Alt+Shift+Z` through the loop, with
+  the notice and the cursor; typing stays one step per key; a `revert-call` of two hunks undone
+  and redone in one step; a reopened file undoes an outside write in one step (two `undo` entries
+  in the ledger); a ledger written before steps (steps stripped, one single undo appended)
+  replays as it did, its remaining group undoing in one step.
+- Five tests that pinned one command per undo now pin the step (buffer, hold, reconcile ×2,
+  attest).
+
+1537 tests + 39 properties + 170 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean.

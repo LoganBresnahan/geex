@@ -94,13 +94,19 @@ defmodule Geex.Ledger.Restore do
   defp step({kind, commands, baseline}, h, path) when kind in [:group, :gap] do
     case baseline do
       :none ->
-        ok(History.group(h, commands, nil), path)
+        ok(History.group(h, commands, nil, keep_steps: true), path)
 
       :result ->
-        ok(with({:ok, h} <- History.group(h, commands, nil), do: {:ok, History.sync(h)}), path)
+        ok(
+          with(
+            {:ok, h} <- History.group(h, commands, nil, keep_steps: true),
+            do: {:ok, History.sync(h)}
+          ),
+          path
+        )
 
       text ->
-        ok(History.group(h, commands, text), path)
+        ok(History.group(h, commands, text, keep_steps: true), path)
     end
   end
 

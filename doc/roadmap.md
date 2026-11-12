@@ -771,6 +771,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       Lock makes the motion cluster the moves in the editor; elsewhere a move is its motion.
       **Built 2026-11-12**, merged after mod-verify's reviews (BUG-12 left: long lines). Next: multiple cursors (`Alt+5`, `Alt+Shift+N`),
       their own ADR.
+   9. **Undo by step** (ADR-0031's 2026-11-12 amendment, the maintainer's yes): `Alt+Z` and
+      `Alt+Shift+Z` move what one action applied together (a fast-forward's hunks, a revert's), so
+      a `revert-call` of three hunks comes back in one press; typing stays a step per key. The
+      ledger keeps one entry per command. **Built 2026-11-12** on `save-undo`.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the

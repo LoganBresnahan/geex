@@ -55,6 +55,17 @@ defmodule Geex.RevertTest do
       refute Enum.any?(h.blame, &match?({{:agent, _}, _}, &1))
     end
 
+    test "one undo step takes a revert-call back whole, one redo step does it again", %{h: h} do
+      before = History.text(h)
+      {h, _commands, %{hunks: 2}} = apply_plan(h, 1, :call)
+      reverted = History.text(h)
+
+      {:ok, h, undone} = History.undo_step(h)
+      assert {History.text(h), length(undone)} == {before, 2}
+      {:ok, h, _redone} = History.redo_step(h)
+      assert History.text(h) == reverted
+    end
+
     test "revert (one hunk) takes back only the hunk under the cursor", %{h: h} do
       {h, _commands, info} = apply_plan(h, 3, :hunk)
       assert History.text(h) == "my-1\nTWO\n3\n4\n5\n"

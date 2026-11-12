@@ -353,6 +353,38 @@ defmodule Geex.HistoryTest do
     end
   end
 
+  # ADR-0031's 2026-11-12 amendment: undo and redo by step move what one group applied together.
+  # With only step-wise undo and redo, no step is ever split between the history and the redo
+  # stack; a step undone then redone is the history it was (its change clock aside); and a step
+  # undone is the same history as that many single undos, as the ledger replays it.
+  property "undo and redo by step move whole groups; a step is that many single undos" do
+    check all({base, ops} <- transitions()) do
+      Enum.reduce(ops, History.new(base), fn op, h ->
+        op = %{undo: :undo_step, redo: :redo_step}[op] || op
+        h = run_op(op, h)
+
+        applied = h.commands |> Enum.map(& &1.meta.step) |> Enum.reject(&is_nil/1) |> MapSet.new()
+        undone = h.redo |> Enum.map(& &1.meta.step) |> Enum.reject(&is_nil/1) |> MapSet.new()
+        assert MapSet.disjoint?(applied, undone), "a step split after #{inspect(op)}"
+
+        with {:ok, undone_h, taken} <- History.undo_step(h) do
+          singles =
+            Enum.reduce(taken, h, fn _, acc ->
+              {:ok, acc, _} = History.undo(acc)
+              acc
+            end)
+
+          assert undone_h == singles
+          {:ok, back, redone} = History.redo_step(undone_h)
+          assert Enum.reverse(redone) == taken
+          assert %{back | seq: h.seq} == h
+        end
+
+        h
+      end)
+    end
+  end
+
   defp transitions, do: tuple({Gen.text(), list_of(transition(), max_length: 100)})
 
   # What a buffer's history goes through: edits (an insert's line and column are seeds, taken
@@ -379,6 +411,8 @@ defmodule Geex.HistoryTest do
     ])
   end
 
+  defp run_op(:undo_step, h), do: step(History.undo_step(h), h)
+  defp run_op(:redo_step, h), do: step(History.redo_step(h), h)
   defp run_op(:undo, h), do: step(History.undo(h), h)
   defp run_op(:redo, h), do: step(History.redo(h), h)
   defp run_op(:sync, h), do: History.sync(h)

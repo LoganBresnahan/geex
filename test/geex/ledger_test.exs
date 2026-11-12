@@ -542,6 +542,75 @@ defmodule Geex.LedgerTest do
     end
   end
 
+  # ADR-0031's 2026-11-12 amendment: a step is written one entry per command, and restore keeps
+  # the steps, so a reopened file still undoes a group in one press.
+  describe "undo by step" do
+    test "a reopened file undoes an outside write's hunks in one step", ctx do
+      File.write!(ctx.doc, "1\n2\n3\n")
+      buf = open(ctx)
+      File.write!(ctx.doc, "ONE\n2\nTHREE\n")
+      {:reconciled, _} = Reconcile.reconcile(buf, "ONE\n2\nTHREE\n")
+      {:ok, %{step: 2}, _} = Buffer.undo(buf)
+      {:ok, %{step: 2}, _} = Buffer.redo(buf)
+      before = live(buf)
+      close(buf)
+
+      # Two undo and two redo entries, one per command.
+      kinds = ledger_lines(ctx) |> Enum.map(&Jason.decode!(&1)["t"])
+      assert Enum.count(kinds, &(&1 == "undo")) == 2
+      assert Enum.count(kinds, &(&1 == "redo")) == 2
+
+      buf = open(ctx)
+      assert live(buf) == before
+      assert {:ok, %{text: "1\n2\n3\n", step: 2}, _} = Buffer.undo(buf)
+      close(buf)
+    end
+
+    test "a ledger written before steps replays as it did, its groups undoing by step", ctx do
+      File.write!(ctx.doc, "1\n2\n3\n")
+      buf = open(ctx)
+      File.write!(ctx.doc, "ONE\n2\nTHREE\n")
+      {:reconciled, _} = Reconcile.reconcile(buf, "ONE\n2\nTHREE\n")
+      close(buf)
+
+      # Strip every step, as an older geex wrote it, and add one single undo, as it could.
+      file = Ledger.file(ctx.ledger, ctx.doc)
+
+      lines =
+        file
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.map(fn line ->
+          line |> Jason.decode!() |> strip_steps() |> Jason.encode!()
+        end)
+
+      refute Enum.any?(lines, &String.contains?(&1, "\"step\""))
+      # The close entry's hashes are of the text before this undo: drop it, as a crash would.
+      {_close, rest} = List.pop_at(lines, -1)
+
+      undo =
+        Jason.encode!(%{"v" => 1, "t" => "undo", "at" => DateTime.to_iso8601(DateTime.utc_now())})
+
+      File.write!(file, Enum.join(rest ++ [undo], "\n") <> "\n")
+
+      {:ok, restored} = Ledger.load(%{Ledger.new(ctx.ledger, ctx.doc) | locked: true})
+      assert restored.stopped == nil
+      # The one undo took back one hunk, as it always did.
+      assert Geex.History.text(restored.history) in ["1\n2\nTHREE\n", "ONE\n2\n3\n"]
+      assert length(restored.history.redo) == 1
+
+      # Its commands were stamped one step as the group replayed: the rest goes in one undo.
+      {:ok, h, [_]} = Geex.History.undo_step(restored.history)
+      assert Geex.History.text(h) == "1\n2\n3\n"
+    end
+  end
+
+  defp strip_steps(%{} = map),
+    do: map |> Map.delete("step") |> Map.new(fn {k, v} -> {k, strip_steps(v)} end)
+
+  defp strip_steps(list) when is_list(list), do: Enum.map(list, &strip_steps/1)
+  defp strip_steps(other), do: other
+
   # ADR-0033 §3: restoring the ledger yields the history value the live buffer had.
   test "after random edits, undos, redos, outside writes, credits and saves, restore == live",
        ctx do

@@ -173,20 +173,21 @@ defmodule Geex.Buffer do
   end
 
   @doc """
-  Undo the most recent edit (ADR-0031). Drops the newest command from history onto the redo
-  stack and replays `base + the remainder` to reconstruct the document — the §15c replay
-  backbone (ADR-0014), so the reverted state is exactly what produced it. Returns
-  `{:ok, snapshot, command}` (the snapshot of the reverted buffer + the **undone** command, so
-  the view can place its cursor where the edit was), or `{:error, :nothing_to_undo}` when there
-  is nothing to undo. Not itself a recorded edit; emits a byte-footprint change so overlays shift.
+  Undo the most recent step (ADR-0031): the newest command, or every command one group applied
+  with it (a fast-forward's hunks, a revert's; its 2026-11-12 amendment), onto the redo stack,
+  replaying `base + the remainder` to reconstruct the document — the §15c replay backbone
+  (ADR-0014), so the reverted state is exactly what produced it. Returns
+  `{:ok, snapshot, command}` (the snapshot of the reverted buffer, its `:step` the number of
+  commands undone, + the step's topmost **undone** command, so the view can place its cursor
+  where the change began), or `{:error, :nothing_to_undo}` when there is nothing to undo. Not itself a recorded edit; emits a byte-footprint change so overlays shift.
   """
   @spec undo(GenServer.server()) :: {:ok, map(), struct()} | {:error, :nothing_to_undo}
   def undo(server), do: GenServer.call(server, :undo)
 
   @doc """
-  Redo the most recently undone edit (ADR-0031) — re-applies it to the current state and moves
-  it from the redo stack back onto history. Returns `{:ok, snapshot, command}` (the **redone**
-  command, for cursor placement) or `{:error, :nothing_to_redo}`. The redo stack is cleared by
+  Redo the most recently undone step (ADR-0031) — re-applies its commands to the current state
+  and moves them from the redo stack back onto history. Returns `{:ok, snapshot, command}`
+  (`:step` the number redone, and the step's newest **redone** command, for cursor placement) or `{:error, :nothing_to_redo}`. The redo stack is cleared by
   any fresh `dispatch/2`, so redo is only available on an unbroken run of undos.
   """
   @spec redo(GenServer.server()) :: {:ok, map(), struct()} | {:error, :nothing_to_redo}
@@ -367,8 +368,11 @@ defmodule Geex.Buffer do
     end
   end
 
-  def handle_call(:undo, _from, state), do: history_op(state, :undo, History.undo(state.history))
-  def handle_call(:redo, _from, state), do: history_op(state, :redo, History.redo(state.history))
+  def handle_call(:undo, _from, state),
+    do: history_op(state, :undo, History.undo_step(state.history))
+
+  def handle_call(:redo, _from, state),
+    do: history_op(state, :redo, History.redo_step(state.history))
 
   def handle_call({:revert, line, scope}, _from, state) do
     with {:ok, commands, info} <- Revert.plan(state.history, line, scope),
@@ -711,18 +715,36 @@ defmodule Geex.Buffer do
   # command, so the minimal splice is exact and the overlay shifts like a forward edit rather
   # than resetting (no re-highlight flash). Returns the affected command so the view can place
   # the cursor.
-  defp history_op(state, entry, {:ok, history, command}) do
-    new_state = record(%{state | history: history}, entry)
+  # A step of several commands (ADR-0031's 2026-11-12 amendment) is written as one ledger entry
+  # per command, so a ledger replays through the single-command `History.undo/1` and `redo/1`
+  # unchanged. The reply carries the command the view places the cursor by: for an undo the
+  # step's topmost (a group's hunks run bottom up, so an earlier line's coordinates hold in the
+  # text it left), for a redo its newest; and the snapshot's `step` says how many moved.
+  defp history_op(state, entry, {:ok, history, commands}) do
+    new_state =
+      Enum.reduce(commands, %{state | history: history}, fn _command, acc ->
+        record(acc, entry)
+      end)
+
+    command =
+      if entry == :undo,
+        do: Enum.min_by(commands, &edit_start/1),
+        else: List.last(commands)
 
     notify_change(
       new_state,
       Footprint.between(History.text(state.history), History.text(history))
     )
 
-    {:reply, {:ok, build_snapshot(new_state), command}, new_state}
+    snapshot = Map.put(build_snapshot(new_state), :step, length(commands))
+    {:reply, {:ok, snapshot, command}, new_state}
   end
 
   defp history_op(state, _entry, {:error, _reason} = error), do: {:reply, error, state}
+
+  defp edit_start(%{start_line: line, start_col: col}), do: {line, col}
+  defp edit_start(%{line: line, col: col}), do: {line, col}
+  defp edit_start(_command), do: {0, 0}
 
   # --- the durable ledger (ADR-0033) ---
 

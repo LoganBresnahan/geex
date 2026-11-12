@@ -2,7 +2,7 @@
 
 - **Status:** Accepted 2026-10-18 (the maintainer's decisions, relayed by the coordinator session
   and built autonomously at the maintainer's word). Steps 2–7 build it; each amends this ADR
-  with what it found. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** the `markdown_inline` companion and the render queries in the load check; `catalog-v3`. **Amended 2026-11-09:** the settings view's Commands tab; General's tab size and final newline.
+  with what it found. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** the `markdown_inline` companion and the render queries in the load check; `catalog-v3`. **Amended 2026-11-09:** the settings view's Commands tab; General's tab size and final newline. **Amended 2026-11-12 by [ADR-0054](0054-trim-trailing-whitespace-on-save.md):** the General tab's "trim trailing whitespace on save".
 - **Date:** 2026-10-18
 - **Amends:** [ADR-0023](0023-theming-and-extension-loading.md) §5 ("geex fetches nothing") and
   §7 ("no marketplace"). §4 (themes are data, grammars are sandboxed `.wasm`, separate load paths)

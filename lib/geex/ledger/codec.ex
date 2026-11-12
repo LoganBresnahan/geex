@@ -149,6 +149,9 @@ defmodule Geex.Ledger.Codec do
         meta.reverts &&
           %{"group" => meta.reverts.group, "scope" => Atom.to_string(meta.reverts.scope)}
     }
+    # The undo step (ADR-0031's 2026-11-12 amendment), written only when there is one, so a
+    # command applied alone reads as it always did.
+    |> then(&if(meta.step, do: Map.put(&1, "step", meta.step), else: &1))
   end
 
   defp actor_json(:human), do: "human"
@@ -256,7 +259,8 @@ defmodule Geex.Ledger.Codec do
          {:ok, at} <- datetime(m["at"]),
          {:ok, origin} <- origin(m["origin"]),
          {:ok, stamp} <- stamp(m["reconcile"]),
-         {:ok, reverts} <- reverts(m["reverts"]) do
+         {:ok, reverts} <- reverts(m["reverts"]),
+         {:ok, step} <- step(m["step"]) do
       {:ok,
        %Meta{
          actor: actor,
@@ -264,12 +268,16 @@ defmodule Geex.Ledger.Codec do
          prompt_hash: m["prompt_hash"],
          origin: origin,
          reconcile: stamp,
-         reverts: reverts
+         reverts: reverts,
+         step: step
        }}
     end
   end
 
   defp meta(_), do: {:error, "malformed meta"}
+  defp step(nil), do: {:ok, nil}
+  defp step(n) when is_integer(n) and n > 0, do: {:ok, n}
+  defp step(_), do: {:error, "malformed step"}
 
   defp actor("human"), do: {:ok, :human}
   defp actor("external"), do: {:ok, :external}

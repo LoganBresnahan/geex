@@ -272,14 +272,25 @@ defmodule Geex.BufferTest do
       assert_receive {:geex_buffer_notice, ^buf, "hello"}, 500
     end
 
-    test "undo walks the group back one command at a time", %{buf: buf} do
+    test "undo takes the group back as one step, redo puts it all back (ADR-0031)", %{buf: buf} do
       {:ok, _} = Buffer.dispatch_group(buf, [replace(2, 0, 2, 1, "C"), replace(0, 0, 0, 1, "A")])
 
-      assert {:ok, snap, _cmd} = Buffer.undo(buf)
-      assert snap.text == "a\nb\nC\n"
-      assert {:ok, snap, _cmd} = Buffer.undo(buf)
-      assert snap.text == "a\nb\nc\n"
+      # The cursor goes by the step's topmost command.
+      assert {:ok, snap, %{start_line: 0}} = Buffer.undo(buf)
+      assert {snap.text, snap.step} == {"a\nb\nc\n", 2}
+      assert {:error, :nothing_to_undo} = Buffer.undo(buf)
+
+      assert {:ok, snap, %{start_line: 0}} = Buffer.redo(buf)
+      assert {snap.text, snap.step} == {"A\nb\nC\n", 2}
+      assert {:error, :nothing_to_redo} = Buffer.redo(buf)
+    end
+
+    test "a command dispatched alone is a step of one, beside a group", %{buf: buf} do
+      {:ok, _} = Buffer.dispatch_group(buf, [replace(2, 0, 2, 1, "C"), replace(0, 0, 0, 1, "A")])
+      {:ok, _} = Buffer.dispatch(buf, replace(1, 0, 1, 1, "B"))
+
+      assert {:ok, %{text: "A\nb\nC\n", step: 1}, _} = Buffer.undo(buf)
+      assert {:ok, %{text: "a\nb\nc\n", step: 2}, _} = Buffer.undo(buf)
     end
   end
-
 end

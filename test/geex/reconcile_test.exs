@@ -196,14 +196,12 @@ defmodule Geex.ReconcileTest do
       refute one.meta.reconcile.group == two.meta.reconcile.group
     end
 
-    test "undo walks an external write back hunk by hunk" do
+    test "undo takes an external write back whole, its hunks one step (ADR-0031)" do
       buf = start_supervised!({Buffer, text: "1\n2\n3\n"})
       assert {:reconciled, _} = Reconcile.reconcile(buf, "ONE\n2\nTHREE\n")
 
       assert {:ok, snap, _} = Buffer.undo(buf)
-      assert snap.text in ["1\n2\nTHREE\n", "ONE\n2\n3\n"]
-      assert {:ok, snap, _} = Buffer.undo(buf)
-      assert snap.text == "1\n2\n3\n"
+      assert {snap.text, snap.step} == {"1\n2\n3\n", 2}
     end
   end
 
@@ -235,8 +233,9 @@ defmodule Geex.ReconcileTest do
       assert_receive {:geex_buffer_notice, ^buf, notice}, 500
       assert notice =~ "1 conflict with the disk"
 
+      # The merge's hunks are one step: one undo takes the whole merge back.
       externals = Enum.count(snap.history, &(&1.meta.actor == :external))
-      for _ <- 1..externals, do: {:ok, _, _} = Buffer.undo(buf)
+      assert {:ok, %{step: ^externals}, _} = Buffer.undo(buf)
 
       assert Buffer.get_text(buf) == "keep\nMINE edit me\n"
     end

@@ -29,6 +29,8 @@ defmodule Geex.History do
       reactor orders its overlays by it (ADR-0031).
     * `next_group` — the id the next reconcile group gets. `group/3` stamps it, so ids come
       from the history itself and survive a restart through the ledger (ADR-0033 §2).
+    * `next_step` — the undo step id the next group gets (`meta.step`, ADR-0031's 2026-11-12
+      amendment). Not written to the ledger: replaying the groups stamps them again.
   """
 
   alias Geex.{Blame, Dispatch, EditorState}
@@ -45,7 +47,8 @@ defmodule Geex.History do
     redo: [],
     dirty: false,
     seq: 0,
-    next_group: 1
+    next_group: 1,
+    next_step: 1
   ]
 
   @type t :: %__MODULE__{
@@ -58,7 +61,8 @@ defmodule Geex.History do
           redo: [struct()],
           dirty: boolean(),
           seq: non_neg_integer(),
-          next_group: pos_integer()
+          next_group: pos_integer(),
+          next_step: pos_integer()
         }
 
   @doc """
@@ -119,14 +123,18 @@ defmodule Geex.History do
            blame: advance(h.blame, h.editor, editor, command),
            redo: [],
            dirty: differs?(editor, h.synced),
-           seq: h.seq + 1
+           seq: h.seq + 1,
+           # A command replayed from a compacted ledger keeps its group's step; later ids pass it.
+           next_step: max(h.next_step, (step_of(command) || 0) + 1)
        }}
     end
   end
 
   @doc """
   Apply `commands` in order as one atomic group: all of them land, or none do (the first
-  error is returned). Each is recorded as its own entry, so undo walks back one at a time.
+  error is returned). Each is recorded as its own entry, stamped with one undo step id
+  (`meta.step`), so `undo_step/1` and `redo_step/1` move them together (ADR-0031's 2026-11-12
+  amendment); `undo/1` and `redo/1` still walk one at a time, as the ledger replays them.
 
   `baseline` is the disk text the buffer is now in sync with (reconcile passes the bytes it
   read), or `nil`. With one, `synced` becomes it and `dirty` is recomputed, so a merge that
@@ -137,10 +145,19 @@ defmodule Geex.History do
 
   Commands that carry a reconcile stamp get this history's `next_group` as their group id,
   whatever id they arrived with, so ids are durable and never collide across restarts.
+
+  `keep_steps: true` is the ledger's replay (`Geex.Ledger.Restore`): commands keep the step id
+  the ledger recorded, so a restored history is the live one; a group recorded before steps
+  existed gets a fresh one.
   """
-  @spec group(t(), [struct()], String.t() | nil) :: {:ok, t()} | {:error, term()}
-  def group(%__MODULE__{} = h, commands, baseline) when is_list(commands) do
+  @spec group(t(), [struct()], String.t() | nil, keyword()) :: {:ok, t()} | {:error, term()}
+  def group(%__MODULE__{} = h, commands, baseline, opts \\ []) when is_list(commands) do
     {commands, next_group} = stamp_group(commands, h.next_group)
+
+    {commands, next_step} =
+      if opts[:keep_steps],
+        do: keep_steps(commands, h.next_step),
+        else: stamp_step(commands, h.next_step)
 
     applied =
       Enum.reduce_while(commands, {:ok, h.editor, h.blame}, fn command, {:ok, editor, blame} ->
@@ -167,7 +184,8 @@ defmodule Geex.History do
            synced: synced,
            dirty: dirty,
            seq: h.seq + 1,
-           next_group: next_group
+           next_group: next_group,
+           next_step: next_step
        }}
     end
   end
@@ -204,6 +222,78 @@ defmodule Geex.History do
       {:ok, revert(h, editor, blame, [command | h.commands], rest_redo), command}
     end
   end
+
+  @doc """
+  Undo the newest **step**: every command sharing the newest command's `meta.step` (one group,
+  ADR-0031's 2026-11-12 amendment), or the newest command alone when it has none. Never half a
+  step. Returns the new history and the undone commands in the order they were undone (newest
+  first), or `{:error, :nothing_to_undo}`. The same history as that many `undo/1`s, its change
+  clock (`seq`) advanced as far, so a ledger that replays them one by one lands on it.
+
+      iex> h = Geex.History.new("ab")
+      iex> human = &Geex.Command.put_meta(&1, Geex.Command.Meta.human())
+      iex> {:ok, c1} = Geex.Commands.Insert.parse(%{line: 0, col: 0, text: "x"})
+      iex> {:ok, c2} = Geex.Commands.Insert.parse(%{line: 0, col: 0, text: "y"})
+      iex> {c1, c2} = {human.(c1), human.(c2)}
+      iex> {:ok, h} = Geex.History.group(h, [c1, c2], nil)
+      iex> {:ok, h, undone} = Geex.History.undo_step(h)
+      iex> {Geex.History.text(h), length(undone)}
+      {"ab", 2}
+      iex> {:ok, h, redone} = Geex.History.redo_step(h)
+      iex> {Geex.History.text(h), length(redone)}
+      {"yxab", 2}
+  """
+  @spec undo_step(t()) :: {:ok, t(), [struct()]} | {:error, :nothing_to_undo}
+  def undo_step(%__MODULE__{commands: []}), do: {:error, :nothing_to_undo}
+
+  def undo_step(%__MODULE__{commands: [newest | _] = commands} = h) do
+    {taken, rest} = take_step(commands, step_of(newest))
+
+    case Blame.replay(h.base, Enum.reverse(rest), h.base_blame) do
+      {:ok, editor, blame} ->
+        h = revert(h, editor, blame, rest, Enum.reverse(taken) ++ h.redo)
+        {:ok, %{h | seq: h.seq - 1 + length(taken)}, taken}
+
+      {:error, _reason} ->
+        {:error, :nothing_to_undo}
+    end
+  end
+
+  @doc """
+  Redo the newest undone **step**: every command on top of the redo stack sharing its
+  `meta.step`, re-applied in their order, or the one alone. Returns the new history and the
+  redone commands in the order they were applied, `{:error, :nothing_to_redo}`, or the first
+  error with nothing changed.
+  """
+  @spec redo_step(t()) :: {:ok, t(), [struct()]} | {:error, term()}
+  def redo_step(%__MODULE__{redo: []}), do: {:error, :nothing_to_redo}
+
+  def redo_step(%__MODULE__{redo: [first | _] = redo} = h) do
+    {taken, rest_redo} = take_step(redo, step_of(first))
+
+    applied =
+      Enum.reduce_while(taken, {:ok, h.editor, h.blame}, fn command, {:ok, editor, blame} ->
+        case Dispatch.apply_command(command, editor) do
+          {:ok, next} -> {:cont, {:ok, next, advance(blame, editor, next, command)}}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+
+    with {:ok, editor, blame} <- applied do
+      h = revert(h, editor, blame, Enum.reverse(taken) ++ h.commands, rest_redo)
+      {:ok, %{h | seq: h.seq - 1 + length(taken)}, taken}
+    end
+  end
+
+  # The run of `commands` at the top sharing `step`; a `nil` step is a run of one.
+  defp take_step([command | rest], nil), do: {[command], rest}
+
+  defp take_step(commands, step),
+    do: Enum.split_while(commands, &(step_of(&1) == step))
+
+  # Every recorded command carries a `Meta` (ADR-0005); one built bare (a test's) has no step.
+  defp step_of(%{meta: %Meta{step: step}}), do: step
+  defp step_of(_command), do: nil
 
   @doc """
   Relabel every command of reconcile `group` (and the lines they last wrote) with `actor`:
@@ -291,6 +381,28 @@ defmodule Geex.History do
     else
       {commands, id}
     end
+  end
+
+  # A replayed group's recorded step ids, the counter moved past them; a group recorded without
+  # one (an older ledger) is stamped as a live one is.
+  defp keep_steps(commands, id) do
+    case Enum.find_value(commands, &step_of/1) do
+      nil -> stamp_step(commands, id)
+      step -> {commands, max(id, step + 1)}
+    end
+  end
+
+  # Give a group's commands one undo step id. An empty group takes none.
+  defp stamp_step([], id), do: {[], id}
+
+  defp stamp_step(commands, id) do
+    stamped =
+      Enum.map(commands, fn
+        %{meta: %Meta{} = meta} = command -> %{command | meta: %{meta | step: id}}
+        command -> command
+      end)
+
+    {stamped, id + 1}
   end
 
   defp in_group?(command, group),

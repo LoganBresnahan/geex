@@ -25,12 +25,23 @@ defmodule Geex.Command.Meta do
                       back and whether it was one hunk or the whole tool call (`:hunk` |
                       `:call`, ADR-0033 §7). `nil` otherwise
 
+    * `step`        — the undo step it belongs to: every command one `Geex.History.group/3`
+                      applied shares an id, stamped by the history, so undo and redo move them
+                      together (ADR-0031's 2026-11-12 amendment). `nil` for a command applied
+                      alone. Never written to the ledger: replaying a group stamps it again
+
   `at` is stamped at creation and **preserved** when a recorded command is
   replayed — replay re-runs the same values, it does not re-stamp them. That is
   what makes replay deterministic (§15c).
   """
 
-  defstruct actor: :human, at: nil, prompt_hash: nil, origin: nil, reconcile: nil, reverts: nil
+  defstruct actor: :human,
+            at: nil,
+            prompt_hash: nil,
+            origin: nil,
+            reconcile: nil,
+            reverts: nil,
+            step: nil
 
   @type actor ::
           :human
@@ -58,7 +69,8 @@ defmodule Geex.Command.Meta do
           prompt_hash: String.t() | nil,
           origin: origin(),
           reconcile: reconcile(),
-          reverts: nil | %{group: pos_integer(), scope: :hunk | :call}
+          reverts: nil | %{group: pos_integer(), scope: :hunk | :call},
+          step: pos_integer() | nil
         }
 
   @doc """

@@ -1,6 +1,6 @@
 # ADR-0019: File lifecycle & MCP operation tools
 
-- **Status:** Accepted; amended 2026-10-19 (the human gets create, delete and rename in the TUI); amended 2026-11-09 (a final newline on save)
+- **Status:** Accepted; amended 2026-10-19 (the human gets create, delete and rename in the TUI); amended 2026-11-09 (a final newline on save) **Amended 2026-11-12 by [ADR-0054](0054-trim-trailing-whitespace-on-save.md):** a save trims trailing whitespace, a setting on by default.
 - **Date:** 2026-06-04
 - **Refines:** [ADR-0014](0014-editor-state-and-dispatch-ownership.md), [ADR-0003](0003-one-shared-path.md); relates to [ADR-0017](0017-reconcile-file-watch.md), [ADR-0018](0018-mcp-transport-streamable-http.md)
 

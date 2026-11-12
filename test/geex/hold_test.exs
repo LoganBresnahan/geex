@@ -85,9 +85,11 @@ defmodule Geex.HoldTest do
       assert snap.behind == nil
       assert actors(buf) == [:external, :external]
 
-      {:ok, _, _} = Buffer.undo(buf)
+      # Its two hunks are one step: one Alt+Z, one Alt+Shift+Z (ADR-0031's 2026-11-12 amendment).
       {:ok, snap, _} = Buffer.undo(buf)
-      assert snap.text == "1\n2\n3\n"
+      assert {snap.text, snap.step} == {"1\n2\n3\n", 2}
+      {:ok, snap, _} = Buffer.redo(buf)
+      assert {snap.text, snap.step} == {"ONE\n2\nTHREE\n", 2}
     end
 
     test "nothing to take in: up to date, and a stale mark is cleared", ctx do

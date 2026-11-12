@@ -117,14 +117,13 @@ defmodule Geex.AttestTest do
     test "a late attestation for a fully undone group credits it, and the redo keeps it" do
       buf = start_supervised!({Buffer, text: "1\n2\n3\n"})
       {:reconciled, _} = Reconcile.reconcile(buf, "ONE\n2\nTHREE\n")
-      {:ok, _, _} = Buffer.undo(buf)
-      {:ok, _, _} = Buffer.undo(buf)
+      # Its two hunks are one undo step (ADR-0031's 2026-11-12 amendment).
+      {:ok, %{step: 2}, _} = Buffer.undo(buf)
       assert actors(buf) == []
 
       assert Buffer.attest(buf, attestation("1\n2\n3\n", "ONE\n2\nTHREE\n")) == :attested
 
-      {:ok, _, _} = Buffer.redo(buf)
-      {:ok, _, _} = Buffer.redo(buf)
+      {:ok, %{step: 2}, _} = Buffer.redo(buf)
       assert [{:agent, %{session: "s1"}}, {:agent, %{session: "s1"}}] = actors(buf)
       assert Buffer.attest(buf, attestation("1\n2\n3\n", "ONE\n2\nTHREE\n")) == :ignored
     end

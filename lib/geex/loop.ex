@@ -5515,19 +5515,36 @@ defmodule Geex.Loop do
   ## buffer reverts/replays the text and hands back the affected command; the *view* (here)
   ## places the cursor: undo lands where the edit began, redo where it originally left off.
 
+  # A step of several commands (a fast-forward's hunks, a revert's, a trimming save: ADR-0031's
+  # 2026-11-12 amendment) moves in one press; the notice says how many edits it was.
   defp do_undo(state) do
     case safe_undo() do
-      {:ok, %{text: text}, command} -> place_after_history_op(state, edit_start(command), text)
-      _ -> state
+      {:ok, %{text: text} = snap, command} ->
+        state
+        |> place_after_history_op(edit_start(command), text)
+        |> step_notice("undid", snap)
+
+      _ ->
+        state
     end
   end
 
   defp do_redo(state) do
     case safe_redo() do
-      {:ok, %{text: text}, command} -> place_after_history_op(state, edit_landing(command), text)
-      _ -> state
+      {:ok, %{text: text} = snap, command} ->
+        state
+        |> place_after_history_op(edit_landing(command), text)
+        |> step_notice("redid", snap)
+
+      _ ->
+        state
     end
   end
+
+  defp step_notice(state, verb, %{step: n}) when n > 1,
+    do: %{state | notice: "#{verb} #{n} edits"}
+
+  defp step_notice(state, _verb, _snap), do: state
 
   # Move the cursor to `target` (clamped to the post-op text), refresh the goal, drop any
   # selection. The buffer's change notification also scheduled a repaint and cleared the
