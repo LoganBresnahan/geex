@@ -971,11 +971,14 @@ defmodule Geex.Loop do
   # Where a key goes: the settings view while it's open,
   # then the keys that work from anywhere, then the minibuffer, then whatever has focus.
   defp dispatch_key(event, state) do
+    # Outside the editor's text a move is its motion (ADR-0052 §8): Caps Lock still moves there.
+    nav = Bindings.as_motion(event)
+
     cond do
       # The settings view, while it is open, takes every key (ADR-0040 §7).
       state.settings != nil ->
         {view, action} =
-          Settings.key(state.settings, event, settings_rows(state.settings, state), state.h)
+          Settings.key(state.settings, nav, settings_rows(state.settings, state), state.h)
 
         state = %{state | settings: same_tab_or_reselect(state.settings, view, state)}
         schedule_repaint(settings_action(action, state))
@@ -988,7 +991,7 @@ defmodule Geex.Loop do
         schedule_repaint(stop_shell(state))
 
       Minibuffer.active?(state.minibuffer) ->
-        apply_minibuffer_key(event, state)
+        apply_minibuffer_key(nav, state)
 
       # Resizing from the keyboard, whatever has focus (roadmap item 18.8).
       match?({:cmd, {:resize, _}}, event) ->
@@ -998,9 +1001,9 @@ defmodule Geex.Loop do
       # A pane can have gone (hidden by a resize); then the keys are the editor's again.
       state.focus != :editor ->
         case focused(state, layout(state)) do
-          :output -> apply_output_key(event, state)
-          :edits -> apply_edits_key(event, state)
-          :tree -> apply_tree_key(event, state)
+          :output -> apply_output_key(nav, state)
+          :edits -> apply_edits_key(nav, state)
+          :tree -> apply_tree_key(nav, state)
           :editor -> apply_editor_key(event, %{state | focus: :editor})
         end
 
@@ -1020,7 +1023,9 @@ defmodule Geex.Loop do
            do: key,
            else: (_ -> event)
 
-    if preview_current?(state), do: preview_key(event, state), else: source_key(event, state)
+    if preview_current?(state),
+      do: preview_key(Bindings.as_motion(event), state),
+      else: source_key(event, state)
   end
 
   defp source_key(event, state) do
@@ -4770,6 +4775,122 @@ defmodule Geex.Loop do
     end
   end
 
+  ## The editing keys (ADR-0052): each one recorded edit, or a new selection.
+
+  # The sideways moves of selected text, and how `Keymap.move_text/3` names each.
+  @move_text %{
+    move_left: :left,
+    move_right: :right,
+    move_word_back: :word_back,
+    move_word_forward: :word_forward,
+    move_line_start: :line_start,
+    move_line_end: :line_end
+  }
+
+  # A selection that selects something, or nil.
+  defp live_selection(%{selection: %Selection{anchor: a, active: b} = sel}) when a != b, do: sel
+  defp live_selection(_state), do: nil
+
+  # The lines an edit of lines acts on: the selection's (ADR-0050 §1), or the cursor's.
+  defp edit_lines(state, {line, _col}) do
+    case live_selection(state) do
+      nil -> {line, line}
+      sel -> Keymap.selected_lines(Selection.range(sel))
+    end
+  end
+
+  # Dispatch `cmd`; the cursor and the selection's ends land where `caret` puts them.
+  defp edit_carets(state, cmd, cursor, caret) do
+    sel = live_selection(state)
+
+    case safe_dispatch(cmd) do
+      {:ok, %{text: after_text} = snap} ->
+        new_cursor = caret.(cursor)
+        set_cursor(new_cursor)
+        selection = sel && %Selection{anchor: caret.(sel.anchor), active: caret.(sel.active)}
+
+        own_edit(
+          %{state | goal: Keymap.goal_column(new_cursor, after_text), selection: selection},
+          snap
+        )
+
+      _ ->
+        state
+    end
+  end
+
+  defp duplicate(state, cursor, text) do
+    lines = edit_lines(state, cursor)
+    {cmd, n} = Keymap.duplicate_lines(text, lines)
+    edit_carets(state, cmd, cursor, &Keymap.follow_lines(&1, lines, n))
+  end
+
+  defp move_lines(state, cursor, text, dir) do
+    lines = edit_lines(state, cursor)
+
+    case Keymap.move_lines(text, lines, dir) do
+      nil -> state
+      {cmd, d} -> edit_carets(state, cmd, cursor, &Keymap.follow_lines(&1, lines, d))
+    end
+  end
+
+  defp comment(state, cursor, text) do
+    path = current_path(state)
+
+    with marker when is_binary(marker) <- Keymap.comment_marker(path),
+         {cmd, changes} <- Keymap.comment_lines(text, edit_lines(state, cursor), marker) do
+      edit_carets(state, cmd, cursor, &Keymap.comment_caret(&1, changes))
+    else
+      nil when is_binary(path) ->
+        if Keymap.comment_marker(path),
+          do: state,
+          else: %{state | notice: "no line comment known for #{Path.basename(path)}"}
+
+      _ ->
+        %{state | notice: "no line comment: this buffer has no file name"}
+    end
+  end
+
+  defp select_more(state, kind, cursor, text) do
+    kind = %{select_char: :char, select_word: :word, select_line: :line}[kind]
+    range = with %Selection{} = sel <- live_selection(state), do: Selection.range(sel)
+
+    case Keymap.select_more(kind, text, cursor, range) do
+      nil ->
+        state
+
+      {anchor, active} ->
+        set_cursor(active)
+
+        %{
+          state
+          | selection: Selection.new(anchor) |> Selection.extend(active),
+            goal: Keymap.goal_column(active, text)
+        }
+    end
+  end
+
+  # Move the selected text along its line; the selection stays on it, its ends as they were.
+  defp move_text(state, how, text) do
+    with %Selection{anchor: anchor, active: active} <- live_selection(state),
+         {cmd, from, to} <- Keymap.move_text(text, Selection.range(live_selection(state)), how),
+         {:ok, %{text: after_text} = snap} <- safe_dispatch(cmd) do
+      {anchor, active} = if anchor <= active, do: {from, to}, else: {to, from}
+      set_cursor(active)
+
+      own_edit(
+        %{
+          state
+          | selection: %Selection{anchor: anchor, active: active},
+            goal: Keymap.goal_column(active, after_text)
+        },
+        snap
+      )
+    else
+      _ -> state
+    end
+  end
+
   # An opener or a quote typed over a selection wraps it, while pairs close as you type
   # (roadmap item 19).
   defp wrap_closer({:char, g}, %{auto_close: true}), do: Keymap.wrap_closer(g)
@@ -4980,6 +5101,24 @@ defmodule Geex.Loop do
 
       :select_clear ->
         schedule_repaint(%{state | selection: nil})
+
+      # The editing keys (ADR-0052).
+      :duplicate ->
+        schedule_repaint(duplicate(state, cursor, text))
+
+      move when move in [:move_up, :move_down] ->
+        schedule_repaint(
+          move_lines(state, cursor, text, if(move == :move_up, do: :up, else: :down))
+        )
+
+      :comment ->
+        schedule_repaint(comment(state, cursor, text))
+
+      select when select in [:select_char, :select_word, :select_line] ->
+        schedule_repaint(select_more(state, select, cursor, text))
+
+      move when is_map_key(@move_text, move) ->
+        schedule_repaint(move_text(state, @move_text[move], text))
 
       :copy ->
         schedule_repaint(do_copy(state, text))

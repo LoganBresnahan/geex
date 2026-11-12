@@ -2,7 +2,8 @@
 
 - **Status:** Accepted 2026-11-11 (the maintainer's ask; built on the branch `indent-keys`,
   accepted at the maintainer's word the same day). §5 changed in place 2026-11-12, before the
-  branch was merged: the other kind moved from `` Alt+` `` to `Alt+1` ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md))
+  branch was merged: the other kind moved from `` Alt+` `` to `Alt+1` ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md)). **Amended 2026-11-12 by [ADR-0052](0052-editing-keys.md):** `\`
+  can be read as an Alt chord (`Alt+\`, the matching bracket).
 - **Date:** 2026-11-11
 - **Amends:** [ADR-0026](0026-terminal-input-model.md) (its 2026-11-10 amendment: Shift+Tab
   inserted the other kind of indent; `` Alt+` `` read), [ADR-0045](0045-typing-assists.md) §3
@@ -81,7 +82,8 @@ Shift+Tab, as before.
   the selection first.
 - Shift+Tab with no selection used to insert; now it removes. The other kind is `Alt+1`.
 - Every Alt letter is now taken or kept (ADR-0049), so new defaults come from the digits and the
-  symbol keys (ADR-0051). `[`, `]` and `\` can't be read as Alt chords: each starts a sequence.
+  symbol keys (ADR-0051). `[` and `]` can't be read as Alt chords: each starts a sequence.
+  (`\` can: ADR-0052 reads `ESC \` outside a string reply as `Alt+\`.)
 
 ## See
 

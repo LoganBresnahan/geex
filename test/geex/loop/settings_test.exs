@@ -11,8 +11,15 @@ defmodule Geex.Loop.SettingsTest do
   doctest KeyHelp
 
   # A key as the loop hands it to the view: a bound key as the command it runs (ADR-0047).
+  # As the loop hands it a key: translated, and a move as its motion (ADR-0052 §8).
   defp key(view, event, rows, h),
-    do: Settings.key(view, Bindings.translate(event, Bindings.defaults()), rows, h)
+    do:
+      Settings.key(
+        view,
+        Bindings.as_motion(Bindings.translate(event, Bindings.defaults())),
+        rows,
+        h
+      )
 
   setup do
     dir = Path.join(System.tmp_dir!(), "geex_settings_#{Geex.Fixtures.uniq()}")

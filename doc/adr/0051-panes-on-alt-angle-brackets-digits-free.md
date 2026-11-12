@@ -1,7 +1,9 @@
 # ADR-0051: The panes on Alt+< and Alt+>, the preview on Alt+P, the digits free
 
 - **Status:** Accepted 2026-11-12 (the maintainer's choices; built on the branch `indent-keys`
-  with ADR-0050)
+  with ADR-0050). **Amended 2026-11-12 by [ADR-0052](0052-editing-keys.md):** `Alt+2`
+  (duplicate), `Alt+7`, `Alt+8` and `Alt+9` (select a character, a word, a line) get commands;
+  `Alt+3`, `Alt+4`, `Alt+6` and `Alt+0` stay the user's, `Alt+5` kept for multiple cursors.
 - **Date:** 2026-11-12
 - **Amends:** [ADR-0026](0026-terminal-input-model.md) (`Alt+<` and `Alt+>` read),
   [ADR-0037](0037-pane-and-file-keys.md) (`Alt+P` was the next pane),

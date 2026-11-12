@@ -277,7 +277,14 @@ defmodule Geex.Loop.PreviewTabsTest do
             {:alt, ?s},
             {:alt, ?a},
             {:alt, ?x},
-            {:alt, ?g}
+            {:alt, ?g},
+            # The editing keys (ADR-0052).
+            {:alt, ?2},
+            {:alt, ?7},
+            {:alt, ?8},
+            {:alt, ?9},
+            {:alt, ?/},
+            {:alt, ?\\}
           ] do
         s = key(state, event)
         assert text(buf) == before, inspect(event)
@@ -289,7 +296,16 @@ defmodule Geex.Loop.PreviewTabsTest do
     test "typed verbs and `line N` are gated; the allowed ones work", %{state: state, buf: buf} do
       before = text(buf)
 
-      for verb <- ["undo", "paste", "revert", "select all", "line 3", "|cat"] do
+      for verb <- [
+            "undo",
+            "paste",
+            "revert",
+            "select all",
+            "line 3",
+            "|cat",
+            "duplicate",
+            "comment"
+          ] do
         s = type(state, verb)
         assert text(buf) == before, verb
         assert s.notice =~ "read-only", verb

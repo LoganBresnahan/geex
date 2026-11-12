@@ -89,7 +89,8 @@ defmodule Geex.Loop.KeymapTest do
       assert vertical?({:key, :up})
       assert vertical?({:key, :down})
       assert vertical?({:alt, ?i})
-      assert vertical?({:alt, ?K})
+      # Alt+Shift+K moves the line down (ADR-0052), not the cursor.
+      refute vertical?({:alt, ?K})
       refute vertical?({:key, :left})
       refute vertical?({:alt, ?l})
       refute vertical?({:char, "x"})

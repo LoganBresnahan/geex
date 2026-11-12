@@ -524,15 +524,16 @@ defmodule Geex.Loop.ComfortTest do
       assert sizes(state) == {34, 11}
     end
 
-    test "Alt+I/J/K/L move the cursor, Shift or not: only Alt with an arrow resizes", %{
+    test "Alt+I/J/K/L move the cursor, Shift moves text: only Alt with an arrow resizes", %{
       state: state
     } do
-      # Alt+Shift+W/A/S/D resized until 2026-11-11 (the maintainer: "alt arrow keys is enough").
+      # Alt+Shift+W/A/S/D resized until 2026-11-11 (the maintainer: "alt arrow keys is enough");
+      # Alt+Shift+J/L move selected text since ADR-0052, and with none do nothing.
       state = panels(state)
       state = key(state, {:alt, ?l})
       assert cursor() == {0, 1}
       state = key(state, {:alt, ?L})
-      assert cursor() == {0, 2}
+      assert cursor() == {0, 1}
       state = key(state, {:alt, ?J})
       assert cursor() == {0, 1}
       assert sizes(state) == {30, 9}

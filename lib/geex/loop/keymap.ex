@@ -60,7 +60,17 @@ defmodule Geex.Loop.Keymap do
   @indent_lines 1000
 
   # The commands that move the cursor (ADR-0026's arrows and Alt cluster, ADR-0047's names).
-  @motions [:up, :down, :left, :right, :word_back, :word_forward, :line_start, :line_end]
+  @motions [
+    :up,
+    :down,
+    :left,
+    :right,
+    :word_back,
+    :word_forward,
+    :line_start,
+    :line_end,
+    :matching_bracket
+  ]
 
   # The commands that are the loop's actions as they are (`Geex.Loop`'s `apply_action/4`, and
   # the openers its `resolve_key/4` handles).
@@ -91,7 +101,21 @@ defmodule Geex.Loop.Keymap do
     :tab_prev,
     :tab_next,
     :save,
-    :quit
+    :quit,
+    # The editing keys (ADR-0052): the loop works them out against the selection.
+    :duplicate,
+    :select_char,
+    :select_word,
+    :select_line,
+    :comment,
+    :move_up,
+    :move_down,
+    :move_left,
+    :move_right,
+    :move_word_back,
+    :move_word_forward,
+    :move_line_start,
+    :move_line_end
   ]
 
   @doc """
@@ -439,6 +463,448 @@ defmodule Geex.Loop.Keymap do
       end)
 
     if tabs > spaces, do: :tabs, else: :spaces
+  end
+
+  ## Editing keys (ADR-0052): duplicate lines, move them, comment them; select a character, a
+  ## word or a line; the matching bracket; move selected text along its line. Each is pure: the
+  ## loop dispatches what it gives as one recorded edit and moves the cursor and selection.
+
+  # Line comments by extension (ADR-0052 §5). HTML, CSS, XML and Markdown have only block
+  # comments and JSON none, so they aren't here.
+  @comment_exts [
+    {"#",
+     ~w(.ex .exs .py .pyi .rb .sh .bash .zsh .fish .yaml .yml .toml .pl .pm .r .R .conf .cfg .nix
+        .cmake .ps1 .tf .jl .cr .coffee .nim .env .mk .awk .tcl .bzl)},
+    {"//",
+     ~w(.js .mjs .cjs .jsx .ts .mts .cts .tsx .rs .go .c .h .cc .cpp .cxx .hpp .hh .java .kt .kts
+        .scala .swift .cs .dart .zig .php .groovy .gleam .proto .scss .less .sol .jsonc .glsl
+        .wgsl .odin .v)},
+    {"--", ~w(.sql .lua .hs .elm .ada .adb .ads .purs)},
+    {";", ~w(.lisp .el .clj .cljs .cljc .edn .scm .rkt .asm .s .ini)},
+    {"%", ~w(.erl .hrl .tex .sty .cls)},
+    {"\"", ~w(.vim)}
+  ]
+
+  # Files known by name whose comments start with `#` (Makefiles are `makefile?/1`'s).
+  @hash_names ~w(Dockerfile Containerfile Gemfile Rakefile Vagrantfile CMakeLists.txt .bashrc
+                 .zshrc .profile .bash_profile .gitignore .gitattributes .dockerignore .env)
+
+  # How far the matching bracket is looked for, in lines each way, so a press costs the same in
+  # any size of file (ADR-0035).
+  @bracket_lines 10_000
+
+  @bracket_open %{"(" => ")", "[" => "]", "{" => "}"}
+  @bracket_close Map.new(@bracket_open, fn {o, c} -> {c, o} end)
+
+  @doc """
+  Copy lines `first..last` of `text` below themselves (ADR-0052 §1): an insert at the last line's
+  end (before a CRLF line's `\\r`) of the file's line break and the lines, and how many lines the
+  copy is below them, for `follow_lines/3`.
+
+      iex> {cmd, n} = Geex.Loop.Keymap.duplicate_lines("a\\nb\\nc", {0, 1})
+      iex> {cmd.line, cmd.col, cmd.text, n}
+      {1, 1, "\\na\\nb", 2}
+      iex> {cmd, 1} = Geex.Loop.Keymap.duplicate_lines("a\\r\\nb\\r\\n", {1, 1})
+      iex> {cmd.line, cmd.col, cmd.text}
+      {1, 1, "\\r\\nb"}
+  """
+  @spec duplicate_lines(String.t(), {non_neg_integer(), non_neg_integer()}) ::
+          {struct(), pos_integer()}
+  def duplicate_lines(text, {first, last}) when first <= last do
+    bodies =
+      text
+      |> lines()
+      |> Enum.slice(first..last//1)
+      |> Enum.map(&String.replace_suffix(&1, "\r", ""))
+
+    eol = eol(text)
+    {insert(last, line_len(text, last), eol <> Enum.join(bodies, eol)), last - first + 1}
+  end
+
+  @doc """
+  Swap lines `first..last` of `text` with the line above (`:up`) or below (`:down`) (ADR-0052
+  §6): one replace over the lines and their neighbour, each line's ending staying where it was,
+  and how far the lines moved (`-1` or `1`), for `follow_lines/3`. `nil` at the top or the bottom;
+  the empty line after a final line break isn't one to swap with.
+
+      iex> {cmd, d} = Geex.Loop.Keymap.move_lines("a\\nb\\nc\\n", {1, 1}, :up)
+      iex> {cmd.start_line, cmd.end_line, cmd.text, d}
+      {0, 1, "b\\na", -1}
+      iex> {cmd, 1} = Geex.Loop.Keymap.move_lines("a\\r\\nb\\r\\nc", {0, 1}, :down)
+      iex> cmd.text
+      "c\\r\\na\\r\\nb"
+      iex> Geex.Loop.Keymap.move_lines("a\\nb\\n", {1, 1}, :down)
+      nil
+  """
+  @spec move_lines(String.t(), {non_neg_integer(), non_neg_integer()}, :up | :down) ::
+          {struct(), -1 | 1} | nil
+  def move_lines(text, {first, last}, dir) when first <= last do
+    all = lines(text)
+    top = if String.ends_with?(text, "\n"), do: length(all) - 2, else: length(all) - 1
+    {a, b, d} = if dir == :up, do: {first - 1, last, -1}, else: {first, last + 1, 1}
+
+    if a < 0 or b > top do
+      nil
+    else
+      span = Enum.slice(all, a..b//1)
+      bodies = Enum.map(span, &String.replace_suffix(&1, "\r", ""))
+      ends = Enum.map(span, &if(String.ends_with?(&1, "\r"), do: "\r", else: ""))
+
+      rotated =
+        if dir == :up,
+          do: tl(bodies) ++ [hd(bodies)],
+          else: [List.last(bodies) | Enum.drop(bodies, -1)]
+
+      new_text = rotated |> Enum.zip_with(ends, &(&1 <> &2)) |> Enum.join("\n")
+      {replace({a, 0}, {b, String.length(List.last(span))}, new_text), d}
+    end
+  end
+
+  @doc """
+  Where a caret lands after lines `first..last` moved `d` lines (`duplicate_lines/2`,
+  `move_lines/3`): on one of them, it moves with it; at the start of the line after them (where a
+  selection of whole lines ends), it moves too; elsewhere it stays.
+
+      iex> Enum.map([{0, 2}, {1, 1}, {2, 3}, {3, 0}, {3, 1}], &Geex.Loop.Keymap.follow_lines(&1, {1, 2}, 2))
+      [{0, 2}, {3, 1}, {4, 3}, {5, 0}, {3, 1}]
+  """
+  @spec follow_lines(cursor(), {non_neg_integer(), non_neg_integer()}, integer()) :: cursor()
+  def follow_lines({line, col}, {first, last}, d) do
+    if (line >= first and line <= last) or (line == last + 1 and col == 0),
+      do: {line + d, col},
+      else: {line, col}
+  end
+
+  @doc """
+  The line comment for the file at `path` (ADR-0052 §5), by its name or extension, or `nil` for
+  a file with only block comments (HTML, CSS), none (JSON) or one geex doesn't know.
+
+      iex> Enum.map(["/p/a.ex", "/p/b.ts", "/p/Makefile", "/p/q.sql", "/p/c.css", nil], &Geex.Loop.Keymap.comment_marker/1)
+      ["#", "//", "#", "--", nil, nil]
+  """
+  @spec comment_marker(String.t() | nil) :: String.t() | nil
+  def comment_marker(nil), do: nil
+
+  def comment_marker(path) do
+    name = Path.basename(path)
+    ext = Path.extname(name)
+
+    cond do
+      makefile?(name) or name in @hash_names -> "#"
+      true -> Enum.find_value(@comment_exts, fn {marker, exts} -> ext in exts && marker end)
+    end
+  end
+
+  @doc """
+  Comment out lines `first..last` of `text` with `marker` (ADR-0052 §5), or take it off when
+  every non-blank one has it: one replace from the first non-blank line to the last, and where
+  each changed line changed (`{column, graphemes gained or lost}`), for `comment_caret/2`. Adding
+  puts `marker ` at the smallest indent among the lines; taking off removes the marker and a
+  space after it. Blank lines are left alone; `nil` when every line is blank.
+
+      iex> {cmd, at} = Geex.Loop.Keymap.comment_lines("  a\\n\\n    b\\n", {0, 2}, "#")
+      iex> {cmd.text, at}
+      {"  # a\\n\\n  #   b", %{0 => {2, 2}, 2 => {2, 2}}}
+      iex> {cmd, at} = Geex.Loop.Keymap.comment_lines("  # a\\n  #b\\n", {0, 1}, "#")
+      iex> {cmd.text, at}
+      {"  a\\n  b", %{0 => {2, -2}, 1 => {2, -1}}}
+  """
+  @spec comment_lines(String.t(), {non_neg_integer(), non_neg_integer()}, String.t()) ::
+          {struct(), %{non_neg_integer() => {non_neg_integer(), integer()}}} | nil
+  def comment_lines(text, {first, last}, marker) when first <= last do
+    rows = text |> lines() |> Enum.slice(first..last//1) |> Enum.with_index(first)
+
+    case for({l, i} <- rows, String.trim(l) != "", do: {i, l, indent_len(l)}) do
+      [] ->
+        nil
+
+      filled ->
+        commented? =
+          Enum.all?(filled, fn {_i, l, n} ->
+            l |> String.slice(n..-1//1) |> String.starts_with?(marker)
+          end)
+
+        at = filled |> Enum.map(&elem(&1, 2)) |> Enum.min()
+        mlen = String.length(marker)
+
+        changes =
+          Map.new(filled, fn {i, l, n} ->
+            if commented? do
+              rest = String.slice(l, (n + mlen)..-1//1)
+              gone = if String.starts_with?(rest, " "), do: mlen + 1, else: mlen
+              {i, {n, -gone, String.slice(l, 0, n) <> String.slice(l, (n + gone)..-1//1)}}
+            else
+              {i,
+               {at, mlen + 1,
+                String.slice(l, 0, at) <> marker <> " " <> String.slice(l, at..-1//1)}}
+            end
+          end)
+
+        {a, _, _} = hd(filled)
+        {b, old_last, _} = List.last(filled)
+
+        new_text =
+          rows
+          |> Enum.filter(fn {_l, i} -> i >= a and i <= b end)
+          |> Enum.map_join("\n", fn {l, i} ->
+            case changes[i] do
+              nil -> l
+              {_at, _n, new} -> new
+            end
+          end)
+
+        {replace({a, 0}, {b, String.length(old_last)}, new_text),
+         Map.new(changes, fn {i, {col, n, _new}} -> {i, {col, n}} end)}
+    end
+  end
+
+  @doc """
+  Where a caret lands after `comment_lines/3`: before the change it stays, after it it moves with
+  its text, inside a removed marker it goes to where the marker was; at column 0 it stays, so
+  whole lines stay whole.
+
+      iex> at = %{0 => {2, 2}, 1 => {2, -2}}
+      iex> Enum.map([{0, 1}, {0, 2}, {0, 4}, {1, 3}, {1, 5}, {2, 3}], &Geex.Loop.Keymap.comment_caret(&1, at))
+      [{0, 1}, {0, 4}, {0, 6}, {1, 2}, {1, 3}, {2, 3}]
+  """
+  @spec comment_caret(cursor(), %{non_neg_integer() => {non_neg_integer(), integer()}}) ::
+          cursor()
+  def comment_caret({line, col}, changes) do
+    case Map.get(changes, line) do
+      nil -> {line, col}
+      _ when col == 0 -> {line, 0}
+      {at, n} when n > 0 -> if col < at, do: {line, col}, else: {line, col + n}
+      {at, n} -> {line, if(col <= at, do: col, else: max(col + n, at))}
+    end
+  end
+
+  defp indent_len(l), do: String.length(l) - String.length(String.replace(l, ~r/^[ \t]+/, ""))
+
+  @doc """
+  A bigger selection (ADR-0052 §2, §3): the `kind` (`:char`, `:word`, `:line`) at `cursor` with no
+  selection (`range` nil), or the selection `range` taking in the next one. `{anchor, active}`, or
+  `nil` when there is nothing more to take. A word runs from space to space, as `Alt+U`/`Alt+O`
+  jump (the maintainer's call, 2026-11-12); with no selection, the one the cursor is on, else the
+  next on its line, else the one before it.
+
+      iex> alias Geex.Loop.Keymap
+      iex> Keymap.select_more(:char, "ab\\n", {0, 1}, nil)
+      {{0, 1}, {0, 2}}
+      iex> Keymap.select_more(:word, "foo(bar, baz)", {0, 5}, nil)
+      {{0, 0}, {0, 8}}
+      iex> Keymap.select_more(:word, "foo(bar, baz)", {0, 8}, {{0, 0}, {0, 8}})
+      {{0, 0}, {0, 13}}
+      iex> Keymap.select_more(:line, "a\\nbc\\nd", {1, 1}, nil)
+      {{1, 0}, {2, 0}}
+      iex> Keymap.select_more(:line, "a\\nbc\\nd", {2, 0}, {{1, 0}, {2, 0}})
+      {{1, 0}, {2, 1}}
+  """
+  @spec select_more(:char | :word | :line, String.t(), cursor(), {cursor(), cursor()} | nil) ::
+          {cursor(), cursor()} | nil
+  def select_more(kind, text, cursor, range) do
+    {anchor, active} =
+      case {kind, range} do
+        {:char, nil} -> {cursor, right(cursor, text)}
+        {:char, {from, to}} -> {from, right(to, text)}
+        {:word, nil} -> word_at(text, cursor) || {cursor, cursor}
+        {:word, {from, to}} -> {from, next_word_end(text, to) || to}
+        {:line, nil} -> {line_start(cursor), line_after(cursor, text)}
+        {:line, {from, to}} -> {line_start(from), line_after(to, text)}
+      end
+
+    if anchor == active or (range != nil and {anchor, active} == range),
+      do: nil,
+      else: {anchor, active}
+  end
+
+  defp line_after({line, _col}, text) do
+    if line < last_line(text), do: {line + 1, 0}, else: {line, line_len(text, line)}
+  end
+
+  # The word the cursor is on, else the next on its line, else the one before it.
+  defp word_at(text, {line, col}) do
+    gs = line_tuple(text, line)
+    n = tuple_size(gs)
+
+    start =
+      cond do
+        col < n and non_space?(elem(gs, col)) -> col
+        i = Enum.find(col..(n - 1)//1, &non_space?(elem(gs, &1))) -> i
+        i = Enum.find((min(col, n) - 1)..0//-1, &non_space?(elem(gs, &1))) -> i
+        true -> nil
+      end
+
+    start &&
+      {{line, skip_bwd(start, gs, &non_space?/1)}, {line, skip_fwd(start, gs, n, &non_space?/1)}}
+  end
+
+  # The end of the next word from `{line, col}`, on this line or a later one.
+  defp next_word_end(text, {line, col}) do
+    text
+    |> lines()
+    |> Enum.drop(line)
+    |> Enum.with_index(line)
+    |> Enum.find_value(fn {l, i} ->
+      gs = l |> String.replace_suffix("\r", "") |> String.graphemes() |> List.to_tuple()
+      n = tuple_size(gs)
+      start = skip_fwd(if(i == line, do: min(col, n), else: 0), gs, n, &(not non_space?(&1)))
+      if start < n, do: {i, skip_fwd(start, gs, n, &non_space?/1)}
+    end)
+  end
+
+  @doc """
+  The bracket paired with the one at `cursor`, or just before it; elsewhere, the opening bracket
+  of the nearest pair around it (ADR-0052 §4). Counted in the plain text, one kind at a time, up
+  to #{@bracket_lines} lines away. `nil` when there is none.
+
+      iex> alias Geex.Loop.Keymap
+      iex> Keymap.matching_bracket({0, 3}, "foo(a, [b])")
+      {0, 10}
+      iex> Keymap.matching_bracket({0, 11}, "foo(a, [b])")
+      {0, 3}
+      iex> Keymap.matching_bracket({1, 2}, "f {\\n  x\\n}")
+      {0, 2}
+      iex> Keymap.matching_bracket({0, 1}, "ab")
+      nil
+  """
+  @spec matching_bracket(cursor(), String.t()) :: cursor() | nil
+  def matching_bracket({line, col}, text) do
+    lt = text |> lines() |> List.to_tuple()
+    gs = line_tuple(text, line)
+    at = fn c -> if c >= 0 and c < tuple_size(gs), do: elem(gs, c) end
+
+    cond do
+      bracket?(at.(col)) -> pair_of({line, col}, at.(col), lt)
+      bracket?(at.(col - 1)) -> pair_of({line, col - 1}, at.(col - 1), lt)
+      true -> enclosing({line, col}, lt)
+    end
+  end
+
+  defp bracket?(g), do: Map.has_key?(@bracket_open, g) or Map.has_key?(@bracket_close, g)
+
+  defp pair_of({line, col}, g, lt) do
+    case @bracket_open do
+      %{^g => close} -> find_pair(graphemes_fwd(lt, {line, col + 1}), g, close)
+      _ -> find_pair(graphemes_bwd(lt, {line, col}), g, @bracket_close[g])
+    end
+  end
+
+  # The bracket that brings the count of `same` back to zero.
+  defp find_pair(stream, same, other) do
+    Enum.reduce_while(stream, 1, fn
+      {^same, _l, _c}, depth -> {:cont, depth + 1}
+      {^other, l, c}, 1 -> {:halt, {l, c}}
+      {^other, _l, _c}, depth -> {:cont, depth - 1}
+      _, depth -> {:cont, depth}
+    end)
+    |> then(&if(is_tuple(&1), do: &1))
+  end
+
+  defp enclosing(cursor, lt) do
+    Enum.reduce_while(graphemes_bwd(lt, cursor), 0, fn {g, l, c}, open ->
+      cond do
+        Map.has_key?(@bracket_close, g) -> {:cont, open + 1}
+        Map.has_key?(@bracket_open, g) and open == 0 -> {:halt, {l, c}}
+        Map.has_key?(@bracket_open, g) -> {:cont, open - 1}
+        true -> {:cont, open}
+      end
+    end)
+    |> then(&if(is_tuple(&1), do: &1))
+  end
+
+  # The graphemes from `{line, col}` on, and before it backwards, as `{g, line, col}`.
+  defp graphemes_fwd(lt, {line, col}) do
+    last = min(tuple_size(lt) - 1, line + @bracket_lines)
+
+    Stream.flat_map(line..last//1, fn i ->
+      gs = elem(lt, i) |> String.graphemes() |> Enum.with_index()
+      for {g, c} <- gs, i != line or c >= col, do: {g, i, c}
+    end)
+  end
+
+  defp graphemes_bwd(lt, {line, col}) do
+    first = max(0, line - @bracket_lines)
+
+    Stream.flat_map(line..first//-1, fn i ->
+      gs = elem(lt, i) |> String.graphemes() |> Enum.with_index() |> Enum.reverse()
+      for {g, c} <- gs, i != line or c < col, do: {g, i, c}
+    end)
+  end
+
+  @doc """
+  Move the selected text `range` along its line (ADR-0052 §7): `:left`/`:right` one character,
+  `:word_back`/`:word_forward` swapping it with the word (space to space) before or after it (what
+  lies between stays), `:line_start` (after the indent)/`:line_end`. One replace on the line and the text's new
+  `{from, to}`; `nil` when the range spans lines, is empty, or can't go that way.
+
+      iex> alias Geex.Loop.Keymap
+      iex> {cmd, from, to} = Keymap.move_text("foo(bar, baz)", {{0, 9}, {0, 13}}, :word_back)
+      iex> {cmd.text, from, to}
+      {"baz) foo(bar,", {0, 0}, {0, 4}}
+      iex> {cmd, from, to} = Keymap.move_text("one two three", {{0, 8}, {0, 13}}, :word_back)
+      iex> {cmd.text, from, to}
+      {"three two", {0, 4}, {0, 9}}
+      iex> {cmd, from, to} = Keymap.move_text("abcd", {{0, 1}, {0, 2}}, :right)
+      iex> {cmd.text, from, to}
+      {"cb", {0, 2}, {0, 3}}
+      iex> Keymap.move_text("abcd", {{0, 0}, {0, 2}}, :left)
+      nil
+  """
+  @spec move_text(String.t(), {cursor(), cursor()}, atom()) ::
+          {struct(), cursor(), cursor()} | nil
+  def move_text(text, {{line, a}, {line, b}}, how) when a < b do
+    gs = line_tuple(text, line)
+    n = tuple_size(gs)
+
+    part = fn from, to ->
+      gs |> Tuple.to_list() |> Enum.slice(from..(to - 1)//1) |> Enum.join()
+    end
+
+    sel = part.(a, b)
+    len = b - a
+
+    # {span from, span to, what replaces the span, where the text starts}
+    move =
+      case how do
+        :left when a > 0 ->
+          {a - 1, b, sel <> part.(a - 1, a), a - 1}
+
+        :right when b < n ->
+          {a, b + 1, part.(b, b + 1) <> sel, a + 1}
+
+        :word_back ->
+          we = skip_bwd(a, gs, &(not non_space?(&1)))
+          ws = skip_bwd(we, gs, &non_space?/1)
+          if ws < we, do: {ws, b, sel <> part.(we, a) <> part.(ws, we), ws}
+
+        :word_forward ->
+          ws = skip_fwd(b, gs, n, &(not non_space?(&1)))
+          we = skip_fwd(ws, gs, n, &non_space?/1)
+          if ws < we, do: {a, we, part.(ws, we) <> part.(b, ws) <> sel, a + (we - b)}
+
+        :line_start ->
+          indent = skip_fwd(0, gs, n, &space?/1)
+          to = if a > indent, do: indent, else: 0
+          if to < a, do: {to, b, sel <> part.(to, a), to}
+
+        :line_end when b < n ->
+          {a, n, part.(b, n) <> sel, n - len}
+
+        _ ->
+          nil
+      end
+
+    with {from, to, new, start} <- move,
+         do: {replace({line, from}, {line, to}, new), {line, start}, {line, start + len}}
+  end
+
+  def move_text(_text, _range, _how), do: nil
+
+  defp replace({l1, c1}, {l2, c2}, text) do
+    {:ok, cmd} =
+      Replace.parse(%{start_line: l1, start_col: c1, end_line: l2, end_col: c2, text: text})
+
+    cmd
   end
 
   ## Typing assists (roadmap item 19, ADR-0045): pairs closed as you type them, and the indent
@@ -827,6 +1293,7 @@ defmodule Geex.Loop.Keymap do
   defp motion(:word_forward, cursor, text), do: word_forward(cursor, text)
   defp motion(:line_start, cursor, _text), do: line_start(cursor)
   defp motion(:line_end, cursor, text), do: line_end(cursor, text)
+  defp motion(:matching_bracket, cursor, text), do: matching_bracket(cursor, text) || cursor
 
   defp line_start({line, _col}), do: {line, 0}
   defp line_end({line, _col}, text), do: {line, line_len(text, line)}

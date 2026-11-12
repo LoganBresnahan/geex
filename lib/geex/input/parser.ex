@@ -36,7 +36,7 @@ defmodule Geex.Input.Parser do
       {:ctrl, ?a..?z}            # Ctrl-letter as the lowercase atom
       {:ctrl, 0x40 | 0x5C..0x5F} # bytes 0, 28–31: Ctrl-@, Ctrl-\\, Ctrl-], Ctrl-^, Ctrl-_
       {:alt, ?a..?z | ?A..?Z}   # Alt/Meta-letter (ESC-prefixed)
-      {:alt, ?0..?9 | ?- | ?= | ?, | ?. | ?< | ?> | ?; | ?`}   # digits; the pane and tab keys; line end
+      {:alt, ?0..?9 | ?- | ?= | ?, | ?. | ?< | ?> | ?; | ?: | ?/ | ?\\ | ?`}   # digits; panes, tabs; line end; edits
       {:alt, :up | :down | :left | :right} # Alt with an arrow (`ESC [ 1 ; 3 A`): resizing
       {:mouse, %{action: :press | :release | :drag | :wheel | :move,
                  button: :left | :middle | :right | :up | :down | :wheel_left | :wheel_right
@@ -275,13 +275,15 @@ defmodule Geex.Input.Parser do
   defp do_parse(<<"\e", c, rest::binary>>, acc) when c in ?a..?z or c in ?A..?Z,
     do: do_parse(rest, [{:alt, c} | acc])
 
-  # ESC + a digit (`Alt+1`, the other kind of indent; the rest the user's, ADR-0051), `-`, `=`,
-  # `,` or `.` (splits and tabs, ADR-0038), `<` or `>` (the panes, ADR-0051), `;` (line end,
-  # ADR-0049) or `` ` `` (unbound, ADR-0051). Not `[`, `]` or `\`: `ESC [` starts a CSI, `ESC ]`
-  # an OSC and `ESC \` is ST, so those chords can't be told from a sequence. No sequence a
-  # terminal sends starts `ESC ;`, `` ESC ` ``, `ESC <` or `ESC >` (the last two are output only).
+  # ESC + a digit (`Alt+1`, the other kind of indent; `Alt+2`, `Alt+7` … `Alt+9`, ADR-0052; the
+  # rest the user's, ADR-0051), `-`, `=`, `,` or `.` (splits and tabs, ADR-0038), `<` or `>` (the
+  # panes, ADR-0051), `;` (line end, ADR-0049), `:` (`Alt+Shift+;`, ADR-0052), `/` (comment,
+  # ADR-0052), `\` (the matching bracket, ADR-0052) or `` ` `` (unbound, ADR-0051). No sequence a
+  # terminal sends starts with any of them (`ESC <` and `ESC >` are output only). `ESC \` is ST,
+  # but only as the end of a string reply, which its own clause (the OSC above) reads whole: one
+  # here is `Alt+\`. Not `[` or `]`: `ESC [` starts a CSI and `ESC ]` an OSC.
   defp do_parse(<<"\e", c, rest::binary>>, acc)
-       when c in ?0..?9 or c in [?-, ?=, ?,, ?., ?<, ?>, ?;, ?`],
+       when c in ?0..?9 or c in [?-, ?=, ?,, ?., ?<, ?>, ?;, ?:, ?/, ?\\, ?`],
        do: do_parse(rest, [{:alt, c} | acc])
 
   # ESC followed by another byte we don't recognise — emit ESC, reparse rest.

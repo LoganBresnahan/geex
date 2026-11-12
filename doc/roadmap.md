@@ -746,8 +746,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       right hand. The macOS terminals that take `Option+←/→`
       (ADR-0026's 2026-11-11 amendment) want a note in `Alt+Y` and install.md.
    5. **Find**: `Alt+Q` in the file, `Alt+Shift+Q` across the project (the maintainer, 2026-11-11),
-      `Alt+N`/`Alt+Shift+N` the next and previous match (the keys kept by ADR-0049 §2a). Needs its
-      own ADR; the project-wide search runs off the loop (ADR-0035).
+      `Alt+N` the next match (the keys kept by ADR-0049 §2a). Its ADR is
+      [ADR-0053](adr/0053-search.md) (Accepted 2026-11-12, not built): the query typed in the
+      minibuffer, the match selected, `Alt+N` wrapping and stepping a project search's results;
+      `Alt+Shift+N` waits for multiple cursors.
    6. **Tab over a selection** (ADR-0050, the maintainer, 2026-11-11): Tab indents the selected
       lines, Shift+Tab un-indents (always, the cursor's line without a selection), and the other
       kind of indent moves from Shift+Tab to `Alt+1` (first `` Alt+` ``, which GNOME and KDE take;
@@ -756,6 +758,13 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       next pane, `Alt+<` the new `pane prev`; `Alt+P` the markdown preview; `Alt+1` `indent
       other`; `Alt+2` … `Alt+0` left for the user (`tab N` typed until remapping binds them);
       `Alt+Shift+R` `revert-call`. **Built 2026-11-12** on `indent-keys`.
+   8. **Editing keys** (ADR-0052, the maintainer, 2026-11-12): `Alt+2` duplicates the line or the
+      selection's lines; `Alt+7`, `Alt+8`, `Alt+9` select a character, a word, a line (again takes
+      in the next); `` Alt+\ `` the matching bracket; `Alt+/` comments lines out and back;
+      `Alt+Shift+I/K` move lines; `Alt+Shift+J/L/U/O/H/;` move selected text along its line. Caps
+      Lock makes the motion cluster the moves in the editor; elsewhere a move is its motion.
+      **Built 2026-11-12** on `editing-keys`. Next: multiple cursors (`Alt+5`, `Alt+Shift+N`),
+      their own ADR.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the

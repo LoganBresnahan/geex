@@ -6053,3 +6053,38 @@ Not changed: undoing a `revert-call` of several hunks as one step (noted in ADR-
 
 1497 tests + 32 properties + 159 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
 `mix compile --warnings-as-errors --force` clean.
+
+### 2026-11-12 — ADR-0052: the editing keys
+
+Built on `editing-keys` (from `indent-keys`) at the maintainer's word: `Alt+2` `duplicate`,
+`Alt+7`/`Alt+8`/`Alt+9` `select character`/`select word`/`select line`, `` Alt+\ `` `matching
+bracket`, `Alt+/` `comment`, `Alt+Shift+I`/`K` `move up`/`move down`, and `Alt+Shift+J/L/U/O/H/;`
+moving selected text along its line. Each edit is one recorded replace or insert on the shared
+path. The parser reads `ESC \` (outside a string reply), `ESC /` and `ESC :`. Where there is no
+text to move (the tree, the panes, the pickers, the settings view, the command line, a preview) a
+move is its motion, so Caps Lock moves the highlight there as before; in the editor it moves
+text (ADR-0052 §8). Six properties: moving lines there and back (endings stay put), duplicating
+adds exactly the lines, commenting twice gives the lines back, moving selected text keeps it and
+the line's graphemes (there and back), a bracket's pair's pair, a bigger selection holds the
+smaller. A planted bug (a whole-line selection's end not following its lines) failed two loop
+tests.
+
+Decided while building, now in ADR-0052: a word for `Alt+8` and the word moves runs from space
+to space, as the motions jump (the maintainer's call, after a first build that took letters,
+digits and `_`); the comment marker comes from the file's name and
+extension, as the typing assists read a file's kind, so no grammar need be installed; the
+bracket search looks 10,000 lines each way; the empty line after a final line break isn't one to
+swap a line with.
+
+Live-verified via tmux (100×20, a scratch git project, `a.ex`): `Alt+;` then `Alt+8` on
+`foo(bar, baz)` selected `baz`, `Alt+Shift+U` gave `foo(baz, bar)`; `Alt+/` gave
+`# foo(baz, bar)` at the indent and `Alt+/` took it off; `Alt+Shift+K` moved the line below
+`end`, `Alt+Shift+I` back; `Alt+2` copied it below, the cursor on the copy; `` Alt+\ `` went to
+the `(` around the cursor, then to its `)`; `Alt+9` twice took in two lines; six `Alt+Z` gave the
+file back.
+That run was before words went space to space: `Alt+8` there now selects `baz)`, and the swap
+gives `baz) foo(bar,`; the tests and the property check the new rule, not tmux.
+
+1519 tests + 38 properties + 169 doctests green twice (1524 once rebased onto the ADR-0050/0051 review fixes); `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. Not tested: a macOS terminal, a layout where `\`
+or `/` needs AltGr, Caps Lock itself (a terminal sends it as Shift; the tests send the capital).

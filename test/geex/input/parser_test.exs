@@ -108,6 +108,21 @@ defmodule Geex.Input.ParserTest do
       assert Parser.parse("\e>\e>") == {[{:alt, ?>}, {:alt, ?>}], ""}
     end
 
+    test "ESC \\, ESC / and ESC : are Alt+\\, Alt+/ and Alt+Shift+; (ADR-0052)" do
+      assert Parser.parse("\e\\") == {[{:alt, ?\\}], ""}
+      assert Parser.parse("\e/x\e:") == {[{:alt, ?/}, {:char, "x"}, {:alt, ?:}], ""}
+      # Held: two in one read are two chords.
+      assert Parser.parse("\e\\\e\\") == {[{:alt, ?\\}, {:alt, ?\\}], ""}
+      # A lone ESC then `\\` in the next read is the chord too.
+      {[], leftover} = Parser.parse("\e")
+      assert Parser.parse(leftover <> "\\") == {[{:alt, ?\\}], ""}
+    end
+
+    test "an OSC answer's ST stays its end, and an Alt+\\ after it is a chord" do
+      assert Parser.parse("\e]11;rgb:1e1e/1e1e/2e2e\e\\\e\\") ==
+               {[{:osc, "11", "rgb:1e1e/1e1e/2e2e"}, {:alt, ?\\}], ""}
+    end
+
     test "CSI still wins over Alt (the `[` is not a letter)" do
       assert {[{:key, :up}], ""} = Parser.parse("\e[A")
     end

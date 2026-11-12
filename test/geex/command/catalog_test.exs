@@ -156,7 +156,7 @@ defmodule Geex.Command.CatalogTest do
             {"clipboard", "paste"},
             {"clear", "no"},
             {"create", "new"},
-            {"character", "delete back"}
+            {"under", "delete forward"}
           ],
           do: assert(hd(Catalog.search(q)).name == top, q)
     end

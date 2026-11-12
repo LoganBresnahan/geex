@@ -106,8 +106,9 @@ defmodule Geex.Loop.BindingsTest do
       # Alt+Shift+P isn't bound: it falls back to Alt+P, the preview (ADR-0051).
       assert Bindings.translate({:alt, ?P}, @defaults) == {:cmd, :toggle_preview}
 
+      # The motion cluster's Shift chords are the moves (ADR-0052).
       shifted = for {{:alt, c}, _} <- @defaults, c in ?A..?Z, do: c
-      assert Enum.sort(shifted) == [?R, ?Z]
+      assert Enum.sort(shifted) == ~c"HIJKLORUZ"
     end
 
     # The property's "never the other way" needs a lower case dropped and its Shift chord kept,
@@ -184,9 +185,31 @@ defmodule Geex.Loop.BindingsTest do
       # clears a selection.
       for c <- [?q, ?Q, ?n, ?N], do: assert(Bindings.translate({:alt, c}, @defaults) == {:alt, c})
 
-      # Alt+2 … Alt+0 are the user's (ADR-0051), and so is Alt+`, which the desktop often takes.
-      for c <- [?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?0, ?`],
+      # Alt+3, Alt+4, Alt+6 and Alt+0 are the user's (ADR-0051, ADR-0052), Alt+5 kept for
+      # multiple cursors, and Alt+` the user's too, which the desktop often takes.
+      for c <- [?3, ?4, ?5, ?6, ?0, ?`],
           do: assert(Bindings.translate({:alt, c}, @defaults) == {:alt, c})
+
+      # The editing keys (ADR-0052).
+      editing = %{
+        {:alt, ?2} => :duplicate,
+        {:alt, ?7} => :select_char,
+        {:alt, ?8} => :select_word,
+        {:alt, ?9} => :select_line,
+        {:alt, ?\\} => :matching_bracket,
+        {:alt, ?/} => :comment,
+        {:alt, ?I} => :move_up,
+        {:alt, ?K} => :move_down,
+        {:alt, ?J} => :move_left,
+        {:alt, ?L} => :move_right,
+        {:alt, ?U} => :move_word_back,
+        {:alt, ?O} => :move_word_forward,
+        {:alt, ?H} => :move_line_start,
+        {:alt, ?:} => :move_line_end
+      }
+
+      for {chord, command} <- editing,
+          do: assert(Bindings.translate(chord, @defaults) == {:cmd, command}, inspect(chord))
     end
 
     test "the defaults bind no key twice" do

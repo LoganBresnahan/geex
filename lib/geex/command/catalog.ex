@@ -344,6 +344,82 @@ defmodule Geex.Command.Catalog do
       invoke: {:command, :indent_other}
     },
     %Entry{
+      name: "duplicate",
+      description: "Copy the cursor's line, or the selection's lines, below themselves.",
+      invoke: {:command, :duplicate}
+    },
+    %Entry{
+      name: "select character",
+      aliases: ["select char"],
+      description: "Select the character at the cursor, or one more.",
+      invoke: {:command, :select_char}
+    },
+    %Entry{
+      name: "select word",
+      description: "Select the word at the cursor, or take in the next word.",
+      invoke: {:command, :select_word}
+    },
+    %Entry{
+      name: "select line",
+      description: "Select the cursor's whole line, or take in the next line.",
+      invoke: {:command, :select_line}
+    },
+    %Entry{
+      name: "matching bracket",
+      aliases: ["bracket"],
+      description:
+        "Go to the bracket paired with the one at the cursor, or to the one around it.",
+      invoke: {:command, :matching_bracket}
+    },
+    %Entry{
+      name: "comment",
+      aliases: ["uncomment"],
+      description: "Comment out the cursor's line or the selection's lines, or uncomment them.",
+      invoke: {:command, :comment}
+    },
+    %Entry{
+      name: "move up",
+      aliases: ["move line up"],
+      description: "Swap the cursor's line, or the selection's lines, with the line above.",
+      invoke: {:command, :move_up}
+    },
+    %Entry{
+      name: "move down",
+      aliases: ["move line down"],
+      description: "Swap the cursor's line, or the selection's lines, with the line below.",
+      invoke: {:command, :move_down}
+    },
+    %Entry{
+      name: "move left",
+      description: "Move the selected text one character left.",
+      invoke: {:command, :move_left}
+    },
+    %Entry{
+      name: "move right",
+      description: "Move the selected text one character right.",
+      invoke: {:command, :move_right}
+    },
+    %Entry{
+      name: "move word back",
+      description: "Swap the selected text with the word before it.",
+      invoke: {:command, :move_word_back}
+    },
+    %Entry{
+      name: "move word forward",
+      description: "Swap the selected text with the word after it.",
+      invoke: {:command, :move_word_forward}
+    },
+    %Entry{
+      name: "move to line start",
+      description: "Move the selected text to the start of its line, after the indent.",
+      invoke: {:command, :move_line_start}
+    },
+    %Entry{
+      name: "move to line end",
+      description: "Move the selected text to the end of its line.",
+      invoke: {:command, :move_line_end}
+    },
+    %Entry{
       name: "delete back",
       description: "Delete the character before the cursor (or the selection).",
       invoke: {:command, :delete_back}

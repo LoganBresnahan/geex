@@ -25,7 +25,8 @@ defmodule Geex.Loop.Bindings do
 
   # The defaults, each command with its keys in the order the help shows them. An Alt+letter
   # covers Alt+Shift+letter too (`translate/2`, Caps Lock); the Shift chords listed are the ones
-  # that mean something else. Alt+2 … Alt+0 are left for the user (ADR-0051).
+  # that mean something else: the motion cluster's are the moves (ADR-0052). Alt+3, Alt+4, Alt+6
+  # and Alt+0 are left for the user (ADR-0051), Alt+5 for multiple cursors.
   @defaults [
     # Motion (ADR-0026, ADR-0049): the arrows and the right hand's IJKL cluster.
     {:up, [{:alt, ?i}, {:key, :up}]},
@@ -46,6 +47,22 @@ defmodule Geex.Loop.Bindings do
     {:paste, [{:alt, ?v}]},
     # The other kind of indent, beside the key above Tab (ADR-0050, ADR-0051).
     {:indent_other, [{:alt, ?1}]},
+    # The editing keys (ADR-0052): duplicate; a character, a word, a line; the matching bracket;
+    # comment; and, Shift on the motion cluster, moving lines and selected text.
+    {:duplicate, [{:alt, ?2}]},
+    {:select_char, [{:alt, ?7}]},
+    {:select_word, [{:alt, ?8}]},
+    {:select_line, [{:alt, ?9}]},
+    {:matching_bracket, [{:alt, ?\\}]},
+    {:comment, [{:alt, ?/}]},
+    {:move_up, [{:alt, ?I}]},
+    {:move_down, [{:alt, ?K}]},
+    {:move_left, [{:alt, ?J}]},
+    {:move_right, [{:alt, ?L}]},
+    {:move_word_back, [{:alt, ?U}]},
+    {:move_word_forward, [{:alt, ?O}]},
+    {:move_line_start, [{:alt, ?H}]},
+    {:move_line_end, [{:alt, ?:}]},
     # History (ADR-0031, ADR-0033 §7) and the file (ADR-0019, ADR-0034).
     {:undo, [{:alt, ?z}]},
     {:redo, [{:alt, ?Z}]},
@@ -131,6 +148,38 @@ defmodule Geex.Loop.Bindings do
   def defaults do
     for {command, chords} <- @defaults, chord <- chords, into: %{}, do: {chord, command}
   end
+
+  # The moves on the motion cluster's Shift chords (ADR-0052) and the motion each is.
+  @motion_of %{
+    move_up: :up,
+    move_down: :down,
+    move_left: :left,
+    move_right: :right,
+    move_word_back: :word_back,
+    move_word_forward: :word_forward,
+    move_line_start: :line_start,
+    move_line_end: :line_end
+  }
+
+  @doc """
+  A move of text as its motion, for the places with no text to move: the tree, the panes, the
+  pickers, the settings view, the command line, a preview (ADR-0052 §8). There, Caps Lock with
+  the motion cluster still moves the highlight, as it did before the moves were bound.
+
+      iex> Geex.Loop.Bindings.as_motion({:cmd, :move_down})
+      {:cmd, :down}
+      iex> Geex.Loop.Bindings.as_motion({:cmd, :duplicate})
+      {:cmd, :duplicate}
+  """
+  @spec as_motion(term()) :: term()
+  def as_motion({:cmd, command} = event) do
+    case @motion_of do
+      %{^command => motion} -> {:cmd, motion}
+      _ -> event
+    end
+  end
+
+  def as_motion(event), do: event
 
   @doc """
   The command a key runs under `bindings`, as `{:cmd, command}`; any other event as it came. An
@@ -229,6 +278,8 @@ defmodule Geex.Loop.Bindings do
   def label({:alt, c}) when c in ?a..?z, do: "Alt+" <> <<c - 32>>
   def label({:alt, c}) when c in ?A..?Z, do: "Alt+Shift+" <> <<c>>
   def label({:alt, dir}) when is_atom(dir), do: "Alt+" <> arrow(dir)
+  # `Alt+Shift+;` arrives as `ESC :` (ADR-0052); written as it's pressed.
+  def label({:alt, ?:}), do: "Alt+Shift+;"
   def label({:alt, c}), do: "Alt+" <> <<c>>
   def label({:ctrl, c}) when c in ?a..?z, do: "Ctrl-" <> <<c - 32>>
   def label({:ctrl, c}), do: "Ctrl-" <> <<c>>

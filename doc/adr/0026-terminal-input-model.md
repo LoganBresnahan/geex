@@ -1,6 +1,6 @@
 # ADR-0026: Terminal input model & keymap (one default, capability-gated extras)
 
-- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read; bracketed paste. **Amended 2026-11-10:** Shift+Tab inserts the other kind of indent from Tab's. **Amended 2026-11-11:** `Alt+Shift+W/A/S/D` no longer resize; Alt with an arrow does. **Amended 2026-11-11 by [ADR-0047](0047-every-key-runs-a-named-command.md):** the keymap is data: each bound key runs a named command. **Amended 2026-11-11 by [ADR-0050](0050-tab-indents-a-selection-shift-tab-unindents.md):** Shift+Tab un-indents; the other kind is `Alt+1` (ADR-0051); `` Alt+` `` read. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+<` and `Alt+>` read.
+- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read; bracketed paste. **Amended 2026-11-10:** Shift+Tab inserts the other kind of indent from Tab's. **Amended 2026-11-11:** `Alt+Shift+W/A/S/D` no longer resize; Alt with an arrow does. **Amended 2026-11-11 by [ADR-0047](0047-every-key-runs-a-named-command.md):** the keymap is data: each bound key runs a named command. **Amended 2026-11-11 by [ADR-0050](0050-tab-indents-a-selection-shift-tab-unindents.md):** Shift+Tab un-indents; the other kind is `Alt+1` (ADR-0051); `` Alt+` `` read. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+<` and `Alt+>` read. **Amended 2026-11-12 by [ADR-0052](0052-editing-keys.md):** `Alt+\`, `Alt+/` and `Alt+:` (`Alt+Shift+;`) read; the motion cluster's Shift chords move text.
 - **Date:** 2026-06-08
 - **Refines:** [ADR-0025](0025-user-config-layer.md) (the keymap is user-config *data*),
   [ADR-0024](0024-tui-core-extractable.md) (the TUI core / `prim_tty`)
@@ -220,6 +220,15 @@ beside `Alt+;`; no sequence starts with it. No default runs it: desktops take it
 The parser reads `ESC <` and `ESC >` (Alt+Shift+, and Alt+Shift+. on a US layout) as `Alt+<` and
 `Alt+>`, the pane keys. A terminal sends no sequence that starts with either; both are output
 sequences only (VT52 and keypad mode).
+
+## Amendment (2026-11-12): `Alt+\`, `Alt+/` and `Alt+:` read ([ADR-0052](0052-editing-keys.md))
+
+The parser reads `ESC \` as `Alt+\` (the matching bracket), `ESC /` as `Alt+/` (comment) and
+`ESC :` as `Alt+:`, written `Alt+Shift+;` (move selected text to the line's end). `ESC \` is ST,
+but only as the end of a string reply, which the parser reads whole in its own clause, so one
+outside a reply is the chord. The motion cluster's Shift chords (`Alt+Shift+I/J/K/L/U/O/H`) are
+the moves of text now, not the motions, so Caps Lock with them moves text in the editor; where
+there is no text to move, a move is its motion.
 
 ## See
 
