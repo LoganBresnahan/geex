@@ -59,7 +59,9 @@ one, the cursor goes to its pair; elsewhere, to the opening bracket of the neare
 Brackets are counted in the plain text, one kind at a time, so one inside a string or a comment
 counts too (the syntax tree can tell them apart later). It looks at most 10,000 lines or 200,000
 characters each way, so a long line (minified code, a log) costs no more than many short ones
-(ADR-0035); a pair farther than that isn't found. The cursor's own line is still read up to the
+(ADR-0035); a pair farther than that isn't found. Searching backward, a line longer than
+what is left of that budget ends the search, even when the pair is at that line's end (a line of
+some 800 KB above the cursor's); reading its tail alone is BUG-12's work. The cursor's own line is still read up to the
 cursor, as the word motions read it, so far into a very long line a press is slow (doc/bugs.md). With a selection live it extends, as a
 motion does. The
 parser reads `ESC \` as `` Alt+\ `` outside a terminal's string reply: `ESC \` ends one (ST), and
@@ -96,7 +98,10 @@ The selection stays on the text, its anchor and cursor ends as they were. With n
 one across lines, these do nothing. A word is as `Alt+8` has it, space to space; a selection
 inside a word swaps with the word's other part. In `one two three` with `three` selected,
 `Alt+Shift+U` gives `one three two`; in `  foo bar` with `foo` selected, `Alt+Shift+;` gives
-`  bar foo`. Text already after the indent goes no farther. A CRLF line's `\r` is no part of the
+`  bar foo`. Text already after the indent goes no farther. A word or line-end move takes the
+selection's words, not spaces at its ends: those stay where they are, so `Alt+S`, `Alt+O` on
+`bar` (which takes `bar `) and then `Alt+Shift+O` turns `foo bar baz` into `foo baz bar`, and the
+selection is the words alone after. Only spaces after the text means it is at the end already. A CRLF line's `\r` is no part of the
 line here: nothing takes it or passes it.
 
 **8. Caps Lock.** A terminal sends `Alt+K` with Caps Lock on as it sends `Alt+Shift+K`. Before

@@ -152,7 +152,16 @@ defmodule Geex.Loop.EditingKeysPureTest do
           ) do
       # A CRLF line's \r is no part of the text a move takes or passes: it stays last.
       text = "first\n" <> l <> eol <> "\nlast"
-      sel = String.slice(l, a..(b - 1))
+      # A word or line-end move takes the selection's words; the spaces at its ends stay as gap.
+      raw = String.slice(l, a..(b - 1))
+      sel = if how in [:left, :right], do: raw, else: String.trim(raw, " ")
+
+      {a, b} =
+        if how in [:left, :right],
+          do: {a, b},
+          else:
+            {a + String.length(raw) - String.length(String.trim_leading(raw, " ")),
+             b - String.length(raw) + String.length(String.trim_trailing(raw, " "))}
 
       with {cmd, {1, f}, {1, t}} <- Keymap.move_text(text, {{1, a}, {1, b}}, how) do
         moved = run(text, cmd)
@@ -287,6 +296,8 @@ defmodule Geex.Loop.EditingKeysPureTest do
     end
 
     test "comment markers by name and extension; none for block-only languages" do
+      assert Keymap.comment_marker("/p/boot.s") == "#"
+      assert Keymap.comment_marker("/p/boot.asm") == ";"
       assert Keymap.comment_marker("/p/Dockerfile") == "#"
       assert Keymap.comment_marker("/p/GNUmakefile") == "#"
       assert Keymap.comment_marker("/p/x.erl") == "%"
@@ -301,6 +312,25 @@ defmodule Geex.Loop.EditingKeysPureTest do
       assert run("a\r\n  b\r\n", cmd) == "// a\r\n//   b\r\n"
       {cmd, _} = Keymap.comment_lines("#  x\n", {0, 0}, "#")
       assert run("#  x\n", cmd) == " x\n"
+    end
+
+    test "a selection's own edge spaces stay put: only its words move" do
+      # Alt+S then Alt+O on `bar` selects `bar ` with its space.
+      for {how, want} <- [
+            word_forward: "foo baz bar",
+            word_back: "bar foo baz",
+            line_end: "foo baz bar",
+            line_start: "bar foo baz"
+          ] do
+        {cmd, from, to} = Keymap.move_text("foo bar baz", {{0, 4}, {0, 8}}, how)
+        moved = run("foo bar baz", cmd)
+        assert moved == want, inspect(how)
+        assert String.slice(moved, elem(from, 1)..(elem(to, 1) - 1)) == "bar"
+      end
+
+      # Only spaces after it: at the end already; they don't become indent.
+      assert Keymap.move_text("  foo  ", {{0, 2}, {0, 5}}, :line_end) == nil
+      assert Keymap.move_text("a   b", {{0, 1}, {0, 4}}, :word_back) == nil
     end
 
     test "moving to a line end keeps the spacing; never past the indent" do

@@ -885,8 +885,23 @@ defmodule Geex.Loop.Keymap do
   """
   @spec move_text(String.t(), {cursor(), cursor()}, atom()) ::
           {struct(), cursor(), cursor()} | nil
-  def move_text(text, {{line, a}, {line, b}}, how) when a < b do
+  def move_text(text, {{line, a}, {line, b}}, how)
+      when a < b and how in [:word_back, :word_forward, :line_start, :line_end] do
+    # A word or line-end move takes the selection's words, not the spaces at its ends: those
+    # are gap, staying where they are, so `Alt+S`, `Alt+O` on `bar` (taking `bar `) and then a
+    # move keeps `foo bar baz`'s spacing (mod-verify's review). All spaces is nothing to move.
     gs = line_tuple(text, line)
+    a2 = skip_fwd(a, gs, b, &space?/1)
+    b2 = skip_bwd(b, gs, &space?/1)
+    if a2 < b2, do: move_words(text, {{line, a2}, {line, b2}}, how, gs)
+  end
+
+  def move_text(text, {{line, a}, {line, b}}, how) when a < b,
+    do: move_words(text, {{line, a}, {line, b}}, how, line_tuple(text, line))
+
+  def move_text(_text, _range, _how), do: nil
+
+  defp move_words(_text, {{line, a}, {line, b}}, how, gs) do
     n = tuple_size(gs)
 
     part = fn from, to ->
@@ -926,10 +941,11 @@ defmodule Geex.Loop.Keymap do
             {indent, b, sel <> part.(gap, a) <> core, indent}
           end
 
+        # Only spaces after it: it is at the end already (they don't become indent).
         :line_end when b < n ->
           gap = skip_fwd(b, gs, n, &space?/1)
           core = part.(gap, n)
-          {a, n, core <> part.(b, gap) <> sel, n - len}
+          if gap < n, do: {a, n, core <> part.(b, gap) <> sel, n - len}
 
         _ ->
           nil
@@ -938,8 +954,6 @@ defmodule Geex.Loop.Keymap do
     with {from, to, new, start} <- move,
          do: {replace({line, from}, {line, to}, new), {line, start}, {line, start + len}}
   end
-
-  def move_text(_text, _range, _how), do: nil
 
   defp replace({l1, c1}, {l2, c2}, text) do
     {:ok, cmd} =

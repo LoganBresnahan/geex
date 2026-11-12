@@ -6115,3 +6115,20 @@ or `/` needs AltGr, Caps Lock itself (a terminal sends it as Shift; the tests se
 `mix compile --warnings-as-errors --force` clean. Live-verified via tmux (100×20): mod-verify's
 reproduction, `alpha beta gamma` in a CRLF file, `Alt+8` on `alpha`, `Alt+Shift+;`, Ctrl-O: the
 screen showed `beta gamma alpha` and the file on disk is `beta gamma alpha\r\nnext\r\n`.
+
+### 2026-11-12 — ADR-0052 second review fixes (mod-verify's review of 4c8e2aa)
+
+- **Sideways moves glued words when the selection carried its own space:** `Alt+S`, `Alt+O` on
+  `bar` selects `bar `, and `Alt+Shift+O` gave `foo bazbar `. A word or line-end move now takes
+  the selection's words and leaves spaces at its ends as gap: `foo baz bar`, the selection then
+  the words alone. Only spaces after the text is the end already (`  foo  ` no longer turns its
+  trailing spaces into indent). The move property trims the selection the same way; four example
+  cases pin the moves.
+- `.s` → `#` and `.asm` → `;` are tested.
+- Not fixed: `` Alt+\ `` backward stops at a line longer than its remaining budget even with the
+  pair at that line's end; written into ADR-0052 §4 and BUG-12 (the same windowed read).
+
+1531 tests + 38 properties + 169 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. Live-verified via tmux: `alpha beta gamma`,
+`Alt+O`, `Alt+S`, `Alt+O` (selecting `beta `), `Alt+Shift+O` gave `alpha gamma beta`; `Alt+Z` gave
+the line back.

@@ -21,6 +21,10 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 - **Recommended fix:** read only a window of the line around the cursor (graphemes on each side,
   up to a budget), giving columns relative to the window's start, which needs the column's byte
   offset without walking the line: keep it in the Doc, or cache it per line.
+- **Same cause, smaller:** `` Alt+\ `` searching backward stops at a line longer than what is left
+  of its 200,000-character budget, so a pair at the end of a line of some 800 KB above the cursor's
+  isn't found (ADR-0052 §4). Reading that line's tail alone, from a UTF-8 boundary, needs its
+  columns counted from its end: the same windowed read.
 - **Ruled out:** the bracket scan itself, fixed in ADR-0052's review (a pair 2 MB away took
   1.1–1.3 s; now the scan stops at 200,000 characters, 38 ms).
 
