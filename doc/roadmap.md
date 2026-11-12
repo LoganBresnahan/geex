@@ -769,7 +769,7 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       in the next); `` Alt+\ `` the matching bracket; `Alt+/` comments lines out and back;
       `Alt+Shift+I/K` move lines; `Alt+Shift+J/L/U/O/H/;` move selected text along its line. Caps
       Lock makes the motion cluster the moves in the editor; elsewhere a move is its motion.
-      **Built 2026-11-12**, merged after mod-verify's reviews (BUG-12 left: long lines). Next: multiple cursors (`Alt+5`, `Alt+Shift+N`),
+      **Built 2026-11-12**, merged after mod-verify's reviews (BUG-12, long lines, since fixed). Next: multiple cursors (`Alt+5`, `Alt+Shift+N`),
       their own ADR.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
@@ -781,8 +781,9 @@ relabel a compacted ledger's checkpoint blame, found by the verify pass) is **FI
 (2026-11-09). BUG-10 (a tab character drew zero columns wide, found looking at item 18.7) is
 **FIXED** (2026-11-09, on the `editor-comfort` branch). BUG-11 (a byte that isn't UTF-8 made the
 input go deaf, found by geex-d3's review of item 19) is **FIXED** (2026-11-09, on the
-`editor-assist` branch). BUG-12 (far into a very long line, the word motions and editing keys stall
-the key loop; found by mod-verify's review of ADR-0052, 2026-11-12) is **open**.
+`editor-assist` branch). BUG-12 (far into a very long line, the word motions, the editing keys and typing stalled
+the key loop; found by mod-verify's review of ADR-0052) and BUG-13 (every frame painted the whole
+of a long line, found measuring BUG-12) are **FIXED** (2026-11-12, on the `long-lines` branch).
 
 ---
 

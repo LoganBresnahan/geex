@@ -6132,3 +6132,85 @@ screen showed `beta gamma alpha` and the file on disk is `beta gamma alpha\r\nne
 `mix compile --warnings-as-errors --force` clean. Live-verified via tmux: `alpha beta gamma`,
 `Alt+O`, `Alt+S`, `Alt+O` (selecting `beta `), `Alt+Shift+O` gave `alpha gamma beta`; `Alt+Z` gave
 the line back.
+
+### 2026-11-12 — BUG-12: a long line read near the cursor (branch `long-lines`)
+
+The word motions, `Alt+8`, the sideways moves and `` Alt+\ `` read a long line (over 4 KB) only
+around the columns they need: an ASCII line by bytes, another with `String.split_at/2`; a read
+that runs into the window's side runs again on the whole line. `` Alt+\ `` reads a long line
+above the cursor's from its end, so a pair at the end of a 1 MB line is found.
+
+Measured on one 2 MB ASCII line (`"ab, cd "` × 300,000), the cursor 10 from its end, in
+`Keymap` (before → after): `Alt+O` 399 → 1 ms, `Alt+U` 384 → 1 ms, `Alt+8` 260 → 1 ms and again
+309 → 1 ms, a word move 391 → 7 ms, a character move 407 → 2 ms, `` Alt+\ `` enclosing 659 →
+31 ms; the pair at the end of a 1 MB line above the cursor's: not found → found in 0 ms. Through
+`Loop.handle_info/2` the keys took 502–896 ms, now 6–48 ms.
+
+Found measuring it, not fixed (doc/bugs.md): every repaint on that line takes about 2.3 s
+(BUG-13: the paint places all 2.1 M graphemes), and a typed character about 1 s (the typing
+assists read the line up to the cursor, BUG-12's remainder). On such a line the keys still feel
+slow until BUG-13 is fixed.
+
+Tests (`test/geex/loop/long_lines_test.exs`): three properties hold the windowed answers to
+whole-line ones on generated lines over 4.5 KB (ASCII or not, CRLF, words and gaps longer than
+the window) for the word motions and `Alt+8`, the moves, and a bracket's pair; timings on the
+2 MB line (each key under 50 ms, the best of three); mod-verify's backward cases; a combining mark
+just past an ASCII window, and a bracket a mark joins. Plants caught: the window's edge check
+off, the word search's edge fallback off (either side), the byte after an ASCII window unchecked,
+the bracket reads' ASCII checks one byte short.
+
+1538 tests + 41 properties + 169 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green (1 min 53 s:
+the three long-line properties take most of it); `mix compile --warnings-as-errors --force`
+clean. Live via tmux (100×20) on a file with one 2 MB line: End, then `Alt+U` moved the cursor
+from 2:2100001 to 2:2099998, but the screen showed it 1.9 s after the key: the repaint, BUG-13.
+
+### 2026-11-12 — BUG-12 and BUG-13: a long line costs its screen (branch `long-lines`)
+
+At the maintainer's word, the rest of the long-line work on the same branch, before any commit:
+the repaint (BUG-13) and typing (BUG-12's remainder). ADR-0035's 2026-11-12 amendment has the
+decision.
+
+- **The paint** draws, of each row, the graphemes from the first that draws into the horizontal
+  scroll's column to the last that starts before the right edge (`Paint.visible_ranges/6`), and
+  resolves and fetches the spans over those bytes only (`frame/11` takes a function of the
+  ranges; the loop asks the reactor per range, ranges under 4 KB apart as one).
+- **`Geex.Width.seek/3`** measures an ASCII run by its bytes; `Width.line/2`,
+  `Width.col_at_display/3` and `Loop.cursor_xy/4` use it.
+- **Typing:** `Keymap.autoclose/5` reads the characters either side of the cursor and the line
+  before it only for a quote (ASCII by its quotes and backslashes); `newline/4`, `dedent/3`,
+  `unpair/3` and the leading whitespace read near the cursor or from the line's start only as
+  far as they need.
+- **`Geex.Buffer.Doc`** cuts a line at a column by its bytes where it is ASCII up to there, else
+  with `String.split_at/2`, for insert, delete, replace, slice and the byte offset.
+
+Measured on one 2 MB ASCII line, the cursor 10 from its end, through `Loop.handle_info/2`
+(before → after): a repaint 1.9–2.6 s → 11–13 ms; Alt+O 584 → 8 ms, Alt+U 528 → 8 ms, Alt+8
+502 → 9 ms, `` Alt+\ `` 896 → 30 ms; `x` 961 → 11 ms, `(` 746 → 12 ms, `"` 676 → 12 ms, Enter
+1,366 → 10 ms, Backspace 511 → 11 ms. Live via tmux (100×20) on that file, each key's change on
+screen 33–69 ms after it (tmux's polling included): Alt+U, Alt+O, `x`, `y`, `(`, Backspace
+(taking the pair), Enter, Backspace (joining the lines back).
+
+Tests:
+- `test/geex/highlight/paint_window_test.exs`: the windowed paint against the full paint as it
+  was (`Geex.PaintReference`, test/support, the old `to_screen/10`), on rows with tabs, wide CJK,
+  emoji, combining marks, control characters and `\r`, short and long, with random spans and
+  selections, scrolled 0–300 columns, tab sizes 1–8; spans fetched by range paint as all of them
+  do; `Width.seek/3` against a grapheme walk; a highlighted 2 MB line's colours at a scroll of
+  2,000,004; a plain 2 MB line under 100 ms.
+- `test/geex/buffer/doc_split_test.exs`: `Doc`'s insert, delete, replace, slice and byte offset
+  against the grapheme lists, on rows where ASCII meets a combining mark at the column, long and
+  short; an insert near the end of a 2 MB line under 20 ms.
+- `test/geex/loop/long_line_loop_test.exs`: keys, typing and the repaint after each on the 2 MB
+  line, a key under 50 ms and a repaint under 100 ms; a quote on a 2 MB line full of strings.
+- Plants caught: the seek one column late, the ASCII run's display column off by one, a tab
+  advancing a whole stop, the byte before a non-ASCII one taken into the ASCII run, `Doc`'s ASCII
+  check one byte short. Not caught, both harmless: the paint's walk stopping a few columns past
+  the edge (the screen clips them), and seeking from the column before the scroll (the same
+  graphemes show).
+
+Not changed: a non-ASCII long line still costs a walk up to the cursor (`Keymap`, `Doc`:
+`String.split_at/2`, 40–80 ms at 2 MB) or up to the scroll (the paint, a grapheme at a time past
+its ASCII runs); the comment toggle and Tab's indent read the line they rewrite.
+
+1543 tests + 45 properties + 171 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green (45
+properties); `mix compile --warnings-as-errors --force` clean; the cassette green unregenerated.

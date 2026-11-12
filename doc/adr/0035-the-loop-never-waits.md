@@ -2,7 +2,7 @@
 
 - **Status:** Accepted 2026-10-16 (proposed by the coordinator session; the maintainer took
   "adopt the rule, park the rest"); amended 2026-10-18 (a frame costs the screen, not the
-  file). First instance built: the file tree's reader (`6a6e3df`,
+  file); amended 2026-11-12 (a long line costs its screen, not the line: BUG-12, BUG-13). First instance built: the file tree's reader (`6a6e3df`,
   [ADR-0034](0034-panes-tree-edits-hold.md)'s 2026-10-16 amendment).
 - **Date:** 2026-10-16
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell and its loop),
@@ -147,3 +147,40 @@ machine and still catches a regression.
   stops early, but a single very long line still makes it measure that line.
 - Tree-sitter reparses the whole file on each edit, off the loop. Incremental reparse and a
   query restricted to a byte range would need changes to the NIF.
+
+## Amendment (2026-11-12): a long line costs its screen, not the line (BUG-12, BUG-13)
+
+**Context.** The 2026-10-18 amendment made a frame cost its rows. A file with one 2 MB line (a
+minified bundle, a log line) still cost the whole of that row: with the cursor near its end a
+repaint took about 2.3 s, a word motion or `Alt+\` up to 0.9 s, a typed character about 1 s. Each
+walked the line from its start a grapheme at a time: the paint placed all 2.1 million graphemes,
+the cursor's display column and the widest line measured it, `Keymap` and the typing assists split
+it, and `Geex.Buffer.Doc` split it into a grapheme list on every edit.
+
+**Decision.** The same rule, along the row: a key and a frame do work in proportion to the columns
+they touch.
+
+- **`Geex.Width.seek/3`** finds a grapheme column or a display column measuring a run of ASCII by
+  its bytes (its tabs and control characters one by one) and walking only other characters a
+  grapheme at a time. The cursor's display column, the widest line and the mouse's display →
+  grapheme cast use it. Width still only paints and casts a click (ADR-0027).
+- **The paint draws each row's window:** from the first grapheme that draws into the horizontal
+  scroll's column to the last that starts before the right edge. Styles are resolved over those
+  bytes only, and the reactor is asked for those bytes only: `frame/11` takes the spans or a
+  function of the byte ranges it paints (`Paint.visible_ranges/6`).
+- **`Keymap` reads a line over 4 KB through a window** of 1,024 graphemes either side of the
+  columns a key needs, and reads the whole line again when an answer reaches a side of the window
+  that isn't the line's, so no answer depends on the window. The typing assists read only the
+  characters either side of the cursor (the line before it only for a quote).
+- **`Doc` cuts a line at a column by its bytes** where the line is ASCII up to there, else with
+  `String.split_at/2`. The results are the same as before (its property holds them to the old
+  grapheme lists), so replay is unchanged (the cassette is green unregenerated).
+
+**Measured** on the 2 MB line, the cursor near its end, through `Loop.handle_info/2`: a repaint
+2.3 s → 11 ms; a word motion, `Alt+8` or a move 0.5–0.9 s → 7–11 ms; `Alt+\` 0.9 s → 30 ms; a typed
+character, Enter or Backspace 0.5–1.4 s → 10–12 ms.
+
+**The guard.** `test/geex/loop/long_line_loop_test.exs` times keys, typing (a quote on a line full
+of strings too) and the repaint after each on the 2 MB line: a key under 50 ms, a repaint under
+100 ms. A non-ASCII long line still costs a walk up to the cursor or the scroll, several times
+cheaper than before (doc/bugs.md, BUG-12's remainder).

@@ -60,11 +60,11 @@ one, the cursor goes to its pair; elsewhere, to the opening bracket of the neare
 Brackets are counted in the plain text, one kind at a time, so one inside a string or a comment
 counts too (the syntax tree can tell them apart later). It looks at most 10,000 lines or 200,000
 characters each way, so a long line (minified code, a log) costs no more than many short ones
-(ADR-0035); a pair farther than that isn't found. Searching backward, a line longer than
-what is left of that budget ends the search, even when the pair is at that line's end (a line of
-some 800 KB above the cursor's); reading its tail alone is BUG-12's work. The cursor's own line is still read up to the
-cursor, as the word motions read it, so far into a very long line a press is slow (doc/bugs.md). With a selection live it extends, as a
-motion does. The
+(ADR-0035); a pair farther than that isn't found. Searching backward, a long line is read from
+its end: by bytes when it is ASCII, else only its last 800 KB, and the search ends there. The
+cursor's own line is read from the cursor, by bytes when it is ASCII up to it (BUG-12, fixed
+2026-11-12: far into a 2 MB line a press took up to 0.9 s, now a few milliseconds). With a
+selection live it extends, as a motion does. The
 parser reads `ESC \` as `` Alt+\ `` outside a terminal's string reply: `ESC \` ends one (ST), and
 the parser reads a reply whole, so outside one nothing else sends it.
 
