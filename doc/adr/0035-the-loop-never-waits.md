@@ -160,9 +160,12 @@ it, and `Geex.Buffer.Doc` split it into a grapheme list on every edit.
 **Decision.** The same rule, along the row: a key and a frame do work in proportion to the columns
 they touch.
 
-- **`Geex.Width.seek/3`** finds a grapheme column or a display column measuring a run of ASCII by
-  its bytes (its tabs and control characters one by one) and walking only other characters a
-  grapheme at a time. The cursor's display column, the widest line and the mouse's display →
+- **`Geex.Width.seek/3`** finds a grapheme column or a display column measuring a line's ASCII up
+  to its first other character by its bytes (its tabs and control characters one by one), and
+  from there walking it a grapheme at a time as before, so a line that isn't ASCII costs no more
+  than it did. The byte patterns the search uses are compiled once (`Geex.Ascii`): given as plain
+  lists they were compiled on every call, which made the first cut of this 50× slower than main
+  on French or Japanese text (mod-verify's review). The cursor's display column, the widest line and the mouse's display →
   grapheme cast use it. Width still only paints and casts a click (ADR-0027).
 - **The paint draws each row's window:** from the first grapheme that draws into the horizontal
   scroll's column to the last that starts before the right edge. Styles are resolved over those

@@ -6214,3 +6214,38 @@ its ASCII runs); the comment toggle and Tab's indent read the line they rewrite.
 
 1543 tests + 45 properties + 171 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green (45
 properties); `mix compile --warnings-as-errors --force` clean; the cassette green unregenerated.
+
+### 2026-11-12 — `long-lines` review fixes (mod-verify's review of 9c718bd)
+
+- **Non-ASCII text was about 50× slower than main** (a frame of a 1,000-line French file 511 ms,
+  a typed key 524 ms, `Width.line` on a 1.5 MB "aé" line 66 s): `Width.seek/3` searched with the
+  128 high bytes and the 33 control bytes as plain pattern lists, which `:binary.match/3` compiles
+  again on every call, about twice a non-ASCII character. The patterns are now compiled once and
+  kept in `:persistent_term` (`Geex.Ascii`, also used by `Doc` and `Keymap`), and a line is
+  measured by its bytes only up to its first non-ASCII character, then walked a grapheme at a time
+  as before, so non-ASCII text never costs more than it did.
+- **The ranges property failed at 10,000 runs** (seed 718496): scrolled sideways, a span over two
+  rows' windows was fetched twice, the copy after an equal-width span of another capture, and
+  `styles/3`'s stable sort gave the copy the tie. Fetched spans are counted once (`Enum.uniq/1`,
+  first occurrences); an example test pins it (fails without the fix); the property's spans come
+  in start order, as the reactor's index answers.
+- BUG-14 (Alt+Z after an MCP `edit` command) and BUG-15 (an invalid UTF-8 byte can crash a paint)
+  recorded in doc/bugs.md, both older than this branch, not fixed here.
+
+Measured in this session against a scratch checkout of main (4a04dcb), 1,000-line files at
+100×30, the best of five (main → `long-lines`): ASCII frame 2.3 → 2.6 ms; French frame 13.1 →
+7.2 ms, a typed key and its frame 4.5 → 3.8 ms; Japanese frame 11.1 → 11.8 ms, key 12.0 → 12.6
+ms; `Width.line` on a 1.5 MB "aé" line 248 → 134 ms, on a 1.8 MB CJK line 209 → 107 ms. The first
+cut (9c718bd) on the same probes: French frame 154 ms, the "aé" line 17 s.
+
+Guards (`test/geex/loop/long_line_loop_test.exs`): a frame and a typed key on French and
+Japanese 1,000-line files under 30 ms or five times the ASCII file's; `Width.line` on the 1.5 MB
+"aé" and 1.8 MB CJK lines under 1 s. Both fail on 9c718bd's code (French frame 154 ms; the "aé"
+line 17 s).
+
+1546 tests + 46 properties + 174 doctests green twice (with `test/geex/ascii_test.exs`: the
+compiled search against a byte scan); `GEEX_PROPERTY_RUNS=10000` green twice (seeds 507869,
+86704), and the paint properties at 10,000 runs with mod-verify's seed 718496;
+`mix compile --warnings-as-errors --force` clean. Live via tmux (100×20) on a 1,000-line French
+file, at the end of line 11: `é`, `x`, `(`, Backspace (the pair), Enter, Backspace, Alt+U each
+on screen 17–39 ms after the key (tmux's polling included).

@@ -85,4 +85,49 @@ defmodule Geex.Loop.LongLineLoopTest do
     # Outside any string at the line's end: the quote got its closer.
     assert Buffer.get_text(buf) |> String.split("\n") |> Enum.at(1) |> String.ends_with?(~s|""|)
   end
+
+  # A frame and a typed key and its frame, the best of five, on a 1,000-line file of `line`.
+  defp file_cost(dir, name, line) do
+    path = Path.join(dir, name)
+    File.write!(path, Enum.map_join(1..1000, "\n", &"#{&1} #{line}") <> "\n")
+    {:ok, pid} = Session.open_file(path)
+    state = %{Loop.new_state(100, 30) | tree_shown: false, edits_shown: false}
+    {:noreply, state} = Loop.handle_info({:geex_active_buffer, pid}, state)
+    Session.set_cursor({500, 20})
+    {:noreply, state} = Loop.handle_info(:repaint, state)
+    best = fn f -> for(_ <- 1..5, do: elem(:timer.tc(f), 0)) |> Enum.min() |> div(1000) end
+    frame = best.(fn -> Loop.handle_info(:repaint, state) end)
+
+    key =
+      best.(fn ->
+        Session.set_cursor({500, 20})
+        {:noreply, after_key} = Loop.handle_info({:geex_io, {:char, "x"}}, state)
+        Loop.handle_info(:repaint, after_key)
+      end)
+
+    {frame, key}
+  end
+
+  test "non-ASCII files cost what an ASCII one does: French, Japanese", %{dir: dir} do
+    # mod-verify's review of the first cut: a frame of a French or Japanese 1,000-line file took
+    # 0.5–0.7 s (a byte pattern compiled on every call, twice a character).
+    {ascii_frame, ascii_key} =
+      file_cost(dir, "a.txt", "the quick brown fox jumps over the lazy dog again and again")
+
+    for {name, line} <- [
+          {"fr.txt", "Le cœur a ses raisons que la raison ne connaît point, déjà vu"},
+          {"ja.txt", "吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。"}
+        ] do
+      {frame, key} = file_cost(dir, name, line)
+      assert frame < max(30, 5 * ascii_frame), "#{name}: frame #{frame} ms (ASCII #{ascii_frame})"
+      assert key < max(30, 5 * ascii_key), "#{name}: key #{key} ms (ASCII #{ascii_key})"
+    end
+  end
+
+  test "a long non-ASCII line is measured in well under a second" do
+    for line <- [String.duplicate("aé", 500_000), String.duplicate("日", 600_000)] do
+      {us, _} = :timer.tc(fn -> Geex.Width.line(line, 2) end)
+      assert div(us, 1000) < 1000, "#{byte_size(line)} bytes: #{div(us, 1000)} ms"
+    end
+  end
 end

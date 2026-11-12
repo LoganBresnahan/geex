@@ -783,7 +783,9 @@ relabel a compacted ledger's checkpoint blame, found by the verify pass) is **FI
 input go deaf, found by geex-d3's review of item 19) is **FIXED** (2026-11-09, on the
 `editor-assist` branch). BUG-12 (far into a very long line, the word motions, the editing keys and typing stalled
 the key loop; found by mod-verify's review of ADR-0052) and BUG-13 (every frame painted the whole
-of a long line, found measuring BUG-12) are **FIXED** (2026-11-12, on the `long-lines` branch).
+of a long line, found measuring BUG-12) are **FIXED** (2026-11-12, on the `long-lines` branch). BUG-14 (Alt+Z after
+an MCP `edit` command crashes the loop) and BUG-15 (an invalid UTF-8 byte on screen can crash a
+paint), both older than that branch and found by mod-verify's review of it, are **open**.
 
 ---
 

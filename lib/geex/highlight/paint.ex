@@ -106,7 +106,9 @@ defmodule Geex.Highlight.Paint do
     # its 2 million characters). Only the spans over those bytes are resolved: a frame costs
     # what the screen shows, not what the file holds (ADR-0035).
     windows = windows(text, scroll, h, max(w - x0, 0), hscroll, tab)
-    spans = if is_function(spans, 1), do: spans.(ranges(windows)), else: spans
+    # A span over two rows' windows comes back for each: counted once, in the order it first
+    # came (a later copy would win a tie of width it shouldn't, `styles/3`'s sort being stable).
+    spans = if is_function(spans, 1), do: Enum.uniq(spans.(ranges(windows))), else: spans
     by_byte = styles(theme, spans, ranges(windows))
     fg = theme.palette.fg
     bg = theme.palette.bg

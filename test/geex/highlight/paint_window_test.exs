@@ -76,7 +76,9 @@ defmodule Geex.Highlight.PaintWindowTest do
     check all(
             lines <- list_of(row(), min_length: 1, max_length: 6),
             text = Enum.join(lines, "\n"),
-            spans <- spans(text),
+            # In start order, as the reactor's index answers (`Geex.Highlight.SpanIndex`): a
+            # span seen first in a later window then starts after every span of an earlier one.
+            spans <- map(spans(text), &Enum.sort_by(&1, fn s -> s.start_byte end)),
             w <- integer(1..50),
             hscroll <- integer(0..120),
             tab <- member_of([2, 4])
@@ -91,6 +93,28 @@ defmodule Geex.Highlight.PaintWindowTest do
       assert Paint.to_screen(text, fetch, theme(), w, 6, 0, 2, hscroll, nil, tab) ==
                Paint.to_screen(text, spans, theme(), w, 6, 0, 2, hscroll, nil, tab)
     end
+  end
+
+  test "a span over two windows, fetched for each, is counted once" do
+    # Scrolled sideways, the rows' windows are bytes 5–8 and 16–19. The keyword covers both, the
+    # string only the first; both are 12 bytes wide, so the later one wins the bytes they share
+    # (6 and 7). Fetched per window the keyword comes twice, the second time after the string.
+    text = "aaaaaaaaaa\nbbbbbbbbbb"
+    keyword = %Span{start_byte: 6, end_byte: 18, capture: "keyword"}
+    string = %Span{start_byte: 0, end_byte: 12, capture: "string"}
+    all = [keyword, string]
+    assert Paint.visible_ranges(text, 0, 2, 3, 5) == [{5, 8}, {16, 19}]
+
+    fetch = fn ranges ->
+      Enum.flat_map(ranges, fn {from, to} ->
+        Enum.filter(all, &(&1.end_byte > from and &1.start_byte < to))
+      end)
+    end
+
+    assert fetch.([{5, 8}, {16, 19}]) == [keyword, string, keyword]
+
+    assert Paint.to_screen(text, fetch, theme(), 3, 2, 0, 0, 5, nil, 2) ==
+             Paint.to_screen(text, all, theme(), 3, 2, 0, 0, 5, nil, 2)
   end
 
   # Where a place is, walking the line a grapheme at a time.

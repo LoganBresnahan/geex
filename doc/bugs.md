@@ -7,6 +7,44 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-15 — An invalid UTF-8 byte on screen can crash a paint
+
+- **Status:** open, found 2026-11-12 by mod-verify's review of `long-lines` (9c718bd). Older than
+  that branch: main paints through the same calls.
+- **Symptom:** a line holding a byte that isn't UTF-8 (a binary file opened by mistake, a file in
+  Latin-1), drawn on screen, can raise inside the paint instead of drawing.
+- **Verified cause:** `Geex.Width.advance/3` → `Width.cells/1` → `String.to_charlist/1` raises
+  `UnicodeConversionError` on an invalid byte (`Width.advance(<<0xFF>>, 0, 2)`); and OTP's
+  grapheme walk raises `ArgumentError` on an emoji followed by invalid bytes
+  (`String.next_grapheme("👍" <> <<0xFF, 0xFE>>)`, `String.graphemes/1` the same). The paint, the
+  cursor's display column and the widest line all walk graphemes and measure them.
+- **Recommended fix:** make the width total: `Width.cells/1` counts a grapheme that isn't valid
+  UTF-8 as one column (a replacement glyph's width), and the walkers step past a byte that won't
+  segment one byte at a time (a `rescue ArgumentError` around `String.next_grapheme/1`, or checking
+  `String.valid?/1` on the slice first), drawing `�` for it, as the input path already replaces
+  invalid bytes (BUG-11). A property over `Geex.Gen` text with random invalid bytes would pin it.
+
+---
+
+## BUG-14 — Alt+Z after an MCP `edit` command crashes the loop
+
+- **Status:** open, found 2026-11-12 by mod-verify's review of `long-lines` (9c718bd). Older than
+  that branch: main has the same clauses.
+- **Symptom:** undoing (or redoing) a command recorded by the MCP `edit` tool
+  (`Geex.Commands.Edit`, search/replace blocks) raises `FunctionClauseError` in the loop. Reachable
+  by reopening in the TUI a file whose ledger holds an edit made under `mix geex.serve`.
+- **Verified cause:** `Geex.Loop.do_undo/1` and `do_redo/1` place the cursor with
+  `edit_start/1` and `edit_landing/1` (`lib/geex/loop.ex`), which have clauses for `Insert`,
+  `Delete` and `Replace` only. `Buffer.undo/1` returns the command it undid, and an `Edit` carries
+  no coordinates of its own (it resolves its blocks against the text when it runs).
+- **Recommended fix:** a clause for any other command that places the cursor where the text
+  changed: the first position at which the text before and after the undo differ (a common-prefix
+  scan of the two texts, which `Buffer.undo/1` already has), falling back to the cursor's own
+  position clamped to the text. A test: dispatch an `Edit`, then `Alt+Z` and `Alt+Shift+Z` through
+  `Loop.handle_info/2`.
+
+---
+
 ## BUG-13 — Every frame painted the whole of a long line  ✅ FIXED (2026-11-12)
 
 - **Status:** **FIXED** 2026-11-12 on the branch `long-lines`, at the maintainer's word; found the
@@ -21,8 +59,9 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
   column in `Loop.cursor_xy/4`, the widest line in `Loop.max_line_width/2`), though 100 columns
   of it showed.
 - **Fix:** `Geex.Width.seek/3` finds a grapheme column or a display column on a line measuring
-  a run of ASCII by its bytes (only its tabs and control characters one by one) and walking
-  only the other characters a grapheme at a time; `Width.line/2` and `Width.col_at_display/3`
+  its ASCII up to its first other character by its bytes (only its tabs and control characters
+  one by one) and walking the rest a grapheme at a time, as before, with its byte patterns
+  compiled once (`Geex.Ascii`); `Width.line/2` and `Width.col_at_display/3`
   (the mouse's cast) use it, and so does `Loop.cursor_xy/4`. The paint takes, of each row, the
   graphemes from the first that draws into the horizontal scroll's column to the last that
   starts before the right edge, resolves the spans over those bytes only, and asks the reactor

@@ -121,9 +121,9 @@ defmodule Geex.Width do
       none does), so the one covering column `t`;
     * `:end` — the line's end, so the display column is the line's width.
 
-  A long line costs what is read of it, not the whole line (BUG-13): a run of ASCII is measured
-  by its bytes (only its tabs and control characters looked at one by one), and only the other
-  characters are walked a grapheme at a time.
+  A long line costs what is read of it, not the whole line (BUG-13): its ASCII up to the first
+  other character is measured by its bytes (only its tabs and control characters looked at one
+  by one), and from there it is walked a grapheme at a time, as a line always was.
 
       iex> Geex.Width.seek("a\\tb字c", {:col, 3}, 4)
       {3, 3, 5}
@@ -134,47 +134,36 @@ defmodule Geex.Width do
   """
   @spec seek(String.t(), {:col, non_neg_integer()} | {:vcol, integer()} | :end, pos_integer()) ::
           {non_neg_integer(), non_neg_integer(), non_neg_integer()}
-  def seek(line, target, tab \\ @tab) when is_binary(line), do: seek(line, target, tab, 0, 0, 0)
+  def seek(line, target, tab \\ @tab) when is_binary(line) do
+    size = byte_size(line)
 
-  @high for b <- 128..255, do: <<b>>
-  @controls for b <- Enum.to_list(0..31) ++ [127], do: <<b>>
+    # The ASCII before the first other byte is measured by its bytes, all but its last (a
+    # combining mark after it would join it); from there the line is walked a grapheme at a
+    # time, as it always was, so a line that isn't ASCII costs no more than before.
+    run_end =
+      case Geex.Ascii.first_high(line) do
+        nil -> size
+        high -> max(high - 1, 0)
+      end
 
-  defp seek(l, target, tab, p, col, v) do
-    size = byte_size(l)
+    case ascii_run(line, 0, run_end, target, tab, 0, 0) do
+      {:found, b, c, v} -> {b, c, v}
+      {:at, c, v} when run_end >= size -> {size, c, v}
+      {:at, c, v} -> walk(line, run_end, target, tab, c, v)
+    end
+  end
 
-    cond do
-      p >= size ->
-        {size, col, v}
-
-      at_col?(target, col) ->
+  defp walk(l, p, target, tab, col, v) do
+    case String.next_grapheme(binary_part(l, p, byte_size(l) - p)) do
+      nil ->
         {p, col, v}
 
-      true ->
-        high =
-          case :binary.match(l, @high, scope: {p, size - p}) do
-            {i, 1} -> i
-            :nomatch -> size
-          end
+      {g, _rest} ->
+        wd = advance(g, v, tab)
 
-        # Up to the byte before the first non-ASCII one: that byte may start a grapheme with a
-        # combining mark after it, so it is walked as a grapheme with what follows.
-        run_end = if high < size, do: max(high - 1, p), else: size
-
-        case ascii_run(l, p, run_end, target, tab, col, v) do
-          {:found, b, c, vv} ->
-            {b, c, vv}
-
-          {:at, c, vv} when run_end >= size ->
-            {size, c, vv}
-
-          {:at, c, vv} ->
-            {g, _rest} = String.next_grapheme(binary_part(l, run_end, size - run_end))
-            wd = advance(g, vv, tab)
-
-            if at_col?(target, c) or draws_past?(target, vv, wd),
-              do: {run_end, c, vv},
-              else: seek(l, target, tab, run_end + byte_size(g), c + 1, vv + wd)
-        end
+        if at_col?(target, col) or draws_past?(target, v, wd),
+          do: {p, col, v},
+          else: walk(l, p + byte_size(g), target, tab, col + 1, v + wd)
     end
   end
 
@@ -199,8 +188,7 @@ defmodule Geex.Width do
     do: {:at, col + e - p, ascii_advance(l, p, e, v, tab)}
 
   defp ascii_run(l, p, e, {:vcol, t}, tab, col, v) do
-    controls = for {s, 1} <- :binary.matches(l, @controls, scope: {p, e - p}), do: s
-    vcol_run(l, p, e, controls, t, tab, col - p, v)
+    vcol_run(l, p, e, Geex.Ascii.controls(l, p, e - p), t, tab, col - p, v)
   end
 
   # `col0 + byte` is a byte's grapheme column in the run.
@@ -231,7 +219,7 @@ defmodule Geex.Width do
   # column, a tab to its stop, a control character none.
   defp ascii_advance(l, p, e, v, tab) do
     {v, cur} =
-      for {s, 1} <- :binary.matches(l, @controls, scope: {p, e - p}), reduce: {v, p} do
+      for s <- Geex.Ascii.controls(l, p, e - p), reduce: {v, p} do
         {v, cur} ->
           v = v + (s - cur)
           {if(:binary.at(l, s) == ?\t, do: v + tab - rem(v, tab), else: v), s + 1}

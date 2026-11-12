@@ -1589,8 +1589,6 @@ defmodule Geex.Loop.Keymap do
 
   @window 1024
   @long_line 4096
-  @high_bytes for b <- 128..255, do: <<b>>
-
   # A line is read without a CRLF's \r (`line_body/2`): the cursor stops before it, and no word or
   # move takes it (mod-verify's review of ADR-0052).
   defp with_window(text, line, from, to, fun), do: on_window(line_body(text, line), from, to, fun)
@@ -1637,8 +1635,7 @@ defmodule Geex.Loop.Keymap do
     do: (i == 0 and not at_start?) or (i == tuple_size(gs) and not at_end?)
 
   # Whether the first `k` bytes of `l` (all of it, when shorter) are ASCII.
-  defp ascii_prefix?(l, k),
-    do: :binary.match(binary_part(l, 0, clamp(k, 0, byte_size(l))), @high_bytes) == :nomatch
+  defp ascii_prefix?(l, k), do: Geex.Ascii.prefix?(l, k)
 
   defp space?(g), do: g == " " or g == "\t"
   defp non_space?(g), do: not space?(g)

@@ -184,10 +184,7 @@ defmodule Geex.Buffer.Doc do
       else: String.split_at(line, col)
   end
 
-  @high for b <- 128..255, do: <<b>>
-
-  defp ascii_prefix?(line, k),
-    do: :binary.match(binary_part(line, 0, min(k, byte_size(line))), @high) == :nomatch
+  defp ascii_prefix?(line, k), do: Geex.Ascii.prefix?(line, k)
 
   # Splice inserted parts between the `pre` and `post` halves of the split line.
   defp splice([only], pre, post), do: [pre <> only <> post]
