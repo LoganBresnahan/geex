@@ -5933,3 +5933,28 @@ its new place and its footer read "← → or Alt+J Alt+L tabs".
 1464 tests + 31 properties + 155 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
 `mix compile --warnings-as-errors --force` clean. Not tested: a real macOS terminal's Option+;
 (Ghostty's `macos-option-as-alt` decides it, as for every Alt key).
+
+### 2026-11-11 — mod-verify's review of the IJKL keys: an SS3 needs its final byte; the notices pinned
+
+mod-verify reviewed 041e40f by differential against main (each old key pressed as its new one:
+60k random keys byte-identical, Alt+N aside, which Esc now covers wherever main's did
+anything), fuzzed `Alt+;` (200k byte strings, nothing misread) and drove it in tmux. Nothing
+blocking; three fixes:
+
+- **Caps Lock + Alt+O typed text.** The parser took `ESC O` and any one byte as an SS3, so two
+  Caps Lock Alt+O presses in one read (`ESC O ESC O`) typed an "O", and Alt+O then Down typed
+  "[B" (mod-verify saw both in tmux). Main had the same clause, under the finder's key; ADR-0049
+  puts word forward there, a key people hold. An SS3 now needs its final byte (`0x40–0x7E`, after
+  any parameter bytes `0x30–0x3F`); otherwise `ESC O` is Alt+Shift+O and the rest is read again.
+  `ESC O` and a letter in one read stays ambiguous.
+- **The five notices that name a key are pinned**: a test checks each against the key the
+  defaults bind to its command (pipe with no selection, the next pane with one pane, behind disk,
+  an empty pane, deleting a file never saved). Each planted old key fails it.
+- **Stale key text**: the dogfood skill's tmux cheat sheet, the orient skill's pointer (now
+  `bindings.ex`), two roadmap lines, `Alt+N` meaning Alt+digit in two moduledocs and a test
+  title, and ADR-0049's layout note (French AZERTY types `;` without Shift).
+
+Live in tmux (100×24): `ESC O ESC O` sent in one write moved the cursor two words and typed
+nothing; `ESC O ESC [ B` moved a word, then down. The file was unchanged. 1471 tests + 31
+properties + 155 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green; warnings-as-errors
+clean. Not tested: a real Caps Lock on a macOS terminal.

@@ -72,6 +72,11 @@ is built, under its own decision; that decision binds them. Bound themselves, `A
 .` (ADR-0038). No terminal sequence begins `ESC ;`, so nothing is mistaken for it. It has no
 Shift twin: Caps Lock doesn't change `;`.
 
+An SS3 (`ESC O` …) now needs its final byte (`0x40–0x7E`, after any parameter bytes); otherwise
+`ESC O` is `Alt+Shift+O` and what follows is read again. Word forward sits on `Alt+O`, a key held
+down, and with Caps Lock two presses in one read (`ESC O ESC O`) used to type an "O" (review,
+2026-11-11).
+
 **4. `Alt+N` stops clearing.** Esc clears a selection reliably since the 40 ms flush, and closes
 the command line and answers no to a question, so `Alt+N`'s binding to `no` goes (§2a keeps the
 key). The typed `no` still clears a selection; the help shows Esc beside it.
@@ -90,8 +95,8 @@ remapping (roadmap 20.3).
 - Muscle memory breaks once, for the maintainer and anyone running 0.5.0's keys. The arrows,
   Home, End and the typed names (`up`, `line end`, `open`, `close` …) don't change, so each
   command can still be reached while the new keys settle in.
-- `Alt+;` needs Shift on some keyboard layouts (French AZERTY, for one); `End` is the same
-  command. Remapping (20.3) is the fix for a layout the defaults don't suit.
+- `Alt+;` needs Shift on some keyboard layouts (German, Spanish, Italian and the Nordic ones put
+  `;` on Shift+`,`); `End` is the same command. Remapping (20.3) is the fix for a layout the defaults don't suit.
 - The tests that pressed a key by its old chord press the new one; the ones that check a
   command's meaning don't change.
 

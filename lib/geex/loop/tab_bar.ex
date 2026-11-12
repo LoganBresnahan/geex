@@ -4,7 +4,7 @@ defmodule Geex.Loop.TabBar do
   §5, [ADR-0039](../../../doc/adr/0039-mouse.md)): each tab's label and its `×`, and the pane's
   own `×` at the right end. Pure, so drawing and a click read the same layout.
 
-  A tab reads ` N name × `: its number (`Alt+N`), its file name (with ` [+]` for unsaved edits),
+  A tab reads ` N name × `: its number (`Alt+1` … `Alt+9`), its file name (with ` [+]` for unsaved edits),
   and a `×` that closes it. When the pane can close (it isn't the only one), the bar's last three
   columns are ` × `, which closes the pane. When the bar is the top of a stacked split's lower
   half, it keeps two columns for the split's handle (`handle(:rows)`), just before the pane's `×` ([ADR-0038](../../../doc/adr/0038-split-panes-and-tabs.md)

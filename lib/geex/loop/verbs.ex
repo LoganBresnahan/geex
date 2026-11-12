@@ -35,7 +35,7 @@ defmodule Geex.Loop.Verbs do
       replace it with the output, one undoable edit. The command is kept as typed. ADR-0042.
     * `split` / `vsplit` — split the pane top and bottom / side by side (= `Alt+-` / `Alt+=`);
       `tab next` / `tab prev` / `tab N` — switch the pane's tab (= `Alt+.` / `Alt+,` /
-      `Alt+N`). ADR-0038.
+      `Alt+1` … `Alt+9`). ADR-0038.
     * `mouse` — turn the mouse off, so the terminal selects and copies text itself, or back on
       (ADR-0039).
     * `theme` — list the themes; `theme NAME` — switch to one for this session, e.g. `theme

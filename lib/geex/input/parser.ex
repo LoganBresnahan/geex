@@ -14,7 +14,7 @@ defmodule Geex.Input.Parser do
   Alt-letter, and the control sequences a terminal sends for special keys.
   A control sequence is read **as one unit**: a CSI (`ESC [`, parameter
   bytes `0x30–0x3F`, intermediate bytes `0x20–0x2F`, a final byte
-  `0x40–0x7E`) or an SS3 (`ESC O` and one byte). The ones geex uses become
+  `0x40–0x7E`) or an SS3 (`ESC O`, parameter bytes and a final byte). The ones geex uses become
   keys (arrows, Home, End, Delete, Page Up/Down, Alt with an arrow), and a mouse report becomes a
   mouse event; every other one (other modified arrows, a modified Page Up/Down, F-keys…) is
   **dropped**, never typed into the buffer as text. An incomplete sequence stays leftover until the rest
@@ -252,9 +252,22 @@ defmodule Geex.Input.Parser do
     end
   end
 
-  # SS3: ESC O and one byte (application-mode arrows, Home/End, F1–F4). It arrives whole, so a
-  # lone `ESC O` at the end of a chunk is Alt+Shift+O.
-  defp do_parse(<<"\eO", c, rest::binary>>, acc), do: do_parse(rest, push(ss3_key(c), acc))
+  # SS3: ESC O, any parameter bytes (`0x30–0x3F`, as in `ESC O 2 P`) and a final byte
+  # (`0x40–0x7E`): application-mode arrows, Home/End, F1–F4. It arrives whole, so a lone `ESC O`
+  # at the end of a chunk is Alt+Shift+O, and so is an `ESC O` not followed by a final byte:
+  # Caps Lock with Alt+O (word forward, ADR-0049) pressed twice in one read is `ESC O ESC O`,
+  # two chords, and the rest is read again. `ESC O` and a letter in one read stays ambiguous.
+  defp do_parse(<<"\eO", rest::binary>> = seq, acc) when byte_size(rest) >= 1 do
+    case ss3_end(rest, 0) do
+      {:final, n} ->
+        <<_params::binary-size(n), final, after_seq::binary>> = rest
+        do_parse(after_seq, push(ss3_key(final), acc))
+
+      :not_ss3 ->
+        <<_esc, _o, after_chord::binary>> = seq
+        do_parse(after_chord, [{:alt, ?O} | acc])
+    end
+  end
 
   # ESC + a letter = Alt/Meta-letter. A terminal sends an Alt chord atomically, so it
   # arrives in one chunk (`\em`); a bare ESC stays leftover (clause below) until more bytes
@@ -400,6 +413,11 @@ defmodule Geex.Input.Parser do
       [ps] -> {:osc, ps, ""}
     end
   end
+
+  # Where an SS3's final byte is: past its parameter bytes, or not an SS3 at all.
+  defp ss3_end(<<b, rest::binary>>, n) when b in 0x30..0x3F, do: ss3_end(rest, n + 1)
+  defp ss3_end(<<b, _::binary>>, n) when b in 0x40..0x7E, do: {:final, n}
+  defp ss3_end(_bytes, _n), do: :not_ss3
 
   defp ss3_key(?A), do: {:key, :up}
   defp ss3_key(?B), do: {:key, :down}

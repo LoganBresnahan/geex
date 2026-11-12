@@ -396,10 +396,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      Left, Right, Backspace today). Likely just "same as in the buffer"; small.
    - **Page Up / Page Down.** Move the cursor one screen. The parser side is one line; the screen
      height lives in the loop, not the pure keymap, so the loop handles it. Small.
-   - **Ctrl+Left / Ctrl+Right.** Likely word motion, which exists as `Alt+Q` / `Alt+E`. The parser
+   - **Ctrl+Left / Ctrl+Right.** Likely word motion, which exists as `Alt+U` / `Alt+O` (ADR-0049). The parser
      needs to decode the modifier (`ESC [ 1 ; 5 C`). Small.
    - **Shift+arrows.** The common convention is "extend the selection" (selection exists,
-     `Alt+H`). Decide whether to adopt it. Small to medium.
+     `Alt+S`, ADR-0049). Decide whether to adopt it. Small to medium.
    - **Alt + a digit or symbol** (`Alt+1` sends `ESC 1`). Still emits Esc and types the `1`. Read
      it as an Alt chord, or drop it. Tiny.
    - **F-keys, Insert.** Nothing to bind them to yet (no overwrite mode). Leave them dropped until

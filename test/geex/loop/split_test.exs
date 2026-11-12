@@ -87,7 +87,7 @@ defmodule Geex.Loop.SplitTest do
     assert cursor() == {1, 3}
   end
 
-  test "a file opens as a tab in the current pane; Alt+, Alt+. and Alt+N switch", %{dir: dir} do
+  test "a file opens as a tab in the current pane; Alt+, Alt+. and Alt+1…9 switch", %{dir: dir} do
     {state, a} = start(dir)
     state = key(state, {:alt, ?=})
     {state, b} = open(state, dir, "b.txt")

@@ -94,7 +94,8 @@ Known-drifty claims in this repo:
 - **Test counts** — memory, roadmap "Where we are", and commit bodies all quote
   them; only `mix test` is current.
 - **Keybindings** — they've been re-laid-out at the user's request more than
-  once (ERTYUIOP → WASD cluster; Ctrl-G → Alt+N). Check `lib/geex/loop/keymap.ex`.
+  once (ERTYUIOP → WASD cluster → IJKL, ADR-0049; Ctrl-G → Alt+N → Esc). The defaults are one
+  table in `lib/geex/loop/bindings.ex` (ADR-0047); check it.
 - **"Deferred" items** — may have quietly landed. Grep before reporting one as
   open.
 

@@ -225,6 +225,21 @@ defmodule Geex.Input.ParserTest do
     test "a lone ESC O at the end of a chunk is Alt+Shift+O" do
       assert {[{:alt, ?O}], ""} = Parser.parse("\eO")
     end
+
+    # mod-verify's review of ADR-0049: Alt+O is word forward, held down. With Caps Lock on, two
+    # presses in one read were an SS3 (`ESC O ESC`) and an "O" typed; Alt+O then Down typed "[B".
+    test "ESC O not followed by a final byte is Alt+Shift+O, and the rest is read again" do
+      assert {[{:alt, ?O}, {:alt, ?O}], ""} = Parser.parse("\eO\eO")
+      assert {[{:alt, ?O}, {:key, :down}], ""} = Parser.parse("\eO\e[B")
+      assert {[{:alt, ?O}, {:key, :enter}], ""} = Parser.parse("\eO\r")
+      assert {[{:alt, ?O}, {:alt, ?o}], ""} = Parser.parse("\eO\eo")
+      assert {[{:alt, ?O}, {:char, "1"}], ""} = Parser.parse("\eO1")
+    end
+
+    test "an SS3 with parameter bytes is still one sequence" do
+      assert Parser.parse("\eO2P") == {[], ""}
+      assert {[{:key, :up}, {:key, :home}], ""} = Parser.parse("\eOA\eOH")
+    end
   end
 
   # Esc, then "[", then "a", typed as separate keystrokes: the leftover Esc joined the "[" and
