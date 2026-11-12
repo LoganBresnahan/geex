@@ -6088,3 +6088,30 @@ gives `baz) foo(bar,`; the tests and the property check the new rule, not tmux.
 1519 tests + 38 properties + 169 doctests green twice (1524 once rebased onto the ADR-0050/0051 review fixes); `GEEX_PROPERTY_RUNS=10000` green;
 `mix compile --warnings-as-errors --force` clean. Not tested: a macOS terminal, a layout where `\`
 or `/` needs AltGr, Caps Lock itself (a terminal sends it as Shift; the tests send the capital).
+
+### 2026-11-12 — ADR-0052 review fixes (mod-verify's review of e78e271)
+
+- **CRLF lines:** `Alt+8` took a CRLF line's `\r` into its last word, and `Alt+Shift+L`,
+  `Alt+Shift+O` and `Alt+Shift+;` carried it into the line (saved as `" beta gamma\ralpha"`).
+  `Keymap.line_tuple/2` now drops the `\r`, so no word, motion or move takes it. The move
+  property's lines may end in `\r`, and the selection property checks a word ends by the line's
+  last character; both fail with the bug planted back.
+- **The bracket search** stops at 200,000 characters as well as 10,000 lines: a pair 2 MB away
+  along one line took 1.1–1.3 s, now 38 ms (and isn't found). Far into such a line a press is
+  still slow, as `Alt+O` on main is: BUG-12.
+- **Comment on mixed indent:** the marker goes after the indent the lines share (where tabs and
+  spaces part), so the markers line up and none lands inside another line's indent. A blank line
+  is only spaces and tabs, as for Tab.
+- **Moving to a line end keeps the spacing:** `  foo bar` with `foo` and `Alt+Shift+;` gives
+  `  bar foo`, not `   barfoo`; text after the indent goes no farther.
+- `.s` comments with `#` (GNU as), `.asm` with `;` (NASM).
+- **Tests for plants the suite missed**, each failing with its plant: the bracket cap (lines and
+  characters); Caps Lock in the output pane, the edits pane, the settings view and a preview; a
+  backwards selection's direction after a sideways move; the `previous pane`/`next pane` aliases.
+- The unreachable pane entries in `preview_verb?/1` and `verb/2`'s list are gone.
+- ADR-0052 §4–§7 say the above; §6 states its one cost generally.
+
+1530 tests + 38 properties + 169 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. Live-verified via tmux (100×20): mod-verify's
+reproduction, `alpha beta gamma` in a CRLF file, `Alt+8` on `alpha`, `Alt+Shift+;`, Ctrl-O: the
+screen showed `beta gamma alpha` and the file on disk is `beta gamma alpha\r\nnext\r\n`.

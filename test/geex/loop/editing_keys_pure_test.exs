@@ -147,15 +147,19 @@ defmodule Geex.Loop.EditingKeysPureTest do
             a <- integer(0..(String.length(l) - 1)),
             b <- integer((a + 1)..String.length(l)),
             how <-
-              member_of([:left, :right, :word_back, :word_forward, :line_start, :line_end])
+              member_of([:left, :right, :word_back, :word_forward, :line_start, :line_end]),
+            eol <- member_of(["", "\r"])
           ) do
-      text = "first\n" <> l <> "\nlast"
+      # A CRLF line's \r is no part of the text a move takes or passes: it stays last.
+      text = "first\n" <> l <> eol <> "\nlast"
       sel = String.slice(l, a..(b - 1))
 
       with {cmd, {1, f}, {1, t}} <- Keymap.move_text(text, {{1, a}, {1, b}}, how) do
         moved = run(text, cmd)
         [first, new_l, last] = String.split(moved, "\n")
         assert {first, last} == {"first", "last"}
+        assert String.ends_with?(new_l, eol)
+        new_l = String.replace_suffix(new_l, eol, "")
         assert String.slice(new_l, f..(t - 1)) == sel
         assert Enum.sort(String.graphemes(new_l)) == Enum.sort(String.graphemes(l))
 
@@ -209,6 +213,9 @@ defmodule Geex.Loop.EditingKeysPureTest do
 
       with {from, to} = range <- Keymap.select_more(kind, text, {l, c}, nil) do
         assert from < to
+        # A word never takes a CRLF's \r: it ends by the line's last character.
+        {wl, wc} = to
+        if kind == :word, do: assert(wc <= String.length(body(Enum.at(lines, wl))))
 
         with {from2, to2} <- Keymap.select_more(kind, text, to, range) do
           assert from2 <= from and to2 >= to and {from2, to2} != range
@@ -252,6 +259,33 @@ defmodule Geex.Loop.EditingKeysPureTest do
       assert Keymap.matching_bracket({0, 0}, "x)") == nil
     end
 
+    test "the search stops 10,000 lines or 200,000 characters away" do
+      near = "(\n" <> String.duplicate("x\n", 20) <> ")"
+      assert Keymap.matching_bracket({0, 0}, near) == {21, 0}
+      assert Keymap.matching_bracket({21, 0}, near) == {0, 0}
+      far = "(\n" <> String.duplicate("\n", 10_001) <> ")"
+      assert Keymap.matching_bracket({0, 0}, far) == nil
+      assert Keymap.matching_bracket({10_002, 0}, far) == nil
+      long = "(" <> String.duplicate("a", 200_000) <> ")"
+      assert Keymap.matching_bracket({0, 0}, long) == nil
+
+      assert Keymap.matching_bracket({0, 0}, "(" <> String.duplicate("a", 1000) <> ")") ==
+               {0, 1001}
+    end
+
+    test "comment on mixed indent: the marker goes where the indents part" do
+      text = "def f():\n    a = 1\n\tb = 2\n    c = 3\n"
+      {cmd, _} = Keymap.comment_lines(text, {1, 3}, "#")
+      commented = run(text, cmd)
+      assert commented == "def f():\n#     a = 1\n# \tb = 2\n#     c = 3\n"
+      {cmd, _} = Keymap.comment_lines(commented, {1, 3}, "#")
+      assert run(commented, cmd) == text
+      # Alike, it goes after the shared indent; a form-feed line is text, as for Tab.
+      {cmd, _} = Keymap.comment_lines("  a\n    b\n", {0, 1}, "#")
+      assert run("  a\n    b\n", cmd) == "  # a\n  #   b\n"
+      assert Keymap.comment_lines("\f\n", {0, 0}, "#") != nil
+    end
+
     test "comment markers by name and extension; none for block-only languages" do
       assert Keymap.comment_marker("/p/Dockerfile") == "#"
       assert Keymap.comment_marker("/p/GNUmakefile") == "#"
@@ -269,11 +303,20 @@ defmodule Geex.Loop.EditingKeysPureTest do
       assert run("#  x\n", cmd) == " x\n"
     end
 
-    test "moving to the line's start stops after the indent, then at 0" do
+    test "moving to a line end keeps the spacing; never past the indent" do
       {cmd, from, _} = Keymap.move_text("  ab cd", {{0, 5}, {0, 7}}, :line_start)
-      assert {run("  ab cd", cmd), from} == {"  cdab ", {0, 2}}
-      {cmd, from, _} = Keymap.move_text("  ab", {{0, 1}, {0, 2}}, :line_start)
-      assert {run("  ab", cmd), from} == {"  ab", {0, 0}}
+      assert {run("  ab cd", cmd), from} == {"  cd ab", {0, 2}}
+      # Already after the indent, or inside it: nothing.
+      assert Keymap.move_text("  cd ab", {{0, 2}, {0, 4}}, :line_start) == nil
+      assert Keymap.move_text("  ab", {{0, 1}, {0, 2}}, :line_start) == nil
+      {cmd, from, _} = Keymap.move_text("  foo bar", {{0, 2}, {0, 5}}, :line_end)
+      assert {run("  foo bar", cmd), from} == {"  bar foo", {0, 6}}
+      # Inside a word there is no gap to keep.
+      {cmd, _, _} = Keymap.move_text("abcd", {{0, 2}, {0, 4}}, :line_start)
+      assert run("abcd", cmd) == "cdab"
+      # A CRLF line's \r stays at its end.
+      {cmd, _, _} = Keymap.move_text("foo bar\r", {{0, 0}, {0, 3}}, :line_end)
+      assert run("foo bar\r", cmd) == "bar foo\r"
       assert Keymap.move_text("ab", {{0, 0}, {0, 1}}, :line_start) == nil
       assert Keymap.move_text("ab", {{0, 1}, {0, 2}}, :line_end) == nil
       assert Keymap.move_text("ab\ncd", {{0, 1}, {1, 1}}, :right) == nil

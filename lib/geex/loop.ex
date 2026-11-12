@@ -5985,8 +5985,6 @@ defmodule Geex.Loop do
         :close,
         :toggle_tree,
         :toggle_edits,
-        :next_pane,
-        :prev_pane,
         :split_rows,
         :split_cols,
         :tab_next,
@@ -6014,7 +6012,7 @@ defmodule Geex.Loop do
 
   # Switching and closing buffers need no text either (and work with none active).
   defp verb(action, state)
-       when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane, :prev_pane] or
+       when action in [:buffers, :close, :toggle_edits, :toggle_tree] or
               action in [:find_file] or
               action in [:toggle_mouse, :toggle_preview] or
               action in [:split_rows, :split_cols, :tab_next, :tab_prev] or

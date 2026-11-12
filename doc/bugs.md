@@ -7,6 +7,25 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-12 — Far into a very long line, a word motion or an editing key stalls the key loop
+
+- **Status:** open, found 2026-11-12 by mod-verify's review of ADR-0052 (`editing-keys`).
+  Older than that branch: `Alt+O` on main takes as long.
+- **Symptom:** on one 2 MB line (minified JS or JSON, a log line), with the cursor near its end,
+  `Alt+O`/`Alt+U` take about 0.4 s, and `Alt+8`, the sideways moves and `` Alt+\ `` about as
+  long or longer. Every key waits behind it (ADR-0035).
+- **Verified cause:** `Keymap`'s line helpers (`line_tuple/2`, and `String.at/2` and
+  `String.slice/3` in `matching_bracket/2`) split the cursor's line into graphemes from its start,
+  so a key costs as much as the line up to the cursor. `` Alt+\ ``'s scan past the cursor is
+  bounded (200,000 characters, ADR-0052 §4); the read up to it isn't.
+- **Recommended fix:** read only a window of the line around the cursor (graphemes on each side,
+  up to a budget), giving columns relative to the window's start, which needs the column's byte
+  offset without walking the line: keep it in the Doc, or cache it per line.
+- **Ruled out:** the bracket scan itself, fixed in ADR-0052's review (a pair 2 MB away took
+  1.1–1.3 s; now the scan stops at 200,000 characters, 38 ms).
+
+---
+
 ## BUG-11 — A byte that isn't UTF-8 makes the input go deaf, Ctrl-Q included  ✅ FIXED (2026-11-09)
 
 - **Status:** **FIXED** 2026-11-09 on the branch `editor-assist` (roadmap item 19), at the

@@ -230,6 +230,17 @@ defmodule Geex.Loop.EditingKeysTest do
       assert sel(state) == {{0, 5}, {0, 7}}
     end
 
+    test "a backwards selection stays backwards, its cursor at the text's start", %{dir: dir} do
+      {state, buf} = open(dir, "a.txt", "one two three\n", {0, 13})
+      # Alt+S at the end, then a word back: the cursor before `three`, the anchor after it.
+      state = keys(state, [{:alt, ?s}, {:alt, ?u}])
+      assert sel(state) == {{0, 13}, {0, 8}}
+      state = key(state, {:alt, ?U})
+      assert Buffer.get_text(buf) == "one three two\n"
+      assert sel(state) == {{0, 9}, {0, 4}}
+      assert cursor() == {0, 4}
+    end
+
     test "with no selection, or one across lines, they do nothing", %{dir: dir} do
       {state, buf} = open(dir, "a.txt", "ab cd\nef\n", {0, 1})
 
@@ -244,6 +255,46 @@ defmodule Geex.Loop.EditingKeysTest do
   end
 
   describe "Caps Lock (§8)" do
+    # Alt+Shift+K (Caps Lock with Alt+K), or another move key, does there what the plain key
+    # does, and moves something.
+    defp same_as_plain(state, what, c \\ ?k, moves? \\ true) do
+      plain = key(state, {:alt, c})
+      shifted = key(state, {:alt, c - 32})
+      assert what.(shifted) == what.(plain)
+      if moves?, do: assert(what.(plain) != what.(state))
+    end
+
+    test "in the output pane, the settings view and a preview, a move is its motion", %{dir: dir} do
+      {state, buf} = open(dir, "a.md", Enum.map_join(1..60, &"line #{&1}\n"))
+      before = Buffer.get_text(buf)
+
+      out = Geex.Loop.Output.new("ls", :show, 0) |> Geex.Loop.Output.append("a\nb\nc\n")
+      # The output pane's highlight starts on its last row: up moves it.
+      same_as_plain(%{state | output: out, focus: :output}, & &1.output.sel, ?i)
+
+      same_as_plain(key(state, {:alt, ?y}), & &1.settings)
+
+      preview = state |> Loop.toggle_preview() |> key({:alt, ?>})
+      assert Geex.Loop.Panes.preview?(Geex.Loop.Panes.current(preview.panes))
+      # Its rendering comes later, so there may be nothing to scroll yet; a move it refused would
+      # say the preview is read-only.
+      same_as_plain(preview, &{&1.panes, &1.notice}, ?k, false)
+
+      assert Buffer.get_text(buf) == before
+    end
+
+    test "in the edits pane, a move is its motion", %{dir: dir} do
+      {state, _buf} = open(dir, "a.txt", "x\n")
+
+      for f <- ["b.txt", "c.txt"] do
+        File.write!(Path.join(dir, f), "y\n")
+        Geex.Edits.saved(Path.join(dir, f))
+      end
+
+      _ = Geex.Edits.rows()
+      same_as_plain(%{state | edits_shown: true, focus: :edits, edits_sel: 0}, & &1.edits_sel)
+    end
+
     test "in the command line, the move chords move its cursor as before", %{dir: dir} do
       {state, _buf} = open(dir, "a.txt", "x\n")
       state = key(state, {:alt, ?m})

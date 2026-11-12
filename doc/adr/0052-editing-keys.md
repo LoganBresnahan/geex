@@ -57,26 +57,31 @@ selection of whole lines is what Tab, Shift+Tab, `duplicate` and the moves act o
 **4. `` Alt+\ ``: `matching bracket`.** On a bracket (`(`, `[`, `{` or its closer), or just after
 one, the cursor goes to its pair; elsewhere, to the opening bracket of the nearest pair around it.
 Brackets are counted in the plain text, one kind at a time, so one inside a string or a comment
-counts too (the syntax tree can tell them apart later). It looks at most 10,000 lines each way,
-so a press costs the same in any size of file (ADR-0035). With a selection live it extends, as a
+counts too (the syntax tree can tell them apart later). It looks at most 10,000 lines or 200,000
+characters each way, so a long line (minified code, a log) costs no more than many short ones
+(ADR-0035); a pair farther than that isn't found. The cursor's own line is still read up to the
+cursor, as the word motions read it, so far into a very long line a press is slow (doc/bugs.md). With a selection live it extends, as a
 motion does. The
 parser reads `ESC \` as `` Alt+\ `` outside a terminal's string reply: `ESC \` ends one (ST), and
 the parser reads a reply whole, so outside one nothing else sends it.
 
 **5. `Alt+/`: `comment`.** Comments out the cursor's line or the selection's lines with the file's
 line comment (`#`, `//`, `--`, `;`, `%` …), or takes it off when every non-blank one has it. Adding
-puts `marker ` at the smallest indent among the lines, so they stay aligned; blank lines are left
-alone. Taking off removes the marker and one space after it. The marker comes from a table in
+puts `marker ` after the indent the lines share, so the markers line up: the smallest indent when
+the lines indent alike, and where they part when they mix tabs and spaces (column 0 for one line
+of spaces and one of a tab), so no marker lands inside another line's indent. Blank lines (only
+spaces and tabs, as Tab has it, ADR-0050) are left alone. Taking off removes the marker and one space after it. The marker comes from a table in
 geex keyed by the file's extension and name (`Makefile`, `Dockerfile`), as the typing assists
 read a file's kind (ADR-0045): no grammar need be installed. A language with only block comments (HTML, CSS) or none known says so in a notice and
-changes nothing.
+changes nothing. `.s` (GNU as) takes `#`, `.asm` (NASM) `;`.
 
 **6. `Alt+Shift+I`/`Alt+Shift+K`: `move up`, `move down`.** The cursor's line, or the selection's
 lines, swap with the line above or below. The cursor and the selection move with them. Each line
 keeps its place's ending (a CRLF file stays CRLF). The empty line after a file's final line break
-isn't one to swap with, so a moved line never takes the file's last line break with it; the one
-cost is that the last line of a file with no final line break, moved up past an empty line, leaves
-the file ending in one, and can't be moved straight back.
+isn't one to swap with, so a moved line never takes the file's last line break with it. The one
+cost: in a file with no final line break, a move that leaves an empty line last (the last line
+moved up past an empty line, or a block ending in an empty line moved down past the last line)
+leaves the file ending in a line break, and can't be moved straight back.
 
 **7. `Alt+Shift+J/L/U/O/H/;`: moving selected text sideways.** With a selection on one line, the
 selected text moves within its line:
@@ -85,12 +90,14 @@ selected text moves within its line:
 |---|---|---|
 | `Alt+Shift+J` / `Alt+Shift+L` | `move left` / `move right` | moves one character; the character it passes goes to its other side |
 | `Alt+Shift+U` / `Alt+Shift+O` | `move word back` / `move word forward` | swaps with the word before or after it; what lies between stays |
-| `Alt+Shift+H` / `Alt+Shift+;` | `move to line start` / `move to line end` | goes to the start (after the indent) or the end of the line |
+| `Alt+Shift+H` / `Alt+Shift+;` | `move to line start` / `move to line end` | goes to the start (after the indent) or the end of the line; the text it passes keeps its spacing, the gap between them |
 
 The selection stays on the text, its anchor and cursor ends as they were. With no selection, or
 one across lines, these do nothing. A word is as `Alt+8` has it, space to space; a selection
 inside a word swaps with the word's other part. In `one two three` with `three` selected,
-`Alt+Shift+U` gives `one three two`.
+`Alt+Shift+U` gives `one three two`; in `  foo bar` with `foo` selected, `Alt+Shift+;` gives
+`  bar foo`. Text already after the indent goes no farther. A CRLF line's `\r` is no part of the
+line here: nothing takes it or passes it.
 
 **8. Caps Lock.** A terminal sends `Alt+K` with Caps Lock on as it sends `Alt+Shift+K`. Before
 this, an `Alt+Shift` letter with no binding fell back to the plain letter, so Caps Lock didn't

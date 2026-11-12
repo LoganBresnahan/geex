@@ -470,17 +470,17 @@ defmodule Geex.Loop.Keymap do
   ## loop dispatches what it gives as one recorded edit and moves the cursor and selection.
 
   # Line comments by extension (ADR-0052 §5). HTML, CSS, XML and Markdown have only block
-  # comments and JSON none, so they aren't here.
+  # comments and JSON none, so they aren't here. GNU as (`.s`) takes `#` on x86; NASM (`.asm`) `;`.
   @comment_exts [
     {"#",
      ~w(.ex .exs .py .pyi .rb .sh .bash .zsh .fish .yaml .yml .toml .pl .pm .r .R .conf .cfg .nix
-        .cmake .ps1 .tf .jl .cr .coffee .nim .env .mk .awk .tcl .bzl)},
+        .cmake .ps1 .tf .jl .cr .coffee .nim .env .mk .awk .tcl .bzl .s .S)},
     {"//",
      ~w(.js .mjs .cjs .jsx .ts .mts .cts .tsx .rs .go .c .h .cc .cpp .cxx .hpp .hh .java .kt .kts
         .scala .swift .cs .dart .zig .php .groovy .gleam .proto .scss .less .sol .jsonc .glsl
         .wgsl .odin .v)},
     {"--", ~w(.sql .lua .hs .elm .ada .adb .ads .purs)},
-    {";", ~w(.lisp .el .clj .cljs .cljc .edn .scm .rkt .asm .s .ini)},
+    {";", ~w(.lisp .el .clj .cljs .cljc .edn .scm .rkt .asm .ini)},
     {"%", ~w(.erl .hrl .tex .sty .cls)},
     {"\"", ~w(.vim)}
   ]
@@ -492,6 +492,9 @@ defmodule Geex.Loop.Keymap do
   # How far the matching bracket is looked for, in lines each way, so a press costs the same in
   # any size of file (ADR-0035).
   @bracket_lines 10_000
+  # And at most this many graphemes, so one long line (minified code, a log line) costs no more
+  # than many short ones (mod-verify's review of ADR-0052: a 2 MB line took over a second).
+  @bracket_graphemes 200_000
 
   @bracket_open %{"(" => ")", "[" => "]", "{" => "}"}
   @bracket_close Map.new(@bracket_open, fn {o, c} -> {c, o} end)
@@ -599,7 +602,7 @@ defmodule Geex.Loop.Keymap do
   Comment out lines `first..last` of `text` with `marker` (ADR-0052 §5), or take it off when
   every non-blank one has it: one replace from the first non-blank line to the last, and where
   each changed line changed (`{column, graphemes gained or lost}`), for `comment_caret/2`. Adding
-  puts `marker ` at the smallest indent among the lines; taking off removes the marker and a
+  puts `marker ` after the indent the lines share (the smallest, when they indent alike); taking off removes the marker and a
   space after it. Blank lines are left alone; `nil` when every line is blank.
 
       iex> {cmd, at} = Geex.Loop.Keymap.comment_lines("  a\\n\\n    b\\n", {0, 2}, "#")
@@ -614,7 +617,7 @@ defmodule Geex.Loop.Keymap do
   def comment_lines(text, {first, last}, marker) when first <= last do
     rows = text |> lines() |> Enum.slice(first..last//1) |> Enum.with_index(first)
 
-    case for({l, i} <- rows, String.trim(l) != "", do: {i, l, indent_len(l)}) do
+    case for({l, i} <- rows, not blank_line?(l), do: {i, l, indent_len(l)}) do
       [] ->
         nil
 
@@ -624,7 +627,9 @@ defmodule Geex.Loop.Keymap do
             l |> String.slice(n..-1//1) |> String.starts_with?(marker)
           end)
 
-        at = filled |> Enum.map(&elem(&1, 2)) |> Enum.min()
+        # The indent the lines share, character for character: with mixed tabs and spaces the
+        # marker goes where they part, so no marker lands inside another line's indent.
+        at = filled |> Enum.map(fn {_i, l, n} -> String.slice(l, 0, n) end) |> shared_prefix()
         mlen = String.length(marker)
 
         changes =
@@ -656,6 +661,16 @@ defmodule Geex.Loop.Keymap do
         {replace({a, 0}, {b, String.length(old_last)}, new_text),
          Map.new(changes, fn {i, {col, n, _new}} -> {i, {col, n}} end)}
     end
+  end
+
+  # How many leading graphemes every string in `strings` has in common.
+  defp shared_prefix([first | rest]) do
+    first
+    |> String.graphemes()
+    |> Enum.with_index()
+    |> Enum.find_value(String.length(first), fn {g, k} ->
+      if Enum.any?(rest, &(String.at(&1, k) != g)), do: k
+    end)
   end
 
   @doc """
@@ -755,7 +770,7 @@ defmodule Geex.Loop.Keymap do
   @doc """
   The bracket paired with the one at `cursor`, or just before it; elsewhere, the opening bracket
   of the nearest pair around it (ADR-0052 §4). Counted in the plain text, one kind at a time, up
-  to #{@bracket_lines} lines away. `nil` when there is none.
+  to #{@bracket_lines} lines or #{@bracket_graphemes} characters away. `nil` when there is none.
 
       iex> alias Geex.Loop.Keymap
       iex> Keymap.matching_bracket({0, 3}, "foo(a, [b])")
@@ -770,8 +785,8 @@ defmodule Geex.Loop.Keymap do
   @spec matching_bracket(cursor(), String.t()) :: cursor() | nil
   def matching_bracket({line, col}, text) do
     lt = text |> lines() |> List.to_tuple()
-    gs = line_tuple(text, line)
-    at = fn c -> if c >= 0 and c < tuple_size(gs), do: elem(gs, c) end
+    here = if line < tuple_size(lt), do: String.replace_suffix(elem(lt, line), "\r", ""), else: ""
+    at = fn c -> if c >= 0, do: String.at(here, c) end
 
     cond do
       bracket?(at.(col)) -> pair_of({line, col}, at.(col), lt)
@@ -812,22 +827,40 @@ defmodule Geex.Loop.Keymap do
     |> then(&if(is_tuple(&1), do: &1))
   end
 
-  # The graphemes from `{line, col}` on, and before it backwards, as `{g, line, col}`.
+  # The graphemes from `{line, col}` on, and before it backwards, as `{g, line, col}`, at most
+  # @bracket_graphemes of them. Forward reads each line lazily, so a long line costs only what is
+  # read of it; backward needs a line whole, so it stops at one longer than what is left to read.
   defp graphemes_fwd(lt, {line, col}) do
     last = min(tuple_size(lt) - 1, line + @bracket_lines)
 
-    Stream.flat_map(line..last//1, fn i ->
-      gs = elem(lt, i) |> String.graphemes() |> Enum.with_index()
-      for {g, c} <- gs, i != line or c >= col, do: {g, i, c}
+    line..last//1
+    |> Stream.flat_map(fn i ->
+      elem(lt, i)
+      |> Stream.unfold(&String.next_grapheme/1)
+      |> Stream.with_index()
+      |> Stream.drop(if i == line, do: col, else: 0)
+      |> Stream.map(fn {g, c} -> {g, i, c} end)
     end)
+    |> Stream.take(@bracket_graphemes)
   end
 
   defp graphemes_bwd(lt, {line, col}) do
     first = max(0, line - @bracket_lines)
 
-    Stream.flat_map(line..first//-1, fn i ->
-      gs = elem(lt, i) |> String.graphemes() |> Enum.with_index() |> Enum.reverse()
-      for {g, c} <- gs, i != line or c < col, do: {g, i, c}
+    line..first//-1
+    |> Stream.transform(@bracket_graphemes, fn i, left ->
+      l = elem(lt, i)
+
+      cond do
+        left <= 0 or (byte_size(l) > left * 4 and i != line) ->
+          {:halt, left}
+
+        true ->
+          gs = if i == line, do: l |> String.slice(0, col), else: l
+          gs = gs |> String.graphemes() |> Enum.with_index() |> Enum.reverse()
+          gs = Enum.take(gs, left)
+          {for({g, c} <- gs, do: {g, i, c}), left - length(gs)}
+      end
     end)
   end
 
@@ -882,13 +915,21 @@ defmodule Geex.Loop.Keymap do
           we = skip_fwd(ws, gs, n, &non_space?/1)
           if ws < we, do: {a, we, part.(ws, we) <> part.(b, ws) <> sel, a + (we - b)}
 
+        # To a line end: the text it passes keeps its spacing, the gap going between them, so
+        # `  ab cd` with `cd` becomes `  cd ab`; never past the indent.
         :line_start ->
           indent = skip_fwd(0, gs, n, &space?/1)
-          to = if a > indent, do: indent, else: 0
-          if to < a, do: {to, b, sel <> part.(to, a), to}
+          gap = skip_bwd(a, gs, &space?/1)
+
+          if a > indent do
+            core = if gap > indent, do: part.(indent, gap), else: ""
+            {indent, b, sel <> part.(gap, a) <> core, indent}
+          end
 
         :line_end when b < n ->
-          {a, n, part.(b, n) <> sel, n - len}
+          gap = skip_fwd(b, gs, n, &space?/1)
+          core = part.(gap, n)
+          {a, n, core <> part.(b, gap) <> sel, n - len}
 
         _ ->
           nil
@@ -1320,8 +1361,16 @@ defmodule Geex.Loop.Keymap do
   defp skip_bwd(i, gs, pred),
     do: if(i > 0 and pred.(elem(gs, i - 1)), do: skip_bwd(i - 1, gs, pred), else: i)
 
+  # A line's graphemes, without a CRLF's \r: the cursor stops before it, and no word or move takes
+  # it (mod-verify's review of ADR-0052: Alt+8 and the moves to the right carried it into the line).
   defp line_tuple(text, line),
-    do: text |> lines() |> Enum.at(line, "") |> String.graphemes() |> List.to_tuple()
+    do:
+      text
+      |> lines()
+      |> Enum.at(line, "")
+      |> String.replace_suffix("\r", "")
+      |> String.graphemes()
+      |> List.to_tuple()
 
   defp space?(g), do: g == " " or g == "\t"
   defp non_space?(g), do: not space?(g)

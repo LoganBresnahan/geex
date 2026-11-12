@@ -241,4 +241,10 @@ defmodule Geex.Command.CatalogTest do
       end
     end
   end
+
+  test "the pane commands answer to their plain names (ADR-0051)" do
+    for {typed, name} <- [{"previous pane", "pane prev"}, {"next pane", "pane next"}] do
+      assert Enum.any?(Catalog.all(), &(&1.name == name and typed in &1.aliases)), typed
+    end
+  end
 end
