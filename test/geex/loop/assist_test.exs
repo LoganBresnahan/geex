@@ -108,7 +108,7 @@ defmodule Geex.Loop.AssistTest do
       dir: dir
     } do
       {state, buf} = open(state, dir, "e.txt", "say hello now", {0, 4})
-      state = Enum.reduce([{:alt, ?h} | List.duplicate({:alt, ?d}, 5)], state, &key(&2, &1))
+      state = Enum.reduce([{:alt, ?s} | List.duplicate({:alt, ?l}, 5)], state, &key(&2, &1))
       state = type(state, "\"")
       assert text(buf) == "say \"hello\" now"
 
@@ -196,7 +196,7 @@ defmodule Geex.Loop.AssistTest do
 
     test "replaces a selection; into the minibuffer, its first line", %{state: state, dir: dir} do
       {state, buf} = open(state, dir, "q.txt", "abc", {0, 0})
-      state = Enum.reduce([{:alt, ?h}, {:alt, ?d}], state, &key(&2, &1))
+      state = Enum.reduce([{:alt, ?s}, {:alt, ?l}], state, &key(&2, &1))
       state = key(state, {:paste, "XY"})
       assert text(buf) == "XYbc"
 
@@ -233,12 +233,12 @@ defmodule Geex.Loop.AssistTest do
       assert text(js) == "css`color: red;`"
     end
 
-    test "#5: with Alt+H's selection live, a closer is typed, not stepped over", %{
+    test "#5: with Alt+S's selection live, a closer is typed, not stepped over", %{
       state: state,
       dir: dir
     } do
       {state, buf} = open(state, dir, "r5.ex", "f(a)", {0, 3})
-      state = state |> key({:alt, ?h}) |> type(")")
+      state = state |> key({:alt, ?s}) |> type(")")
       assert state.selection == nil
       # Typed where the cursor was, before the `)` already there.
       type(state, ";")
@@ -357,7 +357,7 @@ defmodule Geex.Loop.AssistTest do
 
     test "#2: a wrap keeps its selection, so a second wraps again", %{state: state, dir: dir} do
       {state, buf} = open(state, dir, "v2.txt", "say hello now", {0, 4})
-      state = Enum.reduce([{:alt, ?h} | List.duplicate({:alt, ?d}, 5)], state, &key(&2, &1))
+      state = Enum.reduce([{:alt, ?s} | List.duplicate({:alt, ?l}, 5)], state, &key(&2, &1))
       state = type(state, "\"")
       assert state.selection != nil
       type(state, "(")

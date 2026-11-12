@@ -372,7 +372,7 @@ defmodule Geex.HistoryTest do
       {1, tuple({constant(:attest), member_of(["s1", "s2"]), non_negative_integer()})},
       {1, constant(:sync)},
       # Roadmap item 18.2's review: an edit that removes text, and a revert (a group with no
-      # baseline, `Buffer`'s Alt+U / revert-call path).
+      # baseline, `Buffer`'s Alt+R / revert-call path).
       {1,
        tuple({constant(:delete), non_negative_integer(), non_negative_integer(), Gen.actor()})},
       {1, tuple({constant(:revert), non_negative_integer(), member_of([:hunk, :call])})}

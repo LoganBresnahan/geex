@@ -121,7 +121,7 @@ defmodule Geex.BuffersTest do
     test "`open PATH` keeps the path's case; `buffers`, `close`" do
       assert Verbs.parse("open lib/Geex/Foo.ex") == {:open, "lib/Geex/Foo.ex"}
       assert Verbs.parse("  OPEN   ~/My File.txt ") == {:open, "~/My File.txt"}
-      # `open` alone and `find` are the file finder (Alt+O, ADR-0037)
+      # `open` alone and `find` are the file finder (Alt+F, ADR-0037)
       assert Verbs.parse("open") == {:action, :find_file}
       assert Verbs.parse("find") == {:action, :find_file}
       assert Verbs.parse("buffers") == {:action, :buffers}

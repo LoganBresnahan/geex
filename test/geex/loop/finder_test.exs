@@ -1,5 +1,5 @@
 defmodule Geex.Loop.FinderTest do
-  # Alt+O, the file finder (ADR-0028's 2026-10-17 amendment), through the loop's own
+  # Alt+F, the file finder (ADR-0028's 2026-10-17 amendment), through the loop's own
   # handle_info/2 with no terminal: the files are read and searched in processes of their own,
   # and their answers are delivered here as the loop would get them. Sets the global Session's
   # start, so not async.
@@ -43,9 +43,9 @@ defmodule Geex.Loop.FinderTest do
     state
   end
 
-  defp finder(width \\ 60), do: key(Loop.new_state(width, 30), {:alt, ?o})
+  defp finder(width \\ 60), do: key(Loop.new_state(width, 30), {:alt, ?f})
 
-  test "Alt+O reads the files in the background; a blank query lists them in order" do
+  test "Alt+F reads the files in the background; a blank query lists them in order" do
     state = finder()
     assert %Minibuffer{mode: :files} = state.minibuffer
     assert {_pid, _ref} = state.tree.reading
@@ -64,7 +64,7 @@ defmodule Geex.Loop.FinderTest do
     assert state.finder.matching == nil
     assert state.finder.matches == ["lib/loop.ex", "lib/loop/keymap.ex"]
 
-    state = state |> key({:alt, ?s}) |> key({:key, :enter})
+    state = state |> key({:alt, ?k}) |> key({:key, :enter})
     assert state.minibuffer.mode == :inactive
     assert state.focus == :editor
     assert {:ok, %{path: path}} = Session.snapshot()

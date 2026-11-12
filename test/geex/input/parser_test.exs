@@ -92,6 +92,11 @@ defmodule Geex.Input.ParserTest do
       assert {[{:alt, ?d}, {:char, "x"}], ""} = Parser.parse("\edx")
     end
 
+    test "ESC ; is Alt+;, line end's key (ADR-0049)" do
+      assert Parser.parse("\e;") == {[{:alt, ?;}], ""}
+      assert Parser.parse("\e;x") == {[{:alt, ?;}, {:char, "x"}], ""}
+    end
+
     test "CSI still wins over Alt (the `[` is not a letter)" do
       assert {[{:key, :up}], ""} = Parser.parse("\e[A")
     end

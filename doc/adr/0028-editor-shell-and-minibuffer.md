@@ -1,7 +1,7 @@
 # ADR-0028: The editor shell — screen regions, the minibuffer, and the buffer/view/pane model
 
 - **Status:** Accepted. **Keys amended** 2026-10-17 by [ADR-0037](0037-pane-and-file-keys.md):
-  the palette is `Alt+I` (`Alt+P` is now the next pane). **Amended 2026-11-09 (recorded 2026-11-10):** catalog entries carry `usage` and `aliases`, and the catalog covers every typed verb (for `Alt+Y`'s Commands tab). **Amended 2026-11-11 by [ADR-0047](0047-every-key-runs-a-named-command.md):** parity is per key now: every key runs a named command, typed in `Alt+M`. **Amended** 2026-10-17: the file finder
+  the palette is `Alt+I` (`Alt+P` is now the next pane). **Amended 2026-11-09 (recorded 2026-11-10):** catalog entries carry `usage` and `aliases`, and the catalog covers every typed verb (for `Alt+Y`'s Commands tab). **Amended 2026-11-11 by [ADR-0047](0047-every-key-runs-a-named-command.md):** parity is per key now: every key runs a named command, typed in `Alt+M`. **Amended 2026-11-11 by [ADR-0049](0049-ijkl-default-keys.md):** `Alt+N` no longer closes the minibuffer; Esc and `no` do. **Amended** 2026-10-17: the file finder
   is built (`Alt+O`). Tabs and splits built 2026-10-17 by
   [ADR-0038](0038-split-panes-and-tabs.md).
 - **Date:** 2026-06-08
@@ -265,6 +265,11 @@ matches well (each word of the query starts a word of the name, in order), then 
 the key the query names (`enter`, `alt+k`), then every other match, as before. `Geex.Fuzzy` is
 unchanged and orders within a band. The names line up at the longest one listed, as the buffer
 and file lists already did.
+
+## Amendment (2026-11-11): `Alt+N` leaves the exit convention ([ADR-0049](0049-ijkl-default-keys.md))
+
+§1's three ways out are two: Esc and the typed `no`. `Alt+N` is no longer bound to `no`; the key
+is kept for find's next match. A remapped chord bound to `no` still closes the command line.
 
 ## See
 

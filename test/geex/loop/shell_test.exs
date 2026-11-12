@@ -144,7 +144,7 @@ defmodule Geex.Loop.ShellTest do
     test "`stop` picked in the palette stops it too", %{root: root} do
       {state, _} = editing(Path.join(root, "notes.txt"))
       state = typed(state, "!echo go; sleep 30")
-      state = state |> key({:alt, ?i}) |> type("stop") |> key({:key, :enter})
+      state = state |> key({:alt, ?b}) |> type("stop") |> key({:key, :enter})
       assert state.shell.stopping
       assert ran(state).output.status == {:exit, 143}
     end

@@ -106,14 +106,14 @@ defmodule Geex.Loop do
   # Most candidate rows the command palette (ADR-0028 §3) shows at once; a longer match list
   # scrolls to keep the highlighted row in view. The column the command name is padded to.
   @palette_rows 8
-  # The most files the finder (Alt+O) keeps for a query: far more than the popup shows at once.
+  # The most files the finder (Alt+F) keeps for a query: far more than the popup shows at once.
   @finder_limit 100
 
   # The minibuffer modes with a candidate popup.
   @pickers [:palette, :buffers, :files]
 
   # The status line's mark for a buffer behind its file on disk; a click on it fast-forwards.
-  @behind "behind disk (Alt+J)"
+  @behind "behind disk (Alt+D)"
 
   ## Public API
 
@@ -431,7 +431,7 @@ defmodule Geex.Loop do
       recall: %{command: Recall.new(), grid: Recall.new()},
       history_file: nil,
       # The edits pane (ADR-0034 §6): shown at start when the terminal has 20 rows; `edits`
-      # toggles it (Alt+L). `focus` is where keys go (`Alt+P`); `edits_sel` its highlighted entry.
+      # toggles it (Alt+E). `focus` is where keys go (`Alt+P`); `edits_sel` its highlighted entry.
       edits_shown: h >= 20,
       focus: :editor,
       edits_sel: 0,
@@ -462,7 +462,7 @@ defmodule Geex.Loop do
         made: MapSet.new(),
         want: nil
       },
-      # The file finder (Alt+O, `:files` minibuffer mode): the best paths for the typed query;
+      # The file finder (Alt+F, `:files` minibuffer mode): the best paths for the typed query;
       # `matching` the search's `{pid, monitor}` until they arrive; `submit` when Enter came
       # first, so the top match opens on arrival.
       finder: %{matches: [], matching: nil, submit: false},
@@ -1025,7 +1025,7 @@ defmodule Geex.Loop do
 
   defp source_key(event, state) do
     # The scroll the mouse set holds until a key acts on the text (ADR-0039): even one that
-    # doesn't move the cursor (Delete, Alt+H) should show where it acts.
+    # doesn't move the cursor (Delete, Alt+S) should show where it acts.
     state = %{state | panes: Panes.update_current(state.panes, &%{&1 | hold: nil})}
 
     case safe_session_snapshot() do
@@ -1243,7 +1243,7 @@ defmodule Geex.Loop do
     %{state | selection: nil, goal: 0, drag: nil, closers: nil}
   end
 
-  # The only pane lost its only buffer some other way than Alt+K (an agent closed it, it
+  # The only pane lost its only buffer some other way than Alt+W (an agent closed it, it
   # crashed): show another open buffer, or a new scratch one, as `close_active/0` would.
   defp fallback(state, dead) do
     next =
@@ -2089,7 +2089,7 @@ defmodule Geex.Loop do
 
   # The pointer moved with a handle held: put the edge under it. Stored as laid out (clamped), so
   # a later terminal resize starts from what you see.
-  # A panel hidden while its edge was held (Alt+T, Alt+L) ends the drag, keeping its size.
+  # A panel hidden while its edge was held (Alt+T, Alt+E) ends the drag, keeping its size.
   defp resize_to(%{resizing: %{target: :tree}} = state, x, _y) do
     case layout(%{state | tree_w: x + 1}).tree do
       nil -> stop_drag(state)
@@ -2238,7 +2238,7 @@ defmodule Geex.Loop do
     end
   end
 
-  # A press on a pane's tab bar: a tab shows it, a tab's `×` closes it (as Alt+K does, refused
+  # A press on a pane's tab bar: a tab shows it, a tab's `×` closes it (as Alt+W does, refused
   # with unsaved edits), the pane's `×` closes the pane. Each focuses the pane first.
   defp tab_bar_press(state, id, rect, x) do
     pane = state.panes.panes[id]
@@ -2292,7 +2292,7 @@ defmodule Geex.Loop do
 
   # The pane's `×` (ADR-0039): close the pane and its tabs. Refused while one of its tabs holds the
   # only copy of a buffer with unsaved edits; the only pane never closes. A buffer no other pane
-  # has closes with it, as Alt+K's does.
+  # has closes with it, as Alt+W's does.
   defp close_pane(state, id) do
     tabs = state.panes.panes[id].tabs
 
@@ -2374,7 +2374,7 @@ defmodule Geex.Loop do
     %{state | focus: :output, output: out}
   end
 
-  # A press on the status line's "behind disk (Alt+J)": fast-forward.
+  # A press on the status line's "behind disk (Alt+D)": fast-forward.
   defp status_press(state, x) do
     with {:ok, %{behind: behind} = snap} when behind not in [nil, false] <-
            safe_session_snapshot(),
@@ -2856,7 +2856,7 @@ defmodule Geex.Loop do
     |> Screen.draw_text(
       rect.x + 1,
       rect.y + 2,
-      palette_clip("no file (Alt+O opens one)", rect.w - 1),
+      palette_clip("no file (Alt+F opens one)", rect.w - 1),
       %Cell{
         fg: pal.line_number,
         bg: pal.bg
@@ -3015,8 +3015,8 @@ defmodule Geex.Loop do
 
   # The command-palette popup (ADR-0028 §3): the fuzzy candidate list, drawn over the rows
   # directly **above** the minibuffer input row. The list reads top-to-bottom (best match at
-  # the top of the block); pressing Alt+S moves the highlight *down on screen* toward the
-  # input, Alt+W up — the on-screen direction matches the editor's own up/down. The highlighted
+  # the top of the block); pressing Alt+K moves the highlight *down on screen* toward the
+  # input, Alt+I up — the on-screen direction matches the editor's own up/down. The highlighted
   # row takes the active-line tint (the same the input row wears), so eye + Enter agree.
   defp draw_palette(screen, %{minibuffer: %Minibuffer{mode: mode} = mb} = state)
        when mode in [:palette, :buffers, :files] do
@@ -3596,7 +3596,7 @@ defmodule Geex.Loop do
     {Finder.pack(files), Tree.put_dirs(Tree.index(files), made)}
   end
 
-  # Search the files for the finder's query (Alt+O), in a process of its own: the list can be
+  # Search the files for the finder's query (Alt+F), in a process of its own: the list can be
   # huge (ADR-0035). The previous search is dropped first, so only the newest query's answer
   # counts. A blank query lists the files in order, which costs nothing. No list yet: the
   # tree's read is on its way, and its answer calls this again.
@@ -3647,7 +3647,7 @@ defmodule Geex.Loop do
 
     case panes do
       [{:file, _}] ->
-        %{state | notice: "no other pane: the tree and edits pane are hidden (Alt+T, Alt+L)"}
+        %{state | notice: "no other pane: the tree and edits pane are hidden (Alt+T, Alt+E)"}
 
       _ ->
         here =
@@ -3685,7 +3685,7 @@ defmodule Geex.Loop do
 
   # Keys while the tree has focus: up and down move, Enter opens a file or opens/closes a
   # directory, right opens one, left closes one (or, on a file, goes up to its directory), Esc
-  # goes back. The motion commands are whatever keys run them (the arrows, Alt+W/A/S/D). The
+  # goes back. The motion commands are whatever keys run them (the arrows, Alt+I/J/K/L). The
   # panel chords work as in the edits pane (`panel_chord/2`); other keys do nothing.
   defp apply_tree_key(event, state) do
     # A key shows the highlighted row again, wherever the wheel left the list (ADR-0039).
@@ -3937,7 +3937,7 @@ defmodule Geex.Loop do
       %{state | shell: shell, notice: "running | #{cmd} (Ctrl-G stops it)"}
     else
       true -> %{state | notice: @needs_tty}
-      _ -> %{state | notice: "| needs a selection to pipe (Alt+H starts one)"}
+      _ -> %{state | notice: "| needs a selection to pipe (Alt+S starts one)"}
     end
   end
 
@@ -4966,7 +4966,7 @@ defmodule Geex.Loop do
       {:tab, i} ->
         schedule_repaint(switch(state, &Panes.select(&1, i)))
 
-      # Alt+O (ADR-0037): the file finder over the root's files, read again in the background
+      # Alt+F (ADR-0037): the file finder over the root's files, read again in the background
       # so new files show up. With no root (geex started on nothing), the minibuffer, ready for
       # `open PATH`.
       :find_file ->
@@ -5083,7 +5083,7 @@ defmodule Geex.Loop do
     end
   end
 
-  # Alt+K / `close` (ADR-0038): close the current tab. A buffer still in another tab or pane stays
+  # Alt+W / `close` (ADR-0038): close the current tab. A buffer still in another tab or pane stays
   # open; otherwise the buffer closes too, refused while it has unsaved edits. The pane then shows
   # the tab before; a pane left with none closes, unless it is the only one, which shows the
   # buffer before (Session's `close_active/0`, a new scratch buffer when none is left).
@@ -5143,7 +5143,7 @@ defmodule Geex.Loop do
     %{state | notice: notice}
   end
 
-  # Take in what the disk holds now (Alt+J / `fast-forward`, ADR-0034 §1). The buffer's change
+  # Take in what the disk holds now (Alt+D / `fast-forward`, ADR-0034 §1). The buffer's change
   # notification repaints; a merge with conflicts sends its own notice.
   defp do_fast_forward(state) do
     notice =
@@ -5196,7 +5196,7 @@ defmodule Geex.Loop do
   ## recorded delete; paste = a recorded insert (or replace, over a selection) baking the
   ## literal text. All consume + clear the selection.
 
-  # A collapsed selection (e.g. Alt+H with no motion yet) selects nothing — copy/cut are
+  # A collapsed selection (e.g. Alt+S with no motion yet) selects nothing — copy/cut are
   # no-ops that leave you in highlight mode, never pushing "" or recording a no-op delete.
   defp do_copy(%{selection: nil} = state, _text), do: state
 
@@ -5463,7 +5463,7 @@ defmodule Geex.Loop do
   end
 
   # A y/n question before a file operation (`Geex.Loop.FileOps`): `y` runs it; `n`, Enter, Esc
-  # and `no` (Alt+N) don't. Other keys wait for an answer; quitting still quits.
+  # and `no` don't. Other keys wait for an answer; quitting still quits.
   defp apply_minibuffer_key(event, %{minibuffer: %Minibuffer{mode: :confirm}} = state) do
     case event do
       {:char, c} when c in ["y", "Y"] ->
@@ -5484,7 +5484,7 @@ defmodule Geex.Loop do
     end
   end
 
-  # Keys while the minibuffer is open go to its input; Enter submits, Esc / `no` (Alt+N)
+  # Keys while the minibuffer is open go to its input; Enter submits, Esc / `no`
   # cancels, and quitting still quits (so you are never trapped). Everything else is ignored.
   #
   # The motion commands are the editor's (ADR-0047), whatever keys run them: in a picker, up and
@@ -5646,7 +5646,7 @@ defmodule Geex.Loop do
   defp pick(%{invoke: invoke}, state), do: dispatch_palette(invoke, state)
   defp pick(nil, state), do: close_minibuffer(state)
 
-  # Move the palette highlight by `delta` (Alt+W/S, arrows), **wrapping** at the ends so a long
+  # Move the palette highlight by `delta` (Alt+I/K, arrows), **wrapping** at the ends so a long
   # list cycles. Clamp against the *current* candidate count (the filter may have narrowed it);
   # an empty list leaves `sel` untouched.
   defp move_palette(%{minibuffer: mb} = state, delta) do

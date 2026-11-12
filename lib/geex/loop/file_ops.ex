@@ -212,7 +212,7 @@ defmodule Geex.Loop.FileOps do
 
   defp unsaved_hint(full) do
     if Geex.BufferSupervisor.whereis(full) != :error,
-      do: " (it was never saved: close it with Alt+K)",
+      do: " (it was never saved: close it with Alt+W)",
       else: ""
   end
 end

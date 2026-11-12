@@ -48,7 +48,7 @@ defmodule Geex.Loop.VerbsTest do
       assert Verbs.parse("redo") == {:action, :redo}
     end
 
-    test "selection verbs (= Alt+H / Alt+B, ADR-0029)" do
+    test "selection verbs (= Alt+S / Alt+A, ADR-0029)" do
       assert Verbs.parse("highlight") == {:action, :select_start}
       assert Verbs.parse("select") == {:action, :select_start}
       assert Verbs.parse("highlight all") == {:action, :select_all}
@@ -106,7 +106,7 @@ defmodule Geex.Loop.VerbsTest do
   end
 
   describe "parse/1 — cancel and unknown" do
-    test "`no` is the true Alt+N twin (clears a selection); an empty line cancels" do
+    test "`no` is the true Esc twin (clears a selection); an empty line cancels" do
       assert Verbs.parse("no") == {:action, :select_clear}
       assert Verbs.parse("") == :cancel
       assert Verbs.parse("   ") == :cancel

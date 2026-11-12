@@ -19,7 +19,7 @@ defmodule Geex.Tree.Watcher do
 
   The watch is one `:file_system` worker (`inotifywait`) over every directory. When the set
   changes, a new worker starts before the old one stops, so nothing falls in between. If the
-  backend is missing (`inotify-tools`), the tree is re-read only on `Alt+O`/`Alt+T`, as before,
+  backend is missing (`inotify-tools`), the tree is re-read only on `Alt+F`/`Alt+T`, as before,
   and the log says so once. A root with more than 4096 such directories is watched at the root
   and its own subdirectories only.
   """
@@ -131,7 +131,7 @@ defmodule Geex.Tree.Watcher do
     if state.failures <= 2 do
       if state.notify, do: send(state.notify, {:geex_tree_changed, state.root})
     else
-      Logger.warning("geex tree: the file watch keeps stopping; new files show on Alt+O")
+      Logger.warning("geex tree: the file watch keeps stopping; new files show on Alt+F")
     end
 
     {:noreply, state}
@@ -216,7 +216,7 @@ defmodule Geex.Tree.Watcher do
           unless state.warned do
             Logger.warning(
               "geex tree: can't watch #{state.root} (#{inspect(other)}); " <>
-                "new files show on Alt+O or Alt+T"
+                "new files show on Alt+F or Alt+T"
             )
           end
 

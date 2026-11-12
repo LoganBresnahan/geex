@@ -153,6 +153,12 @@ the `delete` command first; `enter`, which names no command, finds Enter's. Foun
 entry for several commands is the one that key runs (`alt+5` is `tab 5`). §2's `newline` is named
 `line break`, with `newline` kept as an alias; the command (`:newline`) and its key don't change.
 
+## Amendment (2026-11-11): the defaults change ([ADR-0049](0049-ijkl-default-keys.md))
+
+The first change of defaults this decision was for: motion moves to the right hand's IJKL
+cluster, and the commands that had keys there move to the left hand. §2's table keeps the keys
+as they were when it was written; `Bindings.defaults/0` and ADR-0049 have the current ones.
+
 ## See
 
 - `lib/geex/loop/bindings.ex` (the table, `translate/2`, the labels), `lib/geex/loop/keymap.ex`

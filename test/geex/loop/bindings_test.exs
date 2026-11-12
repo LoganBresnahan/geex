@@ -29,7 +29,7 @@ defmodule Geex.Loop.BindingsTest do
   defp event do
     one_of([
       tuple({constant(:alt), one_of([integer(?a..?z), integer(?A..?Z), integer(?0..?9)])}),
-      tuple({constant(:alt), member_of([:up, :down, :left, :right, ?-, ?=, ?,, ?.])}),
+      tuple({constant(:alt), member_of([:up, :down, :left, :right, ?-, ?=, ?,, ?., ?;])}),
       tuple({constant(:ctrl), integer(?a..?z)}),
       tuple(
         {constant(:key),
@@ -129,31 +129,30 @@ defmodule Geex.Loop.BindingsTest do
       end
     end
 
-    test "the keys geex had before ADR-0047 run what they ran" do
+    test "the default keys: IJKL and the right hand moves, the left hand's commands (ADR-0049)" do
       expected = %{
-        {:alt, ?w} => :up,
-        {:alt, ?a} => :left,
-        {:alt, ?s} => :down,
-        {:alt, ?d} => :right,
-        {:alt, ?q} => :word_back,
-        {:alt, ?e} => :word_forward,
-        {:alt, ?r} => :line_start,
-        {:alt, ?f} => :line_end,
+        {:alt, ?i} => :up,
+        {:alt, ?j} => :left,
+        {:alt, ?k} => :down,
+        {:alt, ?l} => :right,
+        {:alt, ?u} => :word_back,
+        {:alt, ?o} => :word_forward,
+        {:alt, ?h} => :line_start,
+        {:alt, ?;} => :line_end,
         {:key, :home} => :line_start,
         {:key, :end} => :line_end,
         {:alt, ?m} => :minibuffer,
         {:alt, ?g} => :grid,
-        {:alt, ?i} => :palette,
+        {:alt, ?b} => :palette,
         {:alt, ?y} => :settings,
-        {:alt, ?u} => :revert_hunk,
-        {:alt, ?o} => :find_file,
-        {:alt, ?k} => :close,
+        {:alt, ?r} => :revert_hunk,
+        {:alt, ?f} => :find_file,
+        {:alt, ?w} => :close,
         {:alt, ?t} => :toggle_tree,
-        {:alt, ?l} => :toggle_edits,
-        {:alt, ?j} => :fast_forward,
-        {:alt, ?h} => :select_start,
-        {:alt, ?b} => :select_all,
-        {:alt, ?n} => :select_clear,
+        {:alt, ?e} => :toggle_edits,
+        {:alt, ?d} => :fast_forward,
+        {:alt, ?s} => :select_start,
+        {:alt, ?a} => :select_all,
         {:alt, ?c} => :copy,
         {:alt, ?x} => :cut,
         {:alt, ?v} => :paste,
@@ -173,11 +172,15 @@ defmodule Geex.Loop.BindingsTest do
 
       for {chord, command} <- expected,
           do: assert(Bindings.translate(chord, @defaults) == {:cmd, command}, inspect(chord))
+
+      # Alt+Q and Alt+N are kept for find (ADR-0049 §2a), unbound until find is built; Esc
+      # clears a selection.
+      for c <- [?q, ?Q, ?n, ?N], do: assert(Bindings.translate({:alt, c}, @defaults) == {:alt, c})
     end
 
     test "the defaults bind no key twice" do
       assert Bindings.bound_twice(Bindings.default_list()) == []
-      assert Bindings.bound_twice([{:up, [{:alt, ?w}]}, {:copy, [{:alt, ?w}]}]) == [{:alt, ?w}]
+      assert Bindings.bound_twice([{:up, [{:alt, ?i}]}, {:copy, [{:alt, ?i}]}]) == [{:alt, ?i}]
     end
 
     test "each key is written as a person reads it" do
@@ -197,7 +200,7 @@ defmodule Geex.Loop.BindingsTest do
         {:key, :left} => "←",
         {:key, :right} => "→",
         {:alt, :right} => "Alt+→",
-        {:alt, ?q} => "Alt+Q",
+        {:alt, ?u} => "Alt+U",
         {:alt, ?P} => "Alt+Shift+P",
         {:alt, ?-} => "Alt+-",
         {:alt, ?9} => "Alt+9",
@@ -252,9 +255,9 @@ defmodule Geex.Loop.BindingsTest do
   end
 
   test "labels/3 follows the bindings it is given" do
-    moved = @defaults |> Map.delete({:alt, ?w}) |> Map.put({:alt, ?i}, :up)
-    assert Bindings.labels(moved, [:up]) == "Alt+I ↑"
+    moved = @defaults |> Map.delete({:alt, ?i}) |> Map.put({:alt, ?b}, :up)
+    assert Bindings.labels(moved, [:up]) == "Alt+B ↑"
     assert Bindings.labels(moved, [:palette]) == ""
-    assert Bindings.labels(@defaults, [:newline, :select_clear]) == "Enter  Alt+N Esc"
+    assert Bindings.labels(@defaults, [:newline, :select_clear]) == "Enter  Esc"
   end
 end

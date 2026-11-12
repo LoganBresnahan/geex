@@ -27,35 +27,34 @@ defmodule Geex.Loop.Bindings do
   # covers Alt+Shift+letter too (`translate/2`, Caps Lock); the two Shift chords listed are the
   # ones that mean something else.
   @defaults [
-              # Motion (ADR-0026): the arrows and the left-hand cluster.
-              {:up, [{:alt, ?w}, {:key, :up}]},
-              {:left, [{:alt, ?a}, {:key, :left}]},
-              {:down, [{:alt, ?s}, {:key, :down}]},
-              {:right, [{:alt, ?d}, {:key, :right}]},
-              {:word_back, [{:alt, ?q}]},
-              {:word_forward, [{:alt, ?e}]},
-              {:line_start, [{:alt, ?r}, {:key, :home}]},
-              {:line_end, [{:alt, ?f}, {:key, :end}]},
+              # Motion (ADR-0026, ADR-0049): the arrows and the right hand's IJKL cluster.
+              {:up, [{:alt, ?i}, {:key, :up}]},
+              {:left, [{:alt, ?j}, {:key, :left}]},
+              {:down, [{:alt, ?k}, {:key, :down}]},
+              {:right, [{:alt, ?l}, {:key, :right}]},
+              {:word_back, [{:alt, ?u}]},
+              {:word_forward, [{:alt, ?o}]},
+              {:line_start, [{:alt, ?h}, {:key, :home}]},
+              {:line_end, [{:alt, ?;}, {:key, :end}]},
               {:page_up, [{:key, :page_up}]},
               {:page_down, [{:key, :page_down}]},
               # Selection (ADR-0029) and the clipboard (ADR-0015).
-              {:select_start, [{:alt, ?h}]},
-              {:select_all, [{:alt, ?b}]},
-              {:select_clear, [{:alt, ?n}]},
+              {:select_start, [{:alt, ?s}]},
+              {:select_all, [{:alt, ?a}]},
               {:copy, [{:alt, ?c}]},
               {:cut, [{:alt, ?x}]},
               {:paste, [{:alt, ?v}]},
               # History (ADR-0031, ADR-0033 §7) and the file (ADR-0019, ADR-0034).
               {:undo, [{:alt, ?z}]},
               {:redo, [{:alt, ?Z}]},
-              {:revert_hunk, [{:alt, ?u}]},
+              {:revert_hunk, [{:alt, ?r}]},
               {:save, [{:ctrl, ?o}]},
-              {:fast_forward, [{:alt, ?j}]},
+              {:fast_forward, [{:alt, ?d}]},
               # Files and panes (ADR-0037, ADR-0038, ADR-0043).
-              {:find_file, [{:alt, ?o}]},
-              {:close, [{:alt, ?k}]},
+              {:find_file, [{:alt, ?f}]},
+              {:close, [{:alt, ?w}]},
               {:toggle_tree, [{:alt, ?t}]},
-              {:toggle_edits, [{:alt, ?l}]},
+              {:toggle_edits, [{:alt, ?e}]},
               {:next_pane, [{:alt, ?p}]},
               {:toggle_preview, [{:alt, ?P}]},
               {:split_rows, [{:alt, ?-}]},
@@ -75,7 +74,7 @@ defmodule Geex.Loop.Bindings do
                 {{:resize, :right}, [{:alt, :right}]},
                 # The command surfaces (ADR-0027, ADR-0028, ADR-0040, ADR-0042).
                 {:minibuffer, [{:alt, ?m}]},
-                {:palette, [{:alt, ?i}]},
+                {:palette, [{:alt, ?b}]},
                 {:grid, [{:alt, ?g}]},
                 {:settings, [{:alt, ?y}]},
                 {:stop_shell, [{:ctrl, ?g}]},
@@ -142,9 +141,9 @@ defmodule Geex.Loop.Bindings do
   once.
 
       iex> b = Geex.Loop.Bindings.defaults()
-      iex> Geex.Loop.Bindings.translate({:alt, ?w}, b)
+      iex> Geex.Loop.Bindings.translate({:alt, ?i}, b)
       {:cmd, :up}
-      iex> Geex.Loop.Bindings.translate({:alt, ?K}, b)
+      iex> Geex.Loop.Bindings.translate({:alt, ?W}, b)
       {:cmd, :close}
       iex> Geex.Loop.Bindings.translate({:alt, ?Z}, b)
       {:cmd, :redo}
@@ -194,7 +193,7 @@ defmodule Geex.Loop.Bindings do
   focused view's own key that does the same in the editor (Enter for `line break`, Esc for `no`).
 
       iex> Geex.Loop.Bindings.shown_keys(Geex.Loop.Bindings.defaults(), :select_clear)
-      [{:alt, ?n}, {:key, :esc}]
+      [{:key, :esc}]
   """
   @spec shown_keys(t(), command()) :: [chord() | {:key, atom()}]
   def shown_keys(bindings, command) do
@@ -222,11 +221,11 @@ defmodule Geex.Loop.Bindings do
   defp kind(_key), do: 3
 
   @doc """
-  How `chord` is written for a person: `Alt+W`, `Alt+Shift+Z`, `Ctrl-O`, `Alt+↑`, `Home`.
+  How `chord` is written for a person: `Alt+I`, `Alt+;`, `Alt+Shift+Z`, `Ctrl-O`, `Alt+↑`, `Home`.
 
-      iex> Enum.map([{:alt, ?w}, {:alt, ?Z}, {:alt, ?1}, {:alt, :left}, {:ctrl, ?o}, {:key, :page_up}],
+      iex> Enum.map([{:alt, ?i}, {:alt, ?;}, {:alt, ?Z}, {:alt, ?1}, {:alt, :left}, {:ctrl, ?o}, {:key, :page_up}],
       ...>   &Geex.Loop.Bindings.label/1)
-      ["Alt+W", "Alt+Shift+Z", "Alt+1", "Alt+←", "Ctrl-O", "PgUp"]
+      ["Alt+I", "Alt+;", "Alt+Shift+Z", "Alt+1", "Alt+←", "Ctrl-O", "PgUp"]
   """
   @spec label(chord() | {:key, atom()}) :: String.t()
   def label({:alt, c}) when c in ?a..?z, do: "Alt+" <> <<c - 32>>
@@ -253,14 +252,14 @@ defmodule Geex.Loop.Bindings do
   defp arrow(:right), do: "→"
 
   @doc """
-  Whether `query` names one of the keys of `commands`, whole: `alt+k` finds `close`, `alt+5` finds
-  tab 5 (its own key, not the range the help writes), `alt+s` finds `down` and not
+  Whether `query` names one of the keys of `commands`, whole: `alt+w` finds `close`, `alt+5` finds
+  tab 5 (its own key, not the range the help writes), `alt+s` finds `highlight` and not
   `Alt+Shift+Z`. Case and spaces don't matter, `ctrl+o` is `Ctrl-O`, and `alt+left` is `Alt+←`.
   A bare key counts too (`enter`, `home`): the palette ranks a command named like a key above
   the key's (ADR-0048), so `delete` is still the `delete` command first.
 
       iex> b = Geex.Loop.Bindings.defaults()
-      iex> {Geex.Loop.Bindings.names_key?(b, [:close], "alt+k"), Geex.Loop.Bindings.names_key?(b, [:redo], "alt+s")}
+      iex> {Geex.Loop.Bindings.names_key?(b, [:close], "alt+w"), Geex.Loop.Bindings.names_key?(b, [:redo], "alt+s")}
       {true, false}
       iex> Geex.Loop.Bindings.names_key?(b, [{:tab, 4}], " Alt+5 ")
       true
@@ -316,7 +315,7 @@ defmodule Geex.Loop.Bindings do
       iex> Geex.Loop.Bindings.labels(b, [:undo, :redo])
       "Alt+Z  Alt+Shift+Z"
       iex> Geex.Loop.Bindings.labels(b, [:line_start])
-      "Alt+R Home"
+      "Alt+H Home"
       iex> Geex.Loop.Bindings.labels(b, for(i <- 0..8, do: {:tab, i}), range: true)
       "Alt+1 … Alt+9"
   """

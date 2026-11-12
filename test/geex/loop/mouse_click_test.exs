@@ -223,8 +223,8 @@ defmodule Geex.Loop.MouseClickTest do
       assert %{fg: ^accent, attrs: [:bold]} = cell.(3)
       assert %{fg: ^accent, attrs: []} = cell.(2)
 
-      # Closing b.txt's tab (Alt+K) takes it out.
-      state = send_io(%{state | focus: :editor}, {:alt, ?k}) |> repaint()
+      # Closing b.txt's tab (Alt+W) takes it out.
+      state = send_io(%{state | focus: :editor}, {:alt, ?w}) |> repaint()
       assert cell.(3).fg == pal.fg
       assert %{fg: ^accent, attrs: [:bold]} = cell.(2)
 
@@ -314,7 +314,7 @@ defmodule Geex.Loop.MouseClickTest do
     File.write!(Path.join(dir, "a.txt"), "new\n")
     :behind = Buffer.disk_changed(a, "new\n")
 
-    # " a.txt  behind disk (Alt+J)": the mark starts at column 8.
+    # " a.txt  behind disk (Alt+D)": the mark starts at column 8.
     state = click(state, 3, 29)
     assert Buffer.status(a).behind
     _state = click(state, 9, 29)
@@ -325,7 +325,7 @@ defmodule Geex.Loop.MouseClickTest do
   describe "the pickers" do
     test "the wheel moves the highlight; a click on a row runs it", %{dir: dir} do
       {state, _a} = start(dir)
-      state = send_io(state, {:alt, ?i})
+      state = send_io(state, {:alt, ?b})
       state = Enum.reduce(String.graphemes("vsplit"), state, &send_io(&2, {:char, &1}))
       assert state.minibuffer.sel == 0
 
@@ -358,7 +358,7 @@ defmodule Geex.Loop.MouseClickTest do
 
     test "a click off the list closes the picker", %{dir: dir} do
       {state, _a} = start(dir)
-      state = send_io(state, {:alt, ?i})
+      state = send_io(state, {:alt, ?b})
       state = click(state, 3, 2)
       assert state.minibuffer.mode == :inactive
     end
@@ -407,7 +407,7 @@ defmodule Geex.Loop.MouseClickTest do
 
     test "a click on the tab already shown keeps the selection", %{dir: dir} do
       {state, _a} = start(dir)
-      state = send_io(state, {:alt, ?b})
+      state = send_io(state, {:alt, ?a})
       assert state.selection
       {label_x, _} = tab_x(state, 1, 0, 120, 0)
       state = click(state, label_x, 0)

@@ -36,7 +36,7 @@ defmodule Geex.Input.Parser do
       {:ctrl, ?a..?z}            # Ctrl-letter as the lowercase atom
       {:ctrl, 0x40 | 0x5C..0x5F} # bytes 0, 28–31: Ctrl-@, Ctrl-\\, Ctrl-], Ctrl-^, Ctrl-_
       {:alt, ?a..?z | ?A..?Z}   # Alt/Meta-letter (ESC-prefixed)
-      {:alt, ?0..?9 | ?- | ?= | ?, | ?.}   # the pane and tab keys
+      {:alt, ?0..?9 | ?- | ?= | ?, | ?. | ?;}   # the pane and tab keys; line end
       {:alt, :up | :down | :left | :right} # Alt with an arrow (`ESC [ 1 ; 3 A`): resizing
       {:mouse, %{action: :press | :release | :drag | :wheel | :move,
                  button: :left | :middle | :right | :up | :down | :wheel_left | :wheel_right
@@ -262,10 +262,12 @@ defmodule Geex.Input.Parser do
   defp do_parse(<<"\e", c, rest::binary>>, acc) when c in ?a..?z or c in ?A..?Z,
     do: do_parse(rest, [{:alt, c} | acc])
 
-  # ESC + a digit, `-`, `=`, `,` or `.`: the pane and tab keys (ADR-0038). Not `[` or `\`:
-  # `ESC [` starts a CSI and `ESC \` is ST, so those chords can't be told from a sequence.
-  defp do_parse(<<"\e", c, rest::binary>>, acc) when c in ?0..?9 or c in [?-, ?=, ?,, ?.],
-    do: do_parse(rest, [{:alt, c} | acc])
+  # ESC + a digit, `-`, `=`, `,` or `.`: the pane and tab keys (ADR-0038); `;`, line end
+  # (ADR-0049). Not `[` or `\`: `ESC [` starts a CSI and `ESC \` is ST, so those chords can't be
+  # told from a sequence. No sequence starts `ESC ;`.
+  defp do_parse(<<"\e", c, rest::binary>>, acc)
+       when c in ?0..?9 or c in [?-, ?=, ?,, ?., ?;],
+       do: do_parse(rest, [{:alt, c} | acc])
 
   # ESC followed by another byte we don't recognise — emit ESC, reparse rest.
   # (Real impl would use a small timeout to decide; v0.1 leans on "if more

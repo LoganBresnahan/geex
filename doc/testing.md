@@ -5906,3 +5906,30 @@ changed in 29, all declared or better (`lb` → `line break`). Two gaps fixed:
 
 Planted here, each caught: sort by band only, no clip, no cap. 1463 tests + 31 properties + 155
 doctests green twice; `mix compile --warnings-as-errors --force` clean.
+
+### 2026-11-11 — the default keys move to IJKL (ADR-0049)
+
+Built on `ijkl-keys`, from main at abaa961, to the maintainer's layout: motion on the right hand
+(`Alt+I/J/K/L`, `Alt+U`/`Alt+O` a word, `Alt+H`/`Alt+;` the line's ends), and the commands that
+had keys there on the left hand by their letter (`Alt+A` select all, `Alt+B` palette, `Alt+F`
+open, `Alt+W` close, `Alt+S` select, `Alt+R` revert, `Alt+D` fast-forward, `Alt+E` edits). The
+parser reads `ESC ;` as `Alt+;`. `Alt+Q`/`Alt+Shift+Q` and `Alt+N`/`Alt+Shift+N` are kept for
+find, unbound; `Alt+N` no longer clears a selection (Esc does).
+
+The change is the defaults table, one parser clause and the notices that name a key ("behind
+disk (Alt+D)", "no file (Alt+F opens one)", "close it with Alt+W", "Alt+S starts one", "Alt+T,
+Alt+E", the tree watcher's). The tests pressed keys by chord: a script moved each old chord to
+the new chord for the same command (and the key names in comments and titles), so each test
+still checks what it checked; the slash shorthands (`Alt+W/S`) and the lowercase palette queries
+(`alt+k` → `alt+w`) were fixed by hand. New: `ESC ;` parses as `Alt+;`, `;` in the bindings
+property's generator, the defaults pinned by name, `Alt+Q` and `Alt+N` unbound.
+
+Live in tmux (100×24 and 100×30, scratch XDG dirs, Alt+; sent as raw `ESC ;` since tmux reads `;`
+as a separator): Alt+K, Alt+;, Alt+H, Alt+O, Alt+L, Alt+U, Alt+J and Alt+I each moved the cursor
+as named; Alt+S, five Alt+L and Alt+C copied "hello", Esc, Alt+K, Alt+; and Alt+V pasted it at the
+end of line 2; Alt+B opened the palette, Alt+F the finder; `Alt+Y`'s Keys tab listed every key in
+its new place and its footer read "← → or Alt+J Alt+L tabs".
+
+1464 tests + 31 properties + 155 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. Not tested: a real macOS terminal's Option+;
+(Ghostty's `macos-option-as-alt` decides it, as for every Alt key).

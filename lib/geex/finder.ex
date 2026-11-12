@@ -1,6 +1,6 @@
 defmodule Geex.Finder do
   @moduledoc """
-  The ranking behind `Alt+O`, the fuzzy file finder ([ADR-0028](../../doc/adr/0028-editor-shell-and-minibuffer.md)'s
+  The ranking behind `Alt+F`, the fuzzy file finder ([ADR-0028](../../doc/adr/0028-editor-shell-and-minibuffer.md)'s
   2026-10-17 amendment): the files under the root (the tree's own list, `Geex.Tree.list/1`)
   matched against what you type, best first.
 

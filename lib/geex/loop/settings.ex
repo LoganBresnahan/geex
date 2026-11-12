@@ -17,8 +17,8 @@ defmodule Geex.Loop.Settings do
       closing pairs and keeping the indent as you type, whether a save adds a final newline, and where geex keeps its settings, packages and
       caches.
 
-  Esc or `Alt+Y` closes it; Tab, Left, Right, `Alt+A` and `Alt+D` move between tabs; Up, Down,
-  `Alt+W` and `Alt+S` move the highlight; the mouse clicks tabs and rows and scrolls (ADR-0039).
+  Esc or `Alt+Y` closes it; Tab, Left, Right, `Alt+J` and `Alt+L` move between tabs; Up, Down,
+  `Alt+I` and `Alt+K` move the highlight; the mouse clicks tabs and rows and scrolls (ADR-0039).
 
   This module is the view's state, how a key or a click changes it (`key/3`, `click/4`), which
   rows it shows (`rows/2`) and how it is drawn (`draw/4`). What an action does to the editor
@@ -151,7 +151,7 @@ defmodule Geex.Loop.Settings do
   end
 
   # What geex starts with, as `settings.json` keeps it (`ctx.saved`): not this session's state,
-  # which `mouse`, `Alt+T` and `Alt+L` change without keeping. A tree or edits pane left unset
+  # which `mouse`, `Alt+T` and `Alt+E` change without keeping. A tree or edits pane left unset
   # shows when the terminal is wide enough.
   def rows(%__MODULE__{tab: :general}, ctx) do
     saved = Map.get(ctx, :saved, %{})

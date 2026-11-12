@@ -196,10 +196,10 @@ defmodule Geex.Loop.FileOpsTest do
       assert {:ok, _} = Geex.BufferSupervisor.whereis(at(root, "lib/README.md"))
     end
 
-    test "Alt+O from a file in a subdirectory lists and opens paths from the root",
+    test "Alt+F from a file in a subdirectory lists and opens paths from the root",
          %{root: root} do
       File.write!(at(root, "README.md"), "top\n")
-      state = editing(at(root, "lib/a.ex")) |> key({:alt, ?o}) |> tree_read()
+      state = editing(at(root, "lib/a.ex")) |> key({:alt, ?f}) |> tree_read()
       assert state.minibuffer.mode == :files
       assert Enum.sort(state.finder.matches) == ["README.md", "lib/a.ex"]
 

@@ -113,7 +113,7 @@ defmodule Geex.Loop.NamedKeysTest do
     end
 
     test "picked from the palette, a command runs the same", %{state: state} do
-      state = state |> key({:alt, ?i}) |> type("line end") |> key({:key, :enter})
+      state = state |> key({:alt, ?b}) |> type("line end") |> key({:key, :enter})
       assert state.minibuffer.mode == :inactive
       assert cursor() == {0, 11}
     end
@@ -125,48 +125,48 @@ defmodule Geex.Loop.NamedKeysTest do
       tree = put_in(tree.tree.rows, [%{path: "a.txt", dir?: false}, %{path: "lib", dir?: true}])
       tree = put_in(tree.tree.sel, 1)
 
-      tree = tree |> key({:alt, ?i}) |> type("line end") |> key({:key, :enter})
+      tree = tree |> key({:alt, ?b}) |> type("line end") |> key({:key, :enter})
       assert cursor() == {0, 11}
       assert {tree.focus, tree.tree.sel} == {:tree, 1}
     end
   end
 
   describe "a command means what it means where it runs (§4)" do
-    test "in the command line, Alt+A and Alt+D move the cursor, as ← and → do", %{state: state} do
-      state = state |> key({:alt, ?m}) |> type("abc") |> keys([{:alt, ?a}, {:alt, ?a}])
-      state = type(state, "X") |> key({:alt, ?d}) |> type("Y")
+    test "in the command line, Alt+J and Alt+L move the cursor, as ← and → do", %{state: state} do
+      state = state |> key({:alt, ?m}) |> type("abc") |> keys([{:alt, ?j}, {:alt, ?j}])
+      state = type(state, "X") |> key({:alt, ?l}) |> type("Y")
       assert Minibuffer.value(state.minibuffer) == "aXbYc"
     end
 
-    test "in the command line, Alt+W brings back what was entered, as ↑ does", %{state: state} do
+    test "in the command line, Alt+I brings back what was entered, as ↑ does", %{state: state} do
       state = run(state, "2")
       assert cursor() == {1, 0}
-      state = state |> key({:alt, ?m}) |> key({:alt, ?w})
+      state = state |> key({:alt, ?m}) |> key({:alt, ?i})
       assert Minibuffer.value(state.minibuffer) == "2"
-      state = key(state, {:alt, ?s})
+      state = key(state, {:alt, ?k})
       assert Minibuffer.value(state.minibuffer) == ""
     end
 
-    test "in the output pane, Alt+R and Alt+F go to the top and the bottom, as Home and End do",
+    test "in the output pane, Alt+H and Alt+; go to the top and the bottom, as Home and End do",
          %{state: state} do
       out = Output.new("ls", :show, 0) |> Output.add(~w(a b c d e), "")
       state = %{state | output: out, focus: :output}
-      state = key(state, {:alt, ?r})
+      state = key(state, {:alt, ?h})
       assert state.output.sel == 0
-      state = key(state, {:alt, ?f})
+      state = key(state, {:alt, ?;})
       assert state.output.sel == Output.size(out) - 1
       assert key(state, {:key, :home}).output.sel == 0
     end
   end
 
   describe "the bindings are a value (§7)" do
-    # `up` moved from Alt+W to Alt+I (the palette's key, so the palette goes to Alt+Shift+I).
+    # `up` moved from Alt+I to Alt+B (the palette's key, so the palette goes to Alt+Shift+I).
     defp moved(state) do
       keys =
         Bindings.defaults()
-        |> Map.delete({:alt, ?w})
-        |> Map.put({:alt, ?i}, :up)
-        |> Map.put({:alt, ?I}, :palette)
+        |> Map.delete({:alt, ?i})
+        |> Map.put({:alt, ?b}, :up)
+        |> Map.put({:alt, ?B}, :palette)
 
       %{state | keys: keys}
     end
@@ -178,30 +178,30 @@ defmodule Geex.Loop.NamedKeysTest do
       # The column kept for up and down is the loop's: set it with the cursor.
       state = %{moved(state) | goal: 2}
       Session.set_cursor({1, 2})
-      state = key(state, {:alt, ?w})
+      state = key(state, {:alt, ?i})
       assert cursor() == {1, 2}
       assert text(buf) == "hello world\nline 2\n"
-      _ = key(state, {:alt, ?i})
+      _ = key(state, {:alt, ?b})
       assert cursor() == {0, 2}
     end
 
     test "and in a picker, the tree and the settings view", %{state: state} do
       state = moved(state)
 
-      picker = state |> key({:alt, ?I}) |> keys([{:alt, ?s}, {:alt, ?s}])
+      picker = state |> key({:alt, ?B}) |> keys([{:alt, ?k}, {:alt, ?k}])
       assert picker.minibuffer.mode == :palette
       assert picker.minibuffer.sel == 2
-      assert key(picker, {:alt, ?i}).minibuffer.sel == 1
-      assert key(picker, {:alt, ?w}).minibuffer.sel == 2
+      assert key(picker, {:alt, ?b}).minibuffer.sel == 1
+      assert key(picker, {:alt, ?i}).minibuffer.sel == 2
 
       tree = %{state | tree_shown: true, focus: :tree}
       tree = put_in(tree.tree.rows, [%{path: "a.txt", dir?: false}, %{path: "lib", dir?: true}])
       tree = put_in(tree.tree.sel, 1)
-      assert key(tree, {:alt, ?i}).tree.sel == 0
-      assert key(tree, {:alt, ?w}).tree.sel == 1
+      assert key(tree, {:alt, ?b}).tree.sel == 0
+      assert key(tree, {:alt, ?i}).tree.sel == 1
 
-      settings = key(state, {:alt, ?y}) |> key({:alt, ?d}) |> keys([{:alt, ?s}, {:alt, ?s}])
-      assert key(settings, {:alt, ?i}).settings.sel == settings.settings.sel - 1
+      settings = key(state, {:alt, ?y}) |> key({:alt, ?l}) |> keys([{:alt, ?k}, {:alt, ?k}])
+      assert key(settings, {:alt, ?b}).settings.sel == settings.settings.sel - 1
     end
 
     test "the settings view's footer names the keys the bindings give", %{state: state} do
@@ -211,10 +211,10 @@ defmodule Geex.Loop.NamedKeysTest do
         Enum.map_join(0..119, &Geex.Screen.get_cell(screen, &1, 9).char) |> String.trim()
       end
 
-      assert footer.(Bindings.defaults()) =~ "← → or Alt+A Alt+D tabs · Esc or Alt+Y closes"
+      assert footer.(Bindings.defaults()) =~ "← → or Alt+J Alt+L tabs · Esc or Alt+Y closes"
 
       keys = Bindings.defaults() |> Map.delete({:alt, ?y}) |> Map.put({:ctrl, ?e}, :settings)
-      keys = Map.drop(keys, [{:alt, ?a}, {:alt, ?d}])
+      keys = Map.drop(keys, [{:alt, ?j}, {:alt, ?l}])
       assert footer.(keys) =~ "← → tabs · Esc or Ctrl-E closes"
     end
 
@@ -228,12 +228,12 @@ defmodule Geex.Loop.NamedKeysTest do
     end
 
     test "the palette finds a command by its key, whole, first", %{state: state} do
-      # Alt+E is `word forward`; Enter runs the top row.
-      state = state |> key({:alt, ?i}) |> type("alt+e") |> key({:key, :enter})
+      # Alt+O is `word forward`; Enter runs the top row.
+      state = state |> key({:alt, ?b}) |> type("alt+o") |> key({:key, :enter})
       assert cursor() == {0, 6}
 
-      # Alt+S is `down`, not the Alt+Shift+… keys that start the same.
-      _ = state |> key({:alt, ?i}) |> type("Alt+S") |> key({:key, :enter})
+      # Alt+K is `down`, not the Alt+Shift+… keys that start the same.
+      _ = state |> key({:alt, ?b}) |> type("Alt+K") |> key({:key, :enter})
       assert cursor() == {1, 6}
     end
 
@@ -241,13 +241,13 @@ defmodule Geex.Loop.NamedKeysTest do
       state = moved(state) |> key({:alt, ?y})
       ctx = %{keys: state.keys}
       rows = Loop.Settings.rows(%{state.settings | tab: :commands, query: "up"}, ctx)
-      assert %{cells: ["up", "Alt+I ↑", _]} = Enum.find(rows, &(hd(&1.cells) == "up"))
+      assert %{cells: ["up", "Alt+B ↑", _]} = Enum.find(rows, &(hd(&1.cells) == "up"))
     end
   end
 
   # ADR-0048: a good name match, then the commands of the key the query names, then the rest.
   describe "the palette ranks names, then keys, then loose matches (ADR-0048)" do
-    defp pick(state, query), do: state |> key({:alt, ?i}) |> type(query) |> key({:key, :enter})
+    defp pick(state, query), do: state |> key({:alt, ?b}) |> type(query) |> key({:key, :enter})
 
     test "a word is a command's name first: `delete` asks to delete the file, `tab` edits nothing",
          %{state: state, buf: buf} do
@@ -295,7 +295,7 @@ defmodule Geex.Loop.NamedKeysTest do
       # Found by its words, it still asks for the number.
       state = pick(state, "tab")
       assert state.minibuffer.mode == :inactive
-      asked = state |> key({:alt, ?i}) |> type("tab ")
+      asked = state |> key({:alt, ?b}) |> type("tab ")
       assert Minibuffer.value(asked.minibuffer) == "tab "
     end
 
@@ -308,13 +308,13 @@ defmodule Geex.Loop.NamedKeysTest do
 
       assert first.("delete") == "delete"
       assert first.("enter") == "line break, newline"
-      assert first.("alt+k") == "close"
+      assert first.("alt+w") == "close"
     end
 
     test "the names line up past the longest one: `delete forward` doesn't run into its key", %{
       state: state
     } do
-      state = state |> key({:alt, ?i}) |> type("delete f")
+      state = state |> key({:alt, ?b}) |> type("delete f")
       {:noreply, state} = Loop.handle_info(:repaint, state)
 
       rows =
@@ -332,7 +332,7 @@ defmodule Geex.Loop.NamedKeysTest do
     test "on a narrow terminal the column is half the width, and a longer name is clipped", %{
       state: state
     } do
-      state = %{state | w: 26} |> key({:alt, ?i}) |> type("delete f")
+      state = %{state | w: 26} |> key({:alt, ?b}) |> type("delete f")
       {:noreply, state} = Loop.handle_info(:repaint, state)
 
       rows =

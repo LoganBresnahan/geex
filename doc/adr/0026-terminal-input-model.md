@@ -201,6 +201,13 @@ after that matches a chord. One default keymap still (§1). The keymap file, the
 §4 and the reserved-chord table of §5 come with the remapping slice; the file will be the
 settings file ([ADR-0040](0040-bare-geex-and-the-catalog.md) §7), not ADR-0025's TOML.
 
+## Amendment (2026-11-11): the motion cluster moves to IJKL; `Alt+;` read ([ADR-0049](0049-ijkl-default-keys.md))
+
+The Alt motion cluster is the right hand's now: `Alt+I/J/K/L` up, left, down, right; `Alt+U`/`Alt+O`
+a word back and forward; `Alt+H`/`Alt+;` the line's start and end. The parser reads `ESC ;` as
+`Alt+;`, beside the digits and `- = , .`; no sequence begins `ESC ;`. The arrows, Home and End are
+unchanged.
+
 ## See
 
 [ADR-0025](0025-user-config-layer.md) (keymap-as-data + the optional profile), [ADR-0024](0024-tui-core-extractable.md)

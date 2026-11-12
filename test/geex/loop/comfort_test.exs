@@ -34,8 +34,8 @@ defmodule Geex.Loop.ComfortTest do
   defp text(buf), do: Buffer.get_text(buf)
   defp cursor, do: elem(Session.snapshot(), 1).cursor
 
-  # Alt+H at the cursor, then `n` steps right: "hello world" with `hel` selected from {0, 0}.
-  defp select_right(state, n), do: keys(state, [{:alt, ?h} | List.duplicate({:alt, ?d}, n)])
+  # Alt+S at the cursor, then `n` steps right: "hello world" with `hel` selected from {0, 0}.
+  defp select_right(state, n), do: keys(state, [{:alt, ?s} | List.duplicate({:alt, ?l}, n)])
 
   describe "typing over a selection (18.1)" do
     test "Delete deletes the selection, one undoable edit", %{state: state, buf: buf} do
@@ -58,7 +58,7 @@ defmodule Geex.Loop.ComfortTest do
 
     test "a selection made backwards deletes the same range", %{state: state, buf: buf} do
       Session.set_cursor({0, 5})
-      state |> keys([{:alt, ?h}, {:alt, ?a}, {:alt, ?a}]) |> key({:key, :delete})
+      state |> keys([{:alt, ?s}, {:alt, ?j}, {:alt, ?j}]) |> key({:key, :delete})
       assert text(buf) == "hel world\nline 2\n"
       assert cursor() == {0, 3}
     end
@@ -75,9 +75,9 @@ defmodule Geex.Loop.ComfortTest do
     end
 
     test "a selection across lines is deleted whole", %{state: state, buf: buf} do
-      # Moved by keys, so the goal column follows: Alt+S keeps column 5.
+      # Moved by keys, so the goal column follows: Alt+K keeps column 5.
       state
-      |> keys(List.duplicate({:alt, ?d}, 5) ++ [{:alt, ?h}, {:alt, ?s}])
+      |> keys(List.duplicate({:alt, ?l}, 5) ++ [{:alt, ?s}, {:alt, ?k}])
       |> key({:key, :delete})
 
       assert text(buf) == "hello2\n"
@@ -90,7 +90,7 @@ defmodule Geex.Loop.ComfortTest do
       state = key(state, {:key, :delete})
       assert text(buf) == "ello world\nline 2\n"
 
-      state |> key({:alt, ?h}) |> key({:key, :delete})
+      state |> key({:alt, ?s}) |> key({:key, :delete})
       assert text(buf) == "llo world\nline 2\n"
     end
   end
@@ -544,16 +544,16 @@ defmodule Geex.Loop.ComfortTest do
       assert sizes(state) == {34, 11}
     end
 
-    test "Alt+W/A/S/D move the cursor, Shift or not: only Alt with an arrow resizes", %{
+    test "Alt+I/J/K/L move the cursor, Shift or not: only Alt with an arrow resizes", %{
       state: state
     } do
       # Alt+Shift+W/A/S/D resized until 2026-11-11 (the maintainer: "alt arrow keys is enough").
       state = panels(state)
-      state = key(state, {:alt, ?d})
+      state = key(state, {:alt, ?l})
       assert cursor() == {0, 1}
-      state = key(state, {:alt, ?D})
+      state = key(state, {:alt, ?L})
       assert cursor() == {0, 2}
-      state = key(state, {:alt, ?A})
+      state = key(state, {:alt, ?J})
       assert cursor() == {0, 1}
       assert sizes(state) == {30, 9}
     end

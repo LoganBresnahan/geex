@@ -100,7 +100,7 @@ defmodule Geex.Loop.ThemeTest do
     refute :reverse in Screen.get_cell(screen, 2, 2).attrs
 
     # Back to the editor, select all: the text is reversed.
-    state = send_io(state, {:key, :esc}) |> send_io({:alt, ?b})
+    state = send_io(state, {:key, :esc}) |> send_io({:alt, ?a})
     {_state, screen} = frame(state)
     gutter = Loop.gutter_width("a.txt\n")
     assert :reverse in Screen.get_cell(screen, 30 + gutter, 1).attrs

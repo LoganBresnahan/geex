@@ -85,13 +85,13 @@ defmodule Geex.Loop.KeymapTest do
   end
 
   describe "goal column — sticky vertical motion" do
-    test "vertical?/1 flags up/down and Alt+W/S, nothing else" do
+    test "vertical?/1 flags up/down and Alt+I/K, nothing else" do
       assert vertical?({:key, :up})
       assert vertical?({:key, :down})
-      assert vertical?({:alt, ?w})
-      assert vertical?({:alt, ?S})
+      assert vertical?({:alt, ?i})
+      assert vertical?({:alt, ?K})
       refute vertical?({:key, :left})
-      refute vertical?({:alt, ?d})
+      refute vertical?({:alt, ?l})
       refute vertical?({:char, "x"})
     end
 
@@ -145,12 +145,12 @@ defmodule Geex.Loop.KeymapTest do
   end
 
   describe "resolve/3 — selection (ADR-0029)" do
-    test "Alt+H starts a selection, Alt+B selects all, Alt+N / Esc clear" do
-      assert :select_start = resolve({:alt, ?h}, {0, 0}, "abc")
-      assert :select_start = resolve({:alt, ?H}, {0, 0}, "abc")
-      assert :select_all = resolve({:alt, ?b}, {0, 0}, "abc")
-      assert :select_all = resolve({:alt, ?B}, {0, 0}, "abc")
-      assert :select_clear = resolve({:alt, ?n}, {0, 0}, "abc")
+    test "Alt+S starts a selection, Alt+A selects all, Esc clears; Alt+N is unbound" do
+      assert :select_start = resolve({:alt, ?s}, {0, 0}, "abc")
+      assert :select_start = resolve({:alt, ?S}, {0, 0}, "abc")
+      assert :select_all = resolve({:alt, ?a}, {0, 0}, "abc")
+      assert :select_all = resolve({:alt, ?A}, {0, 0}, "abc")
+      assert :ignore = resolve({:alt, ?n}, {0, 0}, "abc")
       assert :select_clear = resolve({:key, :esc}, {0, 0}, "abc")
     end
 
@@ -178,34 +178,34 @@ defmodule Geex.Loop.KeymapTest do
     test "Alt+WASD moves like the arrows (arrow-key alternative)" do
       text = "abc\ndef"
 
-      assert resolve({:alt, ?d}, {0, 0}, text) ==
+      assert resolve({:alt, ?l}, {0, 0}, text) ==
                resolve({:key, :right}, {0, 0}, text)
 
-      assert resolve({:alt, ?a}, {0, 1}, text) ==
+      assert resolve({:alt, ?j}, {0, 1}, text) ==
                resolve({:key, :left}, {0, 1}, text)
 
-      assert resolve({:alt, ?w}, {1, 1}, text) == resolve({:key, :up}, {1, 1}, text)
+      assert resolve({:alt, ?i}, {1, 1}, text) == resolve({:key, :up}, {1, 1}, text)
 
-      assert resolve({:alt, ?s}, {0, 1}, text) ==
+      assert resolve({:alt, ?k}, {0, 1}, text) ==
                resolve({:key, :down}, {0, 1}, text)
     end
 
-    test "Alt+R/F jump to line start / end" do
+    test "Alt+H/; jump to line start / end" do
       text = "foo bar baz"
-      assert {:move, {0, 0}} = resolve({:alt, ?r}, {0, 5}, text)
-      assert {:move, {0, 11}} = resolve({:alt, ?f}, {0, 5}, text)
+      assert {:move, {0, 0}} = resolve({:alt, ?h}, {0, 5}, text)
+      assert {:move, {0, 11}} = resolve({:alt, ?;}, {0, 5}, text)
     end
 
-    test "Alt+Q/E move by word (whitespace-delimited, clamped to the line)" do
+    test "Alt+U/O move by word (whitespace-delimited, clamped to the line)" do
       text = "foo bar baz"
-      # forward (E) from start / mid-word → start of "bar"
-      assert {:move, {0, 4}} = resolve({:alt, ?e}, {0, 0}, text)
-      assert {:move, {0, 4}} = resolve({:alt, ?e}, {0, 1}, text)
-      # backward (Q) from "baz" → start of "bar"
-      assert {:move, {0, 4}} = resolve({:alt, ?q}, {0, 8}, text)
+      # forward (O) from start / mid-word → start of "bar"
+      assert {:move, {0, 4}} = resolve({:alt, ?o}, {0, 0}, text)
+      assert {:move, {0, 4}} = resolve({:alt, ?o}, {0, 1}, text)
+      # backward (U) from "baz" → start of "bar"
+      assert {:move, {0, 4}} = resolve({:alt, ?u}, {0, 8}, text)
       # forward at the last word clamps to the line end; backward at the first clamps to col 0
-      assert {:move, {0, 11}} = resolve({:alt, ?e}, {0, 8}, text)
-      assert {:move, {0, 0}} = resolve({:alt, ?q}, {0, 2}, text)
+      assert {:move, {0, 11}} = resolve({:alt, ?o}, {0, 8}, text)
+      assert {:move, {0, 0}} = resolve({:alt, ?u}, {0, 2}, text)
     end
 
     test "Alt+G opens grid mode (ADR-0027)" do
@@ -213,9 +213,9 @@ defmodule Geex.Loop.KeymapTest do
       assert :grid = resolve({:alt, ?G}, {0, 0}, "abc")
     end
 
-    test "Alt+I opens the command palette (ADR-0028 §3, ADR-0037)" do
-      assert :palette = resolve({:alt, ?i}, {0, 0}, "abc")
-      assert :palette = resolve({:alt, ?I}, {0, 0}, "abc")
+    test "Alt+B opens the command palette (ADR-0028 §3, ADR-0037)" do
+      assert :palette = resolve({:alt, ?b}, {0, 0}, "abc")
+      assert :palette = resolve({:alt, ?B}, {0, 0}, "abc")
     end
 
     test "unbound Alt letters are ignored" do
@@ -225,11 +225,11 @@ defmodule Geex.Loop.KeymapTest do
 
     test "the pane and file keys (ADR-0037)" do
       for {letter, action} <- [
-            {?o, :find_file},
-            {?k, :close},
+            {?f, :find_file},
+            {?w, :close},
             {?t, :toggle_tree},
-            {?l, :toggle_edits},
-            {?j, :fast_forward}
+            {?e, :toggle_edits},
+            {?d, :fast_forward}
           ],
           c <- [letter, letter - 32] do
         assert resolve({:alt, c}, {0, 0}, "abc") == action, "Alt+#{<<c>>}"

@@ -15,7 +15,7 @@ defmodule Geex.Minibuffer do
   display column), and `:palette` (the command palette, [ADR-0028](../../doc/adr/0028-editor-shell-and-minibuffer.md)
   §3 — the `input` is a fuzzy filter over `Geex.Command.Catalog` and `sel` is the highlighted
   candidate row), `:buffers` (the open buffers, the same way), and `:files` (the fuzzy file
-  finder, `Alt+O` — the input filters the root's files through `Geex.Finder`), `:confirm` (a y/n
+  finder, `Alt+F` — the input filters the root's files through `Geex.Finder`), `:confirm` (a y/n
   question, before a file operation deletes something or makes a missing directory) and `:ask` (a
   path typed under a question, the tree's `r`; ADR-0019's 2026-10-19 amendment). Both carry their
   question in `ask`, shown as the prompt. Incremental search is the next mode.

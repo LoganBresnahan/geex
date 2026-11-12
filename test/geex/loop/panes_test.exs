@@ -38,21 +38,21 @@ defmodule Geex.Loop.PanesTest do
   end
 
   for pane <- [:edits, :tree] do
-    test "Alt+M and Alt+I open the minibuffer and the palette from the #{pane} pane" do
-      for {event, mode} <- [{{:alt, ?m}, :command}, {{:alt, ?i}, :palette}] do
+    test "Alt+M and Alt+B open the minibuffer and the palette from the #{pane} pane" do
+      for {event, mode} <- [{{:alt, ?m}, :command}, {{:alt, ?b}, :palette}] do
         state = key(focused_on(unquote(pane)), event)
         assert %Minibuffer{mode: ^mode} = state.minibuffer
         assert state.focus == unquote(pane)
       end
     end
 
-    test "Alt+O, Alt+T, Alt+L and Alt+P work from the #{pane} pane (ADR-0037)" do
+    test "Alt+F, Alt+T, Alt+E and Alt+P work from the #{pane} pane (ADR-0037)" do
       state = focused_on(unquote(pane))
 
-      assert %Minibuffer{mode: :files} = key(state, {:alt, ?o}).minibuffer
+      assert %Minibuffer{mode: :files} = key(state, {:alt, ?f}).minibuffer
 
       assert key(state, {:alt, ?t}).tree_shown == not state.tree_shown
-      assert key(state, {:alt, ?l}).edits_shown == not state.edits_shown
+      assert key(state, {:alt, ?e}).edits_shown == not state.edits_shown
       assert key(state, {:alt, ?p}).focus != unquote(pane)
     end
 
@@ -87,17 +87,17 @@ defmodule Geex.Loop.PanesTest do
     assert Enum.map(state.tree.rows, & &1.path) == ["lib"]
   end
 
-  test "in the tree, Alt+A and Alt+D act as Left and Right; Alt+W and Alt+S as Up and Down" do
+  test "in the tree, Alt+J and Alt+L act as Left and Right; Alt+I and Alt+K as Up and Down" do
     # Either case: Caps Lock doesn't change them (Alt+Shift+W/A/S/D resized until 2026-11-11).
     state = key(Loop.new_state(120, 30), {:alt, ?p}) |> key({:alt, ?p}) |> tree_read()
-    state = key(state, {:alt, ?d})
+    state = key(state, {:alt, ?l})
     assert Enum.map(state.tree.rows, & &1.path) == ["lib", "lib/a.ex"]
 
-    state = key(state, {:alt, ?s})
+    state = key(state, {:alt, ?k})
     assert state.tree.sel == 1
-    state = key(state, {:alt, ?a})
+    state = key(state, {:alt, ?j})
     assert state.tree.sel == 0
-    state = key(state, {:alt, ?a})
+    state = key(state, {:alt, ?j})
     assert Enum.map(state.tree.rows, & &1.path) == ["lib"]
 
     # Alt+Shift+D is Right too: it opens the directory again, and the tree's edge stays.
@@ -106,10 +106,10 @@ defmodule Geex.Loop.PanesTest do
     end
 
     before = tree_w.(state)
-    state = key(state, {:alt, ?D})
+    state = key(state, {:alt, ?L})
     assert Enum.map(state.tree.rows, & &1.path) == ["lib", "lib/a.ex"]
     assert tree_w.(state) == before
-    state = state |> key({:alt, ?S}) |> key({:alt, ?A})
+    state = state |> key({:alt, ?K}) |> key({:alt, ?J})
     assert state.tree.sel == 0
   end
 
@@ -132,8 +132,8 @@ defmodule Geex.Loop.PanesTest do
     assert {:ok, _} = Session.close_active()
   end
 
-  test "Alt+K closes the file, as the `close` verb does" do
-    state = key(Loop.new_state(120, 30), {:alt, ?k})
+  test "Alt+W closes the file, as the `close` verb does" do
+    state = key(Loop.new_state(120, 30), {:alt, ?w})
     assert state.notice == "closed a.ex"
   end
 

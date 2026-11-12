@@ -174,32 +174,32 @@ defmodule Geex.Loop.PreviewTabsTest do
   end
 
   describe "F2/F20: closing" do
-    test "Alt+K on the last source tab is refused while unsaved, the preview open elsewhere",
+    test "Alt+W on the last source tab is refused while unsaved, the preview open elsewhere",
          ctx do
       {state, buf} = start(ctx.dir)
       state = Loop.toggle_preview(state)
       state = key(state, {:char, "x"})
-      state = key(state, {:alt, ?k})
+      state = key(state, {:alt, ?w})
       assert state.notice =~ "unsaved"
       assert Panes.current(state.panes).buffer == buf
       assert preview_tab(state) != nil
     end
 
-    test "Alt+K on the last source tab closes the file and its previews", ctx do
+    test "Alt+W on the last source tab closes the file and its previews", ctx do
       {state, buf} = start(ctx.dir)
       ref = Process.monitor(buf)
       state = Loop.toggle_preview(state)
-      state = key(state, {:alt, ?k})
+      state = key(state, {:alt, ?w})
       assert_receive {:DOWN, ^ref, :process, ^buf, _}
       assert preview_tab(state) == nil
     end
 
-    test "Alt+K on a preview closes only it, never refused, the file staying open", ctx do
+    test "Alt+W on a preview closes only it, never refused, the file staying open", ctx do
       {state, buf} = start(ctx.dir, 24)
       state = key(state, {:char, "x"})
       state = Loop.toggle_preview(state)
       assert Panes.preview?(Panes.current(state.panes))
-      state = key(state, {:alt, ?k})
+      state = key(state, {:alt, ?w})
       assert preview_tab(state) == nil
       assert Process.alive?(buf)
       assert Panes.current(state.panes).buffer == buf
@@ -252,9 +252,9 @@ defmodule Geex.Loop.PreviewTabsTest do
             {:key, :backspace},
             {:alt, ?z},
             {:alt, ?v},
-            {:alt, ?u},
-            {:alt, ?h},
-            {:alt, ?b},
+            {:alt, ?r},
+            {:alt, ?s},
+            {:alt, ?a},
             {:alt, ?x},
             {:alt, ?g}
           ] do
@@ -295,9 +295,9 @@ defmodule Geex.Loop.PreviewTabsTest do
       scroll = fn s -> Panes.current(s.panes).scroll end
       state = key(state, {:key, :down})
       assert scroll.(state) == 1
-      state = key(state, {:alt, ?s})
+      state = key(state, {:alt, ?k})
       assert scroll.(state) == 2
-      state = key(state, {:alt, ?w}) |> key({:key, :up})
+      state = key(state, {:alt, ?i}) |> key({:key, :up})
       assert scroll.(state) == 0
       state = key(state, {:key, :end})
       bottom = scroll.(state)
@@ -306,11 +306,11 @@ defmodule Geex.Loop.PreviewTabsTest do
       assert scroll.(state) == bottom
       assert scroll.(key(state, {:key, :home})) == 0
 
-      # Alt+R and Alt+F run `line start` and `line end` too, which a preview reads as its top
+      # Alt+H and Alt+; run `line start` and `line end` too, which a preview reads as its top
       # and bottom (ADR-0047 §4).
-      state = key(state, {:alt, ?r})
+      state = key(state, {:alt, ?h})
       assert scroll.(state) == 0
-      assert scroll.(key(state, {:alt, ?f})) == bottom
+      assert scroll.(key(state, {:alt, ?;})) == bottom
     end
 
     test "an edit above the reader keeps their row, and so does the user's save", ctx do
@@ -330,7 +330,7 @@ defmodule Geex.Loop.PreviewTabsTest do
 
       # Take it in, then edit para 10's line from the source and save: the preview re-renders and
       # stays where the reader was (para 30, line 62), not on the saved line.
-      state = key(state, {:alt, ?j})
+      state = key(state, {:alt, ?d})
       Session.set_cursor({22, 0})
       state = key(state, {:char, "X"}) |> key({:ctrl, ?o})
       assert_receive {:geex_preview, ^buf, %{rows: rows} = msg} when rows != %{}, 3_000

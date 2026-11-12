@@ -29,7 +29,7 @@ defmodule Geex.Loop.SplitTest do
     state
   end
 
-  # Open `name` the way Alt+O's Enter does, and deliver Session's event to the loop.
+  # Open `name` the way Alt+F's Enter does, and deliver Session's event to the loop.
   defp open(state, dir, name) do
     {:ok, pid} = Session.open_file(Path.join(dir, name))
     {:noreply, state} = Loop.handle_info({:geex_active_buffer, pid}, state)
@@ -115,31 +115,31 @@ defmodule Geex.Loop.SplitTest do
     assert hd(rows) =~ ~r/│ 1 a\.txt ×  2 b\.txt ×  3 c\.txt × +× $/
   end
 
-  test "Alt+K closes a tab; the buffer stays open while another pane has it", %{dir: dir} do
+  test "Alt+W closes a tab; the buffer stays open while another pane has it", %{dir: dir} do
     {state, a} = start(dir)
     state = key(state, {:alt, ?=})
     {state, b} = open(state, dir, "b.txt")
 
     # b is only here: closing its tab closes the buffer.
-    state = key(state, {:alt, ?k})
+    state = key(state, {:alt, ?w})
     assert state.notice == "closed b.txt"
     refute Process.alive?(b)
     assert active() == a
 
     # a is in both panes: closing this pane's last tab closes the pane, not the buffer.
-    state = key(state, {:alt, ?k})
+    state = key(state, {:alt, ?w})
     assert state.notice =~ "still open in another pane"
     assert state.panes.split == {:pane, 1}
     assert Process.alive?(a)
     assert active() == a
   end
 
-  test "Alt+K refuses a buffer with unsaved edits that no other tab holds", %{dir: dir} do
+  test "Alt+W refuses a buffer with unsaved edits that no other tab holds", %{dir: dir} do
     {state, _a} = start(dir)
     {state, b} = open(state, dir, "b.txt")
     state = key(state, {:char, "x"})
 
-    state = key(state, {:alt, ?k})
+    state = key(state, {:alt, ?w})
     assert state.notice =~ "not closed: unsaved changes"
     assert Process.alive?(b)
     assert length(state.panes.panes[1].tabs) == 2
@@ -151,7 +151,7 @@ defmodule Geex.Loop.SplitTest do
     state = key(state, {:alt, ?1})
     assert active() == a
 
-    state = key(state, {:alt, ?k})
+    state = key(state, {:alt, ?w})
     assert state.notice == "closed a.txt"
     {:noreply, state} = Loop.handle_info({:geex_active_buffer, active()}, state)
     assert active() == b
@@ -222,8 +222,8 @@ defmodule Geex.Loop.SplitTest do
     {state, a} = start(dir)
     state = key(state, {:alt, ?m})
     state = Enum.reduce(String.graphemes("open b.txt"), state, &key(&2, {:char, &1}))
-    # Enter, then Alt+K, both handled before Session's event for b arrives.
-    state = state |> key({:key, :enter}) |> key({:alt, ?k})
+    # Enter, then Alt+W, both handled before Session's event for b arrives.
+    state = state |> key({:key, :enter}) |> key({:alt, ?w})
 
     assert state.notice == "closed b.txt"
     assert Process.alive?(a)

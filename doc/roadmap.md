@@ -17,7 +17,8 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 stop resizing, and every key runs a named command from one table of bindings, typed in `Alt+M`.
 Then, on the branch `palette-ranks`, the palette ranks a good name match, then the key the query
 names, then the loose matches ([adr/0048](adr/0048-the-palette-ranks-names-keys-then-loose.md));
-remapping and new defaults are next. Since the
+then the default keys moved to IJKL ([adr/0049](adr/0049-ijkl-default-keys.md)) on `ijkl-keys`;
+remapping is next. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -739,10 +740,14 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       and its parser; the notices that name a key read the bindings; a chord bound to an own
       command (`line break`, `indent` …) acting as its key in every view, not only the editor.
       ADR-0047 §7 has the rules.
-   4. **New defaults**, with the maintainer, once 3 lands. Ideas on the table: `Alt+N` goes
-      (Esc does it reliably since the 40 ms flush), the motion cluster (WASD, ESDF, IJKL),
-      presets for the left or the right hand. The macOS terminals that take `Option+←/→`
+   4. **New defaults** (ADR-0049): the maintainer chose IJKL, the right hand moving and the left
+      hand's commands by their letter. **Built 2026-11-11** on `ijkl-keys`, ahead of 3. `Alt+N` no
+      longer clears (Esc does), kept for find. Still on the table: presets for the left or the
+      right hand. The macOS terminals that take `Option+←/→`
       (ADR-0026's 2026-11-11 amendment) want a note in `Alt+Y` and install.md.
+   5. **Find**: `Alt+Q` in the file, `Alt+Shift+Q` across the project (the maintainer, 2026-11-11),
+      `Alt+N`/`Alt+Shift+N` the next and previous match (the keys kept by ADR-0049 §2a). Needs its
+      own ADR; the project-wide search runs off the loop (ADR-0035).
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the

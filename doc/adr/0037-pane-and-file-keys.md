@@ -95,6 +95,14 @@ on a file, so it stays the editor's, as `Alt+K` and `Alt+J` do: from the tree, t
 the output pane it does nothing. With Caps Lock on, `Alt+P` therefore no longer leaves a panel; Esc
 still does.
 
+## Amendment (2026-11-11): the pane and file keys move to the left hand ([ADR-0049](0049-ijkl-default-keys.md))
+
+With motion on IJKL, the keys here that sat in that cluster move: `Alt+B` the palette (was
+`Alt+I`), `Alt+F` open a file (was `Alt+O`), `Alt+W` close (was `Alt+K`), `Alt+E` the edits pane
+(was `Alt+L`), `Alt+D` fast-forward (was `Alt+J`), `Alt+R` revert (was `Alt+U`, ADR-0033 §7).
+`Alt+P`, `Alt+T`, `Alt+Y` and `Alt+Shift+P` stay. In the tree, `Alt+J`/`Alt+L` act as Left and
+Right, and `Alt+I`/`Alt+K` as Up and Down, since they run those commands (ADR-0047 §4).
+
 ## See
 
 - `lib/geex/loop/keymap.ex` (`resolve/3`), `lib/geex/loop.ex` (`panel_chord/2`,

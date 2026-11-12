@@ -13,16 +13,16 @@ defmodule Geex.Loop.Verbs do
     * `copy` / `cut` / `paste` — the clipboard verbs (= `Alt+C`/`X`/`V`, ADR-0015).
     * `undo` / `redo` — the history operations (= `Alt+Z`/`Alt+Shift+Z`, ADR-0031).
     * `revert` / `revert-call` — take back the agent's (or outside) change under the cursor,
-      one hunk (= `Alt+U`) or its whole tool call, keeping later edits (ADR-0033 §7).
-    * `highlight` / `select` — start a selection at the cursor (= `Alt+H`, ADR-0029);
-      `highlight all` / `select all` — select the whole buffer (= `Alt+B`).
+      one hunk (= `Alt+R`) or its whole tool call, keeping later edits (ADR-0033 §7).
+    * `highlight` / `select` — start a selection at the cursor (= `Alt+S`, ADR-0029);
+      `highlight all` / `select all` — select the whole buffer (= `Alt+A`).
     * `save` — write the active buffer to disk (= `Ctrl-O`; an operation, ADR-0019).
-    * `fast-forward` — take in the file's change on disk (= `Alt+J`, ADR-0034, ADR-0037).
-    * `edits` / `tree` — show or hide the edits pane / the file tree (= `Alt+L` / `Alt+T`;
+    * `fast-forward` — take in the file's change on disk (= `Alt+D`, ADR-0034, ADR-0037).
+    * `edits` / `tree` — show or hide the edits pane / the file tree (= `Alt+E` / `Alt+T`;
       `Alt+P` moves between the panes). ADR-0034, ADR-0037.
     * `open PATH` — show a file, opening it if needed; a relative `PATH` is from the project
-      root (and may not leave it), and keeps its case. `open` alone or `find` — the file finder (= `Alt+O`,
-      ADR-0037). `buffers` — pick an open buffer. `close` — close this buffer (= `Alt+K`;
+      root (and may not leave it), and keeps its case. `open` alone or `find` — the file finder (= `Alt+F`,
+      ADR-0037). `buffers` — pick an open buffer. `close` — close this buffer (= `Alt+W`;
       refused while it has unsaved edits). ADR-0034.
     * `new PATH` — create a file and open it (asking y/n before making a missing directory);
       `new DIR/` or `mkdir DIR` — make a directory; `delete` — delete this file, after a y/n;
@@ -41,7 +41,7 @@ defmodule Geex.Loop.Verbs do
     * `theme` — list the themes; `theme NAME` — switch to one for this session, e.g. `theme
       terminal`, the terminal's own colours (ADR-0040).
     * `quit` / `exit` — leave the editor (= `Ctrl-X`).
-    * `no` — the typed twin of `Alt+N`: clears a live selection (a plain cancel when
+    * `no` — the typed twin of Esc: clears a live selection (a plain cancel when
       nothing is selected). An empty line just cancels.
 
     * every command that had only a key (ADR-0047): `up`, `word back`, `line start`, `page down`,
@@ -176,7 +176,7 @@ defmodule Geex.Loop.Verbs do
     do: {:command, Map.fetch!(@commands, name)}
 
   defp do_parse(""), do: :cancel
-  # `no` is the true Alt+N twin: it *clears* a live selection (then the minibuffer closes
+  # `no` is the true Esc twin: it *clears* a live selection (then the minibuffer closes
   # either way). With nothing selected it degrades to a plain cancel — same visible result.
   defp do_parse("no"), do: {:action, :select_clear}
 
@@ -209,7 +209,7 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("tab next"), do: {:action, :tab_next}
   defp do_parse("tab prev"), do: {:action, :tab_prev}
   defp do_parse("tab " <> n), do: parse_tab(String.trim(n))
-  # `open` with no path, or `find`: the file finder (= `Alt+O`, ADR-0037).
+  # `open` with no path, or `find`: the file finder (= `Alt+F`, ADR-0037).
   defp do_parse("open"), do: {:action, :find_file}
   defp do_parse("find"), do: {:action, :find_file}
   defp do_parse("mouse"), do: {:action, :toggle_mouse}

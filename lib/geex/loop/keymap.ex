@@ -135,7 +135,7 @@ defmodule Geex.Loop.Keymap do
     end
   end
 
-  # Esc clears the selection, as the `no` command (Alt+N) does.
+  # Esc clears the selection, as the `no` command does.
   def resolve({:key, :esc}, _cursor, _text), do: :select_clear
 
   # A command (ADR-0047): the loop turned a bound key into one (`Geex.Loop.Bindings`), or it
@@ -671,7 +671,7 @@ defmodule Geex.Loop.Keymap do
   # the end of each line. The keymap is pure, so the **goal** itself is held by the loop;
   # these helpers are how it decides what to keep and where to land.
 
-  @doc "Is `event` a vertical motion (up/down, incl. Alt+W/S)? Vertical moves keep the goal."
+  @doc "Is `event` a vertical motion (up/down, incl. Alt+I/K)? Vertical moves keep the goal."
   @spec vertical?(tuple()) :: boolean()
   def vertical?({:cmd, command}), do: command in [:up, :down]
   def vertical?(_event), do: false

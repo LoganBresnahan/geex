@@ -353,7 +353,7 @@ defmodule Geex.Loop.MouseTest do
       state = send_io(state, mouse(:drag, :left, 5, 22))
       ref = state.drag.timer
       # The palette opened by a key: the drag is over, and its pending tick is stale.
-      state = send_io(state, {:alt, ?i})
+      state = send_io(state, {:alt, ?b})
       assert state.drag == nil
       {:noreply, after_tick} = Loop.handle_info({:geex_drag_scroll, ref}, state)
       assert after_tick == state

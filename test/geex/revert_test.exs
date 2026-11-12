@@ -106,15 +106,15 @@ defmodule Geex.RevertTest do
     assert info.actor == :external
   end
 
-  test "Alt+U reverts the hunk under the cursor; Alt+R is still line start" do
+  test "Alt+R reverts the hunk under the cursor; Alt+H is still line start" do
     assert Geex.Loop.Keymap.resolve(
-             Geex.Loop.Bindings.translate({:alt, ?u}, Geex.Loop.Bindings.defaults()),
+             Geex.Loop.Bindings.translate({:alt, ?r}, Geex.Loop.Bindings.defaults()),
              {3, 2},
              "a\nb\nc\nd"
            ) == :revert_hunk
 
     assert Geex.Loop.Keymap.resolve(
-             Geex.Loop.Bindings.translate({:alt, ?r}, Geex.Loop.Bindings.defaults()),
+             Geex.Loop.Bindings.translate({:alt, ?h}, Geex.Loop.Bindings.defaults()),
              {3, 2},
              "a\nb\nc\nd"
            ) == {:move, {3, 0}}

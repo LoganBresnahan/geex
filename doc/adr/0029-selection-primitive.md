@@ -97,6 +97,11 @@ Backspace and Delete delete it, a printable grapheme or Enter replaces it, as on
 and the selection is gone (`Keymap.over_selection/1`). A collapsed selection is none. Tab isn't
 one of those keys: indenting a selection is its own decision, still open.
 
+## Amendment (2026-11-11): the selection keys move ([ADR-0049](0049-ijkl-default-keys.md))
+
+`Alt+S` starts a selection (was `Alt+H`, now line start) and `Alt+A` selects all (was `Alt+B`, now
+the palette). Esc still clears it; `Alt+N` no longer does (it is kept for find, ADR-0049 §2a).
+
 ## See
 
 [ADR-0028](0028-editor-shell-and-minibuffer.md) (the view/selection model + highlight mode),

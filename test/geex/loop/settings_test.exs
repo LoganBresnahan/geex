@@ -77,20 +77,20 @@ defmodule Geex.Loop.SettingsTest do
       assert {_, :none} = key(%{view | sel: elixir}, {:key, :enter}, rows, 30)
     end
 
-    test "Alt+A and Alt+D change tabs, and never type into the Keys search" do
+    test "Alt+J and Alt+L change tabs, and never type into the Keys search" do
       view = Settings.open()
-      {view, :none} = key(view, {:alt, ?d}, [], 30)
+      {view, :none} = key(view, {:alt, ?l}, [], 30)
       assert view.tab == :themes
-      {view, :none} = key(view, {:alt, ?A}, [], 30)
-      {view, :none} = key(view, {:alt, ?a}, [], 30)
+      {view, :none} = key(view, {:alt, ?J}, [], 30)
+      {view, :none} = key(view, {:alt, ?j}, [], 30)
       assert view.tab == :general
-      {view, :none} = key(view, {:alt, ?a}, [], 30)
+      {view, :none} = key(view, {:alt, ?j}, [], 30)
       assert {view.tab, view.query} == {:commands, ""}
-      {view, :none} = key(view, {:alt, ?a}, [], 30)
+      {view, :none} = key(view, {:alt, ?j}, [], 30)
       assert {view.tab, view.query} == {:keys, ""}
-      {view, :none} = key(view, {:alt, ?D}, [], 30)
+      {view, :none} = key(view, {:alt, ?L}, [], 30)
       assert {view.tab, view.query} == {:commands, ""}
-      assert Enum.any?(Geex.Loop.KeyHelp.search("alt+a"), &(elem(&1, 0) == "Settings"))
+      assert Enum.any?(Geex.Loop.KeyHelp.search("alt+j"), &(elem(&1, 0) == "Settings"))
       # The markdown preview's chord and glyph (ADR-0043 §1).
       assert {"Panes", "Alt+Shift+P", _} =
                Enum.find(Geex.Loop.KeyHelp.search("preview"), &(elem(&1, 0) == "Panes"))
@@ -136,7 +136,7 @@ defmodule Geex.Loop.SettingsTest do
       assert %{cells: ["rename [PATH], mv", "", "Rename or move this file" <> _]} =
                Enum.find(rows, &(hd(&1.cells) =~ "rename"))
 
-      assert %{cells: ["up", "Alt+W ↑", _]} = Enum.find(rows, &(hd(&1.cells) == "up"))
+      assert %{cells: ["up", "Alt+I ↑", _]} = Enum.find(rows, &(hd(&1.cells) == "up"))
 
       assert %{cells: ["line break, newline", "Enter", _]} =
                Enum.find(rows, &(hd(&1.cells) =~ "line break"))
@@ -156,22 +156,22 @@ defmodule Geex.Loop.SettingsTest do
     end
 
     test "Commands filters by a key, and shows the keys the bindings give" do
-      view = %{Settings.open() | tab: :commands, query: "alt+k"}
-      assert [%{cells: ["close", "Alt+K", _]} | _] = Settings.rows(view, %{})
+      view = %{Settings.open() | tab: :commands, query: "alt+w"}
+      assert [%{cells: ["close", "Alt+W", _]} | _] = Settings.rows(view, %{})
 
-      # Whole keys: Alt+5 is tab 5's though the row says "Alt+1 … Alt+9"; Alt+S is `down`, not
+      # Whole keys: Alt+5 is tab 5's though the row says "Alt+1 … Alt+9"; Alt+K is `down`, not
       # the Alt+Shift+ keys.
       assert [%{cells: ["tab N" | _]} | _] = Settings.rows(%{view | query: "alt+5"}, %{})
-      assert [%{cells: ["down" | _]} | _] = Settings.rows(%{view | query: "alt+s"}, %{})
+      assert [%{cells: ["down" | _]} | _] = Settings.rows(%{view | query: "alt+k"}, %{})
       assert [%{cells: ["save" | _]} | _] = Settings.rows(%{view | query: "ctrl+o"}, %{})
 
-      # Bindings the view is handed, not the defaults: up moved to Alt+I.
-      keys = Bindings.defaults() |> Map.delete({:alt, ?w}) |> Map.put({:alt, ?i}, :up)
+      # Bindings the view is handed, not the defaults: up moved to Alt+B.
+      keys = Bindings.defaults() |> Map.delete({:alt, ?i}) |> Map.put({:alt, ?b}, :up)
       rows = Settings.rows(%{view | query: ""}, %{keys: keys})
-      assert %{cells: ["up", "Alt+I ↑", _]} = Enum.find(rows, &(hd(&1.cells) == "up"))
+      assert %{cells: ["up", "Alt+B ↑", _]} = Enum.find(rows, &(hd(&1.cells) == "up"))
 
       keys_rows = Settings.rows(%{view | tab: :keys, query: "up, left"}, %{keys: keys})
-      assert [%{cells: ["Alt+I ↑  Alt+A ←  Alt+S ↓  Alt+D →", _, "Move"]}] = keys_rows
+      assert [%{cells: ["Alt+B ↑  Alt+J ←  Alt+K ↓  Alt+L →", _, "Move"]}] = keys_rows
     end
 
     test "Markdown's companion is listed after it as the preview's, not as a language" do
@@ -338,7 +338,7 @@ defmodule Geex.Loop.SettingsTest do
       File.write!(Path.join(dir, entry["asset"]), zip)
       System.put_env("GEEX_CATALOG_URL", "file://" <> dir)
 
-      state = state |> send_io({:alt, ?y}) |> send_io({:alt, ?d})
+      state = state |> send_io({:alt, ?y}) |> send_io({:alt, ?l})
       rows = Settings.rows(state.settings, %{theme_id: state.theme_id})
       birds = Enum.find_index(rows, &(&1.name == "birds-of-paradise"))
       assert Enum.at(rows, birds).status == "update available"
