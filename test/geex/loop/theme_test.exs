@@ -89,8 +89,8 @@ defmodule Geex.Loop.ThemeTest do
     state = type(state, "theme terminal")
     assert state.theme.palette.mark == [:reverse]
 
-    # Into the tree (Alt+P from the editor goes to the edits pane first when shown; it's hidden).
-    state = send_io(state, {:alt, ?p})
+    # Into the tree (Alt+> from the editor goes to the edits pane first when shown; it's hidden).
+    state = send_io(state, {:alt, ?>})
     assert state.focus == :tree
     assert_receive {:geex_tree, _pid, _files} = read, 5_000
     {:noreply, state} = Loop.handle_info(read, state)

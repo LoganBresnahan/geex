@@ -86,7 +86,7 @@ defmodule Geex.Command.CatalogTest do
              entry = Enum.find(Catalog.all(), &(&1.name == "preview"))
 
     keys = Geex.Loop.Bindings.defaults()
-    assert Geex.Loop.Bindings.labels(keys, Catalog.commands(entry)) == "Alt+Shift+P"
+    assert Geex.Loop.Bindings.labels(keys, Catalog.commands(entry)) == "Alt+P"
   end
 
   # ADR-0047: no description names a key; the keys are the bindings', shown beside it.

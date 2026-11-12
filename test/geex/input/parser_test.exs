@@ -97,9 +97,15 @@ defmodule Geex.Input.ParserTest do
       assert Parser.parse("\e;x") == {[{:alt, ?;}, {:char, "x"}], ""}
     end
 
-    test "ESC ` is Alt+`, the other kind of indent's key (ADR-0050)" do
+    test "ESC ` is Alt+`, read though unbound (ADR-0050, ADR-0051)" do
       assert Parser.parse("\e`") == {[{:alt, ?`}], ""}
       assert Parser.parse("a\e`b") == {[{:char, "a"}, {:alt, ?`}, {:char, "b"}], ""}
+    end
+
+    test "ESC < and ESC > are Alt+< and Alt+>, the pane keys (ADR-0051)" do
+      assert Parser.parse("\e<") == {[{:alt, ?<}], ""}
+      assert Parser.parse("\e>x\e<") == {[{:alt, ?>}, {:char, "x"}, {:alt, ?<}], ""}
+      assert Parser.parse("\e>\e>") == {[{:alt, ?>}, {:alt, ?>}], ""}
     end
 
     test "CSI still wins over Alt (the `[` is not a letter)" do

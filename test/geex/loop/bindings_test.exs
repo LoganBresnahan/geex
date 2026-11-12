@@ -29,7 +29,9 @@ defmodule Geex.Loop.BindingsTest do
   defp event do
     one_of([
       tuple({constant(:alt), one_of([integer(?a..?z), integer(?A..?Z), integer(?0..?9)])}),
-      tuple({constant(:alt), member_of([:up, :down, :left, :right, ?-, ?=, ?,, ?., ?;, ?`])}),
+      tuple(
+        {constant(:alt), member_of([:up, :down, :left, :right, ?-, ?=, ?,, ?., ?<, ?>, ?;, ?`])}
+      ),
       tuple({constant(:ctrl), integer(?a..?z)}),
       tuple(
         {constant(:key),
@@ -96,20 +98,22 @@ defmodule Geex.Loop.BindingsTest do
       end
     end
 
-    test "Alt+Shift+Z and Alt+Shift+P are the Shift chords bound themselves" do
+    test "Alt+Shift+Z and Alt+Shift+R are the Shift chords bound themselves" do
       assert Bindings.translate({:alt, ?Z}, @defaults) == {:cmd, :redo}
       assert Bindings.translate({:alt, ?z}, @defaults) == {:cmd, :undo}
+      assert Bindings.translate({:alt, ?R}, @defaults) == {:cmd, :revert_call}
+      assert Bindings.translate({:alt, ?r}, @defaults) == {:cmd, :revert_hunk}
+      # Alt+Shift+P isn't bound: it falls back to Alt+P, the preview (ADR-0051).
       assert Bindings.translate({:alt, ?P}, @defaults) == {:cmd, :toggle_preview}
-      assert Bindings.translate({:alt, ?p}, @defaults) == {:cmd, :next_pane}
 
       shifted = for {{:alt, c}, _} <- @defaults, c in ?A..?Z, do: c
-      assert Enum.sort(shifted) == [?P, ?Z]
+      assert Enum.sort(shifted) == [?R, ?Z]
     end
 
     # The property's "never the other way" needs a lower case dropped and its Shift chord kept,
     # rare in a random subset of the defaults: pinned here.
     test "an unbound lower case doesn't borrow its Shift chord's command" do
-      for c <- [?z, ?p] do
+      for c <- [?z, ?r] do
         b = Map.delete(@defaults, {:alt, c})
         assert Bindings.translate({:alt, c}, b) == {:alt, c}
       end
@@ -156,13 +160,15 @@ defmodule Geex.Loop.BindingsTest do
         {:alt, ?c} => :copy,
         {:alt, ?x} => :cut,
         {:alt, ?v} => :paste,
-        {:alt, ?`} => :indent_other,
+        {:alt, ?1} => :indent_other,
+        {:alt, ?R} => :revert_call,
+        {:alt, ?<} => :prev_pane,
+        {:alt, ?>} => :next_pane,
+        {:alt, ?p} => :toggle_preview,
         {:alt, ?-} => :split_rows,
         {:alt, ?=} => :split_cols,
         {:alt, ?,} => :tab_prev,
         {:alt, ?.} => :tab_next,
-        {:alt, ?1} => {:tab, 0},
-        {:alt, ?9} => {:tab, 8},
         {:alt, :left} => {:resize, :left},
         {:ctrl, ?o} => :save,
         {:ctrl, ?g} => :stop_shell,
@@ -177,6 +183,10 @@ defmodule Geex.Loop.BindingsTest do
       # Alt+Q and Alt+N are kept for find (ADR-0049 §2a), unbound until find is built; Esc
       # clears a selection.
       for c <- [?q, ?Q, ?n, ?N], do: assert(Bindings.translate({:alt, c}, @defaults) == {:alt, c})
+
+      # Alt+2 … Alt+0 are the user's (ADR-0051), and so is Alt+`, which the desktop often takes.
+      for c <- [?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?0, ?`],
+          do: assert(Bindings.translate({:alt, c}, @defaults) == {:alt, c})
     end
 
     test "the defaults bind no key twice" do
@@ -203,6 +213,7 @@ defmodule Geex.Loop.BindingsTest do
         {:alt, :right} => "Alt+→",
         {:alt, ?u} => "Alt+U",
         {:alt, ?P} => "Alt+Shift+P",
+        {:alt, ?<} => "Alt+<",
         {:alt, ?-} => "Alt+-",
         {:alt, ?9} => "Alt+9",
         {:ctrl, ?x} => "Ctrl-X"

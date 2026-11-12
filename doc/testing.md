@@ -6009,3 +6009,22 @@ planted bugs and a tmux run. Everything but the declared changes was byte-identi
 
 1490 tests + 32 properties + 158 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
 `mix compile --warnings-as-errors --force` clean.
+
+### 2026-11-12 — ADR-0051: the panes on `Alt+<` and `Alt+>`, the preview on `Alt+P`, `indent other` on `Alt+1`, the digits free
+
+Built on `indent-keys` at the maintainer's word: `Alt+>` the next pane and the new `pane prev` on
+`Alt+<` (the parser reads `ESC <` and `ESC >`), `Alt+P` the markdown preview, `indent other` on
+`Alt+1` (GNOME and KDE take `` Alt+` ``), `Alt+2` … `Alt+0` bound to nothing, `revert-call` on
+`Alt+Shift+R`. The Keys tab hides a row whose commands have no key ("tab 1 to 9"); the edits
+and output panes' titles name `Alt+>`.
+
+Live-verified via tmux (120×30, a scratch project): `Alt+>` from the editor went to the edits
+pane, then the tree, then back to the editor; `Alt+<` went the other way (tree, edits, editor).
+`Alt+1` in `ab` inserted a tab (1:2 → 1:3), Tab then two spaces, `Alt+5` did nothing, and two
+`Alt+Z`s gave `ab` back. `Alt+P` on `n.md` opened its preview beside it; `Alt+Shift+P` (falling
+back to `Alt+P`) closed it. An outside write to `n.md` taken in with `Alt+D`, then
+`Alt+Shift+R`: "reverted an outside writer's change (2 hunks)", the whole change at once.
+
+1492 tests + 32 properties + 159 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. Not tested: `Alt+<`/`Alt+>` on a layout where
+`<` isn't Shift+`,` (German), or in a macOS terminal.

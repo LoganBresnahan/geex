@@ -120,6 +120,14 @@ defmodule Geex.RevertTest do
            ) == {:move, {3, 0}}
   end
 
+  test "Alt+Shift+R reverts the whole tool call under the cursor (ADR-0051)" do
+    assert Geex.Loop.Keymap.resolve(
+             Geex.Loop.Bindings.translate({:alt, ?R}, Geex.Loop.Bindings.defaults()),
+             {3, 2},
+             "a\nb\nc\nd"
+           ) == :revert_call
+  end
+
   test "the typed verbs" do
     assert Verbs.parse("revert") == {:action, :revert_hunk}
     assert Verbs.parse("revert-call") == {:action, :revert_call}

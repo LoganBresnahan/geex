@@ -114,7 +114,7 @@ defmodule Geex.Loop.ResizeTest do
     assert panes(state) == [{1, {120, 20}}, {2, {120, 9}}]
 
     # Its tab: a click shows it, and resizes nothing.
-    state = send_io(state, {:alt, ?p})
+    state = send_io(state, {:alt, ?>})
     assert state.panes.pane == 1
     state = drag(state, {3, 20}, {3, 25})
     assert state.panes.pane == 2
@@ -301,7 +301,7 @@ defmodule Geex.Loop.ResizeTest do
           acc
         end)
 
-      state = send_io(state, {:alt, ?1})
+      state = send_io(state, {:cmd, {:tab, 0}})
       {state, rows} = frame(state)
       # Pane 2's bar is row 14; its handle is at 120 - 3 - 2.
       assert at(rows, 14, 115, 2) == @rows

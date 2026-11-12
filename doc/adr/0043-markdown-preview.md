@@ -1,6 +1,6 @@
 # ADR-0043: A read-only markdown preview, re-rendered on save
 
-- **Status:** Accepted 2026-11-06. **Amended 2026-11-11** by ADR-0047: `Alt+R`/`Alt+F` go to the top and bottom. The maintainer decided the preview is read-only, re-rendered
+- **Status:** Accepted 2026-11-06. **Amended 2026-11-11** by ADR-0047: `Alt+R`/`Alt+F` go to the top and bottom. **Amended 2026-11-12** by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md): the preview is `Alt+P`. The maintainer decided the preview is read-only, re-rendered
   whole on save, and toggled by `Alt+Shift+P`. The rest (the trigger being the file on disk,
   opening beside the file, the parser, keeping the reader's place) was proposed in the same
   conversation and drafted here at the maintainer's request after a spike (§8), then revised the
@@ -485,6 +485,12 @@ A preview reads commands, not chords: `up`/`down` scroll a row, `page up`/`page 
 start` and `line end` everywhere, now scroll a preview to its top and bottom as Home and End do;
 before, they were refused with the read-only notice. Nothing else a preview takes changes, and
 the page keys still do nothing outside one.
+
+
+## Amendment (2026-11-12): the preview on `Alt+P` ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md))
+
+§1's key is `Alt+P`, which was the next pane (now `Alt+>`). `Alt+Shift+P`, bound to nothing,
+falls back to `Alt+P`, so the old key still opens and closes a preview.
 
 ## See
 

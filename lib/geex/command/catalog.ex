@@ -238,6 +238,11 @@ defmodule Geex.Command.Catalog do
       invoke: {:command, :next_pane}
     },
     %Entry{
+      name: "pane prev",
+      description: "Move to the pane before: the edits pane, the editor's panes, the tree.",
+      invoke: {:command, :prev_pane}
+    },
+    %Entry{
       name: "stop",
       description: "Stop the shell command running.",
       invoke: {:command, :stop_shell}
@@ -448,8 +453,8 @@ defmodule Geex.Command.Catalog do
   end
 
   @doc """
-  An entry narrowed to one of its commands, to run rather than hand off: `tab N` found by
-  `Alt+5` is `tab 5`, which shows tab 5 (ADR-0048 §2). An entry for one command is itself.
+  An entry narrowed to one of its commands, to run rather than hand off: `tab N` found by a key
+  bound to tab 5 is `tab 5`, which shows tab 5 (ADR-0048 §2). An entry for one command is itself.
   """
   @spec narrow(Entry.t(), term()) :: Entry.t()
   def narrow(%Entry{name: "tab"} = entry, {:tab, i} = command) do

@@ -1,6 +1,6 @@
 # ADR-0026: Terminal input model & keymap (one default, capability-gated extras)
 
-- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read; bracketed paste. **Amended 2026-11-10:** Shift+Tab inserts the other kind of indent from Tab's. **Amended 2026-11-11:** `Alt+Shift+W/A/S/D` no longer resize; Alt with an arrow does. **Amended 2026-11-11 by [ADR-0047](0047-every-key-runs-a-named-command.md):** the keymap is data: each bound key runs a named command. **Amended 2026-11-11 by [ADR-0050](0050-tab-indents-a-selection-shift-tab-unindents.md):** Shift+Tab un-indents; the other kind is `` Alt+` ``, read.
+- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read; bracketed paste. **Amended 2026-11-10:** Shift+Tab inserts the other kind of indent from Tab's. **Amended 2026-11-11:** `Alt+Shift+W/A/S/D` no longer resize; Alt with an arrow does. **Amended 2026-11-11 by [ADR-0047](0047-every-key-runs-a-named-command.md):** the keymap is data: each bound key runs a named command. **Amended 2026-11-11 by [ADR-0050](0050-tab-indents-a-selection-shift-tab-unindents.md):** Shift+Tab un-indents; the other kind is `Alt+1` (ADR-0051); `` Alt+` `` read. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+<` and `Alt+>` read.
 - **Date:** 2026-06-08
 - **Refines:** [ADR-0025](0025-user-config-layer.md) (the keymap is user-config *data*),
   [ADR-0024](0024-tui-core-extractable.md) (the TUI core / `prim_tty`)
@@ -212,8 +212,14 @@ unchanged.
 
 The 2026-11-10 amendment's Shift+Tab, the other kind of indent, is replaced: Shift+Tab takes one
 indent level from the selection's lines or the cursor's line, as that amendment foresaw, and the
-other kind moves to `` Alt+` ``. The parser reads `` ESC ` `` as `` Alt+` ``, beside `Alt+;`; no sequence
-starts with it.
+other kind moves to `Alt+1` ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md)). The parser reads `` ESC ` `` as `` Alt+` ``,
+beside `Alt+;`; no sequence starts with it. No default runs it: desktops take it.
+
+## Amendment (2026-11-12): `Alt+<` and `Alt+>` read ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md))
+
+The parser reads `ESC <` and `ESC >` (Alt+Shift+, and Alt+Shift+. on a US layout) as `Alt+<` and
+`Alt+>`, the pane keys. A terminal sends no sequence that starts with either; both are output
+sequences only (VT52 and keypad mode).
 
 ## See
 

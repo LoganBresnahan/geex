@@ -41,6 +41,7 @@ defmodule Geex.Loop.Keymap do
           | :revert_call
           | :fast_forward
           | :next_pane
+          | :prev_pane
           | :toggle_preview
           | :find_file
           | :close
@@ -76,8 +77,10 @@ defmodule Geex.Loop.Keymap do
     :undo,
     :redo,
     :revert_hunk,
+    :revert_call,
     :fast_forward,
     :next_pane,
+    :prev_pane,
     :toggle_preview,
     :find_file,
     :close,
@@ -108,7 +111,7 @@ defmodule Geex.Loop.Keymap do
 
   # Tab → the default tab size's spaces; the loop passes the setting and the file's indent
   # style to `indent/3`, and indents a selection's lines (ADR-0050). Shift+Tab → un-indent the
-  # cursor's line (`shift_lines/3`). `indent other` (`` Alt+` ``) → the other kind, which the loop
+  # cursor's line (`shift_lines/3`). `indent other` (`Alt+1`) → the other kind, which the loop
   # works out the same way (`other_indent/1`); without the loop's context, a tab.
   def resolve({:key, :tab}, cursor, _text), do: indent(cursor, 2, :spaces)
 
@@ -224,7 +227,7 @@ defmodule Geex.Loop.Keymap do
 
   @doc """
   What Tab does at `cursor` (roadmap item 18.7): a real tab in a file that indents with tabs
-  (`:tabs`), else `tab_size` spaces. `indent other` (`` Alt+` ``) is the other kind (`other_indent/1`).
+  (`:tabs`), else `tab_size` spaces. `indent other` (`Alt+1`) is the other kind (`other_indent/1`).
 
       iex> Geex.Loop.Keymap.indent({3, 1}, 4, :spaces) |> elem(2)
       {3, 5}
@@ -350,7 +353,7 @@ defmodule Geex.Loop.Keymap do
   @tabs_by_kind_ext ~w(.go .tsv)
 
   @doc """
-  What `indent other` (`` Alt+` ``, ADR-0050) inserts where Tab inserts `style`: the other
+  What `indent other` (`Alt+1`, ADR-0050) inserts where Tab inserts `style`: the other
   kind, so a tab can be typed where Tab gives spaces, and spaces where it gives a tab (in Go, a
   Makefile, a tab-indented file).
 

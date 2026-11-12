@@ -13,7 +13,8 @@ defmodule Geex.Loop.KeyHelp do
 
   # `{group, keys, what}`: `keys` is the commands whose keys to show (`Geex.Loop.Bindings`,
   # ADR-0047), with `range: true` for a run like Alt+1 … Alt+9, or a string for the keys that
-  # aren't bound (a view's own keys, the mouse).
+  # aren't bound (a view's own keys, the mouse). A row whose commands have no key is left out:
+  # tab 1 to 9 has none by default (ADR-0051), and a binding taken away hides its row.
   @entries [
     {"Move", {[:up, :left, :down, :right]}, "up, left, down, right"},
     {"Move", {[:word_back, :word_forward]}, "a word back, a word forward"},
@@ -33,6 +34,7 @@ defmodule Geex.Loop.KeyHelp do
      "the other kind of indent: a tab where Tab gives spaces, or spaces"},
     {"Edit", {[:undo, :redo]}, "undo, redo"},
     {"Edit", {[:revert_hunk]}, "take back the change under the cursor (one hunk)"},
+    {"Edit", {[:revert_call]}, "take back the whole tool call that changed this line"},
     {"Edit", {[:save]}, "save"},
     {"Files", {[:find_file]}, "open a file: the fuzzy finder"},
     {"Files", {[:close]}, "close the file (not with unsaved edits)"},
@@ -43,7 +45,7 @@ defmodule Geex.Loop.KeyHelp do
      "then type a file operation: `new PATH`, `mkdir DIR`, `delete`, `rename PATH`"},
     {"Panes", {[:toggle_tree]}, "show or hide the file tree"},
     {"Panes", {[:toggle_edits]}, "show or hide the edits pane"},
-    {"Panes", {[:next_pane]}, "the next pane: tree, editor, edits"},
+    {"Panes", {[:prev_pane, :next_pane]}, "the pane before, the next pane: tree, editor, edits"},
     {"Panes", {[:split_rows, :split_cols]}, "split the pane top and bottom, side by side"},
     {"Panes", {[{:resize, :up}, {:resize, :down}, {:resize, :left}, {:resize, :right}]},
      "resize: move the focused pane's edge that way (a split, the tree, the edits pane)"},
@@ -77,10 +79,22 @@ defmodule Geex.Loop.KeyHelp do
 
   @type entry :: {String.t(), String.t(), String.t()}
 
-  @doc "Every entry: `{group, keys, what it does}`, the keys written from `bindings`."
+  @doc """
+  Every entry with a key: `{group, keys, what it does}`, the keys written from `bindings`.
+
+      iex> Geex.Loop.KeyHelp.all() |> Enum.any?(&(elem(&1, 2) == "tab 1 to 9"))
+      false
+      iex> tabs = Map.new(0..8, &{{:alt, ?1 + &1}, {:tab, &1}})
+      iex> Geex.Loop.KeyHelp.all(tabs) |> Enum.find(&(elem(&1, 2) == "tab 1 to 9"))
+      {"Panes", "Alt+1 … Alt+9", "tab 1 to 9"}
+  """
   @spec all(Bindings.t()) :: [entry()]
-  def all(bindings \\ Bindings.defaults()),
-    do: for({group, keys, what} <- @entries, do: {group, written(keys, bindings), what})
+  def all(bindings \\ Bindings.defaults()) do
+    for {group, keys, what} <- @entries,
+        written = written(keys, bindings),
+        written != "",
+        do: {group, written, what}
+  end
 
   defp written(keys, _bindings) when is_binary(keys), do: keys
   defp written({commands}, bindings), do: Bindings.labels(bindings, commands)

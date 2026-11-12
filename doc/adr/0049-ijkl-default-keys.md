@@ -1,7 +1,7 @@
 # ADR-0049: The default keys move to IJKL
 
 - **Status:** Accepted 2026-11-11 (the maintainer's layout; built on the branch `ijkl-keys`,
-  accepted at the maintainer's word the same day)
+  accepted at the maintainer's word the same day). **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+1` `indent other`, the other digits free, the panes on `Alt+<`/`Alt+>`, the preview on `Alt+P`, `Alt+Shift+R` `revert-call`
 - **Date:** 2026-11-11
 - **Amends:** [ADR-0026](0026-terminal-input-model.md) (the motion cluster; `Alt+;` read),
   [ADR-0028](0028-editor-shell-and-minibuffer.md) (`Alt+N` no longer closes the command line),
@@ -99,6 +99,12 @@ remapping (roadmap 20.3).
   `;` on Shift+`,`); `End` is the same command. Remapping (20.3) is the fix for a layout the defaults don't suit.
 - The tests that pressed a key by its old chord press the new one; the ones that check a
   command's meaning don't change.
+
+
+## Amendment (2026-11-12): the digits, the panes, the preview, `revert-call` ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md))
+
+`Alt+1` is `indent other`; `Alt+2` … `Alt+0` run nothing, left for the user. `Alt+>` and `Alt+<`
+are the next pane and the one before, `Alt+P` the preview, and `Alt+Shift+R` is `revert-call`.
 
 ## See
 

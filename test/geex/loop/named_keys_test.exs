@@ -288,7 +288,9 @@ defmodule Geex.Loop.NamedKeysTest do
       {:noreply, state} = Loop.handle_info({:geex_active_buffer, b}, state)
       assert Path.basename(Buffer.status(elem(Session.active_buffer(), 1)).path) == "b.ex"
 
-      state = pick(state, "alt+1")
+      # No key shows a tab by default (ADR-0051): the user's binding, Alt+5 for tab 1.
+      state = %{state | keys: Map.put(state.keys, {:alt, ?5}, {:tab, 0})}
+      state = pick(state, "alt+5")
       assert state.minibuffer.mode == :inactive
       assert Path.basename(Buffer.status(elem(Session.active_buffer(), 1)).path) == "a.txt"
 

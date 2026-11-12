@@ -77,17 +77,17 @@ defmodule Geex.Loop.SplitTest do
     state = key(state, {:alt, ?-})
     Session.set_cursor({1, 3})
 
-    # Alt+P back to the first pane: its cursor, not the second's.
-    state = key(state, {:alt, ?p})
+    # Alt+> back to the first pane: its cursor, not the second's.
+    state = key(state, {:alt, ?>})
     assert state.panes.pane == 1
     assert {active(), cursor()} == {a, {0, 0}}
 
-    state = key(state, {:alt, ?p})
+    state = key(state, {:alt, ?>})
     assert state.panes.pane == 2
     assert cursor() == {1, 3}
   end
 
-  test "a file opens as a tab in the current pane; Alt+, Alt+. and Alt+1…9 switch", %{dir: dir} do
+  test "a file opens as a tab in the current pane; Alt+, Alt+. and `tab N` switch", %{dir: dir} do
     {state, a} = start(dir)
     state = key(state, {:alt, ?=})
     {state, b} = open(state, dir, "b.txt")
@@ -101,10 +101,10 @@ defmodule Geex.Loop.SplitTest do
     assert active() == b
     state = key(state, {:alt, ?.}) |> key({:alt, ?.})
     assert active() == a
-    state = key(state, {:alt, ?3})
+    state = key(state, {:cmd, {:tab, 2}})
     assert active() == c
     # A tab past the end changes nothing.
-    assert key(state, {:alt, ?9}).panes == state.panes
+    assert key(state, {:cmd, {:tab, 8}}).panes == state.panes
 
     # Opening a file the pane already has switches to its tab.
     {state, ^a} = open(state, dir, "a.txt")
@@ -148,7 +148,7 @@ defmodule Geex.Loop.SplitTest do
   test "the only pane's last tab closes to the buffer before it", %{dir: dir} do
     {state, a} = start(dir)
     {state, b} = open(state, dir, "b.txt")
-    state = key(state, {:alt, ?1})
+    state = key(state, {:cmd, {:tab, 0}})
     assert active() == a
 
     state = key(state, {:alt, ?w})
@@ -162,7 +162,7 @@ defmodule Geex.Loop.SplitTest do
     {state, _a} = start(dir)
     state = key(state, {:alt, ?-})
     {state, b} = open(state, dir, "b.txt")
-    state = key(state, {:alt, ?1})
+    state = key(state, {:cmd, {:tab, 0}})
     ref = Process.monitor(b)
     {:ok, _} = Session.close_file(Path.join(dir, "b.txt"))
     assert_receive {:DOWN, ^ref, :process, ^b, _}
@@ -177,7 +177,7 @@ defmodule Geex.Loop.SplitTest do
     {state, a} = start(dir)
     {state, b} = open(state, dir, "b.txt")
     # Two quick switches: to a, then back to b. Session's event for a arrives late.
-    state = key(state, {:alt, ?1}) |> key({:alt, ?2})
+    state = key(state, {:cmd, {:tab, 0}}) |> key({:cmd, {:tab, 1}})
     {:noreply, state} = Loop.handle_info({:geex_active_buffer, a}, state)
     assert Panes.current(state.panes).buffer == b
     assert active() == b
@@ -187,9 +187,9 @@ defmodule Geex.Loop.SplitTest do
     {state, a} = start(dir)
     state = key(state, {:alt, ?=})
     {state, _b} = open(state, dir, "b.txt")
-    state = key(state, {:alt, ?p})
+    state = key(state, {:alt, ?>})
     assert state.panes.pane == 1
-    state = key(state, {:alt, ?p}) |> open(dir, "a.txt") |> elem(0)
+    state = key(state, {:alt, ?>}) |> open(dir, "a.txt") |> elem(0)
 
     {:ok, cmd} = Geex.Commands.Insert.parse(%{line: 0, col: 0, text: "AGENT "})
     {:ok, _} = Buffer.dispatch(a, Geex.Command.put_meta(cmd, Geex.Command.Meta.llm("m")))

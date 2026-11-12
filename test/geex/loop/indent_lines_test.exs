@@ -1,6 +1,6 @@
 defmodule Geex.Loop.IndentLinesTest do
   # ADR-0050 through the loop's own handle_info/2, no terminal: Tab indents a selection's lines,
-  # Shift+Tab un-indents them (or the cursor's line), Alt+` is the other kind, each one edit.
+  # Shift+Tab un-indents them (or the cursor's line), Alt+1 is the other kind, each one edit.
   # Uses the global Session, so not async.
   use ExUnit.Case, async: false
 
@@ -210,16 +210,16 @@ defmodule Geex.Loop.IndentLinesTest do
     end
   end
 
-  describe "Alt+` is the other kind (§5)" do
+  describe "Alt+1 is the other kind (§5)" do
     test "a tab at the cursor where Tab gives spaces; over a selection, its lines", %{dir: dir} do
       {state, buf} = open(dir, "a.txt", "ab\ncd\n", {0, 1})
-      state = key(state, {:alt, ?`})
+      state = key(state, {:alt, ?1})
       assert Buffer.get_text(buf) == "a\tb\ncd\n"
       assert cursor() == {0, 2}
 
       Session.set_cursor({0, 0})
       state = select(state, [{:alt, ?k}, {:alt, ?l}])
-      _ = key(state, {:alt, ?`})
+      _ = key(state, {:alt, ?1})
       assert Buffer.get_text(buf) == "\ta\tb\n\tcd\n"
     end
 
@@ -232,7 +232,7 @@ defmodule Geex.Loop.IndentLinesTest do
           ] do
         {state, buf} = open(dir, name, text)
         state = if with == :tabs, do: %{state | indent_with: :tabs}, else: state
-        _ = key(%{state | tab_size: 4}, {:alt, ?`})
+        _ = key(%{state | tab_size: 4}, {:alt, ?1})
         assert Buffer.get_text(buf) == "    " <> text, name
         assert cursor() == {0, 4}
       end

@@ -163,7 +163,7 @@ defmodule Geex.Loop.KeymapTest do
   end
 
   describe "resolve/3 — undo/redo (ADR-0031)" do
-    test "Alt+Z undoes, Alt+Shift+Z redoes — case-sensitive (as Alt+P and Alt+Shift+P are)" do
+    test "Alt+Z undoes, Alt+Shift+Z redoes — case-sensitive (as Alt+R and Alt+Shift+R are)" do
       assert :undo = resolve({:alt, ?z}, {0, 0}, "abc")
       assert :redo = resolve({:alt, ?Z}, {0, 0}, "abc")
     end
@@ -237,9 +237,11 @@ defmodule Geex.Loop.KeymapTest do
     end
   end
 
-  describe "resolve/3 — Alt+P and Alt+Shift+P (ADR-0043 §1)" do
-    test "Alt+P is the next pane; Alt+Shift+P (and Alt+P under Caps Lock) the markdown preview" do
-      assert resolve({:alt, ?p}, {0, 0}, "abc") == :next_pane
+  describe "resolve/3 — the panes and the preview (ADR-0043 §1, ADR-0051)" do
+    test "Alt+> and Alt+< are the next pane and the one before; Alt+P (and Alt+Shift+P) the preview" do
+      assert resolve({:alt, ?>}, {0, 0}, "abc") == :next_pane
+      assert resolve({:alt, ?<}, {0, 0}, "abc") == :prev_pane
+      assert resolve({:alt, ?p}, {0, 0}, "abc") == :toggle_preview
       assert resolve({:alt, ?P}, {0, 0}, "abc") == :toggle_preview
     end
 

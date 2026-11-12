@@ -79,7 +79,7 @@ so a full-screen program (vim, top, ssh) belongs in a terminal split instead. Up
 command line bring back what you entered before.
 
 Paths are from the project root; an absolute path (`/…`, `~/…`) goes anywhere. In the file tree
-(`Alt+T` shows it, `Alt+P` moves into it), `a` adds a file or directory where the highlight is,
+(`Alt+T` shows it, `Alt+<` moves into it), `a` adds a file or directory where the highlight is,
 `d` deletes the highlighted entry (a directory only when it's empty), and `r` renames it.
 
 ## Languages and themes

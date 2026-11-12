@@ -750,7 +750,12 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       own ADR; the project-wide search runs off the loop (ADR-0035).
    6. **Tab over a selection** (ADR-0050, the maintainer, 2026-11-11): Tab indents the selected
       lines, Shift+Tab un-indents (always, the cursor's line without a selection), and the other
-      kind of indent moves from Shift+Tab to `` Alt+` ``. **Built 2026-11-11** on `indent-keys`.
+      kind of indent moves from Shift+Tab to `Alt+1` (first `` Alt+` ``, which GNOME and KDE take;
+      moved by ADR-0051). **Built 2026-11-11** on `indent-keys`.
+   7. **The panes both ways, the digits free** (ADR-0051, the maintainer, 2026-11-12): `Alt+>` the
+      next pane, `Alt+<` the new `pane prev`; `Alt+P` the markdown preview; `Alt+1` `indent
+      other`; `Alt+2` … `Alt+0` left for the user (`tab N` typed until remapping binds them);
+      `Alt+Shift+R` `revert-call`. **Built 2026-11-12** on `indent-keys`.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the

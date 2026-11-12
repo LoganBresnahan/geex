@@ -5,7 +5,7 @@
   splits keep a ratio, and the mouse resizes them (§6). **Amended 2026-10-18:** an edge dragged
   up and down shows `⠛⠛` (§6). **Builds** what
   [ADR-0034](0034-panes-tree-edits-hold.md) deferred ("splits and tabs") and
-  [ADR-0028](0028-editor-shell-and-minibuffer.md) put "behind the pane system". **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** preview tabs aren't a buffer's views; what reaches the active buffer while one is current (the 2026-11-06 amendment). **Amended 2026-11-09 (roadmap item 18):** the tab bar scrolls; the keyboard resizes; the output pane gets the band's handle; the last session comes back (now [ADR-0046](0046-the-last-session.md)).
+  [ADR-0028](0028-editor-shell-and-minibuffer.md) put "behind the pane system". **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** preview tabs aren't a buffer's views; what reaches the active buffer while one is current (the 2026-11-06 amendment). **Amended 2026-11-09 (roadmap item 18):** the tab bar scrolls; the keyboard resizes; the output pane gets the band's handle; the last session comes back (now [ADR-0046](0046-the-last-session.md)). **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** no default key shows tab N; the panes on `Alt+<` and `Alt+>`.
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0014](0014-editor-state-and-dispatch-ownership.md) (the cursor is
   view-local; Session holds the active buffer), [ADR-0034](0034-panes-tree-edits-hold.md) (the
@@ -230,6 +230,14 @@ The maintainer's list from using geex, decided 2026-11-09:
   session is as last kept. A `geex FILE` instance writes the sizes by reading the file and writing
   it back, unlocked: with a project instance open at once, one's write can be lost until its next
   change. App gate `session_memory` (off under test), `sessions_dir` overrides.
+
+
+## Amendment (2026-11-12): no default key shows tab N; the panes both ways ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md))
+
+`Alt+1` … `Alt+9` no longer show tab N: the maintainer left the digits for their own bindings
+(`Alt+1` is `indent other`). `tab 1` … `tab 9` keep their names, typed or picked, and the tab bar
+keeps its numbers; `Alt+,` and `Alt+.` still step through the tabs. The next pane is `Alt+>`, the
+one before `Alt+<`.
 
 ## See
 

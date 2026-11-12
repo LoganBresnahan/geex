@@ -12,7 +12,8 @@ defmodule Geex.Command.Catalog.Entry do
 
   A `{:command, command}` runs as its key does in the editor, on the file you were last in
   (ADR-0047 §6). `binds` lists the commands an entry's keys are found by when that isn't
-  its invoke (`tab N` is Alt+1 … Alt+9); `nil` reads them from the invoke.
+  its invoke (`tab N` is the keys of tab 1 … tab 9, none by default); `nil` reads them from
+  the invoke.
   """
   @enforce_keys [:name, :description, :invoke]
   defstruct [:name, :description, :invoke, usage: nil, aliases: [], binds: nil]

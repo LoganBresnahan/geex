@@ -301,7 +301,7 @@ defmodule Geex.Loop.MouseClickTest do
 
       state =
         Enum.reduce_while(1..4, %{state | focus: :editor}, fn _, acc ->
-          acc = send_io(acc, {:alt, ?p})
+          acc = send_io(acc, {:alt, ?>})
           if acc.focus == :edits, do: {:halt, acc}, else: {:cont, acc}
         end)
 
@@ -369,7 +369,7 @@ defmodule Geex.Loop.MouseClickTest do
     test "a pane too small to draw takes no click, so its × can't close it", %{dir: dir} do
       {state, _a} = start(dir)
       state = send_io(state, {:alt, ?-})
-      state = send_io(state, {:alt, ?p}) |> Map.put(:tree_shown, false)
+      state = send_io(state, {:alt, ?>}) |> Map.put(:tree_shown, false)
       {state, b} = open(state, dir, "b.txt")
       assert state.panes.pane == 1
       # 120 × 6: the editor is rows 0–4, pane 1 is two rows high.
@@ -383,7 +383,7 @@ defmodule Geex.Loop.MouseClickTest do
       {state, a} = start(dir)
       {state, b} = open(state, dir, "b.txt")
       state = send_io(state, {:char, "!"})
-      state = send_io(state, {:alt, ?1})
+      state = send_io(state, {:cmd, {:tab, 0}})
       assert active() == a
       {_, close_x} = tab_x(state, 1, 0, 120, 1)
       state = click(state, close_x, 0)
@@ -397,7 +397,7 @@ defmodule Geex.Loop.MouseClickTest do
       # 1 | (2 / 3), then back to pane 1.
       state = send_io(state, {:alt, ?=}) |> send_io({:alt, ?-})
       assert Panes.ids(state.panes) == [1, 2, 3]
-      state = send_io(state, {:alt, ?p})
+      state = send_io(state, {:alt, ?>})
       assert state.panes.pane == 1
       # Pane 3 is columns 60–119, rows 14–28: its × at 117–119 on row 14.
       state = click(state, 118, 14)
@@ -440,7 +440,7 @@ defmodule Geex.Loop.MouseClickTest do
       state = repaint(state)
       state = wheel(state, :down, 40, 24) |> repaint()
       assert state.edits_view.top == 3
-      state = send_io(state, {:alt, ?p}) |> send_io({:alt, ?p})
+      state = send_io(state, {:alt, ?>}) |> send_io({:alt, ?>})
       assert state.focus == :edits
       state = repaint(state)
       assert state.edits_view.top == 0

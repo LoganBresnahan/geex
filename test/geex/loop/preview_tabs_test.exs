@@ -147,7 +147,7 @@ defmodule Geex.Loop.PreviewTabsTest do
     test "from a preview it closes that preview and focuses the pane it came from", ctx do
       {state, _buf} = start(ctx.dir)
       state = Loop.toggle_preview(state)
-      state = key(state, {:alt, ?p})
+      state = key(state, {:alt, ?>})
       assert state.panes.pane == 2
       state = Loop.toggle_preview(state)
       assert Panes.ids(state.panes) == [1]
@@ -210,7 +210,7 @@ defmodule Geex.Loop.PreviewTabsTest do
     test "`open` adds a source tab where the pane had only the preview", ctx do
       {state, buf} = start(ctx.dir)
       state = Loop.toggle_preview(state)
-      state = key(state, {:alt, ?p})
+      state = key(state, {:alt, ?>})
       assert state.panes.pane == 2
       state = type(state, "open " <> Path.join(ctx.dir, "a.md"))
       assert %{buffer: ^buf, view: :source} = Panes.current(state.panes)
@@ -446,9 +446,9 @@ defmodule Geex.Loop.PreviewTabsTest do
       state
     end
 
-    test "Alt+Shift+P toggles from the source and from the preview; panels leave it alone", ctx do
+    test "Alt+P toggles from the source and from the preview; panels leave it alone", ctx do
       {state, buf} = start(ctx.dir)
-      state = key(state, {:alt, ?P})
+      state = key(state, {:alt, ?p})
 
       assert Panes.shown(state.panes, 2) |> Map.take([:buffer, :view]) == %{
                buffer: buf,
@@ -457,13 +457,13 @@ defmodule Geex.Loop.PreviewTabsTest do
 
       assert state.panes.pane == 1
 
-      state = key(state, {:alt, ?p}) |> key({:alt, ?P})
+      state = key(state, {:alt, ?>}) |> key({:alt, ?p})
       assert Panes.ids(state.panes) == [1]
       assert state.panes.pane == 1
 
       for focus <- [:tree, :edits] do
         s = %{state | tree_shown: true, edits_shown: true, focus: focus}
-        s = key(s, {:alt, ?P})
+        s = key(s, {:alt, ?p})
         assert s.focus == focus and preview_tab(s) == nil
       end
     end
@@ -526,7 +526,7 @@ defmodule Geex.Loop.PreviewTabsTest do
       File.write!(Path.join(ctx.dir, "b.md"), "# B\n")
       {state, buf} = start(ctx.dir)
       state = Loop.toggle_preview(state) |> rendered(buf)
-      state = key(state, {:alt, ?p})
+      state = key(state, {:alt, ?>})
       assert state.panes.pane == 2
       {state, rows} = frame(state)
       # The preview's half of each row: right of the divider.
@@ -580,12 +580,12 @@ defmodule Geex.Loop.PreviewTabsTest do
       state
     end
 
-    test "2: Alt+Shift+P's refusal is drawn: the key queues a repaint", ctx do
+    test "2: Alt+P's refusal is drawn: the key queues a repaint", ctx do
       {state, _a} = start(ctx.dir)
       {state, _b} = open(state, ctx.dir, "b.txt")
       {state, _rows} = frame(state)
       flush_repaints()
-      state = key(state, {:alt, ?P})
+      state = key(state, {:alt, ?p})
       assert state.notice =~ "markdown"
       assert_received :repaint
     end
@@ -594,7 +594,7 @@ defmodule Geex.Loop.PreviewTabsTest do
       File.write!(Path.join(ctx.dir, "a.md"), "# A\n\nSee [it](my%20file.md).\n")
       File.write!(Path.join(ctx.dir, "my file.md"), "# Spaced\n")
       {state, buf} = start(ctx.dir)
-      state = Loop.toggle_preview(state) |> rendered(buf) |> key({:alt, ?p})
+      state = Loop.toggle_preview(state) |> rendered(buf) |> key({:alt, ?>})
       {state, rows} = frame(state)
       y = Enum.find_index(rows, &(&1 |> String.split("│", parts: 2) |> List.last() =~ "See it"))
       line = Enum.at(rows, y)
@@ -614,7 +614,7 @@ defmodule Geex.Loop.PreviewTabsTest do
       File.write!(Path.join(ctx.dir, "~/t.md"), "# Tilde\n")
       File.write!(Path.join(ctx.dir, "a.md"), "# A\n\nSee [it](~/t.md).\n")
       {state, buf} = start(ctx.dir)
-      state = Loop.toggle_preview(state) |> rendered(buf) |> key({:alt, ?p})
+      state = Loop.toggle_preview(state) |> rendered(buf) |> key({:alt, ?>})
       {state, rows} = frame(state)
       y = Enum.find_index(rows, &(&1 |> String.split("│", parts: 2) |> List.last() =~ "See it"))
       line = Enum.at(rows, y)

@@ -13,13 +13,13 @@ defmodule Geex.Loop.Verbs do
     * `copy` / `cut` / `paste` — the clipboard verbs (= `Alt+C`/`X`/`V`, ADR-0015).
     * `undo` / `redo` — the history operations (= `Alt+Z`/`Alt+Shift+Z`, ADR-0031).
     * `revert` / `revert-call` — take back the agent's (or outside) change under the cursor,
-      one hunk (= `Alt+R`) or its whole tool call, keeping later edits (ADR-0033 §7).
+      one hunk (= `Alt+R`) or its whole tool call (= `Alt+Shift+R`, ADR-0051), keeping later edits (ADR-0033 §7).
     * `highlight` / `select` — start a selection at the cursor (= `Alt+S`, ADR-0029);
       `highlight all` / `select all` — select the whole buffer (= `Alt+A`).
     * `save` — write the active buffer to disk (= `Ctrl-O`; an operation, ADR-0019).
     * `fast-forward` — take in the file's change on disk (= `Alt+D`, ADR-0034, ADR-0037).
     * `edits` / `tree` — show or hide the edits pane / the file tree (= `Alt+E` / `Alt+T`;
-      `Alt+P` moves between the panes). ADR-0034, ADR-0037.
+      `Alt+>` / `Alt+<` move between the panes). ADR-0034, ADR-0037, ADR-0051.
     * `open PATH` — show a file, opening it if needed; a relative `PATH` is from the project
       root (and may not leave it), and keeps its case. `open` alone or `find` — the file finder (= `Alt+F`,
       ADR-0037). `buffers` — pick an open buffer. `close` — close this buffer (= `Alt+W`;
@@ -34,8 +34,8 @@ defmodule Geex.Loop.Verbs do
       `!!` — run the last one again; `|COMMAND` — pipe the selection through a command and
       replace it with the output, one undoable edit. The command is kept as typed. ADR-0042.
     * `split` / `vsplit` — split the pane top and bottom / side by side (= `Alt+-` / `Alt+=`);
-      `tab next` / `tab prev` / `tab N` — switch the pane's tab (= `Alt+.` / `Alt+,` /
-      `Alt+1` … `Alt+9`). ADR-0038.
+      `tab next` / `tab prev` / `tab N` — switch the pane's tab (= `Alt+.` / `Alt+,`; `tab N` has
+      no key, ADR-0051). ADR-0038.
     * `mouse` — turn the mouse off, so the terminal selects and copies text itself, or back on
       (ADR-0039).
     * `theme` — list the themes; `theme NAME` — switch to one for this session, e.g. `theme

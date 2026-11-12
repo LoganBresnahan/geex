@@ -431,7 +431,7 @@ defmodule Geex.Loop do
       recall: %{command: Recall.new(), grid: Recall.new()},
       history_file: nil,
       # The edits pane (ADR-0034 §6): shown at start when the terminal has 20 rows; `edits`
-      # toggles it (Alt+E). `focus` is where keys go (`Alt+P`); `edits_sel` its highlighted entry.
+      # toggles it (Alt+E). `focus` is where keys go (`Alt+<`, `Alt+>`); `edits_sel` its highlighted entry.
       edits_shown: h >= 20,
       focus: :editor,
       edits_sel: 0,
@@ -1394,12 +1394,13 @@ defmodule Geex.Loop do
   ## panes, the files, save, fast-forward, quit …) do what they do anywhere; the rest say why
   ## they don't (ADR-0043 §1).
 
-  @read_only "the preview is read-only (Alt+Shift+P closes it)"
+  @read_only "the preview is read-only (Alt+P closes it)"
   @preview_actions [
     :select_clear,
     :minibuffer,
     :palette,
     :next_pane,
+    :prev_pane,
     :find_file,
     :close,
     :toggle_tree,
@@ -2261,7 +2262,7 @@ defmodule Geex.Loop do
         state |> enter_pane({:file, id}) |> switch(&Panes.select(&1, i))
 
       # The preview's glyph: show that tab, then toggle, as a tab's × shows it before closing.
-      # The tab already shown in the current pane keeps its selection, as Alt+Shift+P does.
+      # The tab already shown in the current pane keeps its selection, as Alt+P does.
       {:toggle_preview, i} when i == pane.at and id == state.panes.pane ->
         toggle_preview(%{state | focus: :editor})
 
@@ -2864,7 +2865,7 @@ defmodule Geex.Loop do
     )
   end
 
-  # The pane's tab bar (ADR-0038) on its top row (`Geex.Loop.TabBar`): each tab numbered (Alt+1..9)
+  # The pane's tab bar (ADR-0038) on its top row (`Geex.Loop.TabBar`): each tab numbered (`tab N`)
   # with its file name, ` [+]` for unsaved edits and a `×` that closes it; the shown tab tinted,
   # brighter in the focused pane; the pane's own `×` at the right end when it isn't the only one
   # (ADR-0039).
@@ -3075,7 +3076,7 @@ defmodule Geex.Loop do
       cond do
         state.shell && state.shell.kind == :show -> " Ctrl-G stops "
         focused? -> " Enter opens · ! again · q closes "
-        true -> " Alt+P "
+        true -> " Alt+> "
       end
 
     head = "── " <> Output.title(out, now_ms()) <> " "
@@ -3134,7 +3135,7 @@ defmodule Geex.Loop do
          entries
        ) do
     focused? = state.focus == :edits
-    hint = if focused?, do: " Enter opens · Esc back ", else: " Alt+P "
+    hint = if focused?, do: " Enter opens · Esc back ", else: " Alt+> "
     title = "── edits " <> String.duplicate("─", max(w - 9 - String.length(hint), 0)) <> hint
 
     screen =
@@ -3637,9 +3638,9 @@ defmodule Geex.Loop do
     :exit, _ -> []
   end
 
-  # Alt+P: the next pane on screen, in the order tree · each file pane (reading order) · edits,
-  # wrapping (ADR-0038).
-  defp next_pane(state) do
+  # Alt+> (`step` 1): the next pane on screen, in the order tree · each file pane (reading
+  # order) · edits, wrapping (ADR-0038); Alt+< (`step` -1) the one before (ADR-0051).
+  defp next_pane(state, step \\ 1) do
     l = layout(state)
     files = for id <- Panes.ids(state.panes), do: {:file, id}
     band = if state.output, do: :output, else: :edits
@@ -3657,7 +3658,7 @@ defmodule Geex.Loop do
           end
 
         i = Enum.find_index(panes, &(&1 == here)) || 0
-        enter_pane(Enum.at(panes, rem(i + 1, length(panes))), state)
+        enter_pane(Enum.at(panes, Integer.mod(i + step, length(panes))), state)
     end
   end
 
@@ -4119,10 +4120,10 @@ defmodule Geex.Loop do
   end
 
   # The chords that work from either panel (ADR-0037): the minibuffer, the palette, the next
-  # pane, open a file, show or hide the tree and the edits pane, and quitting. The openers go
+  # pane or the one before (ADR-0051), open a file, show or hide the tree and the edits pane, and quitting. The openers go
   # through the same branches the editor's keys use (`apply_key/4`); `apply_action/4` has no
   # clause for them.
-  @panel_actions [:next_pane, :find_file, :toggle_tree, :toggle_edits, :quit]
+  @panel_actions [:next_pane, :prev_pane, :find_file, :toggle_tree, :toggle_edits, :quit]
 
   defp panel_chord(event, state) do
     case Keymap.resolve(event, {0, 0}, "") do
@@ -4882,7 +4883,7 @@ defmodule Geex.Loop do
     # the keymap doesn't hold (roadmap item 18.7).
     pairs = live_pairs(state)
 
-    # Tab inserts what the file indents with; `indent other` (Alt+`) the other kind (ADR-0050).
+    # Tab inserts what the file indents with; `indent other` (Alt+1) the other kind (ADR-0050).
     # The tab size and the file's kind are the loop's, not the keymap's.
     action =
       case event do
@@ -5009,6 +5010,9 @@ defmodule Geex.Loop do
 
       :next_pane ->
         schedule_repaint(next_pane(state))
+
+      :prev_pane ->
+        schedule_repaint(next_pane(state, -1))
 
       # Split panes and tabs (ADR-0038). The new pane shows the same tab and becomes current.
       :split_rows ->
@@ -5843,6 +5847,7 @@ defmodule Geex.Loop do
         :toggle_tree,
         :toggle_edits,
         :next_pane,
+        :prev_pane,
         :split_rows,
         :split_cols,
         :tab_next,
@@ -5870,7 +5875,8 @@ defmodule Geex.Loop do
 
   # Switching and closing buffers need no text either (and work with none active).
   defp verb(action, state)
-       when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane, :find_file] or
+       when action in [:buffers, :close, :toggle_edits, :toggle_tree, :next_pane, :prev_pane] or
+              action in [:find_file] or
               action in [:toggle_mouse, :toggle_preview] or
               action in [:split_rows, :split_cols, :tab_next, :tab_prev] or
               (is_tuple(action) and elem(action, 0) in [:tab, :theme]),

@@ -1,6 +1,6 @@
 defmodule Geex.Loop.PanesTest do
   # Keys while a panel has focus (ADR-0034), through the loop's own handle_info/2 with a state
-  # built by new_state/2: no terminal needed. Found live by the coordinator: Alt+M / Alt+P from
+  # built by new_state/2: no terminal needed. Found live by the coordinator: Alt+M / Alt+> from
   # the edits pane crashed the loop. Sets the global Session's start, so not async.
   use ExUnit.Case, async: false
 
@@ -46,14 +46,15 @@ defmodule Geex.Loop.PanesTest do
       end
     end
 
-    test "Alt+F, Alt+T, Alt+E and Alt+P work from the #{pane} pane (ADR-0037)" do
+    test "Alt+F, Alt+T, Alt+E, Alt+> and Alt+< work from the #{pane} pane (ADR-0037)" do
       state = focused_on(unquote(pane))
 
       assert %Minibuffer{mode: :files} = key(state, {:alt, ?f}).minibuffer
 
       assert key(state, {:alt, ?t}).tree_shown == not state.tree_shown
       assert key(state, {:alt, ?e}).edits_shown == not state.edits_shown
-      assert key(state, {:alt, ?p}).focus != unquote(pane)
+      assert key(state, {:alt, ?>}).focus != unquote(pane)
+      assert key(state, {:alt, ?<}).focus != unquote(pane)
     end
 
     test "other keys from the #{pane} pane don't reach a buffer; Esc goes back" do
@@ -63,19 +64,27 @@ defmodule Geex.Loop.PanesTest do
     end
   end
 
-  test "Alt+P cycles tree · editor · edits" do
+  test "Alt+> cycles tree · editor · edits; Alt+< the other way" do
     state = Loop.new_state(120, 30)
-    state = key(state, {:alt, ?p})
+    state = key(state, {:alt, ?>})
     assert state.focus == :edits
-    state = key(state, {:alt, ?p}) |> tree_read()
+    state = key(state, {:alt, ?>}) |> tree_read()
     assert state.focus == :tree
     assert state.tree.rows |> Enum.map(& &1.path) == ["lib"]
-    assert key(state, {:alt, ?p}).focus == :editor
+    assert key(state, {:alt, ?>}).focus == :editor
+
+    # Back the other way, from the editor: edits, then the tree (ADR-0051).
+    state = Loop.new_state(120, 30)
+    state = key(state, {:alt, ?<}) |> tree_read()
+    assert state.focus == :tree
+    state = key(state, {:alt, ?<})
+    assert state.focus == :edits
+    assert key(state, {:alt, ?<}).focus == :editor
   end
 
   test "in the tree, Enter opens a directory; Left on a file goes up to it, then closes it",
        %{dir: _dir} do
-    state = key(Loop.new_state(120, 30), {:alt, ?p}) |> key({:alt, ?p}) |> tree_read()
+    state = key(Loop.new_state(120, 30), {:alt, ?>}) |> key({:alt, ?>}) |> tree_read()
     state = key(state, {:key, :enter})
     assert Enum.map(state.tree.rows, & &1.path) == ["lib", "lib/a.ex"]
 
@@ -89,7 +98,7 @@ defmodule Geex.Loop.PanesTest do
 
   test "in the tree, Alt+J and Alt+L act as Left and Right; Alt+I and Alt+K as Up and Down" do
     # Either case: Caps Lock doesn't change them (Alt+Shift+W/A/S/D resized until 2026-11-11).
-    state = key(Loop.new_state(120, 30), {:alt, ?p}) |> key({:alt, ?p}) |> tree_read()
+    state = key(Loop.new_state(120, 30), {:alt, ?>}) |> key({:alt, ?>}) |> tree_read()
     state = key(state, {:alt, ?l})
     assert Enum.map(state.tree.rows, & &1.path) == ["lib", "lib/a.ex"]
 
@@ -138,12 +147,12 @@ defmodule Geex.Loop.PanesTest do
   end
 
   test "the tree is read in a process of its own: the loop doesn't wait, one read at a time" do
-    state = key(Loop.new_state(120, 30), {:alt, ?p}) |> key({:alt, ?p})
+    state = key(Loop.new_state(120, 30), {:alt, ?>}) |> key({:alt, ?>})
     assert {pid, _ref} = state.tree.reading
     assert state.tree.rows == []
 
     # Back to the editor and into the tree again while the read runs: no second read.
-    again = state |> key({:key, :esc}) |> key({:alt, ?p}) |> key({:alt, ?p})
+    again = state |> key({:key, :esc}) |> key({:alt, ?>}) |> key({:alt, ?>})
     assert again.tree.reading == state.tree.reading
 
     # An answer from another process (a superseded read) changes nothing.
@@ -161,7 +170,7 @@ defmodule Geex.Loop.PanesTest do
     fresh = Loop.new_state(120, 30)
     assert Loop.handle_info({:geex_tree_changed, dir}, fresh) == {:noreply, fresh}
 
-    state = key(fresh, {:alt, ?p}) |> key({:alt, ?p}) |> tree_read()
+    state = key(fresh, {:alt, ?>}) |> key({:alt, ?>}) |> tree_read()
     state = %{state | tree: %{state.tree | open: MapSet.new(["lib"])}}
     state = put_in(state.tree.rows, Geex.Tree.rows(state.tree.index, state.tree.open))
     # The highlight on lib/a.ex, the second row.

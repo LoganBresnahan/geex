@@ -92,7 +92,7 @@ defmodule Geex.Loop.SettingsTest do
       assert {view.tab, view.query} == {:commands, ""}
       assert Enum.any?(Geex.Loop.KeyHelp.search("alt+j"), &(elem(&1, 0) == "Settings"))
       # The markdown preview's chord and glyph (ADR-0043 §1).
-      assert {"Panes", "Alt+Shift+P", _} =
+      assert {"Panes", "Alt+P", _} =
                Enum.find(Geex.Loop.KeyHelp.search("preview"), &(elem(&1, 0) == "Panes"))
 
       assert {"Mouse", "click " <> glyph, _} =
@@ -141,7 +141,8 @@ defmodule Geex.Loop.SettingsTest do
       assert %{cells: ["line break, newline", "Enter", _]} =
                Enum.find(rows, &(hd(&1.cells) =~ "line break"))
 
-      assert %{cells: ["tab N", "Alt+1 … Alt+9", _]} = Enum.find(rows, &(hd(&1.cells) == "tab N"))
+      # No key shows a tab by default (ADR-0051).
+      assert %{cells: ["tab N", "", _]} = Enum.find(rows, &(hd(&1.cells) == "tab N"))
 
       view =
         Enum.reduce(String.graphemes("exit"), view, fn g, v ->
@@ -159,9 +160,9 @@ defmodule Geex.Loop.SettingsTest do
       view = %{Settings.open() | tab: :commands, query: "alt+w"}
       assert [%{cells: ["close", "Alt+W", _]} | _] = Settings.rows(view, %{})
 
-      # Whole keys: Alt+5 is tab 5's though the row says "Alt+1 … Alt+9"; Alt+K is `down`, not
-      # the Alt+Shift+ keys.
-      assert [%{cells: ["tab N" | _]} | _] = Settings.rows(%{view | query: "alt+5"}, %{})
+      # Whole keys: Alt+1 is `indent other`'s (ADR-0051); Alt+K is `down`, not the Alt+Shift+
+      # keys.
+      assert [%{cells: ["indent other" | _]} | _] = Settings.rows(%{view | query: "alt+1"}, %{})
       assert [%{cells: ["down" | _]} | _] = Settings.rows(%{view | query: "alt+k"}, %{})
       assert [%{cells: ["save" | _]} | _] = Settings.rows(%{view | query: "ctrl+o"}, %{})
 

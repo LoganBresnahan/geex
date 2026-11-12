@@ -6,7 +6,7 @@
   [ADR-0034](0034-panes-tree-edits-hold.md) §7 (`Alt+O` and `Alt+L` change meaning).
   **Amended 2026-10-18:** `Alt+Y` opens the settings view (ADR-0040 §7). **Amended
   2026-10-19:** `a`, `d` and `r` in the tree (ADR-0019's amendment); `open PATH` is from the
-  project root, as the finder is. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** P is case-sensitive, `Alt+Shift+P` the markdown preview.
+  project root, as the finder is. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** P is case-sensitive, `Alt+Shift+P` the markdown preview. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** the panes on `Alt+<` and `Alt+>`.
 - **Date:** 2026-10-17
 - **Relates to:** [ADR-0026](0026-terminal-input-model.md) (Alt is a secondary, remappable
   namespace; every Alt key has a typed twin), [ADR-0028](0028-editor-shell-and-minibuffer.md)
@@ -102,6 +102,13 @@ With motion on IJKL, the keys here that sat in that cluster move: `Alt+B` the pa
 (was `Alt+L`), `Alt+D` fast-forward (was `Alt+J`), `Alt+R` revert (was `Alt+U`, ADR-0033 §7).
 `Alt+P`, `Alt+T`, `Alt+Y` and `Alt+Shift+P` stay. In the tree, `Alt+J`/`Alt+L` act as Left and
 Right, and `Alt+I`/`Alt+K` as Up and Down, since they run those commands (ADR-0047 §4).
+
+
+## Amendment (2026-11-12): the panes on `Alt+<` and `Alt+>` ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md))
+
+`Alt+P` no longer moves to the next pane: `Alt+>` does, and `Alt+<` (the new `pane prev`) moves to
+the one before. Both work from the tree and the edits pane, as `Alt+P` did. `Alt+P` is the
+markdown preview.
 
 ## See
 

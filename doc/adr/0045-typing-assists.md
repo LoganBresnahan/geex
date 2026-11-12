@@ -114,11 +114,11 @@ closer one column too far (the next step-over then types instead); a paste over 
 minibuffer inserts each piece's first line; a mouse click moves the cursor without dropping the
 pairs (their closers are still geex's).
 
-## Amendment (2026-11-11): Tab over a selection, Shift+Tab, `` Alt+` `` ([ADR-0050](0050-tab-indents-a-selection-shift-tab-unindents.md))
+## Amendment (2026-11-11): Tab over a selection, Shift+Tab, `Alt+1` ([ADR-0050](0050-tab-indents-a-selection-shift-tab-unindents.md))
 
 §3's indent level is also what Tab inserts at the start of each line of a selection, and what
 Shift+Tab takes back off (a tab, or spaces to the previous tab stop, as Backspace does in leading
-spaces). The other kind is `` Alt+` ``, no longer Shift+Tab.
+spaces). The other kind is `Alt+1` ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md)), no longer Shift+Tab.
 
 ## See
 

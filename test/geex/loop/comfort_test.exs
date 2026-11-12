@@ -273,8 +273,8 @@ defmodule Geex.Loop.ComfortTest do
       assert row =~ ~r/^‹5 +6 file_5\.txt × +7 file_6\.txt × +8 file_7\.txt ×/
       refute row =~ "›"
 
-      # Alt+1: tab 1 shown, the bar starts at it, five hidden at the right.
-      row = state |> key({:alt, ?1}) |> bar_row()
+      # `tab 1`: tab 1 shown, the bar starts at it, five hidden at the right.
+      row = state |> key({:cmd, {:tab, 0}}) |> bar_row()
       assert row =~ ~r/^ 1 a\.txt ×.* 5›/
       refute row =~ "‹"
     end
@@ -294,7 +294,7 @@ defmodule Geex.Loop.ComfortTest do
       assert Panes.bar_first(state.panes.panes[1]) == 5
 
       # A tab switch follows the shown tab again.
-      state = key(state, {:alt, ?1})
+      state = key(state, {:cmd, {:tab, 0}})
       assert Panes.bar_first(state.panes.panes[1]) == nil
       assert bar_row(state) =~ ~r/^ 1 a\.txt/
     end
@@ -417,15 +417,15 @@ defmodule Geex.Loop.ComfortTest do
       assert Geex.Clipboard.top() == "\t"
     end
 
-    # The maintainer's word: Tab follows the file; Alt+` the other kind (a tab here, ADR-0050).
-    test "Tab inserts a tab in a file that indents with tabs; Alt+` a tab where Tab doesn't",
+    # The maintainer's word: Tab follows the file; Alt+1 the other kind (a tab here, ADR-0050, ADR-0051).
+    test "Tab inserts a tab in a file that indents with tabs; Alt+1 a tab where Tab doesn't",
          %{
            state: state,
            dir: dir,
            buf: buf
          } do
-      # setup's file has no indented line: spaces; Alt+`: a tab.
-      state = key(state, {:alt, ?`})
+      # setup's file has no indented line: spaces; Alt+1: a tab.
+      state = key(state, {:alt, ?1})
       assert text(buf) == "\thello world\nline 2\n"
       assert cursor() == {0, 1}
 
@@ -439,7 +439,7 @@ defmodule Geex.Loop.ComfortTest do
       assert cursor() == {2, 1}
     end
 
-    # Alt+` over a selection and in the files whose Tab gives a tab: indent_lines_test.exs
+    # Alt+1 over a selection and in the files whose Tab gives a tab: indent_lines_test.exs
     # (ADR-0050).
 
     test "Shift+Tab elsewhere (the tree, the edits pane, the settings view, the minibuffer) is harmless",
@@ -506,7 +506,7 @@ defmodule Geex.Loop.ComfortTest do
       assert ratio < before
 
       # Back in the left pane, Right moves the same divider right.
-      state = key(state, {:alt, ?p}) |> key({:alt, :right}) |> key({:alt, :right})
+      state = key(state, {:alt, ?>}) |> key({:alt, :right}) |> key({:alt, :right})
       {:cols, _, _, after_right} = state.panes.split
       assert after_right > ratio
 

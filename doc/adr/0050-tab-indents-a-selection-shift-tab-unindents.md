@@ -1,7 +1,8 @@
-# ADR-0050: Tab indents a selection, Shift+Tab un-indents, Alt+backtick the other kind
+# ADR-0050: Tab indents a selection, Shift+Tab un-indents, Alt+1 the other kind
 
 - **Status:** Accepted 2026-11-11 (the maintainer's ask; built on the branch `indent-keys`,
-  accepted at the maintainer's word the same day)
+  accepted at the maintainer's word the same day). §5 changed in place 2026-11-12, before the
+  branch was merged: the other kind moved from `` Alt+` `` to `Alt+1` ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md))
 - **Date:** 2026-11-11
 - **Amends:** [ADR-0026](0026-terminal-input-model.md) (its 2026-11-10 amendment: Shift+Tab
   inserted the other kind of indent; `` Alt+` `` read), [ADR-0045](0045-typing-assists.md) §3
@@ -50,14 +51,14 @@ between them is marked too.
 or taken there, except an end at column 0, which stays at 0, so a selection of whole lines stays
 whole lines.
 
-**5. `` Alt+` `` inserts the other kind.** The command `indent other` (ADR-0047 §2) keeps its
-name and loses Shift+Tab; `` Alt+` `` runs it, the key above Tab on most keyboards. With no
-selection it inserts the other kind at the cursor, as Shift+Tab did; with one, it indents the
-selection's lines with the other kind, as Tab does with its own. The parser reads `` ESC ` `` as
-`` Alt+` ``, beside `Alt+;` (ADR-0049 §3): no sequence starts with it. Where `` ` `` is a dead
-key (several European layouts), `` Alt+` `` may not arrive, nor on desktops that take it to
-switch between one application's windows (GNOME's default, KDE's); `indent other` is still typed
-in `Alt+M`, and remapping (roadmap 20.3) moves it.
+**5. `Alt+1` inserts the other kind.** The command `indent other` (ADR-0047 §2) keeps its
+name and loses Shift+Tab; `Alt+1` runs it, beside the key above Tab. With no selection it
+inserts the other kind at the cursor, as Shift+Tab did; with one, it indents the selection's
+lines with the other kind, as Tab does with its own. It was first `` Alt+` ``, the key above Tab:
+GNOME and KDE take `` Alt+` `` (and `Alt+~`) by default to switch between one application's
+windows, and `` ` `` is a dead key on several European layouts, so the maintainer moved it to
+`Alt+1` ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md)). The parser still reads `` ESC ` `` as `` Alt+` ``, beside `Alt+;`
+(ADR-0049 §3), bound to nothing. `indent other` is also typed in `Alt+M`.
 
 **6. Named.** Shift+Tab's own command is `unindent` (aliases `outdent`, `dedent`), typed in
 `Alt+M` and listed in the palette and the Commands tab; Tab's stays `indent`. Typed, each acts as
@@ -77,9 +78,9 @@ Shift+Tab, as before.
   same lines again.
 - A selection no longer ignores Tab. Typing a tab over a selection, replacing it, is gone; delete
   the selection first.
-- Shift+Tab with no selection used to insert; now it removes. The other kind is `` Alt+` ``.
-- Every Alt letter is now taken or kept (ADR-0049), so new defaults come from the symbol keys:
-  `` ` ``, `'`, `/`. `[`, `]` and `\` can't be read as Alt chords: each starts a sequence.
+- Shift+Tab with no selection used to insert; now it removes. The other kind is `Alt+1`.
+- Every Alt letter is now taken or kept (ADR-0049), so new defaults come from the digits and the
+  symbol keys (ADR-0051). `[`, `]` and `\` can't be read as Alt chords: each starts a sequence.
 
 ## See
 

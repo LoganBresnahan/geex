@@ -24,64 +24,60 @@ defmodule Geex.Loop.Bindings do
   @type t :: %{chord() => command()}
 
   # The defaults, each command with its keys in the order the help shows them. An Alt+letter
-  # covers Alt+Shift+letter too (`translate/2`, Caps Lock); the two Shift chords listed are the
-  # ones that mean something else.
+  # covers Alt+Shift+letter too (`translate/2`, Caps Lock); the Shift chords listed are the ones
+  # that mean something else. Alt+2 … Alt+0 are left for the user (ADR-0051).
   @defaults [
-              # Motion (ADR-0026, ADR-0049): the arrows and the right hand's IJKL cluster.
-              {:up, [{:alt, ?i}, {:key, :up}]},
-              {:left, [{:alt, ?j}, {:key, :left}]},
-              {:down, [{:alt, ?k}, {:key, :down}]},
-              {:right, [{:alt, ?l}, {:key, :right}]},
-              {:word_back, [{:alt, ?u}]},
-              {:word_forward, [{:alt, ?o}]},
-              {:line_start, [{:alt, ?h}, {:key, :home}]},
-              {:line_end, [{:alt, ?;}, {:key, :end}]},
-              {:page_up, [{:key, :page_up}]},
-              {:page_down, [{:key, :page_down}]},
-              # Selection (ADR-0029) and the clipboard (ADR-0015).
-              {:select_start, [{:alt, ?s}]},
-              {:select_all, [{:alt, ?a}]},
-              {:copy, [{:alt, ?c}]},
-              {:cut, [{:alt, ?x}]},
-              {:paste, [{:alt, ?v}]},
-              # The other kind of indent, the key above Tab (ADR-0050).
-              {:indent_other, [{:alt, ?`}]},
-              # History (ADR-0031, ADR-0033 §7) and the file (ADR-0019, ADR-0034).
-              {:undo, [{:alt, ?z}]},
-              {:redo, [{:alt, ?Z}]},
-              {:revert_hunk, [{:alt, ?r}]},
-              {:save, [{:ctrl, ?o}]},
-              {:fast_forward, [{:alt, ?d}]},
-              # Files and panes (ADR-0037, ADR-0038, ADR-0043).
-              {:find_file, [{:alt, ?f}]},
-              {:close, [{:alt, ?w}]},
-              {:toggle_tree, [{:alt, ?t}]},
-              {:toggle_edits, [{:alt, ?e}]},
-              {:next_pane, [{:alt, ?p}]},
-              {:toggle_preview, [{:alt, ?P}]},
-              {:split_rows, [{:alt, ?-}]},
-              {:split_cols, [{:alt, ?=}]},
-              {:tab_prev, [{:alt, ?,}]},
-              {:tab_next, [{:alt, ?.}]}
-            ] ++
-              for(
-                i <- 0..8,
-                do: {{:tab, i}, [{:alt, ?1 + i}]}
-              ) ++
-              [
-                # Resizing (roadmap item 18.8).
-                {{:resize, :up}, [{:alt, :up}]},
-                {{:resize, :down}, [{:alt, :down}]},
-                {{:resize, :left}, [{:alt, :left}]},
-                {{:resize, :right}, [{:alt, :right}]},
-                # The command surfaces (ADR-0027, ADR-0028, ADR-0040, ADR-0042).
-                {:minibuffer, [{:alt, ?m}]},
-                {:palette, [{:alt, ?b}]},
-                {:grid, [{:alt, ?g}]},
-                {:settings, [{:alt, ?y}]},
-                {:stop_shell, [{:ctrl, ?g}]},
-                {:quit, [{:ctrl, ?x}, {:ctrl, ?q}, {:ctrl, ?c}]}
-              ]
+    # Motion (ADR-0026, ADR-0049): the arrows and the right hand's IJKL cluster.
+    {:up, [{:alt, ?i}, {:key, :up}]},
+    {:left, [{:alt, ?j}, {:key, :left}]},
+    {:down, [{:alt, ?k}, {:key, :down}]},
+    {:right, [{:alt, ?l}, {:key, :right}]},
+    {:word_back, [{:alt, ?u}]},
+    {:word_forward, [{:alt, ?o}]},
+    {:line_start, [{:alt, ?h}, {:key, :home}]},
+    {:line_end, [{:alt, ?;}, {:key, :end}]},
+    {:page_up, [{:key, :page_up}]},
+    {:page_down, [{:key, :page_down}]},
+    # Selection (ADR-0029) and the clipboard (ADR-0015).
+    {:select_start, [{:alt, ?s}]},
+    {:select_all, [{:alt, ?a}]},
+    {:copy, [{:alt, ?c}]},
+    {:cut, [{:alt, ?x}]},
+    {:paste, [{:alt, ?v}]},
+    # The other kind of indent, beside the key above Tab (ADR-0050, ADR-0051).
+    {:indent_other, [{:alt, ?1}]},
+    # History (ADR-0031, ADR-0033 §7) and the file (ADR-0019, ADR-0034).
+    {:undo, [{:alt, ?z}]},
+    {:redo, [{:alt, ?Z}]},
+    {:revert_hunk, [{:alt, ?r}]},
+    {:revert_call, [{:alt, ?R}]},
+    {:save, [{:ctrl, ?o}]},
+    {:fast_forward, [{:alt, ?d}]},
+    # Files and panes (ADR-0037, ADR-0038, ADR-0043, ADR-0051).
+    {:find_file, [{:alt, ?f}]},
+    {:close, [{:alt, ?w}]},
+    {:toggle_tree, [{:alt, ?t}]},
+    {:toggle_edits, [{:alt, ?e}]},
+    {:prev_pane, [{:alt, ?<}]},
+    {:next_pane, [{:alt, ?>}]},
+    {:toggle_preview, [{:alt, ?p}]},
+    {:split_rows, [{:alt, ?-}]},
+    {:split_cols, [{:alt, ?=}]},
+    {:tab_prev, [{:alt, ?,}]},
+    {:tab_next, [{:alt, ?.}]},
+    # Resizing (roadmap item 18.8).
+    {{:resize, :up}, [{:alt, :up}]},
+    {{:resize, :down}, [{:alt, :down}]},
+    {{:resize, :left}, [{:alt, :left}]},
+    {{:resize, :right}, [{:alt, :right}]},
+    # The command surfaces (ADR-0027, ADR-0028, ADR-0040, ADR-0042).
+    {:minibuffer, [{:alt, ?m}]},
+    {:palette, [{:alt, ?b}]},
+    {:grid, [{:alt, ?g}]},
+    {:settings, [{:alt, ?y}]},
+    {:stop_shell, [{:ctrl, ?g}]},
+    {:quit, [{:ctrl, ?x}, {:ctrl, ?q}, {:ctrl, ?c}]}
+  ]
 
   @doc """
   The keys listed under more than one command (or twice under one) in `list`, a list of
@@ -254,8 +250,8 @@ defmodule Geex.Loop.Bindings do
   defp arrow(:right), do: "→"
 
   @doc """
-  Whether `query` names one of the keys of `commands`, whole: `alt+w` finds `close`, `alt+5` finds
-  tab 5 (its own key, not the range the help writes), `alt+s` finds `highlight` and not
+  Whether `query` names one of the keys of `commands`, whole: `alt+w` finds `close`, `alt+5` bound
+  to tab 5 finds it (its own key, not a range the help writes), `alt+s` finds `highlight` and not
   `Alt+Shift+Z`. Case and spaces don't matter, `ctrl+o` is `Ctrl-O`, and `alt+left` is `Alt+←`.
   A bare key counts too (`enter`, `home`): the palette ranks a command named like a key above
   the key's (ADR-0048), so `delete` is still the `delete` command first.
@@ -263,7 +259,7 @@ defmodule Geex.Loop.Bindings do
       iex> b = Geex.Loop.Bindings.defaults()
       iex> {Geex.Loop.Bindings.names_key?(b, [:close], "alt+w"), Geex.Loop.Bindings.names_key?(b, [:redo], "alt+s")}
       {true, false}
-      iex> Geex.Loop.Bindings.names_key?(b, [{:tab, 4}], " Alt+5 ")
+      iex> Geex.Loop.Bindings.names_key?(%{{:alt, ?5} => {:tab, 4}}, [{:tab, 4}], " Alt+5 ")
       true
       iex> Geex.Loop.Bindings.names_key?(b, [{:resize, :left}], "alt+left")
       true
@@ -274,10 +270,10 @@ defmodule Geex.Loop.Bindings do
   def names_key?(bindings, commands, query), do: named_command(bindings, commands, query) != nil
 
   @doc """
-  Which of `commands` the key `query` names runs, or `nil` (`names_key?/3`'s rule): `alt+5` of
-  the nine tab commands is `{:tab, 4}`.
+  Which of `commands` the key `query` names runs, or `nil` (`names_key?/3`'s rule): with the nine
+  tab commands on Alt+1 … Alt+9, `alt+5` of them is `{:tab, 4}`.
 
-      iex> b = Geex.Loop.Bindings.defaults()
+      iex> b = Map.new(0..8, &{{:alt, ?1 + &1}, {:tab, &1}})
       iex> Geex.Loop.Bindings.named_command(b, for(i <- 0..8, do: {:tab, i}), "alt+5")
       {:tab, 4}
       iex> Geex.Loop.Bindings.named_command(b, [:close], "tab")
@@ -318,7 +314,8 @@ defmodule Geex.Loop.Bindings do
       "Alt+Z  Alt+Shift+Z"
       iex> Geex.Loop.Bindings.labels(b, [:line_start])
       "Alt+H Home"
-      iex> Geex.Loop.Bindings.labels(b, for(i <- 0..8, do: {:tab, i}), range: true)
+      iex> tabs = Map.new(0..8, &{{:alt, ?1 + &1}, {:tab, &1}})
+      iex> Geex.Loop.Bindings.labels(tabs, for(i <- 0..8, do: {:tab, i}), range: true)
       "Alt+1 … Alt+9"
   """
   @spec labels(t(), [command()], keyword()) :: String.t()
