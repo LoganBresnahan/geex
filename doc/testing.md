@@ -5987,3 +5987,25 @@ listed `unindent` beside Shift+Tab.
 1483 tests + 32 properties + 158 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
 `mix compile --warnings-as-errors --force` clean. Not tested: `` Alt+` `` on a layout where `` ` ``
 is a dead key, or a macOS terminal.
+
+### 2026-11-11 — mod-verify's review of ADR-0050: a no-op Shift+Tab keeps the closer; edge tests
+
+mod-verify reviewed dc625b7: a differential against main (Shift+Tab pressed as `` Alt+` ``), a
+model of ADR-0050 checked against `Keymap.shift_lines/3` over 20,000 cases (CRLF, multi-codepoint
+graphemes, either caret order, tab sizes 1-8), 200k parser fuzz strings with `` ` ``, 21
+planted bugs and a tmux run. Everything but the declared changes was byte-identical. Fixed:
+
+- **A Shift+Tab that changed nothing dropped an auto-closed pair's closer**: "alpha(", Shift+Tab,
+  ")" gave "alpha())". The loop cleared the tracked closers before knowing anything would
+  change; now it leaves them, and an edit's new version drops them as any edit's does.
+- **A blank line of only whitespace was indented**, gaining trailing whitespace; it is left alone
+  now, as an empty one was (ADR-0050 §1 reworded).
+- **Tests for what the suite didn't catch**: a backwards selection, é and an emoji on the last
+  changed line (and in the property's generator), un-indenting at tab size 4, the goal column, a
+  collapsed selection, the closer kept. The closer test fails with the bug planted back.
+- ADR-0050 notes the desktops that take `` Alt+` `` (GNOME, KDE: one application's windows),
+  that un-indent counts characters so mixed indent moves unevenly (VS Code measures width;
+  left for later), and that undo after Tab drops the selection.
+
+1490 tests + 32 properties + 158 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean.

@@ -31,8 +31,8 @@ and where a terminal does pass one, `ESC ESC [ Z` can't be told from Esc then Sh
 inserts one indent level, as the file indents, at the start of every line the selection touches,
 and the selection stays, so Tab again indents again. The lines are the selection's first through
 its last, except a last line the selection only reaches at column 0 (a drag down to the start of
-a line, which selects the lines above it). An empty line is left alone, so no trailing
-whitespace is added.
+a line, which selects the lines above it). A blank line (empty, or only spaces and tabs) is left
+alone, so no trailing whitespace is added.
 
 **2. Shift+Tab un-indents, always.** It takes one level from the start of every line the
 selection touches, or of the cursor's line with no selection: a leading tab, or leading spaces
@@ -55,8 +55,9 @@ name and loses Shift+Tab; `` Alt+` `` runs it, the key above Tab on most keyboar
 selection it inserts the other kind at the cursor, as Shift+Tab did; with one, it indents the
 selection's lines with the other kind, as Tab does with its own. The parser reads `` ESC ` `` as
 `` Alt+` ``, beside `Alt+;` (ADR-0049 §3): no sequence starts with it. Where `` ` `` is a dead
-key (several European layouts), `` Alt+` `` may not arrive; `indent other` is still typed in
-`Alt+M`, and remapping (roadmap 20.3) moves it.
+key (several European layouts), `` Alt+` `` may not arrive, nor on desktops that take it to
+switch between one application's windows (GNOME's default, KDE's); `indent other` is still typed
+in `Alt+M`, and remapping (roadmap 20.3) moves it.
 
 **6. Named.** Shift+Tab's own command is `unindent` (aliases `outdent`, `dedent`), typed in
 `Alt+M` and listed in the palette and the Commands tab; Tab's stays `indent`. Typed, each acts as
@@ -68,6 +69,12 @@ Shift+Tab, as before.
 ## Consequences
 
 - Tab and Shift+Tab work as in most editors: VS Code, Sublime, JetBrains.
+- Un-indenting counts characters, not columns: on a line of mixed indent, spaces before a tab
+  (`" \tx"`) go first, a press that moves nothing on screen though it is recorded, and a tab
+  before spaces (`"\t x"`) goes whole, past the previous stop. VS Code measures the width and
+  rewrites the indent; rare enough here to wait (mod-verify's review, 2026-11-11).
+- Undo after Tab drops the selection, as undo always does, so a further Tab doesn't indent the
+  same lines again.
 - A selection no longer ignores Tab. Typing a tab over a selection, replacing it, is gone; delete
   the selection first.
 - Shift+Tab with no selection used to insert; now it removes. The other kind is `` Alt+` ``.

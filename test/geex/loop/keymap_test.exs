@@ -297,7 +297,23 @@ defmodule Geex.Loop.KeymapTest do
 
   # ADR-0050: indenting lines, then un-indenting them, by the same kind of level.
   defp shift_line,
-    do: member_of(["", "x", "  x", "\tx", "   ", "\t\ty", " \tz", "a b", "x\r", "  y\r", "\r"])
+    do:
+      member_of([
+        "",
+        "x",
+        "  x",
+        "\tx",
+        "   ",
+        "\t\ty",
+        " \tz",
+        "a b",
+        "x\r",
+        "  y\r",
+        "\r",
+        "é",
+        "  👍🏽 e\u0301",
+        " \t\r"
+      ])
 
   defp apply_shift(text, nil), do: text
 
@@ -320,9 +336,13 @@ defmodule Geex.Loop.KeymapTest do
       back = apply_shift(indented, Keymap.shift_lines(indented, {a, b}, {:unindent, tab_size}))
 
       # Spaces come back off only from a line whose leading spaces were whole levels; a tab always.
+      # A blank line gains nothing, so it comes back only if it had nothing to take.
       whole? = fn l ->
         n = byte_size(l) - byte_size(String.trim_leading(l, " "))
-        unit == "\t" or rem(n, tab_size) == 0
+
+        if String.trim(l) == "",
+          do: l in ["", "\r"],
+          else: unit == "\t" or rem(n, tab_size) == 0
       end
 
       if Enum.all?(Enum.slice(lines, a..b), whole?), do: assert(back == text)
@@ -333,7 +353,7 @@ defmodule Geex.Loop.KeymapTest do
       for {{old, new}, i} <- Enum.with_index(Enum.zip(lines, new_lines)) do
         cond do
           i < a or i > b -> assert new == old
-          old in ["", "\r"] -> assert new == old
+          String.trim(old) == "" -> assert new == old
           true -> assert new == unit <> old
         end
       end

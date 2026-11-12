@@ -150,6 +150,66 @@ defmodule Geex.Loop.IndentLinesTest do
     end
   end
 
+  describe "the edges (mod-verify's review)" do
+    test "a backwards selection, its anchor after its end", %{dir: dir} do
+      {state, buf} = open(dir, "a.txt", "one\ntwo\nthree\n", {2, 2})
+      state = select(state, [{:alt, ?i}, {:alt, ?i}])
+      assert %Selection{anchor: {2, 2}, active: {0, _}} = state.selection
+      state = key(state, {:key, :tab})
+
+      assert Buffer.get_text(buf) == "  one\n  two\n  three\n"
+      assert %Selection{anchor: {2, 4}} = state.selection
+    end
+
+    test "a last changed line holding é and an emoji", %{dir: dir} do
+      {state, buf} = open(dir, "a.txt", "a\n  é 👍🏽\n")
+      state = select(state, [{:alt, ?k}, {:alt, ?l}])
+      state = key(state, {:key, :tab})
+      assert Buffer.get_text(buf) == "  a\n    é 👍🏽\n"
+      _ = key(state, {:key, :shift_tab})
+      assert Buffer.get_text(buf) == "a\n  é 👍🏽\n"
+    end
+
+    test "un-indenting follows the tab size", %{dir: dir} do
+      {state, buf} = open(dir, "a.txt", "      x\n", {0, 7})
+      state = key(%{state | tab_size: 4}, {:key, :shift_tab})
+      assert Buffer.get_text(buf) == "    x\n"
+      _ = key(state, {:key, :shift_tab})
+      assert Buffer.get_text(buf) == "x\n"
+    end
+
+    test "a blank line, only whitespace, gains none", %{dir: dir} do
+      {state, buf} = open(dir, "a.txt", "a\n   \nb\n")
+      state = select(state, [{:alt, ?k}, {:alt, ?k}, {:alt, ?l}])
+      _ = key(state, {:key, :tab})
+      assert Buffer.get_text(buf) == "  a\n   \n  b\n"
+    end
+
+    test "the goal column follows the cursor", %{dir: dir} do
+      {state, _buf} = open(dir, "a.txt", "    abc\nxxxxxxxxxx\n", {0, 6})
+      state = key(state, {:key, :shift_tab})
+      assert cursor() == {0, 4}
+      _ = key(state, {:alt, ?k})
+      assert cursor() == {1, 4}
+    end
+
+    test "a collapsed selection is no selection: Tab inserts at the cursor", %{dir: dir} do
+      {state, buf} = open(dir, "a.txt", "ab\ncd\n", {0, 1})
+      state = key(state, {:alt, ?s})
+      _ = key(state, {:key, :tab})
+      assert Buffer.get_text(buf) == "a  b\ncd\n"
+    end
+
+    test "a Shift+Tab that changes nothing keeps the closer typed for you", %{dir: dir} do
+      {state, buf} = open(dir, "a.txt", "\n")
+      state = keys(state, Enum.map(String.graphemes("alpha("), &{:char, &1}))
+      assert Buffer.get_text(buf) == "alpha()\n"
+      state = key(state, {:key, :shift_tab})
+      _ = key(state, {:char, ")"})
+      assert Buffer.get_text(buf) == "alpha()\n"
+    end
+  end
+
   describe "Alt+` is the other kind (§5)" do
     test "a tab at the cursor where Tab gives spaces; over a selection, its lines", %{dir: dir} do
       {state, buf} = open(dir, "a.txt", "ab\ncd\n", {0, 1})

@@ -4723,7 +4723,7 @@ defmodule Geex.Loop do
     if how do
       {line, _col} = cursor
       lines = if sel, do: Keymap.selected_lines(Selection.range(sel)), else: {line, line}
-      schedule_repaint(shift_lines(%{state | closers: nil}, text, lines, how, sel, cursor))
+      schedule_repaint(shift_lines(state, text, lines, how, sel, cursor))
     else
       resolve_key(event, cursor, text, state)
     end
@@ -4745,7 +4745,8 @@ defmodule Geex.Loop do
   end
 
   # Indent or un-indent `lines`, one recorded edit (ADR-0050 §3); the cursor and the selection's
-  # ends move with their text (§4). Nothing to change records nothing.
+  # ends move with their text (§4). Nothing to change records nothing, and keeps the tracked
+  # closers; an edit leaves them behind its version, so `fresh_closers/2` drops them.
   defp shift_lines(state, text, lines, how, sel, cursor) do
     with {cmd, shifts} <- Keymap.shift_lines(text, lines, how),
          {:ok, %{text: after_text} = snap} <- safe_dispatch(cmd) do

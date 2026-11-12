@@ -259,7 +259,7 @@ defmodule Geex.Loop.Keymap do
   last's end, and how many graphemes each changed line gained (or lost, negative), for
   `shift_caret/2`. `nil` when no line changes.
 
-  Indenting leaves an empty line alone. Un-indenting takes a leading tab, or leading spaces back
+  Indenting leaves a blank line (empty, or only whitespace) alone. Un-indenting takes a leading tab, or leading spaces back
   to the previous tab stop, as Backspace does in leading spaces (`dedent/3`).
 
       iex> {cmd, shifts} = Geex.Loop.Keymap.shift_lines("a\\n\\nb\\n", {0, 2}, {:indent, "  "})
@@ -309,8 +309,9 @@ defmodule Geex.Loop.Keymap do
   end
 
   # How many graphemes a line gains (indent) or loses (un-indent, negative).
-  defp line_shift(l, {:indent, _unit}) when l in ["", "\r"], do: 0
-  defp line_shift(_l, {:indent, unit}), do: String.length(unit)
+  defp line_shift(l, {:indent, unit}),
+    do: if(String.trim(l) == "", do: 0, else: String.length(unit))
+
   defp line_shift("\t" <> _, {:unindent, _tab_size}), do: -1
 
   defp line_shift(l, {:unindent, tab_size}) do
