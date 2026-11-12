@@ -96,17 +96,21 @@ defmodule Geex.Highlight.PaintWindowTest do
   end
 
   test "a span over two windows, fetched for each, is counted once" do
-    # Scrolled sideways, the rows' windows are bytes 5–8 and 16–19. The keyword covers both, the
-    # string only the first; both are 12 bytes wide, so the later one wins the bytes they share
-    # (6 and 7). Fetched per window the keyword comes twice, the second time after the string.
+    # Scrolled sideways, the rows' windows are bytes 5–8 and 16–19. The highlighter lists spans in
+    # start order: the string, then the keyword. Both are 12 bytes wide, so the one listed later,
+    # the keyword, wins the bytes they share (6 to 11). Fetched per window the keyword comes twice,
+    # once before the string; counted once at its place in start order, it still wins.
     text = "aaaaaaaaaa\nbbbbbbbbbb"
-    keyword = %Span{start_byte: 6, end_byte: 18, capture: "keyword"}
     string = %Span{start_byte: 0, end_byte: 12, capture: "string"}
-    all = [keyword, string]
+    keyword = %Span{start_byte: 6, end_byte: 18, capture: "keyword"}
+    all = [string, keyword]
     assert Paint.visible_ranges(text, 0, 2, 3, 5) == [{5, 8}, {16, 19}]
 
+    # The second window's answer first, so the keyword's first copy comes before the string.
     fetch = fn ranges ->
-      Enum.flat_map(ranges, fn {from, to} ->
+      ranges
+      |> Enum.reverse()
+      |> Enum.flat_map(fn {from, to} ->
         Enum.filter(all, &(&1.end_byte > from and &1.start_byte < to))
       end)
     end
@@ -115,6 +119,18 @@ defmodule Geex.Highlight.PaintWindowTest do
 
     assert Paint.to_screen(text, fetch, theme(), 3, 2, 0, 0, 5, nil, 2) ==
              Paint.to_screen(text, all, theme(), 3, 2, 0, 0, 5, nil, 2)
+  end
+
+  test "a span listed twice counts once, at its last place" do
+    text = "abcdef"
+    k = %Span{start_byte: 1, end_byte: 3, capture: "keyword"}
+    st = %Span{start_byte: 1, end_byte: 3, capture: "string"}
+    # The reference (the paint before windows) lets the last of equal-width spans win.
+    for list <- [[k, st, k], [st, k], [k, st, st], [st, k, st]] do
+      assert Paint.to_screen(text, list, theme(), 6, 1, 0, 0, 0, nil, 2) ==
+               PaintReference.to_screen(text, list, theme(), 6, 1, 0, 0, 0, nil, 2),
+             inspect(Enum.map(list, & &1.capture))
+    end
   end
 
   # Where a place is, walking the line a grapheme at a time.

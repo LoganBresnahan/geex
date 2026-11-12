@@ -216,7 +216,7 @@ defmodule Geex.Loop do
   defp line_at(text, line), do: text |> String.split("\n") |> Enum.at(line, "")
   # One more than the newlines, found natively: no line is copied out (ADR-0035).
   defp line_count(text), do: length(:binary.matches(text, "\n")) + 1
-  defp digits(n), do: n |> Integer.to_string() |> String.length()
+  defp digits(n), do: n |> Integer.to_string() |> Geex.Text.length()
 
   @doc """
   The viewport top (first visible buffer line) that keeps cursor `line` visible in
@@ -3017,7 +3017,7 @@ defmodule Geex.Loop do
   # The hardware cursor position within the minibuffer: after the prompt, at the input cursor
   # (counted in display columns so a wide glyph in the input shifts it by two).
   defp minibuffer_cursor(%{h: h, minibuffer: mb}) do
-    before = Minibuffer.value(mb) |> String.graphemes() |> Enum.take(mb.cursor) |> Enum.join()
+    before = Minibuffer.value(mb) |> Geex.Text.graphemes() |> Enum.take(mb.cursor) |> Enum.join()
     {Width.string(Minibuffer.prompt(mb)) + Width.string(before), h - 1}
   end
 
@@ -3087,7 +3087,7 @@ defmodule Geex.Loop do
       end
 
     head = "── " <> Output.title(out, now_ms()) <> " "
-    rule = String.duplicate("─", max(w - Width.string(head) - String.length(hint), 0))
+    rule = String.duplicate("─", max(w - Width.string(head) - Geex.Text.length(hint), 0))
 
     screen =
       screen
@@ -3096,7 +3096,7 @@ defmodule Geex.Loop do
         fg: pal.line_number,
         bg: pal.bg
       })
-      |> draw_band_handle({x, y, w}, Width.string(head), String.length(hint), pal)
+      |> draw_band_handle({x, y, w}, Width.string(head), Geex.Text.length(hint), pal)
 
     out
     |> Output.rows(h - 1)
@@ -3143,14 +3143,14 @@ defmodule Geex.Loop do
        ) do
     focused? = state.focus == :edits
     hint = if focused?, do: " Enter opens · Esc back ", else: " Alt+> "
-    title = "── edits " <> String.duplicate("─", max(w - 9 - String.length(hint), 0)) <> hint
+    title = "── edits " <> String.duplicate("─", max(w - 9 - Geex.Text.length(hint), 0)) <> hint
 
     screen =
       screen
       |> Screen.fill_rect(x, y, w, h, %Cell{char: " ", fg: pal.fg, bg: pal.bg})
       |> Screen.draw_text(x, y, palette_clip(title, w), %Cell{fg: pal.line_number, bg: pal.bg})
 
-    screen = draw_band_handle(screen, {x, y, w}, 9, String.length(hint), pal)
+    screen = draw_band_handle(screen, {x, y, w}, 9, Geex.Text.length(hint), pal)
 
     if entries == [] do
       Screen.draw_text(screen, x + 2, y + 1, palette_clip("no edits yet", w - 2), %Cell{
@@ -3191,7 +3191,9 @@ defmodule Geex.Loop do
     focused? = state.focus == :tree
     inner = max(w - 1, 0)
     hint = if focused?, do: " a d r · Enter ", else: ""
-    title = "── files " <> String.duplicate("─", max(inner - 9 - String.length(hint), 0)) <> hint
+
+    title =
+      "── files " <> String.duplicate("─", max(inner - 9 - Geex.Text.length(hint), 0)) <> hint
 
     screen =
       screen
@@ -4046,7 +4048,7 @@ defmodule Geex.Loop do
     if same? do
       out =
         if String.ends_with?(out, "\n") and not String.ends_with?(shell.input, "\n"),
-          do: String.slice(out, 0..-2//1),
+          do: Geex.Text.slice(out, 0..-2//1),
           else: out
 
       {from, _to} = shell.range
@@ -4338,7 +4340,7 @@ defmodule Geex.Loop do
 
   # Names line up at the longest one listed, plus two, up to half the width (ADR-0048 §3).
   defp name_col(_mode, candidates, w) do
-    longest = candidates |> Enum.map(&String.length(&1.name)) |> Enum.max(fn -> 0 end)
+    longest = candidates |> Enum.map(&Geex.Text.length(&1.name)) |> Enum.max(fn -> 0 end)
     min(longest + 2, max(div(w, 2), 1))
   end
 
@@ -4349,7 +4351,7 @@ defmodule Geex.Loop do
     name_fg = if selected?, do: pal.fg, else: pal.active_line_number
     # A name longer than the column (a narrow terminal caps it at half the width) is clipped
     # to leave one space before its keys.
-    label = entry.name |> String.slice(0, max(col - 1, 0)) |> String.pad_trailing(col)
+    label = entry.name |> Geex.Text.slice(0, max(col - 1, 0)) |> String.pad_trailing(col)
 
     screen
     |> Screen.fill_rect(0, y, w, 1, %Cell{char: " ", fg: pal.fg, bg: bg, attrs: attrs})
@@ -4394,7 +4396,7 @@ defmodule Geex.Loop do
   end
 
   defp palette_clip(text, w),
-    do: text |> String.graphemes() |> Enum.take(max(w, 0)) |> Enum.join()
+    do: text |> Geex.Text.graphemes() |> Enum.take(max(w, 0)) |> Enum.join()
 
   # Overlay the status line on the bottom row of `screen`: the buffer label + dirty
   # marker on the left, the 1-based `line:col` flush right, on a reverse-video bar
@@ -4448,7 +4450,7 @@ defmodule Geex.Loop do
         "✎ " <>
           harness <>
           "/" <>
-          String.slice(session, 0, 8) <>
+          Geex.Text.slice(session, 0, 8) <>
           turn_label(who[:turn]) <>
           edited_by_you(who)
 
@@ -4460,7 +4462,7 @@ defmodule Geex.Loop do
     end
   end
 
-  defp turn_label(turn) when is_binary(turn), do: " · turn " <> String.slice(turn, 0, 4) <> "…"
+  defp turn_label(turn) when is_binary(turn), do: " · turn " <> Geex.Text.slice(turn, 0, 4) <> "…"
   defp turn_label(_turn), do: ""
 
   # You edited the agent's change in the permission prompt before accepting it (ADR-0034 §8).
@@ -5410,7 +5412,7 @@ defmodule Geex.Loop do
   # The caret at the very end of the buffer — `{last line, its length}` — for select-all.
   defp end_caret(text) do
     lines = String.split(text, "\n")
-    {length(lines) - 1, String.length(List.last(lines))}
+    {length(lines) - 1, Geex.Text.length(List.last(lines))}
   end
 
   ## Clipboard ops (ADR-0015). copy = ring push only (no edit); cut = ring push + a
@@ -5508,15 +5510,15 @@ defmodule Geex.Loop do
   # Without the text (a redo's landing): counted by the inserted graphemes alone.
   defp cursor_after_insert({line, col}, inserted) do
     case String.split(inserted, "\n") do
-      [single] -> {line, col + String.length(single)}
-      segments -> {line + length(segments) - 1, String.length(List.last(segments))}
+      [single] -> {line, col + Geex.Text.length(single)}
+      segments -> {line + length(segments) - 1, Geex.Text.length(List.last(segments))}
     end
   end
 
   defp cursor_after_insert({line, col}, inserted, text) do
     case String.split(inserted, "\n") do
-      [single] -> {line, String.length(String.slice(line_at(text, line), 0, col) <> single)}
-      segments -> {line + length(segments) - 1, String.length(List.last(segments))}
+      [single] -> {line, Geex.Text.length(Geex.Text.slice(line_at(text, line), 0, col) <> single)}
+      segments -> {line + length(segments) - 1, Geex.Text.length(List.last(segments))}
     end
   end
 
@@ -5539,7 +5541,7 @@ defmodule Geex.Loop do
     case safe_undo() do
       {:ok, %{text: text} = snap, command} ->
         state
-        |> place_after_history_op(edit_start(command), text)
+        |> place_after_history_op(edit_start(command, snap), text)
         |> step_notice("undid", snap)
 
       _ ->
@@ -5551,7 +5553,7 @@ defmodule Geex.Loop do
     case safe_redo() do
       {:ok, %{text: text} = snap, command} ->
         state
-        |> place_after_history_op(edit_landing(command), text)
+        |> place_after_history_op(edit_landing(command, snap), text)
         |> step_notice("redid", snap)
 
       _ ->
@@ -5575,21 +5577,30 @@ defmodule Geex.Loop do
 
   # Where an undone/redone edit sits, from the command's baked coordinates. Undo lands at the
   # edit's *start* (its effect is gone); redo lands where the edit originally left the cursor.
-  defp edit_start(%Insert{line: l, col: c}), do: {l, c}
-  defp edit_start(%Delete{line: l, col: c}), do: {l, c}
-  defp edit_start(%Replace{start_line: l, start_col: c}), do: {l, c}
+  # A command with no coordinates of its own (the MCP `edit` tool's search/replace blocks, or any
+  # command kind added later) lands where the text changed, as the buffer reports it: its start
+  # for an undo, its end for a redo (BUG-14: those raised here).
+  defp edit_start(%Insert{line: l, col: c}, _snap), do: {l, c}
+  defp edit_start(%Delete{line: l, col: c}, _snap), do: {l, c}
+  defp edit_start(%Replace{start_line: l, start_col: c}, _snap), do: {l, c}
+  defp edit_start(_command, snap), do: changed(snap, 0)
 
-  defp edit_landing(%Insert{line: l, col: c, text: t}), do: cursor_after_insert({l, c}, t)
-  defp edit_landing(%Delete{line: l, col: c}), do: {l, c}
+  defp edit_landing(%Insert{line: l, col: c, text: t}, _snap), do: cursor_after_insert({l, c}, t)
+  defp edit_landing(%Delete{line: l, col: c}, _snap), do: {l, c}
 
-  defp edit_landing(%Replace{start_line: l, start_col: c, text: t}),
+  defp edit_landing(%Replace{start_line: l, start_col: c, text: t}, _snap),
     do: cursor_after_insert({l, c}, t)
+
+  defp edit_landing(_command, snap), do: changed(snap, 1)
+
+  defp changed(%{changed: changed}, i), do: elem(changed, i)
+  defp changed(_snap, _i), do: Session.snapshot() |> elem(1) |> Map.get(:cursor, {0, 0})
 
   # Clamp a {line, col} to a valid caret in `text` (a restored/removed line may be shorter).
   defp clamp_cursor({line, col}, text) do
     lines = String.split(text, "\n")
     line = line |> max(0) |> min(length(lines) - 1)
-    col = col |> max(0) |> min(String.length(Enum.at(lines, line, "")))
+    col = col |> max(0) |> min(Geex.Text.length(Enum.at(lines, line, "")))
     {line, col}
   end
 
@@ -5618,7 +5629,7 @@ defmodule Geex.Loop do
   end
 
   defp who({:agent, %{harness: harness, session: session}}),
-    do: harness <> "/" <> String.slice(session, 0, 8)
+    do: harness <> "/" <> Geex.Text.slice(session, 0, 8)
 
   defp who({:llm, model}), do: "llm/" <> to_string(model)
   defp who(_external), do: "an outside writer"
@@ -5750,7 +5761,7 @@ defmodule Geex.Loop do
       # one line, and inserting grapheme by grapheme re-splits the input every time).
       {:paste, pasted} ->
         line = pasted |> String.split(["\r\n", "\r", "\n"], parts: 2) |> hd()
-        line = line |> paste_text("\n") |> String.slice(0, @paste_line)
+        line = line |> paste_text("\n") |> Geex.Text.slice(0, @paste_line)
         schedule_repaint(refresh_matches(%{state | minibuffer: Minibuffer.insert(mb, line)}))
 
       {:key, :backspace} ->

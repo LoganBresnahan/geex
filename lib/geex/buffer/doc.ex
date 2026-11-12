@@ -169,7 +169,7 @@ defmodule Geex.Buffer.Doc do
   defp split_at_col(line, col) do
     {pre, post} = split_col(line, col)
 
-    if post != "" or String.length(pre) == col,
+    if post != "" or Geex.Text.length(pre) == col,
       do: {:ok, pre, post},
       else: {:error, :col_out_of_range}
   end
@@ -181,7 +181,7 @@ defmodule Geex.Buffer.Doc do
   defp split_col(line, col) do
     if col <= byte_size(line) and ascii_prefix?(line, col + 1),
       do: {binary_part(line, 0, col), binary_part(line, col, byte_size(line) - col)},
-      else: String.split_at(line, col)
+      else: Geex.Text.split_at(line, col)
   end
 
   defp ascii_prefix?(line, k), do: Geex.Ascii.prefix?(line, k)

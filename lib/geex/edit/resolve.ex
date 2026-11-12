@@ -102,7 +102,7 @@ defmodule Geex.Edit.Resolve do
   # newlines in prefix; col = graphemes in its last line. Grapheme-correct (String.length).
   defp pos_after(prefix) do
     lines = String.split(prefix, "\n")
-    {length(lines) - 1, String.length(List.last(lines))}
+    {length(lines) - 1, Geex.Text.length(List.last(lines))}
   end
 
   # --- tier 2: whitespace-normalized contiguous line window (unique-or-refuse) ---
@@ -128,7 +128,7 @@ defmodule Geex.Edit.Resolve do
       [i] ->
         window = Enum.slice(content_lines, i, n)
         end_line = i + n - 1
-        end_col = content_lines |> Enum.at(end_line) |> String.length()
+        end_col = content_lines |> Enum.at(end_line) |> Geex.Text.length()
         span = {{i, 0}, {end_line, end_col}}
         {:ok, span, reindent(List.first(window), replace, line_ending(window))}
 
@@ -151,7 +151,7 @@ defmodule Geex.Edit.Resolve do
     # Normalize the replacement to LF first (a CRLF replacement would otherwise double its
     # \r when we re-append the file's ending below).
     replace_lines = replace |> String.split("\n") |> Enum.map(&String.trim_trailing(&1, "\r"))
-    base = replace_lines |> List.first() |> leading_ws() |> String.length()
+    base = replace_lines |> List.first() |> leading_ws() |> Geex.Text.length()
 
     replace_lines
     |> Enum.with_index()
@@ -165,7 +165,7 @@ defmodule Geex.Edit.Resolve do
             indent <> String.trim_leading(line)
 
           true ->
-            relative = max(0, String.length(leading_ws(line)) - base)
+            relative = max(0, Geex.Text.length(leading_ws(line)) - base)
             indent <> String.duplicate(" ", relative) <> String.trim_leading(line)
         end
 

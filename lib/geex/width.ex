@@ -50,12 +50,14 @@ defmodule Geex.Width do
   """
   @spec cells(String.t()) :: 0 | 1 | 2
   def cells(grapheme) when is_binary(grapheme) do
-    case String.to_charlist(grapheme) do
+    case :unicode.characters_to_list(grapheme) do
       # ASCII printable — the overwhelming common case (source code is mostly
       # this). Skip the Unicode table lookups entirely.
       [cp] when cp >= 0x20 and cp < 0x7F -> 1
       [] -> 0
-      cps -> classify(cps)
+      cps when is_list(cps) -> classify(cps)
+      # A byte that isn't UTF-8 (a Latin-1 file, a binary): drawn as one `�` (BUG-15).
+      _invalid -> 1
     end
   end
 
@@ -68,7 +70,7 @@ defmodule Geex.Width do
   @spec string(String.t()) :: non_neg_integer()
   def string(string) when is_binary(string) do
     string
-    |> String.graphemes()
+    |> Geex.Text.graphemes()
     |> Enum.reduce(0, fn g, acc -> acc + cells(g) end)
   end
 
@@ -153,17 +155,23 @@ defmodule Geex.Width do
     end
   end
 
+  # The column target is checked before the grapheme there is measured: a place needs only
+  # what comes before it (mod-verify's review of BUG-12's fix).
   defp walk(l, p, target, tab, col, v) do
-    case String.next_grapheme(binary_part(l, p, byte_size(l) - p)) do
+    case Geex.Text.next_grapheme(binary_part(l, p, byte_size(l) - p)) do
       nil ->
         {p, col, v}
 
       {g, _rest} ->
-        wd = advance(g, v, tab)
+        if at_col?(target, col) do
+          {p, col, v}
+        else
+          wd = advance(g, v, tab)
 
-        if at_col?(target, col) or draws_past?(target, v, wd),
-          do: {p, col, v},
-          else: walk(l, p + byte_size(g), target, tab, col + 1, v + wd)
+          if draws_past?(target, v, wd),
+            do: {p, col, v},
+            else: walk(l, p + byte_size(g), target, tab, col + 1, v + wd)
+        end
     end
   end
 

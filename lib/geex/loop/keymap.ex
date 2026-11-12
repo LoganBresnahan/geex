@@ -245,7 +245,12 @@ defmodule Geex.Loop.Keymap do
   # cursor stops after (the review of roadmap item 19: End then typing wrote past the `\r`, and
   # Backspace or Delete at a line's end left a stray one).
   defp line_len(text, line),
-    do: text |> lines() |> Enum.at(line, "") |> String.replace_suffix("\r", "") |> String.length()
+    do:
+      text
+      |> lines()
+      |> Enum.at(line, "")
+      |> String.replace_suffix("\r", "")
+      |> Geex.Text.length()
 
   defp clamp(v, lo, hi), do: v |> max(lo) |> min(hi)
 
@@ -327,7 +332,7 @@ defmodule Geex.Loop.Keymap do
             start_line: a,
             start_col: 0,
             end_line: b,
-            end_col: String.length(old_last),
+            end_col: Geex.Text.length(old_last),
             text: new_text
           })
 
@@ -344,7 +349,7 @@ defmodule Geex.Loop.Keymap do
 
   defp blank_line?(l), do: String.match?(l, ~r/\A[ \t]*\r?\z/)
 
-  defp shift_of(_l, {:indent, unit}), do: String.length(unit)
+  defp shift_of(_l, {:indent, unit}), do: Geex.Text.length(unit)
   defp shift_of("\t" <> _, {:unindent, _tab_size}), do: -1
 
   defp shift_of(l, {:unindent, tab_size}) do
@@ -578,7 +583,7 @@ defmodule Geex.Loop.Keymap do
           else: [List.last(bodies) | Enum.drop(bodies, -1)]
 
       new_text = rotated |> Enum.zip_with(ends, &(&1 <> &2)) |> Enum.join("\n")
-      {replace({a, 0}, {b, String.length(List.last(span))}, new_text), d}
+      {replace({a, 0}, {b, Geex.Text.length(List.last(span))}, new_text), d}
     end
   end
 
@@ -643,24 +648,24 @@ defmodule Geex.Loop.Keymap do
       filled ->
         commented? =
           Enum.all?(filled, fn {_i, l, n} ->
-            l |> String.slice(n..-1//1) |> String.starts_with?(marker)
+            l |> Geex.Text.slice(n..-1//1) |> String.starts_with?(marker)
           end)
 
         # The indent the lines share, character for character: with mixed tabs and spaces the
         # marker goes where they part, so no marker lands inside another line's indent.
-        at = filled |> Enum.map(fn {_i, l, n} -> String.slice(l, 0, n) end) |> shared_prefix()
-        mlen = String.length(marker)
+        at = filled |> Enum.map(fn {_i, l, n} -> Geex.Text.slice(l, 0, n) end) |> shared_prefix()
+        mlen = Geex.Text.length(marker)
 
         changes =
           Map.new(filled, fn {i, l, n} ->
             if commented? do
-              rest = String.slice(l, (n + mlen)..-1//1)
+              rest = Geex.Text.slice(l, (n + mlen)..-1//1)
               gone = if String.starts_with?(rest, " "), do: mlen + 1, else: mlen
-              {i, {n, -gone, String.slice(l, 0, n) <> String.slice(l, (n + gone)..-1//1)}}
+              {i, {n, -gone, Geex.Text.slice(l, 0, n) <> Geex.Text.slice(l, (n + gone)..-1//1)}}
             else
               {i,
                {at, mlen + 1,
-                String.slice(l, 0, at) <> marker <> " " <> String.slice(l, at..-1//1)}}
+                Geex.Text.slice(l, 0, at) <> marker <> " " <> Geex.Text.slice(l, at..-1//1)}}
             end
           end)
 
@@ -677,7 +682,7 @@ defmodule Geex.Loop.Keymap do
             end
           end)
 
-        {replace({a, 0}, {b, String.length(old_last)}, new_text),
+        {replace({a, 0}, {b, Geex.Text.length(old_last)}, new_text),
          Map.new(changes, fn {i, {col, n, _new}} -> {i, {col, n}} end)}
     end
   end
@@ -685,10 +690,10 @@ defmodule Geex.Loop.Keymap do
   # How many leading graphemes every string in `strings` has in common.
   defp shared_prefix([first | rest]) do
     first
-    |> String.graphemes()
+    |> Geex.Text.graphemes()
     |> Enum.with_index()
-    |> Enum.find_value(String.length(first), fn {g, k} ->
-      if Enum.any?(rest, &(String.at(&1, k) != g)), do: k
+    |> Enum.find_value(Geex.Text.length(first), fn {g, k} ->
+      if Enum.any?(rest, &(Geex.Text.at(&1, k) != g)), do: k
     end)
   end
 
@@ -712,7 +717,8 @@ defmodule Geex.Loop.Keymap do
     end
   end
 
-  defp indent_len(l), do: String.length(l) - String.length(String.replace(l, ~r/^[ \t]+/, ""))
+  defp indent_len(l),
+    do: Geex.Text.length(l) - Geex.Text.length(String.replace(l, ~r/^[ \t]+/, ""))
 
   @doc """
   A bigger selection (ADR-0052 §2, §3): the `kind` (`:char`, `:word`, `:line`) at `cursor` with no
@@ -856,12 +862,12 @@ defmodule Geex.Loop.Keymap do
   defp grapheme_at(l, c) do
     if ascii_prefix?(l, c + 2),
       do: if(c < byte_size(l), do: binary_part(l, c, 1)),
-      else: String.at(l, c)
+      else: Geex.Text.at(l, c)
   end
 
   # A pair found in the tail of a long line read backward carries its column counted from the
   # line's end (`graphemes_bwd/2`); counted once, here, from the line's length.
-  defp resolve_col({l, {:end, k}}, lt), do: {l, String.length(elem(lt, l)) - 1 - k}
+  defp resolve_col({l, {:end, k}}, lt), do: {l, Geex.Text.length(elem(lt, l)) - 1 - k}
   defp resolve_col(found, _lt), do: found
 
   defp bracket?(g), do: Map.has_key?(@bracket_open, g) or Map.has_key?(@bracket_close, g)
@@ -918,7 +924,7 @@ defmodule Geex.Loop.Keymap do
           binary_part(l, min(col, byte_size(l)), max(byte_size(l) - col, 0))
 
         true ->
-          l |> String.split_at(col) |> elem(1)
+          l |> Geex.Text.split_at(col) |> elem(1)
       end
 
     rest
@@ -958,15 +964,15 @@ defmodule Geex.Loop.Keymap do
         {Stream.map((top - 1)..0//-1, &{binary_part(l, &1, 1), i, &1}), false}
 
       true ->
-        prefix = if upto == :end, do: l, else: l |> String.split_at(upto) |> elem(0)
+        prefix = if upto == :end, do: l, else: l |> Geex.Text.split_at(upto) |> elem(0)
 
         if byte_size(prefix) <= @tail_bytes do
-          gs = prefix |> String.graphemes() |> Enum.with_index() |> Enum.reverse()
+          gs = prefix |> Geex.Text.graphemes() |> Enum.with_index() |> Enum.reverse()
           {for({g, c} <- gs, do: {g, i, c}), false}
         else
           tail = utf8_tail(prefix, @tail_bytes)
           col = fn k -> if upto == :end, do: {:end, k}, else: upto - 1 - k end
-          gs = tail |> String.graphemes() |> Enum.reverse() |> Enum.with_index()
+          gs = tail |> Geex.Text.graphemes() |> Enum.reverse() |> Enum.with_index()
           {for({g, k} <- gs, do: {g, i, col.(k)}), true}
         end
     end
@@ -1243,7 +1249,7 @@ defmodule Geex.Loop.Keymap do
       |> Enum.map(fn {at, 1} -> {at, binary_part(before, at, 1)} end)
       |> scan_bytes(nil)
     else
-      before |> String.graphemes() |> scan_strings(nil)
+      before |> Geex.Text.graphemes() |> scan_strings(nil)
     end
   end
 
@@ -1306,7 +1312,7 @@ defmodule Geex.Loop.Keymap do
     if String.contains?(t, "\n") do
       []
     else
-      shifted = shift(pairs, l, c, String.length(t))
+      shifted = shift(pairs, l, c, Geex.Text.length(t))
 
       case event do
         {:char, g} when is_map_key(@pairs, g) and t == g <> :erlang.map_get(g, @pairs) ->
@@ -1398,26 +1404,28 @@ defmodule Geex.Loop.Keymap do
 
   defp indent_newline(line, col, l, unit, eol, colon?) do
     lead = leading_whitespace(l)
-    base = String.slice(lead, 0, col)
+    base = Geex.Text.slice(lead, 0, col)
     {opener, after_first} = blanks_around(l, col)
     # `:` opens a block where it does, but not ending a comment (`# Steps:`).
     colon? = colon? and not String.starts_with?(String.trim_leading(l), "#")
     openers = if colon?, do: ["{", "[", "(", ":"], else: ["{", "[", "("]
 
     cond do
-      l != "" and lead == l and col == String.length(l) ->
+      l != "" and lead == l and col == Geex.Text.length(l) ->
         {:edit, replace_head(line, col, eol <> l), {line + 1, col}}
 
       opener in @openers and after_first == @pairs[opener] ->
         inner = base <> unit
-        {:edit, insert(line, col, eol <> inner <> eol <> base), {line + 1, String.length(inner)}}
+
+        {:edit, insert(line, col, eol <> inner <> eol <> base),
+         {line + 1, Geex.Text.length(inner)}}
 
       opener in openers ->
         inner = base <> unit
-        {:edit, insert(line, col, eol <> inner), {line + 1, String.length(inner)}}
+        {:edit, insert(line, col, eol <> inner), {line + 1, Geex.Text.length(inner)}}
 
       true ->
-        {:edit, insert(line, col, eol <> base), {line + 1, String.length(base)}}
+        {:edit, insert(line, col, eol <> base), {line + 1, Geex.Text.length(base)}}
     end
   end
 
@@ -1474,7 +1482,7 @@ defmodule Geex.Loop.Keymap do
     n = count_leading(l, 0, bytes)
 
     with true <- n > 0 and n < byte_size(l),
-         {g, _rest} <- String.next_grapheme(binary_part(l, n - 1, byte_size(l) - n + 1)),
+         {g, _rest} <- Geex.Text.next_grapheme(binary_part(l, n - 1, byte_size(l) - n + 1)),
          true <- byte_size(g) > 1 do
       n - 1
     else
@@ -1502,14 +1510,15 @@ defmodule Geex.Loop.Keymap do
   defp before_col(l, col) do
     if ascii_prefix?(l, col + 1),
       do: binary_part(l, 0, min(col, byte_size(l))),
-      else: l |> String.split_at(col) |> elem(0)
+      else: l |> Geex.Text.split_at(col) |> elem(0)
   end
 
   defp closes_before?(nil), do: true
   defp closes_before?(g), do: g in @close_before
   defp word?(nil), do: false
   # A letter, digit or `_`, combining marks and all (a decomposed `é`).
-  defp word?(g), do: String.match?(g, ~r/^[\p{L}\p{N}_]\p{M}*$/u)
+  # A byte that isn't UTF-8 is no letter, and a Unicode regex would raise on it (BUG-15).
+  defp word?(g), do: String.valid?(g) and String.match?(g, ~r/^[\p{L}\p{N}_]\p{M}*$/u)
 
   @doc """
   What a key types over a selection (roadmap item 18.1): Backspace and Delete delete it (`""`),
@@ -1623,7 +1632,7 @@ defmodule Geex.Loop.Keymap do
     end
   end
 
-  defp whole(l), do: {l |> String.graphemes() |> List.to_tuple(), 0, true, true}
+  defp whole(l), do: {l |> Geex.Text.graphemes() |> List.to_tuple(), 0, true, true}
 
   defp window(l, _from, _to) when byte_size(l) <= @long_line, do: whole(l)
 
@@ -1641,11 +1650,11 @@ defmodule Geex.Loop.Keymap do
     else
       # Otherwise columns are counted from the start (String.split_at walks the line without
       # building a grapheme per character, several times faster than reading it whole).
-      {before, rest} = String.split_at(l, lo)
+      {before, rest} = Geex.Text.split_at(l, lo)
       # Past the line's end, the window is its end.
-      lo = if rest == "" and lo > 0, do: String.length(before), else: lo
-      {part, more} = String.split_at(rest, hi - lo)
-      {part |> String.graphemes() |> List.to_tuple(), lo, lo == 0, more == ""}
+      lo = if rest == "" and lo > 0, do: Geex.Text.length(before), else: lo
+      {part, more} = Geex.Text.split_at(rest, hi - lo)
+      {part |> Geex.Text.graphemes() |> List.to_tuple(), lo, lo == 0, more == ""}
     end
   end
 

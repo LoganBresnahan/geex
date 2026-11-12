@@ -147,6 +147,6 @@ defmodule Geex.Revert do
 
   defp whole_text(now, merged) do
     lines = String.split(now, "\n")
-    {{{0, 0}, {length(lines) - 1, lines |> List.last() |> String.length()}}, merged}
+    {{{0, 0}, {length(lines) - 1, lines |> List.last() |> Geex.Text.length()}}, merged}
   end
 end

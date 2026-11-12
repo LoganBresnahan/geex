@@ -206,7 +206,7 @@ defmodule Geex.Markdown.Layout do
   ## Headings
 
   defp heading_level(%{type: t}) when t in [:h1, :h2, :h3, :h4, :h5, :h6],
-    do: t |> Atom.to_string() |> String.last() |> String.to_integer()
+    do: t |> Atom.to_string() |> Geex.Text.last() |> String.to_integer()
 
   defp heading_level(_node), do: nil
 
@@ -262,7 +262,7 @@ defmodule Geex.Markdown.Layout do
   defp number_or_bullet(nil, _n, ctx), do: {Enum.at(@bullets, rem(ctx.depth, 3)), [:bullet]}
 
   defp number_or_bullet(number, n, ctx),
-    do: {"#{n}#{ctx.text |> slice(number) |> String.trim() |> String.last()}", [:bullet]}
+    do: {"#{n}#{ctx.text |> slice(number) |> String.trim() |> Geex.Text.last()}", [:bullet]}
 
   defp start_number(items, text) do
     with [first | _] <- items,
@@ -892,7 +892,7 @@ defmodule Geex.Markdown.Layout do
 
   defp split_word(pieces, width) do
     {full, cur, cw} =
-      for({t, roles} <- pieces, g <- String.graphemes(t), do: {g, roles})
+      for({t, roles} <- pieces, g <- Geex.Text.graphemes(t), do: {g, roles})
       |> Enum.reduce({[], [], 0}, fn {g, roles}, {full, cur, cw} ->
         gw = Width.cells(g)
 
@@ -944,7 +944,7 @@ defmodule Geex.Markdown.Layout do
 
   defp cols(text, room) do
     text
-    |> String.graphemes()
+    |> Geex.Text.graphemes()
     |> Enum.reduce_while({[], 0}, fn g, {acc, w} ->
       gw = Width.cells(g)
       if w + gw > room, do: {:halt, {acc, w}}, else: {:cont, {[g | acc], w + gw}}

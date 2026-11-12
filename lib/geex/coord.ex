@@ -111,5 +111,5 @@ defmodule Geex.Coord do
     end
   end
 
-  defp line_len(lines, row), do: lines |> Enum.at(row, "") |> String.length()
+  defp line_len(lines, row), do: lines |> Enum.at(row, "") |> Geex.Text.length()
 end

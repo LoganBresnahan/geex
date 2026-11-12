@@ -65,4 +65,37 @@ defmodule Geex.Loop.UndoStepTest do
     assert Buffer.get_text(buf) == "a\n"
     assert state.notice == nil
   end
+
+  # BUG-14: an MCP `edit` (search/replace blocks) has no coordinates of its own; undo and redo
+  # raised placing the cursor. Now it lands where the text changed.
+  test "Alt+Z and Alt+Shift+Z after an MCP edit land where the text changed", %{dir: dir} do
+    {state, buf, _path} = open(dir, "alpha\nbeta gamma\ndelta\n")
+
+    {:ok, edit} =
+      Geex.Commands.Edit.parse(%{"edits" => [%{"search" => "beta gamma", "replace" => "BETA"}]})
+
+    edit = Geex.Command.put_meta(edit, Geex.Command.Meta.new({:llm, "m"}))
+    {:ok, _} = Buffer.dispatch(buf, edit)
+    assert Buffer.get_text(buf) == "alpha\nBETA\ndelta\n"
+
+    state = key(state, {:alt, ?z})
+    assert Buffer.get_text(buf) == "alpha\nbeta gamma\ndelta\n"
+    assert cursor() == {1, 0}
+
+    _ = key(state, {:alt, ?Z})
+    assert Buffer.get_text(buf) == "alpha\nBETA\ndelta\n"
+    assert cursor() == {1, 4}
+  end
+
+  test "a change inside a line lands at its first different character", %{dir: dir} do
+    {state, buf, _path} = open(dir, "héllo wörld\n")
+
+    {:ok, edit} =
+      Geex.Commands.Edit.parse(%{"edits" => [%{"search" => "wörld", "replace" => "wérld"}]})
+
+    {:ok, _} = Buffer.dispatch(buf, Geex.Command.put_meta(edit, Geex.Command.Meta.new(:human)))
+    _ = key(state, {:alt, ?z})
+    # "wörld" and "wérld" share "w" and the lead byte of ö/é: the cursor goes before the ö.
+    assert cursor() == {0, 7}
+  end
 end

@@ -7,10 +7,21 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-15 — An invalid UTF-8 byte on screen can crash a paint
+## BUG-15 — An invalid UTF-8 byte on screen could crash a paint  ✅ FIXED (2026-11-12)
 
-- **Status:** open, found 2026-11-12 by mod-verify's review of `long-lines` (9c718bd). Older than
-  that branch: main paints through the same calls.
+- **Status:** **FIXED** 2026-11-12 on the branch `crash-fixes`, at the maintainer's word; found the
+  same day by mod-verify's review of `long-lines` (9c718bd). Older than that branch. Verification
+  is in the [testing.md](testing.md) 2026-11-12 entry "BUG-14, BUG-15 and the compaction counts".
+- **Fix:** `Geex.Text` gives `String`'s grapheme functions (graphemes, next_grapheme, length,
+  split_at, slice, at, last) that return exactly what `String`'s do, and only where OTP's
+  segmentation raises (an emoji right before an invalid byte) segment the valid stretches as
+  `String` does with each invalid byte a grapheme of its own, the rule Elixir already follows
+  elsewhere (`String.graphemes("caf\xE9")` is four graphemes). Width, Paint, Screen, Doc, Coord,
+  Keymap and the loop's cursor helpers use it. `Width.cells/1` counts an invalid byte as one
+  column, `Screen.put_grapheme/4` draws it as `�`, so no bad byte reaches the terminal, and
+  Keymap's `word?/1` no longer runs a Unicode regex on one (it raised on any invalid byte, so
+  typing next to a Latin-1 `é` crashed). `Width.seek/3` checks a column target before measuring
+  the grapheme there (mod-verify's note). ADR-0027's 2026-11-12 amendment.
 - **Symptom:** a line holding a byte that isn't UTF-8 (a binary file opened by mistake, a file in
   Latin-1), drawn on screen, can raise inside the paint instead of drawing.
 - **Verified cause:** `Geex.Width.advance/3` → `Width.cells/1` → `String.to_charlist/1` raises
@@ -26,10 +37,16 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-14 — Alt+Z after an MCP `edit` command crashes the loop
+## BUG-14 — Alt+Z after an MCP `edit` command crashed the loop  ✅ FIXED (2026-11-12)
 
-- **Status:** open, found 2026-11-12 by mod-verify's review of `long-lines` (9c718bd). Older than
-  that branch: main has the same clauses.
+- **Status:** **FIXED** 2026-11-12 on the branch `crash-fixes`, at the maintainer's word; found the
+  same day by mod-verify's review of `long-lines` (9c718bd). Verification is in the
+  [testing.md](testing.md) 2026-11-12 entry "BUG-14, BUG-15 and the compaction counts".
+- **Fix:** the buffer's undo and redo reply carries where the text changed (`changed`: the start
+  and end of the splice between the texts before and after, from `Footprint.between/2`, in the
+  text left), and the loop places the cursor by it for any command with no coordinates of its own:
+  the start for an undo, the end for a redo. The buffer's choice of a step's topmost command puts
+  such a command after any with coordinates. The MCP surface is untouched (ADR-0032).
 - **Symptom:** undoing (or redoing) a command recorded by the MCP `edit` tool
   (`Geex.Commands.Edit`, search/replace blocks) raises `FunctionClauseError` in the loop. Reachable
   by reopening in the TUI a file whose ledger holds an edit made under `mix geex.serve`.

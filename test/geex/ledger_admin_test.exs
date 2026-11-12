@@ -129,7 +129,8 @@ defmodule Geex.LedgerAdminTest do
       close(buf)
 
       file = Ledger.file(ctx.ledger, ctx.doc)
-      {:ok, _} = Ledger.compact(file, 2)
+      # The result says what was kept, not what was asked.
+      assert {:ok, %{kept: 3, dropped: 0}} = Ledger.compact(file, 2)
 
       buf = open(ctx)
       assert length(Buffer.history(buf)) == 3

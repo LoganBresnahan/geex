@@ -358,7 +358,7 @@ defmodule Geex.Reconcile do
   defp whole_text_span(buffer_text, disk_text) do
     lines = String.split(buffer_text, "\n")
     last = length(lines) - 1
-    {{{0, 0}, {last, lines |> List.last() |> String.length()}}, disk_text}
+    {{{0, 0}, {last, lines |> List.last() |> Geex.Text.length()}}, disk_text}
   end
 
   defp replace_command({{{sl, sc}, {el, ec}}, text}, meta) do

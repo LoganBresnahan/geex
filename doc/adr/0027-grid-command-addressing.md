@@ -1,6 +1,6 @@
 # ADR-0027: Grid command addressing — the coordinate model
 
-- **Status:** Accepted. **Amended 2026-11-09:** a tab draws to its stop, every tab-size columns.
+- **Status:** Accepted. **Amended 2026-11-09:** a tab draws to its stop, every tab-size columns. **Amended 2026-11-12:** a byte that isn't UTF-8 is a grapheme of its own, drawn as `�` in one column.
 - **Date:** 2026-06-08
 - **Relates to:** [ADR-0002](0002-commands-as-values.md) / [ADR-0003](0003-one-shared-path.md)
   (commands are recorded, replayable values on one path), [ADR-0014](0014-editor-state-and-dispatch-ownership.md)
@@ -250,6 +250,18 @@ display-to-grapheme cast). It stays a render concern: a tab is one grapheme to e
 the grid's display columns cast through the same walk the painter draws. Before this a tab drew
 zero columns wide and tab-indented files lost their indentation (BUG-10). The frozen MCP grid
 surface addresses graphemes and is unchanged. Not covered: the markdown preview's code blocks.
+
+## Amendment (2026-11-12): a byte that isn't UTF-8 (BUG-15)
+
+A file can hold bytes that aren't UTF-8: a Latin-1 file, a binary opened by mistake. Each such
+byte is a **grapheme of its own**, as Elixir already segments one (`String.graphemes("caf\xE9")` is
+four graphemes), so a command addresses it as one column like any other grapheme and the bytes on
+disk never change. Where OTP's segmentation raises instead (an emoji right before an invalid byte),
+`Geex.Text` segments the valid stretches as `String` does and the invalid bytes one by one; on any
+text `String` handles, it returns exactly what `String` returns, so valid text, emoji and all, is
+addressed and drawn as before. For width, an invalid byte is **one cell**, drawn as `�`
+(`Width.cells/1`, `Screen.put_grapheme/4`): no invalid byte reaches the terminal. Width still never
+addresses.
 
 ## See
 

@@ -586,7 +586,7 @@ defmodule Geex.Buffer do
             start_line: first,
             start_col: 0,
             end_line: last,
-            end_col: String.length(Enum.at(lines, last)),
+            end_col: Geex.Text.length(Enum.at(lines, last)),
             text: text
           })
 
@@ -605,7 +605,7 @@ defmodule Geex.Buffer do
     if String.ends_with?(body, [" ", "\t"]) do
       kept =
         body
-        |> String.graphemes()
+        |> Geex.Text.graphemes()
         |> Enum.reverse()
         |> Enum.drop_while(&(&1 in [" ", "\t"]))
         |> Enum.reverse()
@@ -654,7 +654,7 @@ defmodule Geex.Buffer do
       {:ok, cmd} =
         Geex.Commands.Insert.parse(%{
           line: length(lines) - 1,
-          col: String.length(List.last(lines)),
+          col: Geex.Text.length(List.last(lines)),
           text: eol
         })
 
@@ -850,20 +850,54 @@ defmodule Geex.Buffer do
         do: Enum.min_by(commands, &edit_start/1),
         else: List.last(commands)
 
-    notify_change(
-      new_state,
-      Footprint.between(History.text(state.history), History.text(history))
-    )
+    after_text = History.text(history)
+    footprint = Footprint.between(History.text(state.history), after_text)
+    notify_change(new_state, footprint)
 
-    snapshot = Map.put(build_snapshot(new_state), :step, length(commands))
+    # Where the text changed, in the text it left: for a command with no coordinates of its own
+    # (the MCP `edit` tool's search/replace blocks), the view places the cursor by this (BUG-14).
+    changed =
+      {position_at(after_text, footprint.at),
+       position_at(after_text, footprint.at + footprint.added)}
+
+    snapshot =
+      build_snapshot(new_state) |> Map.put(:step, length(commands)) |> Map.put(:changed, changed)
+
     {:reply, {:ok, snapshot, command}, new_state}
   end
 
   defp history_op(state, _entry, {:error, _reason} = error), do: {:reply, error, state}
 
-  defp edit_start(%{start_line: line, start_col: col}), do: {line, col}
-  defp edit_start(%{line: line, col: col}), do: {line, col}
-  defp edit_start(_command), do: {0, 0}
+  # A command's start, to pick a step's topmost; one with no coordinates sorts after any that
+  # has them (BUG-14: an MCP `edit` raised here).
+  defp edit_start(%{start_line: line, start_col: col}), do: {0, line, col}
+  defp edit_start(%{line: line, col: col}), do: {0, line, col}
+  defp edit_start(_command), do: {1, 0, 0}
+
+  # The {line, grapheme column} at byte `at` of `text`, backed off to a whole character.
+  defp position_at(text, at) do
+    before = binary_part(text, 0, min(at, byte_size(text)))
+    line = before |> :binary.matches("\n") |> length()
+    last = before |> String.split("\n") |> List.last()
+    {line, Geex.Text.length(whole_chars(last))}
+  end
+
+  # Without a character the cut split: a UTF-8 lead byte near the end whose sequence the cut left
+  # short. A byte that isn't UTF-8 at all stays: it is a character of its own, as Doc counts it.
+  defp whole_chars(bin) do
+    n = byte_size(bin)
+
+    Enum.find_value(1..min(3, n)//1, bin, fn back ->
+      case :binary.at(bin, n - back) do
+        b when b >= 0xF0 and back < 4 -> binary_part(bin, 0, n - back)
+        b when b >= 0xE0 and b < 0xF0 and back < 3 -> binary_part(bin, 0, n - back)
+        b when b >= 0xC0 and b < 0xE0 and back < 2 -> binary_part(bin, 0, n - back)
+        b when b >= 0xC0 -> bin
+        b when b < 0x80 -> bin
+        _continuation -> nil
+      end
+    end)
+  end
 
   # --- the durable ledger (ADR-0033) ---
 
@@ -938,7 +972,7 @@ defmodule Geex.Buffer do
       case Spool.chain(spool, h.synced, disk_text) do
         {:ok, {:agent, who} = actor, tool_uses} ->
           {Enum.map(commands, &credit(&1, actor, tool_uses)),
-           "; credited to #{who.harness}/#{String.slice(who.session, 0, 8)} " <>
+           "; credited to #{who.harness}/#{Geex.Text.slice(who.session, 0, 8)} " <>
              "(#{length(tool_uses)} edit#{if length(tool_uses) == 1, do: "", else: "s"})"}
 
         :none ->

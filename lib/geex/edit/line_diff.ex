@@ -20,7 +20,9 @@ defmodule Geex.Edit.LineDiff do
   @type hunk :: %{line: non_neg_integer(), removed: non_neg_integer(), added: [String.t()]}
 
   @typedoc "A `Doc.replace/3` range and its replacement text."
-  @type span :: {{{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}}, String.t()}
+  @type span ::
+          {{{non_neg_integer(), non_neg_integer()}, {non_neg_integer(), non_neg_integer()}},
+           String.t()}
 
   @doc """
   The changed hunks turning `old` into `new`, top to bottom, in `old`'s line coordinates.
@@ -119,5 +121,5 @@ defmodule Geex.Edit.LineDiff do
     end
   end
 
-  defp width(lines, row), do: lines |> Enum.at(row) |> String.length()
+  defp width(lines, row), do: lines |> Enum.at(row) |> Geex.Text.length()
 end

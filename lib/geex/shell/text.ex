@@ -120,7 +120,7 @@ defmodule Geex.Shell.Text do
       line
       |> String.split("\t")
       |> Enum.reduce(fn part, acc ->
-        acc <> String.duplicate(" ", 8 - rem(String.length(acc), 8)) <> part
+        acc <> String.duplicate(" ", 8 - rem(Geex.Text.length(acc), 8)) <> part
       end)
     else
       line

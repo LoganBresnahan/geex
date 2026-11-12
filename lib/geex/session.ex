@@ -697,7 +697,7 @@ defmodule Geex.Session do
     col =
       col
       |> max(0)
-      |> min(lines |> Enum.at(line, "") |> String.replace_suffix("\r", "") |> String.length())
+      |> min(lines |> Enum.at(line, "") |> String.replace_suffix("\r", "") |> Geex.Text.length())
 
     {line, col}
   end

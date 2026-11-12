@@ -348,13 +348,16 @@ defmodule Geex.Ledger do
            :ok <- Compact.check(check, restored.history),
            :ok <- replace(file, new_bytes) do
         total = length(History.commands_oldest_first(restored.history))
+        # What the rewrite kept, not what was asked: the cut moves back to a step boundary, so it
+        # can keep more (ADR-0031's 2026-11-12 amendment).
+        kept = Enum.count(entries, &match?({:cmd, _}, &1))
 
         {:ok,
          %{
            before: byte_size(bytes),
            after: byte_size(new_bytes),
-           kept: min(keep, total),
-           dropped: max(total - keep, 0),
+           kept: kept,
+           dropped: total - kept,
            stopped: restored.stopped
          }}
       else

@@ -80,7 +80,7 @@ defmodule Geex.Loop.EditsPane do
   def lines(entries, root, w, n, sel, focused?, start \\ nil) do
     names = Enum.map(entries, &if(&1.path, do: relative(&1.path, root), else: ""))
     name_w = names |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end) |> min(div(w, 2))
-    who_w = entries |> Enum.map(&String.length(&1.who)) |> Enum.max(fn -> 0 end) |> min(36)
+    who_w = entries |> Enum.map(&Geex.Text.length(&1.who)) |> Enum.max(fn -> 0 end) |> min(36)
     start = start || sel |> Kernel.-(n - 1) |> max(0) |> min(max(length(entries) - n, 0))
 
     entries
@@ -90,13 +90,13 @@ defmodule Geex.Loop.EditsPane do
     |> Enum.map(fn
       # The rows below it are from earlier runs. Never selected: the keys step over it.
       {{%{kind: :earlier} = entry, _name}, _i} ->
-        {String.slice("  ── earlier " <> String.duplicate("─", w), 0, w), entry, false}
+        {Geex.Text.slice("  ── earlier " <> String.duplicate("─", w), 0, w), entry, false}
 
       {{entry, name}, i} ->
         selected? = i == sel
         marker = if selected? and focused?, do: "▸ ", else: "  "
         left = marker <> fit(name, name_w) <> "  " <> fit(entry.who, who_w)
-        pad = max(w - String.length(left) - String.length(entry.time) - 1, 1)
+        pad = max(w - Geex.Text.length(left) - Geex.Text.length(entry.time) - 1, 1)
         {left <> String.duplicate(" ", pad) <> entry.time, entry, selected?}
     end)
   end
@@ -126,13 +126,13 @@ defmodule Geex.Loop.EditsPane do
     do:
       harness <>
         "/" <>
-        String.slice(session, 0, 8) <>
+        Geex.Text.slice(session, 0, 8) <>
         if(who[:user_modified], do: ", edited by you", else: "")
 
   # Pad, or cut with an ellipsis, to exactly `w` graphemes.
   defp fit(text, w) do
-    if String.length(text) > w,
-      do: String.slice(text, 0, max(w - 1, 0)) <> "…",
+    if Geex.Text.length(text) > w,
+      do: Geex.Text.slice(text, 0, max(w - 1, 0)) <> "…",
       else: String.pad_trailing(text, w)
   end
 

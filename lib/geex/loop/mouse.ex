@@ -63,17 +63,17 @@ defmodule Geex.Loop.Mouse do
 
     if line >= length(lines) do
       last = length(lines) - 1
-      {{last, String.length(String.replace_suffix(List.last(lines), "\r", ""))}, {dx, dy}}
+      {{last, Geex.Text.length(String.replace_suffix(List.last(lines), "\r", ""))}, {dx, dy}}
     else
       text_line = Enum.at(lines, line)
       g = Width.col_at_display(text_line, max(col, 0) + hscroll + 1, tab) - 1
       # Past a CRLF line's end is before its `\r`.
-      {{line, min(g, String.length(String.replace_suffix(text_line, "\r", "")))}, {dx, dy}}
+      {{line, min(g, Geex.Text.length(String.replace_suffix(text_line, "\r", "")))}, {dx, dy}}
     end
   end
 
   # `Geex.Loop.gutter_width/1` from a line count: the digits (at least two) and a margin each side.
-  defp gutter_width(n), do: max(String.length(Integer.to_string(n)), 2) + 2
+  defp gutter_width(n), do: max(Geex.Text.length(Integer.to_string(n)), 2) + 2
 
   @doc """
   The word at caret `col` of `line`, as `{from, to}` grapheme columns (half-open): the run of
@@ -89,7 +89,7 @@ defmodule Geex.Loop.Mouse do
   """
   @spec word_at(String.t(), non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
   def word_at(line, col) do
-    gs = line |> String.graphemes() |> List.to_tuple()
+    gs = line |> Geex.Text.graphemes() |> List.to_tuple()
     n = tuple_size(gs)
 
     if n == 0 do

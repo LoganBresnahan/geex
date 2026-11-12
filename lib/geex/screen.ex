@@ -95,6 +95,9 @@ defmodule Geex.Screen do
   """
   @spec put_grapheme(t(), integer(), integer(), Cell.t()) :: {t(), integer()}
   def put_grapheme(%__MODULE__{} = s, x, y, %Cell{char: g} = cell) do
+    # A byte that isn't UTF-8 never reaches the terminal: it draws as `�`, one column (BUG-15).
+    cell = if ascii_or_valid?(g), do: cell, else: %{cell | char: "\uFFFD"}
+
     case Geex.Width.cells(g) do
       0 ->
         {s, x}
@@ -116,6 +119,9 @@ defmodule Geex.Screen do
     end
   end
 
+  defp ascii_or_valid?(<<b>>) when b < 0x80, do: true
+  defp ascii_or_valid?(g), do: String.valid?(g)
+
   @doc """
   Draw `text` starting at `{x, y}`, advancing by each grapheme's **display
   width** ([`Geex.Width`](`Geex.Width`)) — wide glyphs take two columns. Style
@@ -129,7 +135,7 @@ defmodule Geex.Screen do
   def draw_text(%__MODULE__{} = s, x, y, text, style \\ Cell.blank()) when is_binary(text) do
     {screen, _x} =
       text
-      |> String.graphemes()
+      |> Geex.Text.graphemes()
       |> Enum.reduce({s, x}, fn g, {acc, col} ->
         put_grapheme(acc, col, y, %{style | char: g})
       end)

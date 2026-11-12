@@ -6318,3 +6318,62 @@ compiled search against a byte scan); `GEEX_PROPERTY_RUNS=10000` green twice (se
 `mix compile --warnings-as-errors --force` clean. Live via tmux (100×20) on a 1,000-line French
 file, at the end of line 11: `é`, `x`, `(`, Backspace (the pair), Enter, Backspace, Alt+U each
 on screen 17–39 ms after the key (tmux's polling included).
+
+### 2026-11-12 — BUG-14, BUG-15 and the compaction counts (branch `crash-fixes`)
+
+Built at the maintainer's word, three fixes from mod-verify's reviews of `long-lines` and
+`save-undo`:
+
+- **BUG-14:** Alt+Z or Alt+Shift+Z after an MCP `edit` (search/replace blocks, no coordinates of
+  its own) raised `FunctionClauseError` in `Loop.edit_start/1`. The buffer's undo/redo reply now
+  carries where the text changed (`changed`, from `Footprint.between/2`), and the loop places the
+  cursor there for any command it has no clause for: the start for an undo, the end for a redo.
+  The MCP surface is untouched (ADR-0032). Tests through `Loop.handle_info/2`: an `Edit`
+  dispatched, then Alt+Z (cursor at the change's start) and Alt+Shift+Z (its end); a change inside
+  a line lands at its first different character, a split `é`'s lead byte backed off. The test
+  fails with the fallback clause removed.
+- **BUG-15:** `Geex.Text` (new) gives `String`'s grapheme functions, identical wherever `String`
+  doesn't raise, and where OTP's segmentation raises (an emoji right before an invalid byte)
+  segments the valid stretches as `String` does with each invalid byte a grapheme of its own.
+  Width, Paint, Screen, Doc, Coord, Keymap, Session, Buffer, Reconcile, Revert, the edit resolver,
+  the mouse and the loop use it. `Width.cells/1` counts an invalid byte as one cell;
+  `Screen.put_grapheme/4` draws it as `�`, so no invalid byte reaches the terminal; Keymap's
+  `word?/1` no longer runs a Unicode regex on one (it raised on any invalid byte, so typing beside
+  a Latin-1 `é` crashed). `Width.seek/3` checks a column target before measuring the grapheme
+  there (mod-verify's note). ADR-0027's amendment. Tests (`test/geex/invalid_bytes_test.exs`):
+  a property that painting (no cell holds an invalid byte), `max_line_width`, `cursor_xy` at every
+  column and `col_at_display` at every display column never raise on text of `Geex.Gen` pieces,
+  emoji (skin tones, a ZWJ family, a flag, a keycap), CJK, combining marks, tabs and `\r` mixed
+  with random invalid bytes; a property that Doc inserts and deletes address each invalid byte as
+  one; a property that `Geex.Text` equals `String` wherever `String` doesn't raise; examples
+  (`caf\xE9`, `👍` + `<<0xFF, 0xFE>>`, a line starting with an invalid byte, valid emoji
+  untouched). Three plants (an invalid byte raising in `cells/1`, `Geex.Text.graphemes/1` without
+  its fallback, `�` not substituted) each fail them. The windowed paint's property still holds
+  every valid frame to the reference paint.
+- **Compaction counts:** `Ledger.compact/2` reported `kept: min(keep, total)`; the cut moves back
+  to a step boundary, so it now counts the commands the rewrite kept (mod-verify's repro: a
+  3-hunk write, keep 2, reports kept 3, dropped 0).
+
+Live-verified via tmux (90×14): a Latin-1 file drew `caf� au lait` and `na�ve r�sum�`; moving
+through it, typing `X` beside the `é`, and `(` worked. A small binary (a PNG header with
+`\xf0\x9f\x91\x8d\xff\xfe` and a trailing `\xc3`) drew `�PNG` and `IHDR👍��binary�`; on that line
+typing `Z`, `Alt+8` (selected the line's one word), Backspace and two `Alt+Z` worked; Ctrl-X quit
+with exit 0 and no error in the log. The first live run found `Session.clamp_cursor/2` still
+calling `String.length/1` (the Session crashed on the binary's line); it and the other modules
+that address text now use `Geex.Text`.
+
+**A paint property failing on main too** ("spans fetched for the painted ranges paint what all of
+them do", seed 507480 on main 8864273): its shrunk case listed one span twice with an equal-width
+span between, and the fetched path's `Enum.uniq` (keeping the first copy) handed the tie to the
+other span where the list path gave it to the second copy. Fixed in `Paint.styles/3`, which both
+paths go through: a span listed twice counts once, at its **last** place, which is the tie rule the
+paint always had (the later of equal-width spans wins); and fetched spans are put in start order
+(stable) first, as the highlighter lists them, so a span fetched once per window sits where the
+whole list has it. The `long-lines` example test now lists its spans in start order and fetches the
+later window first; a new example checks four duplicate orders against the reference paint. Seeds
+507480, 718496 (mod-verify's earlier one), 281843, 1 and 2 pass at 10,000 runs.
+
+1576 tests + 52 properties + 177 doctests green four times in a row; `GEEX_PROPERTY_RUNS=10000`
+green three times; `mix compile --warnings-as-errors --force` clean. (The span dedupe runs after
+the visible filter: deduping a 175,000-span list first made the highlighted 2 MB paint's 500 ms
+bound flaky.)
