@@ -135,13 +135,8 @@ defmodule Geex.Loop do
           pos_integer()
         ) :: {non_neg_integer(), integer()}
   def cursor_xy(text, {line, col}, scroll, tab \\ 2) do
-    x =
-      text
-      |> line_at(line)
-      |> String.graphemes()
-      |> Enum.take(col)
-      |> Enum.reduce(0, &(&2 + Width.advance(&1, &2, tab)))
-
+    # Measured up to the cursor only, an ASCII run by its bytes (`Width.seek/3`, BUG-13).
+    {_byte, _col, x} = text |> line_at(line) |> Width.seek({:col, col}, tab)
     {x, line - scroll}
   end
 
@@ -157,11 +152,13 @@ defmodule Geex.Loop do
   `@hscrolloff` margin); the cursor's `x` is shifted by the gutter width and the horizontal
   scroll to match. Returns the resolved `hscroll` so the caller can persist it. With `follow?`
   false the given `hscroll` is kept even if the cursor is out of view (the mouse scrolled it,
-  ADR-0039). `tab` is the tab size a tab character draws to (roadmap item 18.7).
+  ADR-0039). `tab` is the tab size a tab character draws to (roadmap item 18.7). `spans` is the
+  highlight spans, or a function giving them for the byte ranges the frame paints
+  (`Geex.Highlight.Paint.to_screen/10`).
   """
   @spec frame(
           String.t(),
-          [map()],
+          [map()] | ([{non_neg_integer(), non_neg_integer()}] -> [map()]),
           Theme.t(),
           {non_neg_integer(), non_neg_integer()},
           non_neg_integer(),
@@ -2611,14 +2608,15 @@ defmodule Geex.Loop do
     # painting assumes they are the same buffer version. A concurrent MCP/reconcile edit landing
     # between the two reads can briefly pair text@vN with spans@v(N+1); the overlay only ever
     # clips (Paint tolerates out-of-range spans) and the change's own repaint corrects it.
-    # Only the spans over the rows shown (`scroll` is final here: `frame/11` moves only the
-    # horizontal scroll), so the reactor copies a screen's spans, not the file's (ADR-0035).
-    {_lines, from, to} = Paint.visible_lines(text, scroll, h_text)
+    # Only the spans over what the frame shows: the paint asks for the byte ranges it draws, once
+    # the horizontal scroll is final, so the reactor copies a screen's spans, not the file's
+    # (ADR-0035), nor all of a long line's (BUG-13).
+    reactor = reactor_of(state, tab.buffer)
 
     {screen, {cx, cy}, hscroll} =
       frame(
         text,
-        overlay_spans(reactor_of(state, tab.buffer), from, to),
+        &window_spans(reactor, &1),
         state.theme,
         cursor,
         tw,
@@ -6069,7 +6067,19 @@ defmodule Geex.Loop do
     :exit, _ -> :ok
   end
 
-  defp overlay_spans(nil, _from, _to), do: []
+  # The overlay's spans over byte `ranges`, ranges a few KB apart asked for as one, so a frame
+  # scrolled sideways asks once, not once per row.
+  defp window_spans(nil, _ranges), do: []
+
+  defp window_spans(reactor, ranges) do
+    ranges
+    |> Enum.reduce([], fn
+      {from, to}, [{f, t} | rest] when from - t < 4096 -> [{f, max(t, to)} | rest]
+      range, acc -> [range | acc]
+    end)
+    |> Enum.reverse()
+    |> Enum.flat_map(fn {from, to} -> overlay_spans(reactor, from, to) end)
+  end
 
   defp overlay_spans(reactor, from, to) do
     case safe_highlights(reactor, from, to) do

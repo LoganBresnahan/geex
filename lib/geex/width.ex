@@ -90,9 +90,7 @@ defmodule Geex.Width do
       {6, 5, 3}
   """
   @spec line(String.t(), pos_integer()) :: non_neg_integer()
-  def line(line, tab \\ @tab) when is_binary(line) do
-    line |> String.graphemes() |> Enum.reduce(0, &(&2 + advance(&1, &2, tab)))
-  end
+  def line(line, tab \\ @tab) when is_binary(line), do: line |> seek(:end, tab) |> elem(2)
 
   @doc """
   The **1-based grapheme `x`** at display column `display_x` (1-based) of `line` — the cast
@@ -110,19 +108,124 @@ defmodule Geex.Width do
       2
   """
   @spec col_at_display(String.t(), pos_integer(), pos_integer()) :: pos_integer()
-  def col_at_display(line, display_x, tab \\ @tab) when is_binary(line) and display_x >= 1 do
-    walk_to_display(String.graphemes(line), display_x, 1, 1, tab)
+  def col_at_display(line, display_x, tab \\ @tab) when is_binary(line) and display_x >= 1,
+    do: elem(seek(line, {:vcol, display_x - 1}, tab), 1) + 1
+
+  @doc """
+  Where a place on `line` is, as `{byte, column, display column}`: the byte offset and the
+  grapheme column of a grapheme's start, and the display column it starts at (0-based, tabs
+  every `tab` columns). The place is one of:
+
+    * `{:col, c}` — grapheme column `c` (the line's end when it is shorter);
+    * `{:vcol, t}` — the first grapheme that draws past display column `t` (the line's end when
+      none does), so the one covering column `t`;
+    * `:end` — the line's end, so the display column is the line's width.
+
+  A long line costs what is read of it, not the whole line (BUG-13): its ASCII up to the first
+  other character is measured by its bytes (only its tabs and control characters looked at one
+  by one), and from there it is walked a grapheme at a time, as a line always was.
+
+      iex> Geex.Width.seek("a\\tb字c", {:col, 3}, 4)
+      {3, 3, 5}
+      iex> Geex.Width.seek("a\\tb字c", {:vcol, 6}, 4)
+      {3, 3, 5}
+      iex> Geex.Width.seek("a\\tb字c", :end, 4)
+      {7, 5, 8}
+  """
+  @spec seek(String.t(), {:col, non_neg_integer()} | {:vcol, integer()} | :end, pos_integer()) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  def seek(line, target, tab \\ @tab) when is_binary(line) do
+    size = byte_size(line)
+
+    # The ASCII before the first other byte is measured by its bytes, all but its last (a
+    # combining mark after it would join it); from there the line is walked a grapheme at a
+    # time, as it always was, so a line that isn't ASCII costs no more than before.
+    run_end =
+      case Geex.Ascii.first_high(line) do
+        nil -> size
+        high -> max(high - 1, 0)
+      end
+
+    case ascii_run(line, 0, run_end, target, tab, 0, 0) do
+      {:found, b, c, v} -> {b, c, v}
+      {:at, c, v} when run_end >= size -> {size, c, v}
+      {:at, c, v} -> walk(line, run_end, target, tab, c, v)
+    end
   end
 
-  # gx = current grapheme's 1-based index; ds = its 1-based display-column start.
-  defp walk_to_display([], _target, gx, _ds, _tab), do: gx
+  defp walk(l, p, target, tab, col, v) do
+    case String.next_grapheme(binary_part(l, p, byte_size(l) - p)) do
+      nil ->
+        {p, col, v}
 
-  defp walk_to_display([g | rest], target, gx, ds, tab) do
-    w = advance(g, ds - 1, tab)
+      {g, _rest} ->
+        wd = advance(g, v, tab)
 
-    if w > 0 and target < ds + w,
-      do: gx,
-      else: walk_to_display(rest, target, gx + 1, ds + w, tab)
+        if at_col?(target, col) or draws_past?(target, v, wd),
+          do: {p, col, v},
+          else: walk(l, p + byte_size(g), target, tab, col + 1, v + wd)
+    end
+  end
+
+  defp at_col?({:col, c}, col), do: col >= c
+  defp at_col?(_target, _col), do: false
+
+  defp draws_past?({:vcol, t}, v, wd), do: v + wd > t
+  defp draws_past?(_target, _v, _wd), do: false
+
+  # Bytes `[p, e)` of `l`, every one an ASCII grapheme of its own, from grapheme column `col` at
+  # display column `v`: `{:found, byte, col, vcol}` where the target is among them, else
+  # `{:at, col, vcol}` at `e`.
+  defp ascii_run(l, p, e, {:col, c}, tab, col, v) do
+    k = c - col
+
+    if k < e - p,
+      do: {:found, p + k, c, ascii_advance(l, p, p + k, v, tab)},
+      else: {:at, col + e - p, ascii_advance(l, p, e, v, tab)}
+  end
+
+  defp ascii_run(l, p, e, :end, tab, col, v),
+    do: {:at, col + e - p, ascii_advance(l, p, e, v, tab)}
+
+  defp ascii_run(l, p, e, {:vcol, t}, tab, col, v) do
+    vcol_run(l, p, e, Geex.Ascii.controls(l, p, e - p), t, tab, col - p, v)
+  end
+
+  # `col0 + byte` is a byte's grapheme column in the run.
+  defp vcol_run(l, cur, e, [s | rest], t, tab, col0, v) do
+    i = max(t - v, 0)
+
+    if i < s - cur do
+      {:found, cur + i, col0 + cur + i, v + i}
+    else
+      v = v + (s - cur)
+      wd = if :binary.at(l, s) == ?\t, do: tab - rem(v, tab), else: 0
+
+      if v + wd > t,
+        do: {:found, s, col0 + s, v},
+        else: vcol_run(l, s + 1, e, rest, t, tab, col0, v + wd)
+    end
+  end
+
+  defp vcol_run(_l, cur, e, [], t, _tab, col0, v) do
+    i = max(t - v, 0)
+
+    if i < e - cur,
+      do: {:found, cur + i, col0 + cur + i, v + i},
+      else: {:at, col0 + e, v + e - cur}
+  end
+
+  # The display column after ASCII bytes `[p, e)` of `l` from display column `v`: a byte a
+  # column, a tab to its stop, a control character none.
+  defp ascii_advance(l, p, e, v, tab) do
+    {v, cur} =
+      for s <- Geex.Ascii.controls(l, p, e - p), reduce: {v, p} do
+        {v, cur} ->
+          v = v + (s - cur)
+          {if(:binary.at(l, s) == ?\t, do: v + tab - rem(v, tab), else: v), s + 1}
+      end
+
+    v + (e - cur)
   end
 
   # `is_wide/1` is a compiled clause table (cheap) and is checked first: a wide

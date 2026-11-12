@@ -19,23 +19,30 @@ defmodule Geex.Highlight.Paint do
   simply absent (the caller uses the theme's default foreground there).
   """
   @spec styles(Theme.t(), [Geex.Highlight.Span.t()]) :: %{non_neg_integer() => Style.t()}
-  def styles(%Theme{} = theme, spans), do: styles(theme, spans, 0, :infinity)
+  def styles(%Theme{} = theme, spans), do: styles(theme, spans, [{0, :infinity}])
 
-  # The same, for the bytes in `[from, to)` only: a frame needs the visible lines' bytes, not
-  # the whole file's (ADR-0035). Precedence is decided by each span's whole width, so a span
-  # clamped to the window still loses to a narrower one, as it does unclamped.
-  defp styles(theme, spans, from, to) do
+  # The same, for the bytes in the `[from, to)` ranges only: a frame needs the bytes it shows,
+  # not the whole file's (ADR-0035), nor the whole of a long line (BUG-13). Precedence is
+  # decided by each span's whole width, so a span clamped to a range still loses to a narrower
+  # one, as it does unclamped.
+  defp styles(theme, spans, ranges) do
+    within = fn span, {from, to} ->
+      span.end_byte > from and (to == :infinity or span.start_byte < to)
+    end
+
     spans
-    |> Enum.filter(&(&1.end_byte > from and (to == :infinity or &1.start_byte < to)))
+    |> Enum.filter(fn span -> Enum.any?(ranges, &within.(span, &1)) end)
     |> Enum.map(fn span -> {span, Theme.style_for(theme, span.capture)} end)
     |> Enum.reject(fn {_span, style} -> is_nil(style) end)
     |> Enum.sort_by(fn {span, _style} ->
       {-(span.end_byte - span.start_byte), dot_count(span.capture)}
     end)
     |> Enum.reduce(%{}, fn {span, style}, acc ->
-      first = max(span.start_byte, from)
-      last = if to == :infinity, do: span.end_byte, else: min(span.end_byte, to)
-      Enum.reduce(first..(last - 1)//1, acc, &Map.put(&2, &1, style))
+      Enum.reduce(ranges, acc, fn {from, to}, acc ->
+        first = max(span.start_byte, from)
+        last = if to == :infinity, do: span.end_byte, else: min(span.end_byte, to)
+        Enum.reduce(first..(last - 1)//1, acc, &Map.put(&2, &1, style))
+      end)
     end)
   end
 
@@ -69,7 +76,7 @@ defmodule Geex.Highlight.Paint do
   """
   @spec to_screen(
           String.t(),
-          [Geex.Highlight.Span.t()],
+          [Geex.Highlight.Span.t()] | ([{non_neg_integer(), non_neg_integer()}] -> [map()]),
           Theme.t(),
           non_neg_integer(),
           non_neg_integer(),
@@ -94,10 +101,15 @@ defmodule Geex.Highlight.Paint do
       )
       when is_binary(text) and w >= 0 and h >= 0 and scroll >= 0 and x0 >= 0 and hscroll >= 0 do
     # Only the rows on screen are walked, sliced out of the text by their byte offsets (one
-    # native scan for the newlines), and only the spans over those bytes are resolved: a frame
-    # costs what the screen shows, not what the file holds (ADR-0035).
-    {lines, first_byte, last_byte} = visible_lines(text, scroll, h)
-    by_byte = styles(theme, spans, first_byte, last_byte)
+    # native scan for the newlines), and of each row only the graphemes that can show, from the
+    # horizontal scroll to the pane's right edge (BUG-13: a 2 MB line costs its 100 columns, not
+    # its 2 million characters). Only the spans over those bytes are resolved: a frame costs
+    # what the screen shows, not what the file holds (ADR-0035).
+    windows = windows(text, scroll, h, max(w - x0, 0), hscroll, tab)
+    # A span over two rows' windows comes back for each: counted once, in the order it first
+    # came (a later copy would win a tie of width it shouldn't, `styles/3`'s sort being stable).
+    spans = if is_function(spans, 1), do: Enum.uniq(spans.(ranges(windows))), else: spans
+    by_byte = styles(theme, spans, ranges(windows))
     fg = theme.palette.fg
     bg = theme.palette.bg
     sel_bg = theme.palette.selection
@@ -109,38 +121,32 @@ defmodule Geex.Highlight.Paint do
     # the buffer all show the theme background, not the terminal's default.
     base = Screen.fill_rect(Screen.new(w, h), 0, 0, w, h, %Cell{char: " ", fg: fg, bg: bg})
 
-    # Walk lines the way the Doc does — split on "\n" only, so a "\r" stays a content
-    # grapheme at its Doc column. The outer accumulator carries the running byte offset
-    # (aligned with the original text: +1 per "\n" between lines); the inner walk tracks
-    # `col` (grapheme index) so a `Geex.Selection` (caret coordinates) tints the right cells.
-    {screen, _byte} =
-      lines
-      |> Enum.reduce({base, first_byte}, fn {line, row}, {screen, byte0} ->
-        sy = row - scroll
+    # Each row's graphemes carry their byte (for the spans), their column (so a
+    # `Geex.Selection`, in caret coordinates, tints the right cells) and their display column.
+    Enum.reduce(windows, base, fn %{row: row, byte0: byte0} = win, screen ->
+      sy = row - scroll
 
-        {screen, byte_end, end_vcol, len} =
-          line
-          |> String.graphemes()
-          |> Enum.reduce({screen, byte0, x0, 0}, fn g, {screen, byte, vcol, col} ->
-            wd = Width.advance(g, vcol - x0, tab)
-            cell = cell_for(g, style_at(by_byte, byte, byte_size(g)), fg, bg)
+      screen =
+        Enum.reduce(win.graphemes, screen, fn {g, byte, col, v, wd}, screen ->
+          cell = cell_for(g, style_at(by_byte, byte0 + byte, byte_size(g)), fg, bg)
 
-            cell =
-              if selected?(selection, row, col),
-                do: %{cell | bg: sel_bg, attrs: cell.attrs ++ sel_attrs},
-                else: cell
+          cell =
+            if selected?(selection, row, col),
+              do: %{cell | bg: sel_bg, attrs: cell.attrs ++ sel_attrs},
+              else: cell
 
-            screen = place(screen, vcol - hscroll, sy, cell, wd, x0)
-            {screen, byte + byte_size(g), vcol + wd, col + 1}
-          end)
+          place(screen, x0 + v - hscroll, sy, cell, wd, x0)
+        end)
 
-        # A multi-line selection covers this line's *newline* (the EOL caret {row, len} is in
-        # range): tint the trailing run from the content end to the right edge so the spanned
-        # line reads as fully selected, not ragged. The last buffer line has no newline, so its
-        # EOL caret is never `< end` — this never fires there. `+1` for the "\n" separator.
-        screen =
+      # A multi-line selection covers this line's *newline* (the EOL caret {row, len} is in
+      # range): tint the trailing run from the content end to the right edge so the spanned
+      # line reads as fully selected, not ragged. The last buffer line has no newline, so its
+      # EOL caret is never `< end` — this never fires there. A line that runs past the right
+      # edge has no run to tint.
+      case win.end do
+        {len, end_v} ->
           if selected?(selection, row, len) do
-            fill_eol(screen, sy, max(end_vcol - hscroll, x0), w, %Cell{
+            fill_eol(screen, sy, max(x0 + end_v - hscroll, x0), w, %Cell{
               char: " ",
               fg: fg,
               bg: sel_bg,
@@ -150,10 +156,85 @@ defmodule Geex.Highlight.Paint do
             screen
           end
 
-        {screen, byte_end + 1}
+        :past_edge ->
+          screen
+      end
+    end)
+  end
+
+  @doc """
+  The byte ranges of `text` a frame paints, scrolled down by `scroll` rows and right by
+  `hscroll` display columns, `cols` text columns wide, `h` rows high: for each row the bytes of
+  the graphemes that can show (a wide glyph straddling the left edge among them: it shows its
+  second half), adjacent rows' ranges merged. What a frame needs highlighted.
+
+      iex> Geex.Highlight.Paint.visible_ranges("ab\\ncdefgh\\ni", 0, 3, 3, 2)
+      [{2, 2}, {5, 8}, {11, 11}]
+  """
+  @spec visible_ranges(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          pos_integer()
+        ) :: [{non_neg_integer(), non_neg_integer()}]
+  def visible_ranges(text, scroll, h, cols, hscroll, tab \\ 2),
+    do: ranges(windows(text, scroll, h, cols, hscroll, tab))
+
+  # Each visible row's window: the graphemes from the first that draws into display column
+  # `hscroll` or past it (so a wide glyph or a tab straddling the left edge, which shows its
+  # second half) to the last that starts before `hscroll + cols`, as `{grapheme, byte, col, vcol, width}` (byte and
+  # column within the line, vcol from the line's start), and how the row ends: `{len, vcol}`
+  # when the line ends on screen, `:past_edge` when it runs on past the right edge.
+  defp windows(text, scroll, h, cols, hscroll, tab) do
+    {lines, first_byte, _last} = visible_lines(text, scroll, h)
+
+    {windows, _byte} =
+      Enum.map_reduce(lines, first_byte, fn {line, row}, byte0 ->
+        {b, col, v} = Width.seek(line, {:vcol, hscroll}, tab)
+        {graphemes, ending} = walk(line, b, col, v, hscroll + cols, tab, [])
+        from = if graphemes == [], do: b, else: elem(hd(graphemes), 1)
+        to = window_end(line, graphemes, ending, b)
+
+        {%{row: row, byte0: byte0, graphemes: graphemes, end: ending, bytes: {from, to}},
+         byte0 + byte_size(line) + 1}
       end)
 
-    screen
+    windows
+  end
+
+  defp walk(line, b, col, v, stop, tab, acc) do
+    case String.next_grapheme(binary_part(line, b, byte_size(line) - b)) do
+      nil ->
+        {Enum.reverse(acc), {col, v}}
+
+      {_g, _rest} when v >= stop ->
+        {Enum.reverse(acc), :past_edge}
+
+      {g, _rest} ->
+        wd = Width.advance(g, v, tab)
+        walk(line, b + byte_size(g), col + 1, v + wd, stop, tab, [{g, b, col, v, wd} | acc])
+    end
+  end
+
+  defp window_end(line, [], {_len, _v}, _b), do: byte_size(line)
+  defp window_end(_line, [], :past_edge, b), do: b
+
+  defp window_end(line, graphemes, ending, _b) do
+    {g, byte, _col, _v, _wd} = List.last(graphemes)
+    if ending == :past_edge, do: byte + byte_size(g), else: byte_size(line)
+  end
+
+  # The windows' byte ranges in the text, adjacent ones merged.
+  defp ranges(windows) do
+    windows
+    |> Enum.map(fn %{byte0: byte0, bytes: {from, to}} -> {byte0 + from, byte0 + to} end)
+    |> Enum.reduce([], fn
+      {from, to}, [{f, t} | rest] when from <= t + 1 -> [{f, max(to, t)} | rest]
+      range, acc -> [range | acc]
+    end)
+    |> Enum.reverse()
   end
 
   @doc """

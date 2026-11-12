@@ -50,15 +50,8 @@ defmodule Geex.Buffer.Doc do
     row = row |> max(0) |> min(length(lines) - 1)
     prefix = lines |> Enum.take(row) |> Enum.reduce(0, fn l, acc -> acc + byte_size(l) + 1 end)
 
-    col_bytes =
-      lines
-      |> Enum.at(row, "")
-      |> String.graphemes()
-      |> Enum.take(max(col, 0))
-      |> IO.iodata_to_binary()
-      |> byte_size()
-
-    prefix + col_bytes
+    {pre, _post} = lines |> Enum.at(row, "") |> split_col(max(col, 0))
+    prefix + byte_size(pre)
   end
 
   @doc """
@@ -68,10 +61,9 @@ defmodule Geex.Buffer.Doc do
   @spec insert(t(), pos(), String.t()) :: {:ok, t()} | {:error, atom()}
   def insert(%__MODULE__{lines: lines} = doc, {row, col}, text)
       when is_integer(row) and is_integer(col) and is_binary(text) do
-    with {:ok, graphemes} <- fetch_graphemes(lines, row),
-         true <- col >= 0 and col <= length(graphemes) do
-      {pre, post} = Enum.split(graphemes, col)
-      new_lines = splice(String.split(text, "\n"), Enum.join(pre), Enum.join(post))
+    with {:ok, line} <- fetch_line(lines, row),
+         {:ok, pre, post} <- split_at_col(line, col) do
+      new_lines = splice(String.split(text, "\n"), pre, post)
 
       replaced =
         lines
@@ -92,10 +84,10 @@ defmodule Geex.Buffer.Doc do
   @spec delete(t(), pos(), non_neg_integer()) :: {:ok, t()} | {:error, atom()}
   def delete(%__MODULE__{lines: lines} = doc, {row, col}, count)
       when is_integer(row) and is_integer(col) and is_integer(count) and count >= 0 do
-    with {:ok, graphemes} <- fetch_graphemes(lines, row),
-         true <- col >= 0 and col <= length(graphemes) do
-      {pre, rest} = Enum.split(graphemes, col)
-      new_line = Enum.join(pre ++ Enum.drop(rest, count))
+    with {:ok, line} <- fetch_line(lines, row),
+         {:ok, pre, rest} <- split_at_col(line, col) do
+      {_gone, kept} = split_col(rest, count)
+      new_line = pre <> kept
       {:ok, %__MODULE__{doc | lines: List.replace_at(lines, row, new_line)}}
     else
       {:error, _} = e -> e
@@ -115,12 +107,10 @@ defmodule Geex.Buffer.Doc do
       when is_integer(r1) and is_integer(c1) and is_integer(r2) and is_integer(c2) and
              is_binary(text) do
     with :ok <- ordered(from, to),
-         {:ok, start_graphemes} <- fetch_graphemes(lines, r1),
-         {:ok, end_graphemes} <- fetch_graphemes(lines, r2),
-         true <- c1 >= 0 and c1 <= length(start_graphemes),
-         true <- c2 >= 0 and c2 <= length(end_graphemes) do
-      prefix = start_graphemes |> Enum.take(c1) |> Enum.join()
-      suffix = end_graphemes |> Enum.drop(c2) |> Enum.join()
+         {:ok, start_line} <- fetch_line(lines, r1),
+         {:ok, end_line} <- fetch_line(lines, r2),
+         {:ok, prefix, _} <- split_at_col(start_line, c1),
+         {:ok, _, suffix} <- split_at_col(end_line, c2) do
       middle = splice(String.split(text, "\n"), prefix, suffix)
       replaced = Enum.take(lines, r1) ++ middle ++ Enum.drop(lines, r2 + 1)
       {:ok, %__MODULE__{doc | lines: replaced}}
@@ -141,17 +131,15 @@ defmodule Geex.Buffer.Doc do
   def slice(%__MODULE__{lines: lines}, {{r1, c1} = from, {r2, c2} = to})
       when is_integer(r1) and is_integer(c1) and is_integer(r2) and is_integer(c2) do
     with :ok <- ordered(from, to),
-         {:ok, start_graphemes} <- fetch_graphemes(lines, r1),
-         {:ok, end_graphemes} <- fetch_graphemes(lines, r2),
-         true <- c1 >= 0 and c1 <= length(start_graphemes),
-         true <- c2 >= 0 and c2 <= length(end_graphemes) do
+         {:ok, start_line} <- fetch_line(lines, r1),
+         {:ok, end_line} <- fetch_line(lines, r2),
+         {:ok, _, first} <- split_at_col(start_line, c1),
+         {:ok, last, _} <- split_at_col(end_line, c2) do
       text =
         if r1 == r2 do
-          start_graphemes |> Enum.slice(c1, c2 - c1) |> Enum.join()
+          first |> split_col(c2 - c1) |> elem(0)
         else
-          first = start_graphemes |> Enum.drop(c1) |> Enum.join()
           middle = Enum.slice(lines, r1 + 1, r2 - r1 - 1)
-          last = end_graphemes |> Enum.take(c2) |> Enum.join()
           Enum.join([first | middle] ++ [last], "\n")
         end
 
@@ -167,12 +155,36 @@ defmodule Geex.Buffer.Doc do
   defp ordered(from, to) when from <= to, do: :ok
   defp ordered(_from, _to), do: {:error, :range_reversed}
 
-  defp fetch_graphemes(lines, row) do
+  defp fetch_line(lines, row) do
     case Enum.at(lines, row) do
       nil -> {:error, :row_out_of_range}
-      line when is_binary(line) -> {:ok, String.graphemes(line)}
+      line when is_binary(line) -> {:ok, line}
     end
   end
+
+  # `line`'s first `col` graphemes and the rest, `{:ok, pre, post}`, or
+  # `{:error, :col_out_of_range}` when `col` is negative or past the line's end.
+  defp split_at_col(_line, col) when col < 0, do: {:error, :col_out_of_range}
+
+  defp split_at_col(line, col) do
+    {pre, post} = split_col(line, col)
+
+    if post != "" or String.length(pre) == col,
+      do: {:ok, pre, post},
+      else: {:error, :col_out_of_range}
+  end
+
+  # The first `col` graphemes of `line` (all of it when shorter) and the rest, without splitting
+  # the whole of a long line into graphemes (BUG-13): an ASCII prefix is cut by its bytes (the
+  # byte at `col` ASCII too, so no combining mark there belongs to the grapheme before it), any
+  # other walked by `String.split_at/2`.
+  defp split_col(line, col) do
+    if col <= byte_size(line) and ascii_prefix?(line, col + 1),
+      do: {binary_part(line, 0, col), binary_part(line, col, byte_size(line) - col)},
+      else: String.split_at(line, col)
+  end
+
+  defp ascii_prefix?(line, k), do: Geex.Ascii.prefix?(line, k)
 
   # Splice inserted parts between the `pre` and `post` halves of the split line.
   defp splice([only], pre, post), do: [pre <> only <> post]

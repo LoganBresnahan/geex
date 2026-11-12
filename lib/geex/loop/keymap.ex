@@ -757,19 +757,39 @@ defmodule Geex.Loop.Keymap do
 
   # The word the cursor is on, else the next on its line, else the one before it.
   defp word_at(text, {line, col}) do
-    gs = line_tuple(text, line)
-    n = tuple_size(gs)
+    with_window(text, line, col, col, fn {gs, lo, at_start?, at_end?} = w ->
+      n = tuple_size(gs)
+      c = clamp(col - lo, 0, n)
 
-    start =
-      cond do
-        col < n and non_space?(elem(gs, col)) -> col
-        i = Enum.find(col..(n - 1)//1, &non_space?(elem(gs, &1))) -> i
-        i = Enum.find((min(col, n) - 1)..0//-1, &non_space?(elem(gs, &1))) -> i
-        true -> nil
+      fwd =
+        if c < n and non_space?(elem(gs, c)),
+          do: c,
+          else: Enum.find(c..(n - 1)//1, &non_space?(elem(gs, &1)))
+
+      start =
+        cond do
+          fwd -> fwd
+          not at_end? -> :edge
+          i = Enum.find((c - 1)..0//-1, &non_space?(elem(gs, &1))) -> i
+          not at_start? -> :edge
+          true -> nil
+        end
+
+      case start do
+        :edge ->
+          :edge
+
+        nil ->
+          {:ok, nil}
+
+        start ->
+          {a, b} = {skip_bwd(start, gs, &non_space?/1), skip_fwd(start, gs, n, &non_space?/1)}
+
+          if edge?(w, a) or edge?(w, b),
+            do: :edge,
+            else: {:ok, {{line, a + lo}, {line, b + lo}}}
       end
-
-    start &&
-      {{line, skip_bwd(start, gs, &non_space?/1)}, {line, skip_fwd(start, gs, n, &non_space?/1)}}
+    end)
   end
 
   # The end of the next word from `{line, col}`, on this line or a later one.
@@ -779,10 +799,24 @@ defmodule Geex.Loop.Keymap do
     |> Enum.drop(line)
     |> Enum.with_index(line)
     |> Enum.find_value(fn {l, i} ->
-      gs = l |> String.replace_suffix("\r", "") |> String.graphemes() |> List.to_tuple()
-      n = tuple_size(gs)
-      start = skip_fwd(if(i == line, do: min(col, n), else: 0), gs, n, &(not non_space?(&1)))
-      if start < n, do: {i, skip_fwd(start, gs, n, &non_space?/1)}
+      c = if i == line, do: col, else: 0
+
+      on_window(String.replace_suffix(l, "\r", ""), c, c, fn {gs, lo, _s, at_end?} = w ->
+        n = tuple_size(gs)
+        start = skip_fwd(clamp(c - lo, 0, n), gs, n, &(not non_space?(&1)))
+
+        cond do
+          start < n ->
+            e = skip_fwd(start, gs, n, &non_space?/1)
+            if edge?(w, e), do: :edge, else: {:ok, {i, e + lo}}
+
+          at_end? ->
+            {:ok, nil}
+
+          true ->
+            :edge
+        end
+      end)
     end)
   end
 
@@ -805,14 +839,30 @@ defmodule Geex.Loop.Keymap do
   def matching_bracket({line, col}, text) do
     lt = text |> lines() |> List.to_tuple()
     here = if line < tuple_size(lt), do: String.replace_suffix(elem(lt, line), "\r", ""), else: ""
-    at = fn c -> if c >= 0, do: String.at(here, c) end
+    at = fn c -> grapheme_at(here, c) end
 
     cond do
       bracket?(at.(col)) -> pair_of({line, col}, at.(col), lt)
       bracket?(at.(col - 1)) -> pair_of({line, col - 1}, at.(col - 1), lt)
       true -> enclosing({line, col}, lt)
     end
+    |> resolve_col(lt)
   end
+
+  # The grapheme at column `c` of `l`: on an ASCII line (up to past `c`) the byte there, without
+  # walking the line (BUG-12).
+  defp grapheme_at(_l, c) when c < 0, do: nil
+
+  defp grapheme_at(l, c) do
+    if ascii_prefix?(l, c + 2),
+      do: if(c < byte_size(l), do: binary_part(l, c, 1)),
+      else: String.at(l, c)
+  end
+
+  # A pair found in the tail of a long line read backward carries its column counted from the
+  # line's end (`graphemes_bwd/2`); counted once, here, from the line's length.
+  defp resolve_col({l, {:end, k}}, lt), do: {l, String.length(elem(lt, l)) - 1 - k}
+  defp resolve_col(found, _lt), do: found
 
   defp bracket?(g), do: Map.has_key?(@bracket_open, g) or Map.has_key?(@bracket_close, g)
 
@@ -847,40 +897,93 @@ defmodule Geex.Loop.Keymap do
   end
 
   # The graphemes from `{line, col}` on, and before it backwards, as `{g, line, col}`, at most
-  # @bracket_graphemes of them. Forward reads each line lazily, so a long line costs only what is
-  # read of it; backward needs a line whole, so it stops at one longer than what is left to read.
+  # @bracket_graphemes of them, read lazily so a long line costs only what is read of it. Where
+  # the cursor's line is ASCII up to it, its column is a byte and the reading starts there
+  # without walking the line (BUG-12).
   defp graphemes_fwd(lt, {line, col}) do
     last = min(tuple_size(lt) - 1, line + @bracket_lines)
 
     line..last//1
-    |> Stream.flat_map(fn i ->
-      elem(lt, i)
-      |> Stream.unfold(&String.next_grapheme/1)
-      |> Stream.with_index()
-      |> Stream.drop(if i == line, do: col, else: 0)
-      |> Stream.map(fn {g, c} -> {g, i, c} end)
-    end)
+    |> Stream.flat_map(fn i -> forward_from(elem(lt, i), i, if(i == line, do: col, else: 0)) end)
     |> Stream.take(@bracket_graphemes)
   end
 
+  defp forward_from(l, i, col) do
+    rest =
+      cond do
+        col == 0 ->
+          l
+
+        ascii_prefix?(l, col + 1) ->
+          binary_part(l, min(col, byte_size(l)), max(byte_size(l) - col, 0))
+
+        true ->
+          l |> String.split_at(col) |> elem(1)
+      end
+
+    rest
+    |> Stream.unfold(&String.next_grapheme/1)
+    |> Stream.with_index(col)
+    |> Stream.map(fn {g, c} -> {g, i, c} end)
+  end
+
+  # Backward, an ASCII line (up to the cursor, on its line) is read byte by byte from its end;
+  # any other is read whole when it is short enough, else only its last @bracket_graphemes × 4
+  # bytes, and the search ends there: what comes before that tail isn't read. A tail's columns
+  # are counted from the end (`{:end, k}` off a line whose length isn't known yet, resolved once
+  # a pair is found, `resolve_col/2`).
   defp graphemes_bwd(lt, {line, col}) do
     first = max(0, line - @bracket_lines)
 
     line..first//-1
-    |> Stream.transform(@bracket_graphemes, fn i, left ->
-      l = elem(lt, i)
+    |> Stream.transform(:go, fn
+      _i, :stop ->
+        {:halt, :stop}
 
-      cond do
-        left <= 0 or (byte_size(l) > left * 4 and i != line) ->
-          {:halt, left}
-
-        true ->
-          gs = if i == line, do: l |> String.slice(0, col), else: l
-          gs = gs |> String.graphemes() |> Enum.with_index() |> Enum.reverse()
-          gs = Enum.take(gs, left)
-          {for({g, c} <- gs, do: {g, i, c}), left - length(gs)}
-      end
+      i, :go ->
+        {gs, more?} = backward_from(elem(lt, i), i, if(i == line, do: col, else: :end))
+        {gs, if(more?, do: :stop, else: :go)}
     end)
+    |> Stream.take(@bracket_graphemes)
+  end
+
+  @tail_bytes @bracket_graphemes * 4
+
+  defp backward_from(l, i, upto) do
+    ascii_to = if upto == :end, do: byte_size(l), else: upto + 1
+
+    cond do
+      ascii_prefix?(l, ascii_to) ->
+        top = if upto == :end, do: byte_size(l), else: min(upto, byte_size(l))
+        {Stream.map((top - 1)..0//-1, &{binary_part(l, &1, 1), i, &1}), false}
+
+      true ->
+        prefix = if upto == :end, do: l, else: l |> String.split_at(upto) |> elem(0)
+
+        if byte_size(prefix) <= @tail_bytes do
+          gs = prefix |> String.graphemes() |> Enum.with_index() |> Enum.reverse()
+          {for({g, c} <- gs, do: {g, i, c}), false}
+        else
+          tail = utf8_tail(prefix, @tail_bytes)
+          col = fn k -> if upto == :end, do: {:end, k}, else: upto - 1 - k end
+          gs = tail |> String.graphemes() |> Enum.reverse() |> Enum.with_index()
+          {for({g, k} <- gs, do: {g, i, col.(k)}), true}
+        end
+    end
+  end
+
+  # The last `n` bytes of `b` or a few fewer, starting on a character's first byte.
+  defp utf8_tail(b, n) do
+    start = byte_size(b) - n
+
+    start =
+      Enum.find(
+        start..(byte_size(b) - 1)//1,
+        start,
+        &(Bitwise.band(:binary.at(b, &1), 0xC0) != 0x80)
+      )
+
+    binary_part(b, start, byte_size(b) - start)
   end
 
   @doc """
@@ -904,23 +1007,27 @@ defmodule Geex.Loop.Keymap do
   """
   @spec move_text(String.t(), {cursor(), cursor()}, atom()) ::
           {struct(), cursor(), cursor()} | nil
-  def move_text(text, {{line, a}, {line, b}}, how)
-      when a < b and how in [:word_back, :word_forward, :line_start, :line_end] do
-    # A word or line-end move takes the selection's words, not the spaces at its ends: those
-    # are gap, staying where they are, so `Alt+S`, `Alt+O` on `bar` (taking `bar `) and then a
-    # move keeps `foo bar baz`'s spacing (mod-verify's review). All spaces is nothing to move.
-    gs = line_tuple(text, line)
-    a2 = skip_fwd(a, gs, b, &space?/1)
-    b2 = skip_bwd(b, gs, &space?/1)
-    if a2 < b2, do: move_words(text, {{line, a2}, {line, b2}}, how, gs)
-  end
+  def move_text(text, {{line, a}, {line, b}}, how) when a < b do
+    with_window(text, line, a, b, fn {gs, lo, _s, _e} = w ->
+      {a, b} = {a - lo, b - lo}
 
-  def move_text(text, {{line, a}, {line, b}}, how) when a < b,
-    do: move_words(text, {{line, a}, {line, b}}, how, line_tuple(text, line))
+      # A word or line-end move takes the selection's words, not the spaces at its ends: those
+      # are gap, staying where they are, so `Alt+S`, `Alt+O` on `bar` (taking `bar `) and then a
+      # move keeps `foo bar baz`'s spacing (mod-verify's review). All spaces is nothing to move.
+      {a, b} =
+        if how in [:word_back, :word_forward, :line_start, :line_end],
+          do: {skip_fwd(a, gs, b, &space?/1), skip_bwd(b, gs, &space?/1)},
+          else: {a, b}
+
+      if a < b, do: move_in(w, line, a, b, how), else: {:ok, nil}
+    end)
+  end
 
   def move_text(_text, _range, _how), do: nil
 
-  defp move_words(_text, {{line, a}, {line, b}}, how, gs) do
+  # The move in the window `w`, `a`..`b` its local columns: `{:ok, result}`, or `:edge` when the
+  # move needs more of the line than the window has.
+  defp move_in({gs, lo, at_start?, at_end?} = w, line, a, b, how) do
     n = tuple_size(gs)
 
     part = fn from, to ->
@@ -933,6 +1040,8 @@ defmodule Geex.Loop.Keymap do
     # {span from, span to, what replaces the span, where the text starts}
     move =
       case how do
+        # The window reaches @window past the selection's ends, so a character beside it is in
+        # the window whenever the line has one.
         :left when a > 0 ->
           {a - 1, b, sel <> part.(a - 1, a), a - 1}
 
@@ -942,12 +1051,29 @@ defmodule Geex.Loop.Keymap do
         :word_back ->
           we = skip_bwd(a, gs, &(not non_space?(&1)))
           ws = skip_bwd(we, gs, &non_space?/1)
-          if ws < we, do: {ws, b, sel <> part.(we, a) <> part.(ws, we), ws}
+
+          cond do
+            edge?(w, ws) -> :edge
+            ws < we -> {ws, b, sel <> part.(we, a) <> part.(ws, we), ws}
+            true -> nil
+          end
 
         :word_forward ->
           ws = skip_fwd(b, gs, n, &(not non_space?(&1)))
           we = skip_fwd(ws, gs, n, &non_space?/1)
-          if ws < we, do: {a, we, part.(ws, we) <> part.(b, ws) <> sel, a + (we - b)}
+
+          cond do
+            edge?(w, we) -> :edge
+            ws < we -> {a, we, part.(ws, we) <> part.(b, ws) <> sel, a + (we - b)}
+            true -> nil
+          end
+
+        # To a line end it needs the line up to that end.
+        how when how == :line_start and not at_start? ->
+          :edge
+
+        how when how == :line_end and not at_end? ->
+          :edge
 
         # To a line end: the text it passes keeps its spacing, the gap going between them, so
         # `  ab cd` with `cd` becomes `  cd ab`; never past the indent.
@@ -970,8 +1096,18 @@ defmodule Geex.Loop.Keymap do
           nil
       end
 
-    with {from, to, new, start} <- move,
-         do: {replace({line, from}, {line, to}, new), {line, start}, {line, start + len}}
+    case move do
+      :edge ->
+        :edge
+
+      nil ->
+        {:ok, nil}
+
+      {from, to, new, start} ->
+        {:ok,
+         {replace({line, from + lo}, {line, to + lo}, new), {line, start + lo},
+          {line, start + lo + len}}}
+    end
   end
 
   defp replace({l1, c1}, {l2, c2}, text) do
@@ -1065,12 +1201,12 @@ defmodule Geex.Loop.Keymap do
   @spec autoclose(tuple(), cursor(), String.t(), [pair()], keyword()) :: action() | nil
   def autoclose(event, cursor, text, pairs, opts \\ [])
 
-  def autoclose({:char, g}, {line, col}, text, pairs, opts) do
+  def autoclose({:char, g}, {line, col}, text, pairs, opts)
+      when g in @closers or g in @quotes or g in @openers do
+    # Only the characters either side of the cursor are read (BUG-12: a typed character near the
+    # end of a 2 MB line took a second), and the line before it only for a quote.
     l = line_body(text, line)
-    col = min(col, String.length(l))
-    before = String.slice(l, 0, col)
-    next = String.at(l, col)
-    prev = String.last(before)
+    {col, prev, next} = around(l, col)
 
     cond do
       (g in @closers or g in @quotes) and next == g and tracked?(pairs, line, col) ->
@@ -1079,7 +1215,7 @@ defmodule Geex.Loop.Keymap do
       g in @openers and closes_before?(next) ->
         {:edit, insert(line, col, g <> @pairs[g]), {line, col + 1}}
 
-      g in @quotes and closes_before?(next) and opens_string?(g, before, prev, opts) ->
+      g in @quotes and closes_before?(next) and opens_string?(g, l, col, prev, opts) ->
         {:edit, insert(line, col, g <> g), {line, col + 1}}
 
       true ->
@@ -1089,17 +1225,36 @@ defmodule Geex.Loop.Keymap do
 
   def autoclose(_event, _cursor, _text, _pairs, _opts), do: nil
 
-  # Whether a quote typed after `before` opens a string (and so gets its closer).
-  defp opens_string?(g, before, prev, opts) do
+  # Whether a quote typed at column `col` of `l` opens a string (and so gets its closer).
+  defp opens_string?(g, l, col, prev, opts) do
     (g != "'" or Keyword.get(opts, :single_quote, true)) and
       (g != "`" or Keyword.get(opts, :backtick, true)) and not word?(prev) and
-      prev not in [g | @closers] and string_at(before) == nil
+      prev not in [g | @closers] and string_at(before_col(l, col)) == nil
   end
 
   # The string `before` ends inside, read left to right: nil outside any, else its quote. Inside
   # a string a backslash escapes the next grapheme, and the other quotes are text (the review of
-  # item 19: `x = "it's" + '` is outside a string, so its `'` opens one).
-  defp string_at(before), do: before |> String.graphemes() |> scan_strings(nil)
+  # item 19: `x = "it's" + '` is outside a string, so its `'` opens one). ASCII is read by its
+  # quotes and backslashes alone, each a byte and a grapheme (BUG-12).
+  defp string_at(before) do
+    if ascii_prefix?(before, byte_size(before)) do
+      before
+      |> :binary.matches(["\"", "'", "`", "\\"])
+      |> Enum.map(fn {at, 1} -> {at, binary_part(before, at, 1)} end)
+      |> scan_bytes(nil)
+    else
+      before |> String.graphemes() |> scan_strings(nil)
+    end
+  end
+
+  defp scan_bytes([], open), do: open
+
+  defp scan_bytes([{at, "\\"} | rest], open) when open != nil,
+    do: scan_bytes(Enum.drop_while(rest, fn {next, _} -> next == at + 1 end), open)
+
+  defp scan_bytes([{_at, g} | rest], nil) when g in @quotes, do: scan_bytes(rest, g)
+  defp scan_bytes([{_at, open} | rest], open), do: scan_bytes(rest, nil)
+  defp scan_bytes([_ | rest], open), do: scan_bytes(rest, open)
 
   defp scan_strings([], open), do: open
   defp scan_strings(["\\", _ | rest], open) when open != nil, do: scan_strings(rest, open)
@@ -1119,12 +1274,12 @@ defmodule Geex.Loop.Keymap do
   """
   @spec unpair(cursor(), String.t(), [pair()]) :: action() | nil
   def unpair({line, col}, text, pairs) when col > 0 do
-    l = line_body(text, line)
-    prev = String.at(l, col - 1)
-
-    if Map.has_key?(@pairs, prev) and String.at(l, col) == @pairs[prev] and
-         tracked?(pairs, line, col),
-       do: {:edit, delete(line, col - 1, 2), {line, col - 1}}
+    with true <- tracked?(pairs, line, col),
+         l = line_body(text, line),
+         prev = grapheme_at(l, col - 1),
+         true <- Map.has_key?(@pairs, prev) and grapheme_at(l, col) == @pairs[prev],
+         do: {:edit, delete(line, col - 1, 2), {line, col - 1}},
+         else: (_ -> nil)
   end
 
   def unpair(_cursor, _text, _pairs), do: nil
@@ -1232,30 +1387,28 @@ defmodule Geex.Loop.Keymap do
   def newline({line, col}, text, unit, opts \\ []) do
     eol = eol(text)
     l = line_body(text, line)
-    len = String.length(l)
-    col = min(col, len)
+    {col, _prev, _next} = around(l, col)
 
     if Keyword.get(opts, :indent, true) do
-      indent_newline(line, col, l, len, unit, eol, Keyword.get(opts, :colon, false))
+      indent_newline(line, col, l, unit, eol, Keyword.get(opts, :colon, false))
     else
       {:edit, insert(line, col, eol), {line + 1, 0}}
     end
   end
 
-  defp indent_newline(line, col, l, len, unit, eol, colon?) do
-    base = l |> leading_whitespace() |> String.slice(0, col)
-    before = String.slice(l, 0, col)
-    after_cursor = String.slice(l, col, len)
-    opener = before |> String.trim_trailing(" ") |> String.trim_trailing("\t") |> String.last()
+  defp indent_newline(line, col, l, unit, eol, colon?) do
+    lead = leading_whitespace(l)
+    base = String.slice(lead, 0, col)
+    {opener, after_first} = blanks_around(l, col)
     # `:` opens a block where it does, but not ending a comment (`# Steps:`).
     colon? = colon? and not String.starts_with?(String.trim_leading(l), "#")
     openers = if colon?, do: ["{", "[", "(", ":"], else: ["{", "[", "("]
 
     cond do
-      l != "" and leading_whitespace(l) == l and col == len ->
-        {:edit, replace_head(line, len, eol <> l), {line + 1, len}}
+      l != "" and lead == l and col == String.length(l) ->
+        {:edit, replace_head(line, col, eol <> l), {line + 1, col}}
 
-      opener in @openers and first_non_blank(after_cursor) == @pairs[opener] ->
+      opener in @openers and after_first == @pairs[opener] ->
         inner = base <> unit
         {:edit, insert(line, col, eol <> inner <> eol <> base), {line + 1, String.length(inner)}}
 
@@ -1268,8 +1421,21 @@ defmodule Geex.Loop.Keymap do
     end
   end
 
-  defp first_non_blank(s),
-    do: s |> String.trim_leading(" ") |> String.trim_leading("\t") |> String.first()
+  # Around column `col` of `l`: the last character before it past the spaces, then the tabs,
+  # before it, and the first after it past the spaces, then the tabs, after it (`nil` at a
+  # line's end), as the line trimmed would give them; read near the cursor (BUG-12).
+  defp blanks_around(l, col) do
+    on_window(l, col, col, fn {gs, lo, _s, _e} = w ->
+      n = tuple_size(gs)
+      c = clamp(col - lo, 0, n)
+      i = skip_bwd(skip_bwd(c, gs, &(&1 == " ")), gs, &(&1 == "\t"))
+      j = skip_fwd(skip_fwd(c, gs, n, &(&1 == " ")), gs, n, &(&1 == "\t"))
+
+      if edge?(w, i) or edge?(w, j),
+        do: :edge,
+        else: {:ok, {if(i > 0, do: elem(gs, i - 1)), if(j < n, do: elem(gs, j))}}
+    end)
+  end
 
   @doc """
   Backspace in a line's leading spaces takes one indent level, back to the previous stop of
@@ -1283,9 +1449,7 @@ defmodule Geex.Loop.Keymap do
   """
   @spec dedent(cursor(), String.t(), pos_integer()) :: action() | nil
   def dedent({line, col}, text, tab_size) when col > 0 do
-    before = String.slice(line_text(text, line), 0, col)
-
-    if String.trim_leading(before, " ") == "" do
+    if leading_bytes(line_text(text, line), [?\s]) >= col do
       n = if rem(col, tab_size) == 0, do: tab_size, else: rem(col, tab_size)
       {:edit, delete(line, col - n, n), {line, col - n}}
     end
@@ -1301,8 +1465,45 @@ defmodule Geex.Loop.Keymap do
 
   # The line's leading spaces and tabs, by grapheme: a space a combining mark joins isn't one,
   # nor is a form feed.
-  defp leading_whitespace(l),
-    do: l |> String.graphemes() |> Enum.take_while(&(&1 in [" ", "\t"])) |> Enum.join()
+  defp leading_whitespace(l), do: binary_part(l, 0, leading_bytes(l, [?\s, ?\t]))
+
+  # How many of `l`'s first bytes are graphemes in `bytes` (spaces, tabs): the run of them, less
+  # its last when a combining mark after it joins it into another character. Read from the
+  # line's start only as far as the run goes.
+  defp leading_bytes(l, bytes) do
+    n = count_leading(l, 0, bytes)
+
+    with true <- n > 0 and n < byte_size(l),
+         {g, _rest} <- String.next_grapheme(binary_part(l, n - 1, byte_size(l) - n + 1)),
+         true <- byte_size(g) > 1 do
+      n - 1
+    else
+      _ -> n
+    end
+  end
+
+  defp count_leading(l, n, bytes) do
+    if n < byte_size(l) and :binary.at(l, n) in bytes,
+      do: count_leading(l, n + 1, bytes),
+      else: n
+  end
+
+  # The characters either side of column `col` of `l` and `col` clamped to the line, as
+  # `{col, prev, next}`, read near the cursor (BUG-12).
+  defp around(l, col) do
+    on_window(l, col, col, fn {gs, lo, _s, _e} ->
+      n = tuple_size(gs)
+      c = clamp(col - lo, 0, n)
+      {:ok, {lo + c, if(c > 0, do: elem(gs, c - 1)), if(c < n, do: elem(gs, c))}}
+    end)
+  end
+
+  # `l`'s first `col` graphemes: by bytes when ASCII up to past them.
+  defp before_col(l, col) do
+    if ascii_prefix?(l, col + 1),
+      do: binary_part(l, 0, min(col, byte_size(l))),
+      else: l |> String.split_at(col) |> elem(0)
+  end
 
   defp closes_before?(nil), do: true
   defp closes_before?(g), do: g in @close_before
@@ -1376,16 +1577,20 @@ defmodule Geex.Loop.Keymap do
   # start (skip the rest of this word, then the spaces); backward lands on the previous
   # word's start. Clamped to the line ends; line-crossing is a later refinement.
   defp word_forward({line, col}, text) do
-    gs = line_tuple(text, line)
-    n = tuple_size(gs)
-    i = skip_fwd(min(col, n), gs, n, &non_space?/1)
-    {line, skip_fwd(i, gs, n, &space?/1)}
+    with_window(text, line, col, col, fn {gs, lo, _s, _e} = w ->
+      n = tuple_size(gs)
+      i = skip_fwd(clamp(col - lo, 0, n), gs, n, &non_space?/1)
+      r = skip_fwd(i, gs, n, &space?/1)
+      if edge?(w, r), do: :edge, else: {:ok, {line, r + lo}}
+    end)
   end
 
   defp word_back({line, col}, text) do
-    gs = line_tuple(text, line)
-    i = skip_bwd(min(col, tuple_size(gs)), gs, &space?/1)
-    {line, skip_bwd(i, gs, &non_space?/1)}
+    with_window(text, line, col, col, fn {gs, lo, _s, _e} = w ->
+      i = skip_bwd(clamp(col - lo, 0, tuple_size(gs)), gs, &space?/1)
+      r = skip_bwd(i, gs, &non_space?/1)
+      if edge?(w, r), do: :edge, else: {:ok, {line, r + lo}}
+    end)
   end
 
   defp skip_fwd(i, gs, n, pred),
@@ -1394,16 +1599,62 @@ defmodule Geex.Loop.Keymap do
   defp skip_bwd(i, gs, pred),
     do: if(i > 0 and pred.(elem(gs, i - 1)), do: skip_bwd(i - 1, gs, pred), else: i)
 
-  # A line's graphemes, without a CRLF's \r: the cursor stops before it, and no word or move takes
-  # it (mod-verify's review of ADR-0052: Alt+8 and the moves to the right carried it into the line).
-  defp line_tuple(text, line),
-    do:
-      text
-      |> lines()
-      |> Enum.at(line, "")
-      |> String.replace_suffix("\r", "")
-      |> String.graphemes()
-      |> List.to_tuple()
+  ## Reading a long line near the cursor (BUG-12). A short line is read whole, as always; a long
+  ## one only around the columns a key needs, so a key costs the same near the end of a 2 MB line
+  ## (minified code, a log line) as at its start. `fun` gets a window `{graphemes, lo, at_start?,
+  ## at_end?}` (the graphemes from column `lo` on, and whether they reach the line's ends) and
+  ## answers `{:ok, result}`, or `:edge` when it ran into a side of the window that isn't the
+  ## line's: then it runs again on the whole line, so the answer never depends on the window.
+
+  @window 1024
+  @long_line 4096
+  # A line is read without a CRLF's \r (`line_body/2`): the cursor stops before it, and no word or
+  # move takes it (mod-verify's review of ADR-0052).
+  defp with_window(text, line, from, to, fun), do: on_window(line_body(text, line), from, to, fun)
+
+  defp on_window(l, from, to, fun) do
+    case fun.(window(l, from, to)) do
+      {:ok, result} ->
+        result
+
+      :edge ->
+        {:ok, result} = fun.(whole(l))
+        result
+    end
+  end
+
+  defp whole(l), do: {l |> String.graphemes() |> List.to_tuple(), 0, true, true}
+
+  defp window(l, _from, _to) when byte_size(l) <= @long_line, do: whole(l)
+
+  defp window(l, from, to) do
+    size = byte_size(l)
+    lo = max(from - @window, 0)
+    hi = to + @window
+
+    if ascii_prefix?(l, hi + 1) do
+      # ASCII up to past the window: a column is a byte, so the window is a slice. The byte after
+      # it is ASCII too, so no combining mark there joins the window's last character.
+      {lo, hi} = {min(lo, size), min(hi, size)}
+      gs = for <<b <- binary_part(l, lo, hi - lo)>>, do: <<b>>
+      {List.to_tuple(gs), lo, lo == 0, hi == size}
+    else
+      # Otherwise columns are counted from the start (String.split_at walks the line without
+      # building a grapheme per character, several times faster than reading it whole).
+      {before, rest} = String.split_at(l, lo)
+      # Past the line's end, the window is its end.
+      lo = if rest == "" and lo > 0, do: String.length(before), else: lo
+      {part, more} = String.split_at(rest, hi - lo)
+      {part |> String.graphemes() |> List.to_tuple(), lo, lo == 0, more == ""}
+    end
+  end
+
+  # Whether local index `i` is at a side of the window that isn't the line's.
+  defp edge?({gs, _lo, at_start?, at_end?}, i),
+    do: (i == 0 and not at_start?) or (i == tuple_size(gs) and not at_end?)
+
+  # Whether the first `k` bytes of `l` (all of it, when shorter) are ASCII.
+  defp ascii_prefix?(l, k), do: Geex.Ascii.prefix?(l, k)
 
   defp space?(g), do: g == " " or g == "\t"
   defp non_space?(g), do: not space?(g)

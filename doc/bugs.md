@@ -7,26 +7,97 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-12 — Far into a very long line, a word motion or an editing key stalls the key loop
+## BUG-15 — An invalid UTF-8 byte on screen can crash a paint
 
-- **Status:** open, found 2026-11-12 by mod-verify's review of ADR-0052 (`editing-keys`).
-  Older than that branch: `Alt+O` on main takes as long.
-- **Symptom:** on one 2 MB line (minified JS or JSON, a log line), with the cursor near its end,
-  `Alt+O`/`Alt+U` take about 0.4 s, and `Alt+8`, the sideways moves and `` Alt+\ `` about as
-  long or longer. Every key waits behind it (ADR-0035).
-- **Verified cause:** `Keymap`'s line helpers (`line_tuple/2`, and `String.at/2` and
-  `String.slice/3` in `matching_bracket/2`) split the cursor's line into graphemes from its start,
-  so a key costs as much as the line up to the cursor. `` Alt+\ ``'s scan past the cursor is
-  bounded (200,000 characters, ADR-0052 §4); the read up to it isn't.
-- **Recommended fix:** read only a window of the line around the cursor (graphemes on each side,
-  up to a budget), giving columns relative to the window's start, which needs the column's byte
-  offset without walking the line: keep it in the Doc, or cache it per line.
-- **Same cause, smaller:** `` Alt+\ `` searching backward stops at a line longer than what is left
-  of its 200,000-character budget, so a pair at the end of a line of some 800 KB above the cursor's
-  isn't found (ADR-0052 §4). Reading that line's tail alone, from a UTF-8 boundary, needs its
-  columns counted from its end: the same windowed read.
-- **Ruled out:** the bracket scan itself, fixed in ADR-0052's review (a pair 2 MB away took
-  1.1–1.3 s; now the scan stops at 200,000 characters, 38 ms).
+- **Status:** open, found 2026-11-12 by mod-verify's review of `long-lines` (9c718bd). Older than
+  that branch: main paints through the same calls.
+- **Symptom:** a line holding a byte that isn't UTF-8 (a binary file opened by mistake, a file in
+  Latin-1), drawn on screen, can raise inside the paint instead of drawing.
+- **Verified cause:** `Geex.Width.advance/3` → `Width.cells/1` → `String.to_charlist/1` raises
+  `UnicodeConversionError` on an invalid byte (`Width.advance(<<0xFF>>, 0, 2)`); and OTP's
+  grapheme walk raises `ArgumentError` on an emoji followed by invalid bytes
+  (`String.next_grapheme("👍" <> <<0xFF, 0xFE>>)`, `String.graphemes/1` the same). The paint, the
+  cursor's display column and the widest line all walk graphemes and measure them.
+- **Recommended fix:** make the width total: `Width.cells/1` counts a grapheme that isn't valid
+  UTF-8 as one column (a replacement glyph's width), and the walkers step past a byte that won't
+  segment one byte at a time (a `rescue ArgumentError` around `String.next_grapheme/1`, or checking
+  `String.valid?/1` on the slice first), drawing `�` for it, as the input path already replaces
+  invalid bytes (BUG-11). A property over `Geex.Gen` text with random invalid bytes would pin it.
+
+---
+
+## BUG-14 — Alt+Z after an MCP `edit` command crashes the loop
+
+- **Status:** open, found 2026-11-12 by mod-verify's review of `long-lines` (9c718bd). Older than
+  that branch: main has the same clauses.
+- **Symptom:** undoing (or redoing) a command recorded by the MCP `edit` tool
+  (`Geex.Commands.Edit`, search/replace blocks) raises `FunctionClauseError` in the loop. Reachable
+  by reopening in the TUI a file whose ledger holds an edit made under `mix geex.serve`.
+- **Verified cause:** `Geex.Loop.do_undo/1` and `do_redo/1` place the cursor with
+  `edit_start/1` and `edit_landing/1` (`lib/geex/loop.ex`), which have clauses for `Insert`,
+  `Delete` and `Replace` only. `Buffer.undo/1` returns the command it undid, and an `Edit` carries
+  no coordinates of its own (it resolves its blocks against the text when it runs).
+- **Recommended fix:** a clause for any other command that places the cursor where the text
+  changed: the first position at which the text before and after the undo differ (a common-prefix
+  scan of the two texts, which `Buffer.undo/1` already has), falling back to the cursor's own
+  position clamped to the text. A test: dispatch an `Edit`, then `Alt+Z` and `Alt+Shift+Z` through
+  `Loop.handle_info/2`.
+
+---
+
+## BUG-13 — Every frame painted the whole of a long line  ✅ FIXED (2026-11-12)
+
+- **Status:** **FIXED** 2026-11-12 on the branch `long-lines`, at the maintainer's word; found the
+  same day measuring BUG-12. Older than that branch: main painted the same way. Verification is
+  in the [testing.md](testing.md) 2026-11-12 entry "BUG-12 and BUG-13: a long line costs its
+  screen".
+- **Symptom:** a file with one 2 MB line (minified JS or JSON, a log line): every repaint took
+  about 2.3 s, whatever the key, so on that line every key felt that slow.
+- **Verified cause:** an `:eprof` profile of one repaint: `Geex.Highlight.Paint.to_screen/10`
+  placed every one of the line's 2.1 million graphemes and `Geex.Width.cells/1` ran 6.3 M times
+  (the line split into graphemes and measured three times over: the paint, the cursor's display
+  column in `Loop.cursor_xy/4`, the widest line in `Loop.max_line_width/2`), though 100 columns
+  of it showed.
+- **Fix:** `Geex.Width.seek/3` finds a grapheme column or a display column on a line measuring
+  its ASCII up to its first other character by its bytes (only its tabs and control characters
+  one by one) and walking the rest a grapheme at a time, as before, with its byte patterns
+  compiled once (`Geex.Ascii`); `Width.line/2` and `Width.col_at_display/3`
+  (the mouse's cast) use it, and so does `Loop.cursor_xy/4`. The paint takes, of each row, the
+  graphemes from the first that draws into the horizontal scroll's column to the last that
+  starts before the right edge, resolves the spans over those bytes only, and asks the reactor
+  for the spans over them only (`Paint.visible_ranges/6`, `frame/11` taking a function of the
+  ranges). A repaint of the 2 MB line takes 11 ms.
+
+---
+
+## BUG-12 — Far into a very long line, a word motion or an editing key stalled the key loop  ✅ FIXED (2026-11-12)
+
+- **Status:** **FIXED** 2026-11-12 on the branch `long-lines`, at the maintainer's word. Found
+  2026-11-12 by mod-verify's review of ADR-0052 (`editing-keys`); older than that branch (`Alt+O`
+  on main took as long). Verification is in the [testing.md](testing.md) 2026-11-12 entries
+  "BUG-12: a long line read near the cursor" and "BUG-12 and BUG-13: a long line costs its
+  screen".
+- **Symptom:** on one 2 MB line, with the cursor near its end, `Alt+O`/`Alt+U` took about 0.4 s,
+  `Alt+8` and the sideways moves about as long, `` Alt+\ `` 0.7–0.9 s, and a typed character,
+  Enter or Backspace 0.5–1.4 s. Every key waits behind it (ADR-0035).
+- **Verified cause:** the line was split into graphemes from its start: `Keymap`'s line helpers
+  (`line_tuple/2`, `String.at/2` and `String.slice/3` in `matching_bracket/2`), the typing
+  assists (`autoclose/5`'s `String.slice/3` and `String.last/1`, `newline/4`'s, `dedent/3`'s,
+  `unpair/3`'s `String.at/2`, `leading_whitespace/1`), and `Geex.Buffer.Doc`'s insert, delete,
+  replace, slice and byte offset, which split the edited line into a grapheme list.
+- **Fix:** `Keymap` reads a line over 4 KB through a window of 1,024 graphemes each side of the
+  columns a key needs (`on_window/4`), running again on the whole line when a read reaches a
+  side of the window that isn't the line's, so no answer depends on the window; an ASCII line is
+  cut by bytes, another walked with `String.split_at/2`. `` Alt+\ `` reads from the cursor and a
+  long line above it from its end. The typing assists read the characters either side of the
+  cursor (`around/2`), a line's leading whitespace by its bytes, and the line before the cursor
+  only for a quote (ASCII by its quotes and backslashes). `Doc` cuts a line at a column by its
+  bytes when it is ASCII up to there, else with `String.split_at/2`, with the same results (its
+  property holds it to the grapheme lists).
+- **What remains:** a non-ASCII long line still costs a walk up to the cursor in `Keymap` and
+  `Doc` (`String.split_at/2`: 40–80 ms at 2 MB, was 0.3–1 s), and up to the horizontal scroll in
+  the paint (a grapheme at a time past its ASCII runs). The comment toggle (`Alt+/`) and Tab's
+  indent still read the whole line, which they rewrite anyway.
 
 ---
 
