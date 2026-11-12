@@ -320,8 +320,15 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "indent",
-      description: "Insert one indent level, as the file indents.",
+      description:
+        "Insert one indent level, as the file indents, or indent the selection's lines.",
       invoke: {:command, :indent}
+    },
+    %Entry{
+      name: "unindent",
+      description: "Take one indent level from the selection's lines, or from the cursor's line.",
+      aliases: ["outdent", "dedent"],
+      invoke: {:command, :unindent}
     },
     %Entry{
       name: "indent other",

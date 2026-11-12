@@ -114,6 +114,12 @@ closer one column too far (the next step-over then types instead); a paste over 
 minibuffer inserts each piece's first line; a mouse click moves the cursor without dropping the
 pairs (their closers are still geex's).
 
+## Amendment (2026-11-11): Tab over a selection, Shift+Tab, `` Alt+` `` ([ADR-0050](0050-tab-indents-a-selection-shift-tab-unindents.md))
+
+§3's indent level is also what Tab inserts at the start of each line of a selection, and what
+Shift+Tab takes back off (a tab, or spaces to the previous tab stop, as Backspace does in leading
+spaces). The other kind is `` Alt+` ``, no longer Shift+Tab.
+
 ## See
 
 - `lib/geex/loop/keymap.ex` (`autoclose/5`, `unpair/3`, `track/4`, `wrap_closer/1`, `eol/1`,

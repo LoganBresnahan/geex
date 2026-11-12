@@ -1,6 +1,6 @@
 # ADR-0026: Terminal input model & keymap (one default, capability-gated extras)
 
-- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read; bracketed paste. **Amended 2026-11-10:** Shift+Tab inserts the other kind of indent from Tab's. **Amended 2026-11-11:** `Alt+Shift+W/A/S/D` no longer resize; Alt with an arrow does. **Amended 2026-11-11 by [ADR-0047](0047-every-key-runs-a-named-command.md):** the keymap is data: each bound key runs a named command.
+- **Status:** Accepted. **Amended 2026-11-06 ([ADR-0043](0043-markdown-preview.md)):** Page Up/Down are read, for the markdown preview. **Amended 2026-11-09:** Alt with an arrow is read, and `Alt+Shift+W/A/S/D` resize; Shift+Tab is read; bracketed paste. **Amended 2026-11-10:** Shift+Tab inserts the other kind of indent from Tab's. **Amended 2026-11-11:** `Alt+Shift+W/A/S/D` no longer resize; Alt with an arrow does. **Amended 2026-11-11 by [ADR-0047](0047-every-key-runs-a-named-command.md):** the keymap is data: each bound key runs a named command. **Amended 2026-11-11 by [ADR-0050](0050-tab-indents-a-selection-shift-tab-unindents.md):** Shift+Tab un-indents; the other kind is `` Alt+` ``, read.
 - **Date:** 2026-06-08
 - **Refines:** [ADR-0025](0025-user-config-layer.md) (the keymap is user-config *data*),
   [ADR-0024](0024-tui-core-extractable.md) (the TUI core / `prim_tty`)
@@ -207,6 +207,13 @@ The Alt motion cluster is the right hand's now: `Alt+I/J/K/L` up, left, down, ri
 a word back and forward; `Alt+H`/`Alt+;` the line's start and end. The parser reads `ESC ;` as
 `Alt+;`, beside the digits and `- = , .`; no sequence begins `ESC ;`. The arrows, Home and End are
 unchanged.
+
+## Amendment (2026-11-11): Shift+Tab un-indents; `` Alt+` `` read ([ADR-0050](0050-tab-indents-a-selection-shift-tab-unindents.md))
+
+The 2026-11-10 amendment's Shift+Tab, the other kind of indent, is replaced: Shift+Tab takes one
+indent level from the selection's lines or the cursor's line, as that amendment foresaw, and the
+other kind moves to `` Alt+` ``. The parser reads `` ESC ` `` as `` Alt+` ``, beside `Alt+;`; no sequence
+starts with it.
 
 ## See
 

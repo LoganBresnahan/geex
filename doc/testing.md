@@ -5958,3 +5958,32 @@ Live in tmux (100×24): `ESC O ESC O` sent in one write moved the cursor two wor
 nothing; `ESC O ESC [ B` moved a word, then down. The file was unchanged. 1471 tests + 31
 properties + 155 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green; warnings-as-errors
 clean. Not tested: a real Caps Lock on a macOS terminal.
+
+### 2026-11-11 — Tab indents a selection, Shift+Tab un-indents, Alt+` the other kind (ADR-0050)
+
+Built on `indent-keys` from main at 19d6d13, to the maintainer's word ("yes always, and alt+`
+for the opposite"). Tab over a live selection indents every line it touches (an empty one aside,
+a last line reached only at column 0 left out) and keeps the selection; Shift+Tab un-indents
+those lines, or the cursor's line with none (a tab, or spaces back to the previous tab stop);
+each is one recorded replace, one `Alt+Z`. `indent other` moves from Shift+Tab to `` Alt+` ``,
+which the parser now reads; Shift+Tab's own command is the new `unindent` (aliases `outdent`,
+`dedent`). The help lists the three keys.
+
+New: `Keymap.selected_lines/1`, `shift_lines/3` and `shift_caret/2` (pure, with doctests) and a
+property that indenting then un-indenting by the same kind gives the lines back (spaces only
+from whole levels) and leaves the lines outside the range alone; `indent_lines_test.exs`
+through the loop (12 tests: the selection kept and moved, column-0 ends, a Go file's tabs, CRLF,
+nothing to take records nothing, typed `unindent`/`outdent`/`indent other`, `` Alt+` `` with and
+without a selection and in the files whose Tab gives a tab); `` ESC ` `` parses; the defaults
+pin `` Alt+` ``. Two comfort tests moved from Shift+Tab to `` Alt+` ``.
+
+Live in tmux (100×24, scratch XDG dirs, `` Alt+` `` sent as raw `ESC ``): Alt+S and three Alt+K
+from line 1 (to column 0 of line 4), then Tab indented lines 1 and 3 and left the empty line 2
+and line 4 alone; Tab again, another level; Shift+Tab twice took both back, a third changed
+nothing. With no selection, Shift+Tab took line 4's four spaces to two and the cursor moved with
+them; `` Alt+` `` inserted a tab at the cursor and `Alt+Z` took it back. The palette's `unin`
+listed `unindent` beside Shift+Tab.
+
+1483 tests + 32 properties + 158 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. Not tested: `` Alt+` `` on a layout where `` ` ``
+is a dead key, or a macOS terminal.

@@ -417,15 +417,15 @@ defmodule Geex.Loop.ComfortTest do
       assert Geex.Clipboard.top() == "\t"
     end
 
-    # The maintainer's word: Tab follows the file; Shift+Tab the other kind (a tab here).
-    test "Tab inserts a tab in a file that indents with tabs; Shift+Tab a tab where Tab doesn't",
+    # The maintainer's word: Tab follows the file; Alt+` the other kind (a tab here, ADR-0050).
+    test "Tab inserts a tab in a file that indents with tabs; Alt+` a tab where Tab doesn't",
          %{
            state: state,
            dir: dir,
            buf: buf
          } do
-      # setup's file has no indented line: spaces; Shift+Tab: a tab.
-      state = key(state, {:key, :shift_tab})
+      # setup's file has no indented line: spaces; Alt+`: a tab.
+      state = key(state, {:alt, ?`})
       assert text(buf) == "\thello world\nline 2\n"
       assert cursor() == {0, 1}
 
@@ -439,28 +439,8 @@ defmodule Geex.Loop.ComfortTest do
       assert cursor() == {2, 1}
     end
 
-    # The maintainer's word, 2026-11-10 (ADR-0026's amendment): Shift+Tab is the other kind, so
-    # spaces can be typed where Tab gives a tab.
-    test "Shift+Tab inserts spaces where Tab gives a tab, whatever decided that", %{
-      state: state,
-      dir: dir
-    } do
-      for {name, text, st} <- [
-            {"u.go", "", state},
-            {"Makefile", "", state},
-            {"t.c", "\tx\n", state},
-            {"v.py", "", %{state | indent_with: :tabs}}
-          ] do
-        path = Path.join(dir, name)
-        File.write!(path, text)
-        {:ok, pid} = Session.open_file(path)
-        {:noreply, st} = Loop.handle_info({:geex_active_buffer, pid}, %{st | tab_size: 4})
-        Session.set_cursor({0, 0})
-        key(st, {:key, :shift_tab})
-        assert Buffer.get_text(pid) == "    " <> text, name
-        assert cursor() == {0, 4}
-      end
-    end
+    # Alt+` over a selection and in the files whose Tab gives a tab: indent_lines_test.exs
+    # (ADR-0050).
 
     test "Shift+Tab elsewhere (the tree, the edits pane, the settings view, the minibuffer) is harmless",
          %{state: state, buf: buf} do

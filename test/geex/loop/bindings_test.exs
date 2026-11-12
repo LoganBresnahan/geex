@@ -29,7 +29,7 @@ defmodule Geex.Loop.BindingsTest do
   defp event do
     one_of([
       tuple({constant(:alt), one_of([integer(?a..?z), integer(?A..?Z), integer(?0..?9)])}),
-      tuple({constant(:alt), member_of([:up, :down, :left, :right, ?-, ?=, ?,, ?., ?;])}),
+      tuple({constant(:alt), member_of([:up, :down, :left, :right, ?-, ?=, ?,, ?., ?;, ?`])}),
       tuple({constant(:ctrl), integer(?a..?z)}),
       tuple(
         {constant(:key),
@@ -156,6 +156,7 @@ defmodule Geex.Loop.BindingsTest do
         {:alt, ?c} => :copy,
         {:alt, ?x} => :cut,
         {:alt, ?v} => :paste,
+        {:alt, ?`} => :indent_other,
         {:alt, ?-} => :split_rows,
         {:alt, ?=} => :split_cols,
         {:alt, ?,} => :tab_prev,

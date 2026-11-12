@@ -295,6 +295,51 @@ defmodule Geex.Loop.KeymapTest do
     end
   end
 
+  # ADR-0050: indenting lines, then un-indenting them, by the same kind of level.
+  defp shift_line,
+    do: member_of(["", "x", "  x", "\tx", "   ", "\t\ty", " \tz", "a b", "x\r", "  y\r", "\r"])
+
+  defp apply_shift(text, nil), do: text
+
+  defp apply_shift(text, {%Replace{} = cmd, _shifts}) do
+    range = {{cmd.start_line, cmd.start_col}, {cmd.end_line, cmd.end_col}}
+    {:ok, doc} = Geex.Buffer.Doc.replace(Geex.Buffer.Doc.new(text), range, cmd.text)
+    Geex.Buffer.Doc.text(doc)
+  end
+
+  property "indent then un-indent gives the lines back; lines outside the range never change" do
+    check all(
+            lines <- list_of(shift_line(), min_length: 1, max_length: 12),
+            a <- integer(0..(length(lines) - 1)),
+            b <- integer(a..(length(lines) - 1)),
+            tab_size <- member_of([2, 4, 8]),
+            unit <- member_of(["\t", String.duplicate(" ", tab_size)])
+          ) do
+      text = Enum.join(lines, "\n")
+      indented = apply_shift(text, Keymap.shift_lines(text, {a, b}, {:indent, unit}))
+      back = apply_shift(indented, Keymap.shift_lines(indented, {a, b}, {:unindent, tab_size}))
+
+      # Spaces come back off only from a line whose leading spaces were whole levels; a tab always.
+      whole? = fn l ->
+        n = byte_size(l) - byte_size(String.trim_leading(l, " "))
+        unit == "\t" or rem(n, tab_size) == 0
+      end
+
+      if Enum.all?(Enum.slice(lines, a..b), whole?), do: assert(back == text)
+
+      new_lines = String.split(indented, "\n")
+      assert length(new_lines) == length(lines)
+
+      for {{old, new}, i} <- Enum.with_index(Enum.zip(lines, new_lines)) do
+        cond do
+          i < a or i > b -> assert new == old
+          old in ["", "\r"] -> assert new == old
+          true -> assert new == unit <> old
+        end
+      end
+    end
+  end
+
   test "indent_style/1 reads only the first 1000 lines" do
     text = String.duplicate("  x\n", 1000) <> String.duplicate("\tx\n", 2000)
     assert Keymap.indent_style(text) == :spaces

@@ -159,6 +159,12 @@ The first change of defaults this decision was for: motion moves to the right ha
 cluster, and the commands that had keys there move to the left hand. §2's table keeps the keys
 as they were when it was written; `Bindings.defaults/0` and ADR-0049 have the current ones.
 
+## Amendment (2026-11-11): `unindent`; `indent other` on `` Alt+` `` ([ADR-0050](0050-tab-indents-a-selection-shift-tab-unindents.md))
+
+§2's own commands: Shift+Tab's is `unindent` (aliases `outdent`, `dedent`), and `indent other`
+is an ordinary bound command, on `` Alt+` ``. Typed, `indent` and `unindent` act on the selection as
+their keys do (§6).
+
 ## See
 
 - `lib/geex/loop/bindings.ex` (the table, `translate/2`, the labels), `lib/geex/loop/keymap.ex`

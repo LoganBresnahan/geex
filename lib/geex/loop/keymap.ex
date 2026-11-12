@@ -107,10 +107,19 @@ defmodule Geex.Loop.Keymap do
     do: {:edit, insert(line, col, eol(text)), {line + 1, 0}}
 
   # Tab → the default tab size's spaces; the loop passes the setting and the file's indent
-  # style to `indent/3`. Shift+Tab → the other kind, which the loop works out the same way
-  # (`other_indent/1`); without the loop's context, a tab.
+  # style to `indent/3`, and indents a selection's lines (ADR-0050). Shift+Tab → un-indent the
+  # cursor's line (`shift_lines/3`). `indent other` (`` Alt+` ``) → the other kind, which the loop
+  # works out the same way (`other_indent/1`); without the loop's context, a tab.
   def resolve({:key, :tab}, cursor, _text), do: indent(cursor, 2, :spaces)
-  def resolve({:key, :shift_tab}, cursor, _text), do: indent(cursor, 2, :tabs)
+
+  def resolve({:key, :shift_tab}, {line, _col} = cursor, text) do
+    case shift_lines(text, {line, line}, {:unindent, 2}) do
+      nil -> :ignore
+      {cmd, shifts} -> {:edit, cmd, shift_caret(cursor, shifts)}
+    end
+  end
+
+  def resolve({:cmd, :indent_other}, cursor, _text), do: indent(cursor, 2, :tabs)
 
   # Backspace within a line → delete the grapheme before the cursor.
   def resolve({:key, :backspace}, {line, col}, _text) when col > 0,
@@ -215,7 +224,7 @@ defmodule Geex.Loop.Keymap do
 
   @doc """
   What Tab does at `cursor` (roadmap item 18.7): a real tab in a file that indents with tabs
-  (`:tabs`), else `tab_size` spaces. Shift+Tab is the other kind (`other_indent/1`).
+  (`:tabs`), else `tab_size` spaces. `indent other` (`` Alt+` ``) is the other kind (`other_indent/1`).
 
       iex> Geex.Loop.Keymap.indent({3, 1}, 4, :spaces) |> elem(2)
       {3, 5}
@@ -229,6 +238,108 @@ defmodule Geex.Loop.Keymap do
   def indent({line, col}, tab_size, :spaces),
     do: {:edit, insert(line, col, String.duplicate(" ", tab_size)), {line, col + tab_size}}
 
+  @doc """
+  The lines a Tab or Shift+Tab over a selection's `range` acts on (ADR-0050 §1): its first through
+  its last, less a last line it only reaches at column 0.
+
+      iex> Geex.Loop.Keymap.selected_lines({{1, 4}, {3, 2}})
+      {1, 3}
+      iex> Geex.Loop.Keymap.selected_lines({{1, 0}, {3, 0}})
+      {1, 2}
+      iex> Geex.Loop.Keymap.selected_lines({{1, 2}, {1, 5}})
+      {1, 1}
+  """
+  @spec selected_lines({cursor(), cursor()}) :: {non_neg_integer(), non_neg_integer()}
+  def selected_lines({{l1, _}, {l2, 0}}) when l2 > l1, do: {l1, l2 - 1}
+  def selected_lines({{l1, _}, {l2, _}}), do: {l1, l2}
+
+  @doc """
+  Indent (`{:indent, unit}`, `unit` a tab or spaces) or un-indent (`{:unindent, tab_size}`) lines
+  `first..last` of `text` (ADR-0050): one replace from the first changed line's start to the
+  last's end, and how many graphemes each changed line gained (or lost, negative), for
+  `shift_caret/2`. `nil` when no line changes.
+
+  Indenting leaves an empty line alone. Un-indenting takes a leading tab, or leading spaces back
+  to the previous tab stop, as Backspace does in leading spaces (`dedent/3`).
+
+      iex> {cmd, shifts} = Geex.Loop.Keymap.shift_lines("a\\n\\nb\\n", {0, 2}, {:indent, "  "})
+      iex> {cmd.text, shifts}
+      {"  a\\n\\n  b", %{0 => 2, 2 => 2}}
+      iex> {cmd, shifts} = Geex.Loop.Keymap.shift_lines("\\tx\\n   y\\nz", {0, 2}, {:unindent, 2})
+      iex> {cmd.text, shifts}
+      {"x\\n  y", %{0 => -1, 1 => -1}}
+      iex> Geex.Loop.Keymap.shift_lines("x\\ny", {0, 1}, {:unindent, 4})
+      nil
+  """
+  @spec shift_lines(
+          String.t(),
+          {non_neg_integer(), non_neg_integer()},
+          {:indent, String.t()} | {:unindent, pos_integer()}
+        ) ::
+          {struct(), %{non_neg_integer() => integer()}} | nil
+  def shift_lines(text, {first, last}, how) when first <= last do
+    changes =
+      text
+      |> String.split("\n", parts: last + 2)
+      |> Enum.slice(first..last//1)
+      |> Enum.with_index(first)
+      |> Enum.map(fn {l, i} -> {i, l, line_shift(l, how)} end)
+
+    case for({i, _l, n} <- changes, n != 0, do: i) do
+      [] ->
+        nil
+
+      changed ->
+        {a, b} = {hd(changed), List.last(changed)}
+        span = for {i, _l, _n} = c <- changes, i in a..b//1, do: c
+        {_b, old_last, _n} = List.last(span)
+        new_text = Enum.map_join(span, "\n", fn {_i, l, n} -> shifted(l, n, how) end)
+
+        {:ok, cmd} =
+          Replace.parse(%{
+            start_line: a,
+            start_col: 0,
+            end_line: b,
+            end_col: String.length(old_last),
+            text: new_text
+          })
+
+        {cmd, Map.new(for {i, _l, n} <- changes, n != 0, do: {i, n})}
+    end
+  end
+
+  # How many graphemes a line gains (indent) or loses (un-indent, negative).
+  defp line_shift(l, {:indent, _unit}) when l in ["", "\r"], do: 0
+  defp line_shift(_l, {:indent, unit}), do: String.length(unit)
+  defp line_shift("\t" <> _, {:unindent, _tab_size}), do: -1
+
+  defp line_shift(l, {:unindent, tab_size}) do
+    spaces = byte_size(l) - byte_size(String.trim_leading(l, " "))
+    back = if rem(spaces, tab_size) == 0, do: tab_size, else: rem(spaces, tab_size)
+    -min(back, spaces)
+  end
+
+  defp shifted(l, 0, _how), do: l
+  defp shifted(l, _n, {:indent, unit}), do: unit <> l
+  defp shifted(l, n, {:unindent, _}), do: binary_part(l, -n, byte_size(l) + n)
+
+  @doc """
+  Where a caret lands after `shift_lines/3` (ADR-0050 §4): moved with its text on a changed line,
+  never past the line's start; at column 0 it stays, so whole lines stay whole.
+
+      iex> shifts = %{1 => 2, 2 => -2}
+      iex> Enum.map([{0, 3}, {1, 0}, {1, 3}, {2, 1}, {2, 5}], &Geex.Loop.Keymap.shift_caret(&1, shifts))
+      [{0, 3}, {1, 0}, {1, 5}, {2, 0}, {2, 3}]
+  """
+  @spec shift_caret(cursor(), %{non_neg_integer() => integer()}) :: cursor()
+  def shift_caret({line, col}, shifts) do
+    case Map.get(shifts, line) do
+      nil -> {line, col}
+      _n when col == 0 -> {line, 0}
+      n -> {line, max(col + n, 0)}
+    end
+  end
+
   # Files that need tabs: a Makefile's recipe lines must start with one (roadmap item 19).
   @tabs_required ~w(Makefile makefile GNUmakefile BSDmakefile)
   @tabs_required_ext ~w(.mk .mak .make)
@@ -238,7 +349,7 @@ defmodule Geex.Loop.Keymap do
   @tabs_by_kind_ext ~w(.go .tsv)
 
   @doc """
-  What Shift+Tab inserts where Tab inserts `style` (ADR-0026's 2026-11-10 amendment): the other
+  What `indent other` (`` Alt+` ``, ADR-0050) inserts where Tab inserts `style`: the other
   kind, so a tab can be typed where Tab gives spaces, and spaces where it gives a tab (in Go, a
   Makefile, a tab-indented file).
 
@@ -652,7 +763,8 @@ defmodule Geex.Loop.Keymap do
   @doc """
   What a key types over a selection (roadmap item 18.1): Backspace and Delete delete it (`""`),
   a printable grapheme or Enter replaces it. `nil` for every other key, which acts as it does
-  without a selection (Tab among them: indenting a selection is its own decision).
+  without a selection, or as its own decision has it (Tab indents the selection's lines,
+  ADR-0050).
 
       iex> Enum.map([{:char, "x"}, {:key, :enter}, {:key, :backspace}, {:key, :delete}, {:key, :tab}],
       ...>   &Geex.Loop.Keymap.over_selection/1)

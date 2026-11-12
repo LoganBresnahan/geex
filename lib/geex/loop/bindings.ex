@@ -44,6 +44,8 @@ defmodule Geex.Loop.Bindings do
               {:copy, [{:alt, ?c}]},
               {:cut, [{:alt, ?x}]},
               {:paste, [{:alt, ?v}]},
+              # The other kind of indent, the key above Tab (ADR-0050).
+              {:indent_other, [{:alt, ?`}]},
               # History (ADR-0031, ADR-0033 §7) and the file (ADR-0019, ADR-0034).
               {:undo, [{:alt, ?z}]},
               {:redo, [{:alt, ?Z}]},
@@ -112,7 +114,7 @@ defmodule Geex.Loop.Bindings do
   @own %{
     newline: {:key, :enter},
     indent: {:key, :tab},
-    indent_other: {:key, :shift_tab},
+    unindent: {:key, :shift_tab},
     delete_back: {:key, :backspace},
     delete_forward: {:key, :delete}
   }

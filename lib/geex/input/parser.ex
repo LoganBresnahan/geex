@@ -36,7 +36,7 @@ defmodule Geex.Input.Parser do
       {:ctrl, ?a..?z}            # Ctrl-letter as the lowercase atom
       {:ctrl, 0x40 | 0x5C..0x5F} # bytes 0, 28–31: Ctrl-@, Ctrl-\\, Ctrl-], Ctrl-^, Ctrl-_
       {:alt, ?a..?z | ?A..?Z}   # Alt/Meta-letter (ESC-prefixed)
-      {:alt, ?0..?9 | ?- | ?= | ?, | ?. | ?;}   # the pane and tab keys; line end
+      {:alt, ?0..?9 | ?- | ?= | ?, | ?. | ?; | ?`}   # the pane and tab keys; line end; indent other
       {:alt, :up | :down | :left | :right} # Alt with an arrow (`ESC [ 1 ; 3 A`): resizing
       {:mouse, %{action: :press | :release | :drag | :wheel | :move,
                  button: :left | :middle | :right | :up | :down | :wheel_left | :wheel_right
@@ -276,10 +276,11 @@ defmodule Geex.Input.Parser do
     do: do_parse(rest, [{:alt, c} | acc])
 
   # ESC + a digit, `-`, `=`, `,` or `.`: the pane and tab keys (ADR-0038); `;`, line end
-  # (ADR-0049). Not `[` or `\`: `ESC [` starts a CSI and `ESC \` is ST, so those chords can't be
-  # told from a sequence. No sequence starts `ESC ;`.
+  # (ADR-0049); `` ` ``, the other kind of indent (ADR-0050). Not `[`, `]` or `\`: `ESC [` starts
+  # a CSI, `ESC ]` an OSC and `ESC \` is ST, so those chords can't be told from a sequence. No
+  # sequence starts `ESC ;` or `` ESC ` ``.
   defp do_parse(<<"\e", c, rest::binary>>, acc)
-       when c in ?0..?9 or c in [?-, ?=, ?,, ?., ?;],
+       when c in ?0..?9 or c in [?-, ?=, ?,, ?., ?;, ?`],
        do: do_parse(rest, [{:alt, c} | acc])
 
   # ESC followed by another byte we don't recognise — emit ESC, reparse rest.

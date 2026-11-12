@@ -748,6 +748,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    5. **Find**: `Alt+Q` in the file, `Alt+Shift+Q` across the project (the maintainer, 2026-11-11),
       `Alt+N`/`Alt+Shift+N` the next and previous match (the keys kept by ADR-0049 §2a). Needs its
       own ADR; the project-wide search runs off the loop (ADR-0035).
+   6. **Tab over a selection** (ADR-0050, the maintainer, 2026-11-11): Tab indents the selected
+      lines, Shift+Tab un-indents (always, the cursor's line without a selection), and the other
+      kind of indent moves from Shift+Tab to `` Alt+` ``. **Built 2026-11-11** on `indent-keys`.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the

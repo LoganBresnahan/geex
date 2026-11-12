@@ -4702,6 +4702,33 @@ defmodule Geex.Loop do
     end
   end
 
+  # Tab, Shift+Tab and `indent other` (ADR-0050): over a live selection they indent or un-indent
+  # its lines; Shift+Tab un-indents the cursor's line without one. With no selection, Tab and
+  # `indent other` insert at the cursor (`resolve_key/4`).
+  defp apply_key(event, cursor, text, state)
+       when event in [{:key, :tab}, {:key, :shift_tab}, {:cmd, :indent_other}] do
+    sel =
+      with %Selection{anchor: a, active: b} = sel when a != b <- state.selection,
+           do: sel,
+           else: (_ -> nil)
+
+    how =
+      case event do
+        {:key, :shift_tab} -> {:unindent, state.tab_size}
+        _ when sel == nil -> nil
+        {:key, :tab} -> {:indent, indent_unit(text, state)}
+        {:cmd, :indent_other} -> {:indent, other_unit(text, state)}
+      end
+
+    if how do
+      {line, _col} = cursor
+      lines = if sel, do: Keymap.selected_lines(Selection.range(sel)), else: {line, line}
+      schedule_repaint(shift_lines(%{state | closers: nil}, text, lines, how, sel, cursor))
+    else
+      resolve_key(event, cursor, text, state)
+    end
+  end
+
   defp apply_key(event, cursor, text, state) do
     case {over_selection(event, state.selection), wrap_closer(event, state)} do
       {nil, _} ->
@@ -4714,6 +4741,30 @@ defmodule Geex.Loop do
         # Enter over a selection is the file's line break.
         typed = if typed == "\n", do: Keymap.eol(text), else: typed
         schedule_repaint(type_over(%{state | closers: nil}, range, typed, text))
+    end
+  end
+
+  # Indent or un-indent `lines`, one recorded edit (ADR-0050 §3); the cursor and the selection's
+  # ends move with their text (§4). Nothing to change records nothing.
+  defp shift_lines(state, text, lines, how, sel, cursor) do
+    with {cmd, shifts} <- Keymap.shift_lines(text, lines, how),
+         {:ok, %{text: after_text} = snap} <- safe_dispatch(cmd) do
+      new_cursor = Keymap.shift_caret(cursor, shifts)
+      set_cursor(new_cursor)
+
+      selection =
+        sel &&
+          %Selection{
+            anchor: Keymap.shift_caret(sel.anchor, shifts),
+            active: Keymap.shift_caret(sel.active, shifts)
+          }
+
+      own_edit(
+        %{state | goal: Keymap.goal_column(new_cursor, after_text), selection: selection},
+        snap
+      )
+    else
+      _ -> state
     end
   end
 
@@ -4817,19 +4868,27 @@ defmodule Geex.Loop do
   defp indent_with(text, state),
     do: Keymap.indent_with(text, current_path(state), state.indent_with)
 
+  # The other kind of indent level from `indent_unit/2`'s (`indent other`, ADR-0050).
+  defp other_unit(text, state) do
+    case Keymap.other_indent(indent_with(text, state)) do
+      :tabs -> "\t"
+      :spaces -> String.duplicate(" ", state.tab_size)
+    end
+  end
+
   defp resolve_key(event, cursor, text, state) do
     # Tab follows the file: a tab where it indents with tabs, else the tab size's spaces, which
     # the keymap doesn't hold (roadmap item 18.7).
     pairs = live_pairs(state)
 
-    # Tab inserts what the file indents with; Shift+Tab the other kind (ADR-0026's 2026-11-10
-    # amendment). The tab size and the file's kind are the loop's, not the keymap's.
+    # Tab inserts what the file indents with; `indent other` (Alt+`) the other kind (ADR-0050).
+    # The tab size and the file's kind are the loop's, not the keymap's.
     action =
       case event do
         {:key, :tab} ->
           Keymap.indent(cursor, state.tab_size, indent_with(text, state))
 
-        {:key, :shift_tab} ->
+        {:cmd, :indent_other} ->
           Keymap.indent(cursor, state.tab_size, Keymap.other_indent(indent_with(text, state)))
 
         _ ->
