@@ -163,6 +163,48 @@ under an open prompt is searched again (R9). These are slice B's; slice A is the
 - From a panel, `Alt+Q` searches the current file pane; from a preview, the pane it was opened
   from.
 
+**As built, slice C (2026-11-13, project search).**
+- `Alt+Shift+Q` runs `search project`, or `search all` when the General setting ("Alt+Shift+Q")
+  says so; the setting is kept as `search_key` and rebinds the chord, so the help shows it. Both
+  are minibuffer modes (`search project:`, `search all:`), pre-filled from a one-line selection
+  (Q9), keeping their queries in the file search's history list (Q8); an empty prompt runs the
+  last project query again.
+- The command (`Geex.Search.Project`): in git, `git -c core.quotePath=false grep -n -I -F [-i]
+  --untracked -e QUERY -- .` with `:(exclude,glob)**/DIR/**` for `.git _build deps node_modules
+  target dist .venv` (tracked or not, at any depth); `search all` adds `--no-exclude-standard` and
+  excludes nothing. Outside git, `grep -rnI -F [-i] --exclude-dir=DIR … -e QUERY .`, or plain
+  `grep -rnI` for `search all`; both refused from the home directory or `/` (Q16). The query is
+  quoted `'…'\''…'`, always after `-e` (so `-n` is a query, not an option); one holding a NUL byte
+  is refused (R15). A query that isn't UTF-8 (a Latin-1 selection) gets no `-i`: git refuses such a
+  pattern under it, and an invalid byte matches only itself, as in the file's search.
+- **Case folding follows the locale** (Q15): `-i` folds every letter under a UTF-8 locale, only
+  A–Z under the bare `C`/`POSIX` one (`café` misses `CAFÉ` there); not forced.
+- It runs through `Geex.Shell` into the output pane, as `!` does (Ctrl+G stops it), with a new
+  `:first` option: the first 5,000 lines are kept, none passed over, and the command is stopped
+  once they came (Q12); the pane's title and a notice say "the first 5000 lines". Exit status 1
+  with no lines is "no matches", said so, not a failure.
+- Results are read by a parser of their own (`locations/1`): every `path:line` a result line could
+  name, the first naming a file under the root taken, so a space, an `é` or a colon in a path
+  reads right (R13). `--column` isn't used (it counts bytes).
+- `Alt+N` after a project search opens the next result line (one stop per line, Q13), from the
+  top the first time (or from the highlight when it was moved), wrapping with "wrapped to the
+  first result"; it selects the line's first match by the same smart case, or puts the cursor at
+  the line's start with a notice when the line has none in the buffer (an unsaved edit, bytes git
+  matched, R14). Enter on a result line in the output pane does the same. When a `!` has replaced
+  the results, `Alt+N` is the file's search again (Q14); `Alt+Q` makes it so too.
+- **Caps Lock with `Alt+q` runs `Alt+Shift+Q`'s command** (R17), as with the moves (ADR-0052 §8).
+- The title says "1 line" for one result.
+- **Decided overnight, pending the maintainer** (mod-verify's review of slice C, the
+  coordinator's call):
+  - **Outside git, grep runs in the C locale** (`LC_ALL=C`): under a UTF-8 locale GNU grep takes a
+    file holding a byte that isn't UTF-8 for binary, and `-I` skips it without a word, so a Latin-1
+    file was never searched. The cost: outside git `-i` folds only A–Z, so `café` misses `CAFÉ`
+    there, as under a `C` locale in git (Q15).
+  - **The refusal follows symlinks** (a link to the home directory is the home directory) and
+    covers any directory above the home directory too (`/home`). **A home directory kept in git**
+    (a dotfiles repository) isn't refused: it is searched without `--untracked`, its tracked files
+    only (untracked there is everything else in the home directory), and a notice says so.
+
 ## See
 
 - `lib/geex/search.ex` (the pure matching core), `lib/geex/minibuffer.ex` (the `:search` mode), `lib/geex/loop.ex`, `lib/geex/shell.ex`,

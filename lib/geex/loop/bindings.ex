@@ -75,6 +75,9 @@ defmodule Geex.Loop.Bindings do
     # Search (ADR-0053): the file's, and the next match.
     {:search, [{:alt, ?q}]},
     {:next_match, [{:alt, ?n}]},
+    # The project's (ADR-0053 §6); the General setting can make it `search all`.
+    {:search_project, [{:alt, ?Q}]},
+    {:search_all, []},
     {:close, [{:alt, ?w}]},
     {:toggle_tree, [{:alt, ?t}]},
     {:toggle_edits, [{:alt, ?e}]},

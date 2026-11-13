@@ -27,6 +27,7 @@ defmodule Geex.Shell do
                                                      # (`Geex.Shell.Text.clean/1`), in batches
       {:geex_shell, pid, :needs_tty}
       {:geex_shell, pid, :overflow}            # it printed faster than it could be read: stopped
+      {:geex_shell, pid, :capped}              # `:first` lines came: stopped, the rest unread
       {:geex_shell, pid, {:exit, status}}      # 128 + n when signal n ended it
 
   and for a `|` (with `:input`), once:
@@ -53,7 +54,8 @@ defmodule Geex.Shell do
   @doc """
   Start `cmd` in a monitored process; returns `{pid, monitor}`. Options: `:cwd` (default the
   working directory), `:input` (the text for a `|`; without it, a `!`), `:owner` (default the
-  caller), `:grace_ms`.
+  caller), `:grace_ms`, and for a `!` `:first`: keep the first that many lines, not the newest,
+  and stop the command once they came (a project search, ADR-0053 Q12).
   """
   @spec start(String.t(), keyword()) :: {pid(), reference()}
   def start(cmd, opts \\ []) when is_binary(cmd) do
@@ -93,6 +95,8 @@ defmodule Geex.Shell do
       owner: owner,
       grace: Keyword.get(opts, :grace_ms, @grace_ms),
       keep: Keyword.get(opts, :keep, 5000),
+      first: Keyword.get(opts, :first),
+      sent: 0,
       overflow: Keyword.get(opts, :overflow, @overflow),
       behind: Keyword.get(opts, :behind, @behind),
       switches: Text.alt_screen_pattern(),
@@ -126,7 +130,9 @@ defmodule Geex.Shell do
           waiting > run.overflow ->
             show_loop(stop_for(run, :overflow))
 
-          waiting > run.behind ->
+          # Keeping the first lines: none may be passed over, and the command stops once they
+          # came, so the mailbox stays bounded without draining.
+          waiting > run.behind and run.first == nil ->
             case drain(%{run | tail: next_tail(run.tail, data)}, data, waiting) do
               {:ok, run, newest} -> show_loop(take(%{run | partial: "", resync: true}, newest))
               {:tty, run} -> show_loop(stop_for(run, :needs_tty))
@@ -198,11 +204,26 @@ defmodule Geex.Shell do
     [partial | done] = :binary.split(run.partial <> data, "\n", [:global]) |> Enum.reverse()
     partial = tail_bytes(partial, @max_partial)
     count = run.count + length(done)
-    {lines, count} = cap(done ++ run.lines, count, run.keep)
+    # Keeping the newest, trimmed as they come; keeping the first, `first_reached/1` cuts them.
+    {lines, count} =
+      if run.first, do: {done ++ run.lines, count}, else: cap(done ++ run.lines, count, run.keep)
+
     timer = run.timer || Process.send_after(self(), :flush, @flush_ms)
     tail = next_tail(run.tail, data)
-    %{run | lines: lines, count: count, partial: partial, timer: timer, tail: tail}
+    run = %{run | lines: lines, count: count, partial: partial, timer: timer, tail: tail}
+    first_reached(run)
   end
+
+  # With `:first`, once that many lines came: send them (the oldest of what waits), say so, and
+  # stop the command.
+  defp first_reached(%{first: first, sent: sent, count: count} = run)
+       when is_integer(first) and sent + count >= first do
+    lines = Enum.take(run.lines, -(first - sent))
+    run = flush(%{run | lines: lines, count: length(lines), partial: ""})
+    stop_for(run, :capped)
+  end
+
+  defp first_reached(run), do: run
 
   # Kept to `keep` lines, the newest; trimmed only once twice over, so a flood isn't trimmed on
   # every chunk.
@@ -212,9 +233,10 @@ defmodule Geex.Shell do
   defp flush(%{lines: [], partial: ""} = run), do: run
 
   defp flush(run) do
-    lines = run.lines |> Enum.take(run.keep) |> Enum.reverse() |> Enum.map(&Text.clean/1)
+    keep = if run.first, do: length(run.lines), else: run.keep
+    lines = run.lines |> Enum.take(keep) |> Enum.reverse() |> Enum.map(&Text.clean/1)
     send(run.owner, {:geex_shell, self(), {:lines, lines, Text.clean(run.partial)}})
-    %{run | lines: [], count: 0}
+    %{run | lines: [], count: 0, sent: run.sent + length(lines)}
   end
 
   defp pipe(cmd, input, cwd, owner, grace, max) do

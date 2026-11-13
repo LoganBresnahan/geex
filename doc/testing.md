@@ -6617,3 +6617,88 @@ used the kept answer at once ("1 of 1", 200001:7).
 1630 tests + 57 properties + 195 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
 `mix compile --warnings-as-errors --force` clean. Left for the maintainer: a motion after a search
 extends the match's selection (geex's selection model), as mod-verify noted.
+
+### 2026-11-13 — ADR-0053 slice C: project search; slice B's pass follow-ups (branch `search`)
+
+**Slice B follow-ups (mod-verify's pass):** tests for five paths the code handled but nothing
+pinned, each failing with its plant: a selection started after the press is kept (the goal
+counts the selection); a press after a move starts there (not one match further); two presses
+then a move, or another file, selects nothing (the full answer checks the goal); a query past 64
+graphemes goes to a process of its own; a frame after the text changed under the prompt draws the
+moved cursor. Writing the second, a first answer computed from an old starting place could apply
+to a fresh goal: `{:first, from, …}` now carries where it was asked from and applies only to a
+goal starting there. A frame reads the snapshot again only when the prompt is open (only then
+can the refresh move the cursor), correcting the slice-B entry above; the first answer's
+snapshot read uses `with`.
+
+**Slice C:** `Alt+Shift+Q` (`search project`, or `search all` by the General setting
+"Alt+Shift+Q", kept as `search_key`), prompts pre-filled from a one-line selection and sharing the
+search history; `git grep` with `--untracked` and the common directories excluded at any depth
+(`search all`: ignored files too, nothing excluded); outside git `grep -r`, refused from the home
+directory or `/`; quoted for `sh`, a NUL byte refused; through `Geex.Shell`'s new `:first` mode
+(the first 5,000 lines, none passed over, the command stopped) into the output pane, whose title
+says how it went ("3 lines", "no matches", "the first 5000 lines"); results read by their own
+parser (spaces, `é`, colons in paths); `Alt+N` opens the next result line with its match
+selected (the line's start and a notice when the match isn't there), wrapping; Enter on a result
+does the same; a `!` replacing the results makes `Alt+N` the file's again.
+
+Tests: `project_search_test.exs` (12, against real repositories through `Loop.handle_info/2`:
+tracked, untracked, a space and `é` in a path, `_build` and nested `deps` left out, `search all`
+finding an ignored and an excluded file, `' $ ` and `\` searched as typed, no matches, smart case,
+the 5,000 cap, `Alt+N` stepping and wrapping and Enter on a result, the unsaved-edit fallback, a
+`!` replacing the results, `grep -r` outside git, the refusal at `$HOME`, the setting);
+`search/project_test.exs` (the quoting round-tripped through `sh`, the flags, the refusals, the
+result parser, doctests); `shell_test.exs` (`:first` keeps the first lines, none passed over,
+under `behind: -1` and `keep: 100`, and sends no `:capped` with fewer). Plants caught: no
+`--untracked`, the quoting not escaping, the shell keeping the newest, the parser rejecting a
+space, no wrap notice, `Alt+N` not falling back after a `!`.
+
+Live-verified via tmux (110×16, scratch state): in a git repository, `Alt+Shift+Q` `needle` showed
+"search project “needle” · 3 lines" (`lib/a.ex`, the untracked `new.txt`, `sub dir/café notes.txt`;
+`_build/out.txt` not among them); `Alt+N` opened `a.ex` at 1:13, then `new.txt` at 1:17, then
+`café notes.txt` at 2:11 (`Needle` selected), and wrapped to `a.ex` with "wrapped to the first
+result"; typed `search all` with `needle` showed 4 lines, `_build/out.txt` among them (its prompt
+had been pre-filled with the selected `Needle` first, as Q9 has it); outside git `./p.txt` found
+and `node_modules` left out; with `HOME` pointed at the started directory (`-env HOME`), the search
+said "not searching your whole home directory: start geex in a project".
+
+1655 tests + 57 properties + 199 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. Not tested: a macOS terminal, a `C`-locale
+system's case folding (documented, Q15), a repository past a few thousand files.
+
+**Slice C, after mod-verify's review (not yet passed):**
+- **A Latin-1 query broke git's search:** smart case added `-i`, and git refuses a pattern that
+  isn't UTF-8 under it ("fatal: -e option, 'caf\xE9': UTF-8 error", exit 128). Such a query now gets
+  no `-i` (an invalid byte matches only itself, as in the file's search). A loop test selects
+  `caf\xE9`, runs `Alt+Shift+Q` and finds the Latin-1 line.
+- **Outside git, grep runs with `LC_ALL=C`** (decided overnight, pending the maintainer): under a
+  UTF-8 locale GNU grep took a Latin-1 file for binary and `-I` skipped it silently. Outside git,
+  `-i` now folds only A–Z (ADR-0053, beside Q15). A test finds a Latin-1 file outside git.
+- **Refusal** (decided overnight, pending the maintainer): symlinks followed
+  (`Geex.Search.Project.real_path/1`), any directory above the home directory refused too, and a
+  home directory kept in git searched without `--untracked` (its tracked files only) with a notice;
+  `refusal/4` became `plan/4`. Tests for each.
+- **The parser** reads every `path:line` with a lookahead, so `notes:12:7:text` includes
+  `{"notes:12", 7}`. **The title** says "1 line".
+- **Tests for the three missed plants**: a query starting with `-` searched as typed (fails without
+  `-e`); `:first` stopping the whole process group and sending `:capped` once; Alt+N after the
+  highlight was moved starting from it. Every plant of this round caught: no `-e`, `:first` not
+  stopping, the highlight ignored, `-i` on an invalid query, no `LC_ALL`, no lookahead, no symlink
+  resolution, no above-home refusal, `--untracked` kept at home, "1 lines".
+
+Live-verified via tmux: a Latin-1 file in a git repository, `caf\xE9` selected, `Alt+Shift+Q`,
+Enter: "search project “caf�” · 1 line", `l1.txt:1:le caf� noir`; the same outside git:
+`./l1.txt:1:le caf� noir`.
+
+1666 tests + 57 properties + 199 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. For the maintainer: the C locale outside git,
+the refusal rules (symlinks, above home, home in git), and whether the first key should replace a
+pre-filled prompt (today typing appends).
+
+**Slice C, mod-verify's second re-review:** `Project.real_path/1` raised `UnicodeConversionError`
+in the loop on a project path holding a byte that isn't UTF-8 (`String.to_charlist/1` on
+`…/caf\xE9/proj`, seen live: geex opened there, then Alt+Shift+Q killed the loop). The name now
+goes to `:file.read_link_all/1` as the binary it is, and a link's target comes back as raw bytes.
+A test with a Latin-1 directory and a link to it (real_path and plan) fails with the old call.
+1667 tests + 57 properties + 199 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean.

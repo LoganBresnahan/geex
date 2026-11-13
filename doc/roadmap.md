@@ -770,7 +770,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       the minibuffer, the match selected, `Alt+N` wrapping and stepping a project search's results;
       `Alt+Shift+N` waits for multiple cursors. Being built on `search`: slice A (the pure core) and
       slice B (search in the file: `Alt+Q`, `Alt+N`, the matches drawn and counted) built
-      2026-11-13; slice C (project search) next.
+      2026-11-13; slice C (project search: `Alt+Shift+Q`, `search all`, `Alt+N` through the
+      results) built 2026-11-13.
    6. **Tab over a selection** (ADR-0050, the maintainer, 2026-11-11): Tab indents the selected
       lines, Shift+Tab un-indents (always, the cursor's line without a selection), and the other
       kind of indent moves from Shift+Tab to `Alt+1` (first `` Alt+` ``, which GNOME and KDE take;

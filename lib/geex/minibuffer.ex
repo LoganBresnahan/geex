@@ -39,7 +39,17 @@ defmodule Geex.Minibuffer do
   alias Geex.Text
 
   @type mode ::
-          :inactive | :command | :grid | :palette | :buffers | :files | :search | :confirm | :ask
+          :inactive
+          | :command
+          | :grid
+          | :palette
+          | :buffers
+          | :files
+          | :search
+          | :search_project
+          | :search_all
+          | :confirm
+          | :ask
   @type t :: %__MODULE__{
           mode: mode(),
           input: String.t(),
@@ -100,6 +110,8 @@ defmodule Geex.Minibuffer do
   def prompt(%__MODULE__{mode: :buffers}), do: "buffer:"
   def prompt(%__MODULE__{mode: :files}), do: "open:"
   def prompt(%__MODULE__{mode: :search}), do: "search:"
+  def prompt(%__MODULE__{mode: :search_project}), do: "search project:"
+  def prompt(%__MODULE__{mode: :search_all}), do: "search all:"
   def prompt(%__MODULE__{mode: mode, ask: ask}) when mode in [:confirm, :ask], do: ask
   def prompt(%__MODULE__{}), do: ""
 

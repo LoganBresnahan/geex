@@ -239,6 +239,18 @@ defmodule Geex.Command.Catalog do
       invoke: {:command, :search}
     },
     %Entry{
+      name: "search project",
+      aliases: ["grep"],
+      description:
+        "Search the project's files (git grep), build and dependency folders left out; results below.",
+      invoke: {:command, :search_project}
+    },
+    %Entry{
+      name: "search all",
+      description: "Search every file in the project, ignored ones too; results below.",
+      invoke: {:command, :search_all}
+    },
+    %Entry{
       name: "next match",
       description: "Select the next match of the last search, wrapping at the end of the file.",
       invoke: {:command, :next_match}

@@ -89,6 +89,58 @@ defmodule Geex.ShellTest do
     assert String.ends_with?(out, "299999\n300000\n")
   end
 
+  test "`:first`: the first lines kept, in order, none passed over, the command stopped", %{
+    dir: dir
+  } do
+    # `behind: -1` too: keeping the first lines, no chunk may be passed over.
+    # `keep: 100` too: keeping the first lines, the newest-kept trimming doesn't apply.
+    {pid, _ref} = Shell.start("seq 1 300000", cwd: dir, first: 5000, behind: -1, keep: 100)
+
+    lines =
+      Stream.repeatedly(fn ->
+        receive do
+          {:geex_shell, ^pid, {:lines, lines, _}} -> lines
+          {:geex_shell, ^pid, :capped} -> []
+          {:geex_shell, ^pid, {:exit, _}} -> :done
+        after
+          10_000 -> flunk("no exit")
+        end
+      end)
+      |> Enum.take_while(&(&1 != :done))
+      |> Enum.concat()
+
+    assert lines == Enum.map(1..5000, &Integer.to_string/1)
+  end
+
+  test "`:first` stops the whole process group once the lines came, and says so once", %{
+    dir: dir
+  } do
+    secs = 3000 + rem(System.unique_integer([:positive]), 5000)
+    {pid, _ref} = Shell.start("sh -c 'sleep #{secs}' & seq 1 1000; wait", cwd: dir, first: 100)
+    msgs = drain_all(pid)
+    assert Enum.count(msgs, &(&1 == :capped)) == 1
+    assert List.last(msgs) == {:exit, 128 + 15}
+    Process.sleep(100)
+    {ps, _} = System.cmd("ps", ["-eo", "args"])
+    refute ps =~ "sleep #{secs}"
+  end
+
+  defp drain_all(pid, acc \\ []) do
+    receive do
+      {:geex_shell, ^pid, {:exit, _} = e} -> Enum.reverse([e | acc])
+      {:geex_shell, ^pid, msg} -> drain_all(pid, [msg | acc])
+    after
+      10_000 -> flunk("no exit")
+    end
+  end
+
+  test "`:first` with fewer lines than that: all of them, and no :capped", %{dir: dir} do
+    {pid, _ref} = Shell.start("seq 1 10", cwd: dir, first: 5000)
+    {out, 0} = collect(pid)
+    assert out == Enum.map_join(1..10, &"#{&1}\n")
+    refute_received {:geex_shell, ^pid, :capped}
+  end
+
   test "an unfinished line is shown as it stands, and ends as a line", %{dir: dir} do
     {pid, _ref} = Shell.start("printf 'half'; sleep 0.3; printf ' done'", cwd: dir)
     assert_receive {:geex_shell, ^pid, {:lines, [], "half"}}, 5_000

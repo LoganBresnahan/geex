@@ -95,6 +95,8 @@ defmodule Geex.Loop.Keymap do
     :find_file,
     :search,
     :next_match,
+    :search_project,
+    :search_all,
     :close,
     :toggle_tree,
     :toggle_edits,

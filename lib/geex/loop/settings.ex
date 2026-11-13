@@ -225,6 +225,14 @@ defmodule Geex.Loop.Settings do
           "every save trims trailing spaces and tabs; not Markdown, diffs or patches"
         ]
       },
+      %{
+        name: :search_key,
+        cells: [
+          "Alt+Shift+Q",
+          search_key_label(Map.get(ctx, :search_key, :search_project)),
+          "search project skips build and dependency folders; search all reads everything"
+        ]
+      },
       %{name: nil, cells: ["Settings", tilde(Geex.Settings.path()), ""], left_cut: 1},
       %{name: nil, cells: ["Packages", tilde(Installed.root()), ""], left_cut: 1},
       %{
@@ -234,6 +242,9 @@ defmodule Geex.Loop.Settings do
       }
     ]
   end
+
+  defp search_key_label(:search_all), do: "search all"
+  defp search_key_label(_), do: "search project"
 
   defp indent_label(:follow), do: "follow the file"
   defp indent_label(other), do: Atom.to_string(other)
@@ -380,7 +391,8 @@ defmodule Geex.Loop.Settings do
              :auto_close,
              :auto_indent,
              :final_newline,
-             :trim_whitespace
+             :trim_whitespace,
+             :search_key
            ] ->
         {:toggle, id}
 

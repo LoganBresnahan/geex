@@ -341,6 +341,60 @@ defmodule Geex.Loop.SearchLoopTest do
     end
   end
 
+  describe "the goal's paths (mod-verify's pass of slice B)" do
+    test "a selection started after the press: the answer keeps it", %{dir: dir} do
+      {state, _buf} = stale(dir)
+      state = state |> key({:alt, ?n}) |> key({:alt, ?s}) |> answers()
+      assert %Selection{anchor: {0, 0}, active: {0, 0}} = state.selection
+    end
+
+    test "a press after a move starts from there, not one match further", %{dir: dir} do
+      {state, _buf} = stale(dir, text: "q\nq\nx\nx\nq\n")
+      state = state |> key({:alt, ?n}) |> keys([{:alt, ?k}, {:alt, ?k}]) |> key({:alt, ?n})
+      state = answers(state)
+      assert sel(state) == {{4, 0}, {4, 1}}
+    end
+
+    test "two presses, then a move: the full answer selects nothing", %{dir: dir} do
+      {state, _buf} = stale(dir, text: "q q q\nnext\n")
+      state = state |> keys([{:alt, ?n}, {:alt, ?n}]) |> key({:alt, ?k}) |> answers()
+      assert sel(state) == nil
+      assert {1, _} = cursor()
+    end
+
+    test "two presses, then another file: nothing selected there", %{dir: dir} do
+      {state, _buf} = stale(dir)
+      state = keys(state, [{:alt, ?n}, {:alt, ?n}])
+      File.write!(Path.join(dir, "b.txt"), "other\n")
+      {:ok, b} = Session.open_file(Path.join(dir, "b.txt"))
+      {:noreply, state} = Loop.handle_info({:geex_active_buffer, b}, state)
+      assert sel(answers(state)) == nil
+    end
+
+    test "a query past 64 graphemes is searched in a process of its own", %{dir: dir} do
+      {state, _buf} = open(dir, "a.txt", String.duplicate("a", 100) <> "\n")
+      state = state |> key({:alt, ?q}) |> type(String.duplicate("a", 64))
+      assert state.search.task == nil
+      state = type(state, "a")
+      assert state.search.task != nil
+      _ = answers(state)
+    end
+
+    test "a frame after the text changed under the prompt draws the moved cursor", %{dir: dir} do
+      {state, buf} = open(dir, "a.txt", "ab xy\n")
+      state = state |> key({:alt, ?q}) |> type("xy")
+      assert cursor() == {0, 5}
+      {:ok, cmd} = Insert.parse(%{line: 0, col: 0, text: "zz"})
+
+      {:ok, _} =
+        Buffer.dispatch(buf, Geex.Command.put_meta(cmd, Geex.Command.Meta.new(:external)))
+
+      state = repaint(state)
+      assert cursor() == {0, 7}
+      assert Geex.Loop.Panes.current(state.panes).cursor == {0, 7}
+    end
+  end
+
   describe "what the prompt keeps (mod-verify's review of slice B)" do
     test "Esc after the text changed under the prompt puts back no stale selection", %{dir: dir} do
       {state, buf} = open(dir, "a.txt", "aa bb\ncc dd\n", {0, 0})

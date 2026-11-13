@@ -119,6 +119,11 @@ defmodule Geex.Loop do
   # on 16 KB inline, mod-verify's review).
   @search_query_inline 64
 
+  # The project search's prompts (ADR-0053 §6).
+  @project_modes [:search_project, :search_all]
+  # The most result lines a project search keeps: the first (Q12).
+  @search_results 5000
+
   # The minibuffer modes with a candidate popup.
   @pickers [:palette, :buffers, :files]
 
@@ -338,6 +343,12 @@ defmodule Geex.Loop do
       end
     end)
     |> then(fn state ->
+      case settings["search_key"] do
+        "search all" -> %{state | keys: Map.put(state.keys, {:alt, ?Q}, :search_all)}
+        _ -> state
+      end
+    end)
+    |> then(fn state ->
       case settings["indent_with"] do
         w when w in ["follow", "spaces", "tabs"] ->
           %{state | indent_with: String.to_existing_atom(w)}
@@ -500,6 +511,10 @@ defmodule Geex.Loop do
       # the `search:` prompt is open, where it starts and what Esc puts back; `note` a word for
       # the prompt's end ("wrapped"); `inline` how big a text is searched in the key itself.
       search: %{
+        # `last` what Alt+N steps: the file's matches, or a project search's results (`project`,
+        # `%{query, mode, at}`: the result line Alt+N last opened).
+        last: :file,
+        project: nil,
         query: nil,
         active: false,
         found: nil,
@@ -1465,6 +1480,8 @@ defmodule Geex.Loop do
     :find_file,
     :search,
     :next_match,
+    :search_project,
+    :search_all,
     :close,
     :toggle_tree,
     :toggle_edits,
@@ -3444,12 +3461,16 @@ defmodule Geex.Loop do
       saved: state.settings_saved,
       tab_size: state.tab_size,
       indent_with: state.indent_with,
+      search_key: Map.get(state.keys, {:alt, ?Q}, :search_project),
       installing: MapSet.new(Map.keys(state.installing)),
       keys: state.keys
     }
   end
 
   defp settings_rows(view, state), do: Settings.rows(view, settings_ctx(state))
+
+  # What Alt+Shift+Q runs: `search project`, or `search all` by the General setting.
+  defp search_key(state), do: Map.get(state.keys, {:alt, ?Q}, :search_project)
 
   defp say(%{settings: %Settings{} = view} = state, message),
     do: %{state | settings: Settings.say(view, message)}
@@ -3527,6 +3548,20 @@ defmodule Geex.Loop do
       "indent_with",
       Atom.to_string(next),
       "indent with: #{indent_label(next)}"
+    )
+  end
+
+  # What Alt+Shift+Q runs (ADR-0053's 2026-11-13 amendment): `search project` or `search all`,
+  # kept in settings.json as `search_key`; the bindings take it, so the help shows it.
+  defp settings_action({:toggle, :search_key}, state) do
+    next = if search_key(state) == :search_all, do: :search_project, else: :search_all
+    label = if next == :search_all, do: "search all", else: "search project"
+
+    keep(
+      %{state | keys: Map.put(state.keys, {:alt, ?Q}, next)},
+      "search_key",
+      label,
+      "Alt+Shift+Q runs #{label}"
     )
   end
 
@@ -4046,6 +4081,12 @@ defmodule Geex.Loop do
   defp shell_said(:needs_tty, state),
     do: %{state | shell: %{state.shell | tty: true}, notice: @needs_tty}
 
+  # A project search's first lines came; the rest go unread (Q12).
+  defp shell_said(:capped, %{output: %Output{} = out} = state),
+    do: %{state | shell: Map.put(state.shell, :capped, true), output: %{out | capped: true}}
+
+  defp shell_said(:capped, state), do: state
+
   defp shell_said(:overflow, state),
     do: %{state | shell: Map.put(state.shell, :overflow, true), notice: @overflow}
 
@@ -4065,6 +4106,8 @@ defmodule Geex.Loop do
       cond do
         shell.tty -> @needs_tty
         shell[:overflow] -> @overflow
+        shell[:capped] -> "the first #{@search_results} lines are shown; the rest weren't read"
+        match?(%Output{search: %{}, count: 0}, output) and status == 1 -> "no matches"
         shell.stopping and state.notice == "stopping…" -> nil
         true -> state.notice
       end
@@ -4147,6 +4190,9 @@ defmodule Geex.Loop do
       {:cmd, :line_end} ->
         schedule_repaint(%{state | output: Output.move(out, Output.size(out))})
 
+      {:key, :enter} when out.search != nil ->
+        schedule_repaint(open_result(state, out.sel))
+
       {:key, :enter} ->
         schedule_repaint(open_location(state, Output.line(out, out.sel)))
 
@@ -4219,6 +4265,8 @@ defmodule Geex.Loop do
     :find_file,
     :search,
     :next_match,
+    :search_project,
+    :search_all,
     :toggle_tree,
     :toggle_edits,
     :quit
@@ -5183,6 +5231,9 @@ defmodule Geex.Loop do
       :next_match ->
         schedule_repaint(next_match(state))
 
+      mode when mode in [:search_project, :search_all] ->
+        schedule_repaint(open_project_search(state, mode))
+
       :toggle_preview ->
         schedule_repaint(toggle_preview(state))
 
@@ -5773,7 +5824,7 @@ defmodule Geex.Loop do
 
       prompt = %{start: Search.start_position(range, cursor), saved: saved}
       fill = one_line_text(range, text)
-      search = %{state.search | prompt: prompt, note: nil}
+      search = %{state.search | prompt: prompt, note: nil, last: :file}
       state = %{state | search: search, minibuffer: Minibuffer.open(:search, fill)}
       schedule_repaint(if fill == "", do: state, else: search_typed(state))
     else
@@ -5830,6 +5881,12 @@ defmodule Geex.Loop do
     else
       _ -> state
     end
+  end
+
+  defp next_match(%{search: %{last: :project}} = state) do
+    if project_results?(state),
+      do: next_result(state),
+      else: next_match(put_in(state.search.last, :file))
   end
 
   defp next_match(state) do
@@ -5931,7 +5988,11 @@ defmodule Geex.Loop do
     {pid, ref} =
       spawn_monitor(fn ->
         if first,
-          do: send(loop, {:geex_search, self(), {:first, Search.first_from(text, query, first)}})
+          do:
+            send(
+              loop,
+              {:geex_search, self(), {:first, first, Search.first_from(text, query, first)}}
+            )
 
         send(loop, {:geex_search, self(), {:all, Search.matches(text, query)}})
       end)
@@ -5948,7 +6009,12 @@ defmodule Geex.Loop do
 
   defp stop_search(state), do: state
 
-  defp search_answered({:first, first}, %{search: %{goal: %{n: 1, shown: false} = g}} = state) do
+  # The first match, for a goal still starting where it was asked from (a press after a move
+  # starts a goal of its own, which this answer isn't for).
+  defp search_answered(
+         {:first, from, first},
+         %{search: %{goal: %{n: 1, shown: false, from: from} = g}} = state
+       ) do
     if goal_holds?(state, g) do
       state =
         case first do
@@ -5957,14 +6023,17 @@ defmodule Geex.Loop do
         end
 
       # Shown: what it selected is what the goal now holds, so the full answer leaves it be.
-      {:ok, snap} = safe_session_snapshot()
-      put_in(state.search.goal, %{g | shown: true, at: here(state, snap)})
+      with {:ok, snap} <- safe_session_snapshot() do
+        put_in(state.search.goal, %{g | shown: true, at: here(state, snap)})
+      else
+        _ -> put_in(state.search.goal, nil)
+      end
     else
       put_in(state.search.goal, nil)
     end
   end
 
-  defp search_answered({:first, _}, state), do: state
+  defp search_answered({:first, _from, _first}, state), do: state
 
   defp search_answered({:all, packed}, %{search: %{task: %{ref: ref, key: key}}} = state) do
     Process.demonitor(ref, [:flush])
@@ -6090,13 +6159,14 @@ defmodule Geex.Loop do
          key = {buffer, seq, query},
          false <- match?(%{found: %{key: ^key}}, state.search),
          false <- match?(%{task: %{key: ^key}}, state.search) do
-      state =
-        case state.search.prompt do
-          %{start: start} -> find(state, query, {clamp_cursor(start, text), 1}, :type, snap)
-          nil -> find(state, query, nil, :refresh, snap)
-        end
+      # Only with the prompt open does a refresh select (and so move the cursor the frame draws).
+      case state.search.prompt do
+        %{start: start} ->
+          {find(state, query, {clamp_cursor(start, text), 1}, :type, snap), true}
 
-      {state, true}
+        nil ->
+          {find(state, query, nil, :refresh, snap), false}
+      end
     else
       _ -> {state, false}
     end
@@ -6150,6 +6220,168 @@ defmodule Geex.Loop do
     end
   end
 
+  ## Project search (ADR-0053 §6–§7): Alt+Shift+Q (`search project`, or `search all` by the
+  ## General setting) runs `git grep` (or `grep -r`) through `Geex.Shell` into the output pane,
+  ## the first 5,000 lines kept; Alt+N then opens the next result, selecting its match.
+
+  defp open_project_search(state, mode) do
+    fill =
+      case safe_session_snapshot() do
+        {:ok, %{text: text}} ->
+          one_line_text(state.selection && Selection.range(state.selection), text)
+
+        _ ->
+          ""
+      end
+
+    %{state | minibuffer: Minibuffer.open(mode, fill)}
+  end
+
+  defp run_project_search(%{shell: %{}} = state, _query, _mode), do: %{state | notice: @running}
+
+  defp run_project_search(state, query, mode) do
+    root = file_root()
+    git? = File.exists?(Path.join(root, ".git"))
+
+    home = System.get_env("HOME") || System.user_home()
+    real = &Geex.Search.Project.real_path/1
+
+    case Geex.Search.Project.plan(query, real.(root), git?, home && real.(home)) do
+      {:ok, opts} ->
+        kind = if mode == :search_all, do: :all, else: :project
+        cmd = Geex.Search.Project.command(query, kind, git?, opts)
+        {pid, ref} = Shell.start(cmd, cwd: root, first: @search_results)
+        Process.send_after(self(), :geex_shell_tick, 1_000)
+
+        out =
+          Output.new(cmd, :show, now_ms(),
+            max: @search_results,
+            search: %{query: query, mode: mode}
+          )
+
+        project = %{query: query, mode: mode, at: nil}
+
+        %{
+          state
+          | shell: %{pid: pid, ref: ref, kind: :show, stopping: false, tty: false},
+            output: out,
+            focus: :output,
+            notice: opts[:note] || state.notice,
+            search: %{state.search | last: :project, project: project}
+        }
+
+      {:error, why} ->
+        %{state | notice: why}
+    end
+  end
+
+  # Whether the output pane still holds the last project search's results (a later `!` replaces
+  # them: Alt+N is the file's again, Q14).
+  defp project_results?(%{output: %Output{search: %{query: q}}, search: %{project: %{query: q}}}),
+    do: true
+
+  defp project_results?(_state), do: false
+
+  # Alt+N: the next result line after the one last opened (or the pane's highlight), wrapping:
+  # one stop per line (Q13), lines that name no file passed over.
+  defp next_result(%{output: out, search: %{project: project}} = state) do
+    n = Output.size(out)
+    # From the line last opened; before any, from the highlight when it was moved there, else
+    # from the top.
+    from =
+      cond do
+        project.at -> project.at
+        out.follow -> -1
+        true -> out.sel - 1
+      end
+
+    found =
+      Enum.find_value(1..max(n, 1)//1, fn k ->
+        i = Integer.mod(from + k, max(n, 1))
+        if result_target(Output.line(out, i)), do: i
+      end)
+
+    case found do
+      nil -> %{state | notice: "no results to step through"}
+      i -> open_result(state, i, i <= from)
+    end
+  end
+
+  # Open result line `i` at its line and select its match there (or the line's start, R14).
+  defp open_result(state, i, wrapped? \\ false) do
+    out = state.output
+
+    case result_target(Output.line(out, i)) do
+      nil ->
+        %{state | notice: "no path:line on this line"}
+
+      {full, path, line} ->
+        state = %{state | output: %{out | sel: i, follow: false}}
+
+        state =
+          put_in(state.search.project, %{
+            (state.search.project || %{query: out.search.query, mode: out.search.mode})
+            | at: i
+          })
+
+        state = Map.update!(state, :search, &Map.put(&1, :last, :project))
+
+        case open_tab(full, state) do
+          {:ok, pid, state} ->
+            select_result(%{state | focus: :editor}, pid, line - 1, out.search.query, wrapped?)
+
+          {:error, reason, state} ->
+            %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
+        end
+    end
+  end
+
+  # The file a result line names under the project root, and its line: the first reading of the
+  # line that names a file (`Geex.Search.Project.locations/1`).
+  defp result_target(nil), do: nil
+
+  defp result_target(text) do
+    root = file_root()
+
+    Enum.find_value(Geex.Search.Project.locations(text), fn {path, line} ->
+      with {:ok, full} <- FileOps.resolve(path, root),
+           true <- File.regular?(full),
+           do: {full, path, line},
+           else: (_ -> nil)
+    end)
+  end
+
+  defp select_result(state, pid, line, query, wrapped?) do
+    note = if wrapped?, do: "wrapped to the first result"
+
+    with {:ok, %{text: text}} <- safe_buffer_snapshot(pid),
+         l when is_binary(l) <- nth_line(text, line),
+         [{s, e} | _] <- Search.line_matches(l, query) do
+      set_cursor({line, e})
+      sel = Selection.new({line, s}) |> Selection.extend({line, e})
+      %{state | selection: sel, goal: e, notice: note}
+    else
+      _ ->
+        set_cursor({line, 0})
+
+        %{
+          state
+          | selection: nil,
+            goal: 0,
+            notice:
+              "the match isn't on line #{line + 1} here (an unsaved edit, or bytes git matched)"
+        }
+    end
+  end
+
+  # Line `n` of `text`, reading no further than it.
+  defp nth_line(text, n) do
+    case String.split(text, "\n", parts: n + 2) do
+      lines when length(lines) > n -> Enum.at(lines, n)
+      _ -> nil
+    end
+  end
+
   ## Minibuffer (the command surface, ADR-0028)
 
   defp open_minibuffer(state),
@@ -6173,7 +6405,8 @@ defmodule Geex.Loop do
   # The line entered, kept in its mode's history (ADR-0042) and written to the history file in
   # a process of its own.
   defp remember(%{minibuffer: %Minibuffer{mode: mode} = mb} = state)
-       when is_map_key(state.recall, mode) do
+       when is_map_key(state.recall, mode) or mode in @project_modes do
+    mode = recall_list(mode)
     state = update_in(state.recall[mode], &Recall.push(&1, Minibuffer.value(mb)))
 
     if file = state.history_file do
@@ -6186,14 +6419,20 @@ defmodule Geex.Loop do
 
   defp remember(state), do: state
 
+  # Which history list a mode keeps its lines in: the project searches share the file search's
+  # (Q8).
+  defp recall_list(mode) when mode in @project_modes, do: :search
+  defp recall_list(mode), do: mode
+
   # Up and Down in the minibuffer: an older or newer line from its mode's history.
   defp recall(%{minibuffer: %Minibuffer{mode: mode} = mb} = state, dir) do
-    r = state.recall[mode]
+    list = recall_list(mode)
+    r = state.recall[list]
     step = if dir == :older, do: Recall.older(r, Minibuffer.value(mb)), else: Recall.newer(r)
 
     case step do
       {r, text} ->
-        state = put_in(state.recall[mode], r)
+        state = put_in(state.recall[list], r)
         schedule_repaint(%{state | minibuffer: Minibuffer.open(mode, text)})
 
       :none ->
@@ -6249,10 +6488,10 @@ defmodule Geex.Loop do
       {:cmd, :down} when mb.mode in @pickers ->
         move_palette(state, +1)
 
-      {:cmd, :up} when is_map_key(state.recall, mb.mode) ->
+      {:cmd, :up} when is_map_key(state.recall, mb.mode) or mb.mode in @project_modes ->
         state |> recall(:older) |> search_typed()
 
-      {:cmd, :down} when is_map_key(state.recall, mb.mode) ->
+      {:cmd, :down} when is_map_key(state.recall, mb.mode) or mb.mode in @project_modes ->
         state |> recall(:newer) |> search_typed()
 
       {:char, g} ->
@@ -6308,6 +6547,20 @@ defmodule Geex.Loop do
     if preview_current?(state),
       do: state |> close_minibuffer() |> read_only(),
       else: close_minibuffer(do_grid(Verbs.parse_grid(Minibuffer.value(state.minibuffer)), state))
+  end
+
+  # A project search: Enter runs it; an empty prompt the last one again (Q4).
+  defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: mode} = mb} = state)
+       when mode in @project_modes do
+    query = Minibuffer.value(mb)
+
+    query =
+      if query == "" and state.search.project, do: state.search.project.query, else: query
+
+    state =
+      if query == "", do: close_minibuffer(state), else: state |> remember() |> close_minibuffer()
+
+    if query == "", do: state, else: run_project_search(state, query, mode)
   end
 
   # The palette: Enter runs the **highlighted** candidate. Re-derive the candidate list from
