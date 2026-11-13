@@ -165,6 +165,31 @@ as they were when it was written; `Bindings.defaults/0` and ADR-0049 have the cu
 is an ordinary bound command, on `Alt+1` ([ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md)). Typed, `indent` and `unindent` act on the selection as
 their keys do (§6).
 
+## Amendment (2026-11-13): a name of more than one word is hyphenated; an argument comes after a space
+
+The maintainer, typing at `Alt+M`, expected `search all needle` to search, and asked why some
+names had a hyphen (`revert-call`, `fast-forward`) and the rest spaces. Decided: **every name of
+more than one word is hyphenated, and an argument comes after a space.** A word from a fixed set is
+part of the name (`search-all`, `tab-next`, `resize-left`, `move-up`); free text is the argument (a
+path, a number, a theme's name, a search's text): `open a.txt`, `tab 3`, `theme terminal`, `search
+needle`. Treating `all` or `project` as an argument was weighed and not taken: `search all` could
+then mean "search everything" or "search this file for *all*".
+
+- Every catalog name and alias with a space took hyphens (`select-all`, `search-project`,
+  `word-back`, `line-break`, `pane-next`, `find-in-file` …). The spaced spellings are no longer
+  commands: with arguments after a space they would read as a command and its argument. `theme
+  terminal` stays: it is `theme NAME`.
+- The search commands take their text: `search TEXT`, `search-project TEXT`, `search-all TEXT` run
+  as if TEXT were typed in their prompt and Enter pressed (the text keeps its case and its inner
+  spaces). Alone, each opens its prompt as before ([ADR-0053](0053-search.md)).
+- A line `Alt+M` doesn't know says "unknown command: …" instead of nothing.
+- The palette (`Alt+B`) and the Commands tab still find a name by its words: a space typed matches
+  a hyphen, so `search all` and `sea al` find `search-all` first.
+- The General setting kept as `search_key` is written `search-all` / `search-project`; a file
+  that says `search all` (written before) is still read.
+- History: `Alt+M` lines recalled from before keep their old spelling (`search all` recalled now
+  searches the file for `all`).
+
 ## See
 
 - `lib/geex/loop/bindings.ex` (the table, `translate/2`, the labels), `lib/geex/loop/keymap.ex`

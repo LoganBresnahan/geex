@@ -180,6 +180,39 @@ defmodule Geex.Loop.SearchLoopTest do
     end
   end
 
+  describe "typed at Alt+M: `search TEXT` (2026-11-13)" do
+    defp command(state, line), do: state |> key({:alt, ?m}) |> type(line) |> key({:key, :enter})
+
+    test "selects the first match from the cursor, the prompt closed, Alt+N goes on", %{dir: dir} do
+      {state, _pid} = open(dir, "a.txt", "x needle\nNeedle y\n")
+      state = command(state, "search needle")
+      assert state.minibuffer.mode == :inactive
+      assert sel(state) == {{0, 2}, {0, 8}}
+      state = key(state, {:alt, ?n})
+      assert sel(state) == {{1, 0}, {1, 6}}
+    end
+
+    test "the text replaces a selection's pre-fill; a capital keeps smart case", %{dir: dir} do
+      {state, _pid} = open(dir, "a.txt", "needle Needle\n")
+      state = state |> key({:alt, ?7}) |> key({:alt, ?7})
+      state = command(state, "search Needle")
+      assert sel(state) == {{0, 7}, {0, 13}}
+    end
+
+    test "searched off the loop, the answer selects it", %{dir: dir} do
+      {state, _pid} = open(dir, "a.txt", "x\nthe needle\n", {0, 0}, inline: 0)
+      state = state |> command("search needle") |> answers()
+      assert state.minibuffer.mode == :inactive
+      assert sel(state) == {{1, 4}, {1, 10}}
+    end
+
+    test "an unknown command says so", %{dir: dir} do
+      {state, _pid} = open(dir, "a.txt", "x\n")
+      state = command(state, "word back")
+      assert state.notice == "unknown command: word back"
+    end
+  end
+
   describe "from a preview" do
     test "Alt+Q searches the pane the preview was opened from", %{dir: dir} do
       {state, _buf} = open(dir, "n.md", "# Title\n\nsome words\n")

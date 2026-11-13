@@ -75,7 +75,7 @@ defmodule Geex.Loop.Bindings do
     # Search (ADR-0053): the file's, and the next match.
     {:search, [{:alt, ?q}]},
     {:next_match, [{:alt, ?n}]},
-    # The project's (ADR-0053 §6); the General setting can make it `search all`.
+    # The project's (ADR-0053 §6); the General setting can make it `search-all`.
     {:search_project, [{:alt, ?Q}]},
     {:search_all, []},
     {:close, [{:alt, ?w}]},
@@ -226,7 +226,7 @@ defmodule Geex.Loop.Bindings do
   def translate(event, _bindings), do: event
 
   @doc """
-  The key a command named for one of the editor's own keys stands for (`line break` is Enter), or
+  The key a command named for one of the editor's own keys stands for (`line-break` is Enter), or
   `nil`.
 
       iex> Geex.Loop.Bindings.own_key(:newline)
@@ -237,13 +237,13 @@ defmodule Geex.Loop.Bindings do
   @spec own_key(command()) :: {:key, atom()} | nil
   def own_key(command), do: Map.get(@own, command)
 
-  @doc "The commands named for the editor's own keys (`line break`, `indent` …)."
+  @doc "The commands named for the editor's own keys (`line-break`, `indent` …)."
   @spec own_commands() :: [command()]
   def own_commands, do: Map.keys(@own)
 
   @doc """
   The keys that run `command` for a person to read: the bound ones (`keys/2`), then the
-  focused view's own key that does the same in the editor (Enter for `line break`, Esc for `no`).
+  focused view's own key that does the same in the editor (Enter for `line-break`, Esc for `no`).
 
       iex> Geex.Loop.Bindings.shown_keys(Geex.Loop.Bindings.defaults(), :select_clear)
       [{:key, :esc}]

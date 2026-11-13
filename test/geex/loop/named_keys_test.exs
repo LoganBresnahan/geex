@@ -44,13 +44,13 @@ defmodule Geex.Loop.NamedKeysTest do
 
   describe "a typed command does what its key does (§6)" do
     test "the motions", %{state: state} do
-      state = run(state, "word forward")
+      state = run(state, "word-forward")
       assert cursor() == {0, 6}
-      state = run(state, "line end")
+      state = run(state, "line-end")
       assert cursor() == {0, 11}
       state = run(state, "down")
       assert cursor() == {1, 6}
-      state = run(state, "line start")
+      state = run(state, "line-start")
       assert cursor() == {1, 0}
       _ = run(state, "up")
       assert cursor() == {0, 0}
@@ -61,12 +61,12 @@ defmodule Geex.Loop.NamedKeysTest do
       buf: buf
     } do
       Session.set_cursor({0, 5})
-      state = run(state, "line break")
+      state = run(state, "line-break")
       assert text(buf) == "hello\n world\nline 2\n"
       assert cursor() == {1, 0}
       assert length(Buffer.history(buf)) == 1
 
-      _ = run(state, "delete back")
+      _ = run(state, "delete-back")
       assert text(buf) == "hello world\nline 2\n"
       assert cursor() == {0, 5}
     end
@@ -79,7 +79,7 @@ defmodule Geex.Loop.NamedKeysTest do
       assert %Minibuffer{mode: :grid} = run(state, "grid").minibuffer
 
       state = %{state | tree_shown: true, tree_w: 30}
-      assert run(state, "resize left").tree_w == 26
+      assert run(state, "resize-left").tree_w == 26
     end
 
     # The maintainer's word, 2026-11-11: typed commands act on the file you were last in, as the
@@ -102,8 +102,8 @@ defmodule Geex.Loop.NamedKeysTest do
       assert tree.tree.sel == 1
 
       # `resize left` is one that follows the focus: the tree's edge moves, as Alt+← does there.
-      assert run(tree, "resize left").tree_w == 26
-      assert run(tree, "pane next").focus != :tree
+      assert run(tree, "resize-left").tree_w == 26
+      assert run(tree, "pane-next").focus != :tree
     end
 
     test "`stop` with nothing running does nothing", %{state: state, buf: buf} do
@@ -113,7 +113,7 @@ defmodule Geex.Loop.NamedKeysTest do
     end
 
     test "picked from the palette, a command runs the same", %{state: state} do
-      state = state |> key({:alt, ?b}) |> type("line end") |> key({:key, :enter})
+      state = state |> key({:alt, ?b}) |> type("line-end") |> key({:key, :enter})
       assert state.minibuffer.mode == :inactive
       assert cursor() == {0, 11}
     end
@@ -125,7 +125,7 @@ defmodule Geex.Loop.NamedKeysTest do
       tree = put_in(tree.tree.rows, [%{path: "a.txt", dir?: false}, %{path: "lib", dir?: true}])
       tree = put_in(tree.tree.sel, 1)
 
-      tree = tree |> key({:alt, ?b}) |> type("line end") |> key({:key, :enter})
+      tree = tree |> key({:alt, ?b}) |> type("line-end") |> key({:key, :enter})
       assert cursor() == {0, 11}
       assert {tree.focus, tree.tree.sel} == {:tree, 1}
     end
@@ -309,7 +309,7 @@ defmodule Geex.Loop.NamedKeysTest do
       end
 
       assert first.("delete") == "delete"
-      assert first.("enter") == "line break, newline"
+      assert first.("enter") == "line-break, newline"
       assert first.("alt+w") == "close"
     end
 
@@ -327,8 +327,8 @@ defmodule Geex.Loop.NamedKeysTest do
                 &Geex.Screen.get_cell(Geex.Renderer.current(), &1, y).char
               )
 
-      row = Enum.find(rows, &String.starts_with?(&1, "delete forward"))
-      assert row =~ ~r/^delete forward  +Delete · /
+      row = Enum.find(rows, &String.starts_with?(&1, "delete-forward"))
+      assert row =~ ~r/^delete-forward  +Delete · /
     end
 
     test "on a narrow terminal the column is half the width, and a longer name is clipped", %{
@@ -341,7 +341,7 @@ defmodule Geex.Loop.NamedKeysTest do
         for y <- 0..(state.h - 1),
             do: Enum.map_join(0..25, &Geex.Screen.get_cell(Geex.Renderer.current(), &1, y).char)
 
-      assert Enum.find(rows, &String.starts_with?(&1, "delete forwa")) =~ ~r/^delete forwa Delete/
+      assert Enum.find(rows, &String.starts_with?(&1, "delete-forwa")) =~ ~r/^delete-forwa Delete/
     end
   end
 end

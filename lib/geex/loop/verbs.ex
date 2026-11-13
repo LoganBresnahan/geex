@@ -6,7 +6,10 @@ defmodule Geex.Loop.Verbs do
   one parsed verb; the loop applies it through the **same action vocabulary** the
   keymap resolves chords into, so `copy` and `Alt+C` converge on one code path.
 
-  Grammar (case-insensitive, whitespace-trimmed):
+  Grammar (case-insensitive, whitespace-trimmed). A name of more than one word is hyphenated
+  (`select-all`, `search-project`); an argument comes after a space (`open PATH`, `tab N`,
+  `search TEXT`), so `word back` is no command and `search all` searches the file for `all`
+  (ADR-0047's 2026-11-13 amendment):
 
     * `42` / `line 42` — go to line ([ADR-0030](../../../doc/adr/0030-view-action-tool-category.md)
       `line` view action; the bare number is sugar). 1-based; `0` = the last line.
@@ -15,7 +18,7 @@ defmodule Geex.Loop.Verbs do
     * `revert` / `revert-call` — take back the agent's (or outside) change under the cursor,
       one hunk (= `Alt+R`) or its whole tool call (= `Alt+Shift+R`, ADR-0051), keeping later edits (ADR-0033 §7).
     * `highlight` / `select` — start a selection at the cursor (= `Alt+S`, ADR-0029);
-      `highlight all` / `select all` — select the whole buffer (= `Alt+A`).
+      `highlight-all` / `select-all` — select the whole buffer (= `Alt+A`).
     * `save` — write the active buffer to disk (= `Ctrl-O`; an operation, ADR-0019).
     * `fast-forward` — take in the file's change on disk (= `Alt+D`, ADR-0034, ADR-0037).
     * `edits` / `tree` — show or hide the edits pane / the file tree (= `Alt+E` / `Alt+T`;
@@ -34,7 +37,7 @@ defmodule Geex.Loop.Verbs do
       `!!` — run the last one again; `|COMMAND` — pipe the selection through a command and
       replace it with the output, one undoable edit. The command is kept as typed. ADR-0042.
     * `split` / `vsplit` — split the pane top and bottom / side by side (= `Alt+-` / `Alt+=`);
-      `tab next` / `tab prev` / `tab N` — switch the pane's tab (= `Alt+.` / `Alt+,`; `tab N` has
+      `tab-next` / `tab-prev` / `tab N` — switch the pane's tab (= `Alt+.` / `Alt+,`; `tab N` has
       no key, ADR-0051). ADR-0038.
     * `mouse` — turn the mouse off, so the terminal selects and copies text itself, or back on
       (ADR-0039).
@@ -43,13 +46,16 @@ defmodule Geex.Loop.Verbs do
     * `quit` / `exit` — leave the editor (= `Ctrl-X`).
     * `no` — the typed twin of Esc: clears a live selection (a plain cancel when
       nothing is selected). An empty line just cancels.
+    * `search TEXT` / `search-project TEXT` / `search-all TEXT` (and their aliases `find-in-file`,
+      `grep`) — the search, as if TEXT were typed in its prompt and Enter pressed; TEXT keeps its
+      case (smart case reads it) and its inner spaces. Without TEXT, the prompt opens (ADR-0053).
 
-    * every command that had only a key (ADR-0047): `up`, `word back`, `line start`, `page down`,
-      `resize left`, `command line`, `palette`, `grid`, `settings`, `pane next`, `stop`,
-      `line break`, `indent`, `delete back` … — `{:command, command}`, which the loop runs as its
+    * every command that had only a key (ADR-0047): `up`, `word-back`, `line-start`, `page-down`,
+      `resize-left`, `command-line`, `palette`, `grid`, `settings`, `pane-next`, `stop`,
+      `line-break`, `indent`, `delete-back` … — `{:command, command}`, which the loop runs as its
       key would. Their names are the catalog's.
 
-  Anything else is `:unknown` (a no-op today). The command **catalog**
+  Anything else is `:unknown`, which the loop says ("unknown command: …"). The command **catalog**
   ([`Geex.Command.Catalog`](../command/catalog.ex)) now backs the **palette** (ADR-0028 §3, built); the
   remaining consolidation — having *this* parser resolve against that catalog instead of the
   hardcoded clauses below — lands with the grid-agent-parity work, when the action-verbs become
@@ -64,6 +70,13 @@ defmodule Geex.Loop.Verbs do
                 into: %{},
                 do: {name, command}
 
+  # The search commands, by every name they are typed by, and the prompt each opens.
+  @searches for %{invoke: {:command, mode}} = entry <- Geex.Command.Catalog.all(),
+                mode in [:search, :search_project, :search_all],
+                name <- [entry.name | entry.aliases],
+                into: %{},
+                do: {name, mode}
+
   @type verb ::
           {:line, non_neg_integer()}
           | {:action, atom() | {:tab, non_neg_integer()}}
@@ -71,6 +84,7 @@ defmodule Geex.Loop.Verbs do
           | {:new | :mkdir | :rename, String.t()}
           | {:shell | :pipe, String.t()}
           | {:command, term()}
+          | {:search, :search | :search_project | :search_all, String.t()}
           | :shell_again
           | :cancel
           | :unknown
@@ -127,6 +141,10 @@ defmodule Geex.Loop.Verbs do
   defp path_verb("new", path), do: new_or_mkdir(path)
   defp path_verb("mkdir", path), do: {:mkdir, trim_slash(path)}
   defp path_verb(verb, path) when verb in ["rename", "mv"], do: {:rename, path}
+  # A search's text keeps its case too: smart case reads it (ADR-0053).
+  defp path_verb(verb, text) when is_map_key(@searches, verb),
+    do: {:search, Map.fetch!(@searches, verb), text}
+
   defp path_verb(_verb, _path), do: :lower
 
   defp new_or_mkdir(path) do
@@ -191,8 +209,8 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("revert-call"), do: {:action, :revert_call}
   defp do_parse("highlight"), do: {:action, :select_start}
   defp do_parse("select"), do: {:action, :select_start}
-  defp do_parse("highlight all"), do: {:action, :select_all}
-  defp do_parse("select all"), do: {:action, :select_all}
+  defp do_parse("highlight-all"), do: {:action, :select_all}
+  defp do_parse("select-all"), do: {:action, :select_all}
   defp do_parse("save"), do: {:action, :save}
   defp do_parse("fast-forward"), do: {:action, :fast_forward}
   # The file operations on the current file (ADR-0019's 2026-10-19 amendment): `delete` asks
@@ -206,8 +224,8 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("preview"), do: {:action, :toggle_preview}
   defp do_parse("split"), do: {:action, :split_rows}
   defp do_parse("vsplit"), do: {:action, :split_cols}
-  defp do_parse("tab next"), do: {:action, :tab_next}
-  defp do_parse("tab prev"), do: {:action, :tab_prev}
+  defp do_parse("tab-next"), do: {:action, :tab_next}
+  defp do_parse("tab-prev"), do: {:action, :tab_prev}
   defp do_parse("tab " <> n), do: parse_tab(String.trim(n))
   # `open` with no path, or `find`: the file finder (= `Alt+F`, ADR-0037).
   defp do_parse("open"), do: {:action, :find_file}

@@ -139,7 +139,7 @@ defmodule Geex.Loop.Keymap do
 
   # Tab → the default tab size's spaces; the loop passes the setting and the file's indent
   # style to `indent/3`, and indents a selection's lines (ADR-0050). Shift+Tab → un-indent the
-  # cursor's line (`shift_lines/3`). `indent other` (`Alt+1`) → the other kind, which the loop
+  # cursor's line (`shift_lines/3`). `indent-other` (`Alt+1`) → the other kind, which the loop
   # works out the same way (`other_indent/1`); without the loop's context, a tab.
   def resolve({:key, :tab}, cursor, _text), do: indent(cursor, 2, :spaces)
 
@@ -180,7 +180,7 @@ defmodule Geex.Loop.Keymap do
 
   # A command (ADR-0047): the loop turned a bound key into one (`Geex.Loop.Bindings`), or it
   # was typed. Motion moves the cursor; the rest are the loop's actions, run as they are. A
-  # command named for one of the editor's own keys (`line break` …) never gets here: the loop
+  # command named for one of the editor's own keys (`line-break` …) never gets here: the loop
   # turns it into its key first, so the tab size, "Indent with" and the assists apply.
   def resolve({:cmd, command}, cursor, text) when command in @motions,
     do: {:move, motion(command, cursor, text)}
@@ -260,7 +260,7 @@ defmodule Geex.Loop.Keymap do
 
   @doc """
   What Tab does at `cursor` (roadmap item 18.7): a real tab in a file that indents with tabs
-  (`:tabs`), else `tab_size` spaces. `indent other` (`Alt+1`) is the other kind (`other_indent/1`).
+  (`:tabs`), else `tab_size` spaces. `indent-other` (`Alt+1`) is the other kind (`other_indent/1`).
 
       iex> Geex.Loop.Keymap.indent({3, 1}, 4, :spaces) |> elem(2)
       {3, 5}
@@ -411,7 +411,7 @@ defmodule Geex.Loop.Keymap do
     do: String.downcase(Path.extname(path)) not in @keeps_trailing_ext
 
   @doc """
-  What `indent other` (`Alt+1`, ADR-0050) inserts where Tab inserts `style`: the other
+  What `indent-other` (`Alt+1`, ADR-0050) inserts where Tab inserts `style`: the other
   kind, so a tab can be typed where Tab gives spaces, and spaces where it gives a tab (in Go, a
   Makefile, a tab-indented file).
 

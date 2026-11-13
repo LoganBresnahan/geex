@@ -31,7 +31,9 @@ byte or an undone MCP edit (BUG-14, BUG-15), and the shared property generators 
 ([adr/0044](adr/0044-property-tests-with-stream-data.md)'s amendment), each merged after
 mod-verify's review; 1583 tests + 54 properties + 183 doctests green. All of 2026-11-11 and
 2026-11-12 released in 0.6.0. Search ([adr/0053](adr/0053-search.md), accepted) and remapping are
-next. Since the
+next. **2026-11-13:** search merged to main; then every command name of more than one word took
+hyphens and an argument comes after a space (`search-all needle`, `tab 3`), and a line `Alt+M`
+doesn't know says so ([adr/0047](adr/0047-every-key-runs-a-named-command.md)'s amendment). Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**

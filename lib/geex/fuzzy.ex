@@ -14,7 +14,7 @@ defmodule Geex.Fuzzy do
     * a **run** of consecutive matches compounds (so `cop` scores higher against `copy` than
       against `c-o-p` scattered), making prefix/substring hits float to the top;
     * a match right after a **word boundary** (start, space, `_`, `-`, `.`, `:`) earns a bonus,
-      so an acronym-style query (`sa` → `select all`) ranks well.
+      so an acronym-style query (`sa` → `select-all`) ranks well.
 
   An empty query matches everything at score `0` — callers keep their input order. The matcher
   is content-only: it knows nothing about commands, so the finder can reuse it over file paths.

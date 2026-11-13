@@ -56,6 +56,8 @@ defmodule Geex.Loop.ProjectSearchTest do
 
   defp type(state, text), do: Enum.reduce(String.graphemes(text), state, &key(&2, {:char, &1}))
 
+  defp command(state, line), do: state |> key({:alt, ?m}) |> type(line) |> key({:key, :enter})
+
   # Run a search for `query` with Alt+Shift+Q and deliver the runner's messages until it ends.
   defp search(state, query),
     do: state |> key({:alt, ?Q}) |> type(query) |> key({:key, :enter}) |> ran()
@@ -98,7 +100,7 @@ defmodule Geex.Loop.ProjectSearchTest do
       assert Enum.any?(lines, &(&1 =~ "new.txt:1:"))
       refute Enum.any?(lines, &(&1 =~ ~r/_build|deps|x\.log/))
       assert state.focus == :output
-      assert Output.title(state.output, 0) =~ ~r/search project “needle” · 3 lines/
+      assert Output.title(state.output, 0) =~ ~r/search-project “needle” · 3 lines/
       assert state.recall.search.entries == ["needle"]
     end
 
@@ -109,7 +111,7 @@ defmodule Geex.Loop.ProjectSearchTest do
       lines = results(state)
       assert Enum.any?(lines, &(&1 =~ "_build/b.txt:1:"))
       assert Enum.any?(lines, &(&1 =~ "x.log:1:"))
-      assert Output.title(state.output, 0) =~ "search all"
+      assert Output.title(state.output, 0) =~ "search-all"
     end
 
     test "the query quoted: ' $ ` and \\ are searched for as typed", %{root: root} do
@@ -291,6 +293,27 @@ defmodule Geex.Loop.ProjectSearchTest do
     end
   end
 
+  describe "typed at Alt+M with the text (2026-11-13)" do
+    test "`search-all TEXT` and `search-project TEXT` run at once, the prompt skipped", %{
+      root: root
+    } do
+      repo(root, %{"a.txt" => "needle\n"}, %{"_build/b.txt" => "needle\n"})
+      state = editing(root, "a.txt") |> command("search-all needle") |> ran()
+      assert state.minibuffer.mode == :inactive
+      assert Enum.sort(results(state)) == ["_build/b.txt:1:needle", "a.txt:1:needle"]
+      assert Output.title(state.output, 0) =~ "search-all “needle”"
+
+      state = %{state | focus: :editor} |> command("search-project needle") |> ran()
+      assert results(state) == ["a.txt:1:needle"]
+    end
+
+    test "a setting kept as `search all` (before the hyphens) is still read", %{root: root} do
+      repo(root, %{"a.txt" => "x\n"})
+      state = Loop.apply_settings(editing(root, "a.txt"), %{"search_key" => "search all"})
+      assert state.keys[{:alt, ?Q}] == :search_all
+    end
+  end
+
   describe "outside git" do
     test "grep -r, the common dirs left out", %{root: root} do
       write(root, %{"a.txt" => "needle\n", "node_modules/m.js" => "needle\n"})
@@ -320,7 +343,7 @@ defmodule Geex.Loop.ProjectSearchTest do
     repo(root, %{"a.txt" => "x\n"})
     state = editing(root, "a.txt")
     assert Loop.Bindings.translate({:alt, ?Q}, state.keys) == {:cmd, :search_project}
-    state = Loop.apply_settings(state, %{"search_key" => "search all"})
+    state = Loop.apply_settings(state, %{"search_key" => "search-all"})
     assert Loop.Bindings.translate({:alt, ?Q}, state.keys) == {:cmd, :search_all}
     state = key(state, {:alt, ?Q})
     assert state.minibuffer.mode == :search_all

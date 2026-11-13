@@ -5,7 +5,7 @@ defmodule Geex.FuzzyTest do
 
   describe "match?/2" do
     test "a subsequence matches; a non-subsequence does not" do
-      assert Fuzzy.match?("select all", "sa")
+      assert Fuzzy.match?("select-all", "sa")
       assert Fuzzy.match?("copy", "cp")
       refute Fuzzy.match?("copy", "cz")
       refute Fuzzy.match?("copy", "copye")
@@ -44,9 +44,9 @@ defmodule Geex.FuzzyTest do
     end
 
     test "a contiguous prefix outranks a same-letter acronym across words" do
-      # typing "sa" should float "save" (prefix) above "select all" (word-start acronym),
+      # typing "sa" should float "save" (prefix) above "select-all" (word-start acronym),
       # i.e. contiguity dominates the boundary bonus
-      assert Fuzzy.score("save", "sa") > Fuzzy.score("select all", "sa")
+      assert Fuzzy.score("save", "sa") > Fuzzy.score("select-all", "sa")
     end
 
     test "a longer contiguous run scores higher than a shorter one" do

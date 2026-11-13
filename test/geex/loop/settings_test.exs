@@ -145,8 +145,8 @@ defmodule Geex.Loop.SettingsTest do
 
       assert %{cells: ["up", "Alt+I ↑", _]} = Enum.find(rows, &(hd(&1.cells) == "up"))
 
-      assert %{cells: ["line break, newline", "Enter", _]} =
-               Enum.find(rows, &(hd(&1.cells) =~ "line break"))
+      assert %{cells: ["line-break, newline", "Enter", _]} =
+               Enum.find(rows, &(hd(&1.cells) =~ "line-break"))
 
       # No key shows a tab by default (ADR-0051).
       assert %{cells: ["tab N", "", _]} = Enum.find(rows, &(hd(&1.cells) == "tab N"))
@@ -169,7 +169,7 @@ defmodule Geex.Loop.SettingsTest do
 
       # Whole keys: Alt+1 is `indent other`'s (ADR-0051); Alt+K is `down`, not the Alt+Shift+
       # keys.
-      assert [%{cells: ["indent other" | _]} | _] = Settings.rows(%{view | query: "alt+1"}, %{})
+      assert [%{cells: ["indent-other" | _]} | _] = Settings.rows(%{view | query: "alt+1"}, %{})
       assert [%{cells: ["down" | _]} | _] = Settings.rows(%{view | query: "alt+k"}, %{})
       assert [%{cells: ["save" | _]} | _] = Settings.rows(%{view | query: "ctrl+o"}, %{})
 

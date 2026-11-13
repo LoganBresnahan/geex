@@ -268,10 +268,10 @@ defmodule Geex.Loop.SplitTest do
     {state, b} = open(state, dir, "b.txt")
     state = type.(state, "tab 1")
     refute active() == b
-    _state = type.(state, "tab next")
+    _state = type.(state, "tab-next")
     assert active() == b
 
     names = Enum.map(Geex.Command.Catalog.all(), & &1.name)
-    assert Enum.all?(["split", "vsplit", "tab next", "tab prev"], &(&1 in names))
+    assert Enum.all?(["split", "vsplit", "tab-next", "tab-prev"], &(&1 in names))
   end
 end

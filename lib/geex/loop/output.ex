@@ -163,7 +163,7 @@ defmodule Geex.Loop.Output do
   """
   @spec title(t(), integer()) :: String.t()
   def title(%__MODULE__{search: %{query: q, mode: mode}} = out, now) do
-    name = if mode == :search_all, do: "search all", else: "search project"
+    name = if mode == :search_all, do: "search-all", else: "search-project"
     head = "#{name} “#{Text.clean(q)}”"
 
     case out.status do
