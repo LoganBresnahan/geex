@@ -6488,3 +6488,29 @@ the attestation discovery file existed while running and was gone after; the log
 code in embedded mode" with no `terminating` lines and no crash dump. Not checked: the new keys,
 long lines and invalid bytes in the installed program (the suite and the branches' tmux runs cover
 them), a macOS build, the release CI.
+
+### 2026-11-13 — 0.6.0 (ADR-0041)
+
+At the maintainer's word ("lets do a 0.6.0 release"), with main at 4b4cded, pushed and CI green:
+`@version` 0.6.0. Since 0.5.0:
+- keys you can move (roadmap item 20): every key a named command (ADR-0047), the palette's ranking
+  (ADR-0048), the default keys on IJKL (ADR-0049), Tab indents a selection and Shift+Tab
+  un-indents (ADR-0050), the panes on `Alt+<`/`Alt+>` with the digits free (ADR-0051), and the
+  editing keys: duplicate, select a character, word or line, the matching bracket, comments,
+  moving lines and text (ADR-0052);
+- undo and redo by what one action applied (ADR-0031's amendment);
+- trim trailing whitespace on save, on by default (ADR-0054);
+- long lines costing their screen, not the line (BUG-12, BUG-13, ADR-0035's amendment);
+- no crash on an invalid byte or an undone MCP edit (BUG-14, BUG-15, ADR-0027's amendment);
+- the shared property generators carrying invalid bytes, rare characters and long lines
+  (ADR-0044's amendment).
+
+The default keys changed wholesale (ADR-0049); the Keys tab in `Alt+Y` lists them.
+
+**The deep run's occasional failure, explained** (recorded as open on 2026-11-12, `gen-inputs`):
+a timeout, not a counterexample. ExUnit gives each test 60 s; in a deep run the long-line move
+property takes up to 55 s and undo by step 47.5 s on a loaded machine (`--slowest`), so one now and
+then went past and failed with no shrunk case, and its seed never reproduced it. Shown by giving
+the long-line move property 15 s at 10,000 runs: "property timed out after 15000ms". A deep run
+now gives each test 20 minutes (`test_helper.exs`); the default run keeps 60 s. Seven deep runs
+in a row green before the change, two after.

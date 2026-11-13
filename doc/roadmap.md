@@ -23,8 +23,15 @@ IJKL ([adr/0049](adr/0049-ijkl-default-keys.md)), each merged after mod-verify's
 `Alt+<`/`Alt+>` with the digits left free ([adr/0051](adr/0051-panes-on-alt-angle-brackets-digits-free.md)),
 and the editing keys (duplicate, select a character, word or line, the matching bracket,
 comments, moving lines and text, [adr/0052](adr/0052-editing-keys.md)), merged after four
-mod-verify passes; 1531 tests + 38 properties + 169 doctests green. Search
-([adr/0053](adr/0053-search.md), accepted) and remapping are next. Since the
+mod-verify passes; 1531 tests + 38 properties + 169 doctests green. Later that day: undo by
+step ([adr/0031](adr/0031-undo-redo-history-operations.md)'s amendment), trim trailing whitespace on
+save ([adr/0054](adr/0054-trim-trailing-whitespace-on-save.md)), long lines costing their screen
+(BUG-12, BUG-13, [adr/0035](adr/0035-the-loop-never-waits.md)'s amendment), no crash on an invalid
+byte or an undone MCP edit (BUG-14, BUG-15), and the shared property generators widened
+([adr/0044](adr/0044-property-tests-with-stream-data.md)'s amendment), each merged after
+mod-verify's review; 1583 tests + 54 properties + 183 doctests green. All of 2026-11-11 and
+2026-11-12 released in 0.6.0. Search ([adr/0053](adr/0053-search.md), accepted) and remapping are
+next. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -557,7 +564,13 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    ADR-0044, which found and fixed BUG-8 and BUG-9), the maintainer's editor-comfort list (item
    18: typing over a selection, the last session brought back, tab stops fixing BUG-10, resizing
    from the keyboard and more), and typing assists with bracketed paste (item 19, ADR-0045:
-   pairs closed as you type them, the indent kept on Enter, BUG-11 fixed).
+   pairs closed as you type them, the indent kept on Enter, BUG-11 fixed). **0.6.0** ships keys
+   you can move (item 20: every key a named command, ADR-0047; the palette's ranking, ADR-0048;
+   the default keys on IJKL, ADR-0049; Tab over a selection, ADR-0050; the panes on `Alt+<`/`Alt+>`
+   and the digits free, ADR-0051; the editing keys, ADR-0052), undo by step (ADR-0031's
+   amendment), trim trailing whitespace on save (ADR-0054, on by default), long lines costing
+   their screen (BUG-12, BUG-13), and no crash on an invalid byte or an undone MCP edit (BUG-14,
+   BUG-15). The default keys changed: see ADR-0049 and the Keys tab in `Alt+Y`.
    1. **Goal:** depend on Burrito less, then not at all. Until then, the patched fork
       (`LoganBresnahan/burrito`, fork-only, never upstream) is the stopgap.
    2. **Approach:** plain release tarballs per target, built in GitHub Actions.
@@ -747,7 +760,7 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       command (`line break`, `indent` …) acting as its key in every view, not only the editor.
       ADR-0047 §7 has the rules.
    4. **New defaults** (ADR-0049): the maintainer chose IJKL, the right hand moving and the left
-      hand's commands by their letter. **Built 2026-11-11**, merged after mod-verify's review, ahead of 3. `Alt+N` no
+      hand's commands by their letter. **Built 2026-11-11**, merged after mod-verify's review and released in 0.6.0, ahead of 3. `Alt+N` no
       longer clears (Esc does), kept for find. Still on the table: presets for the left or the
       right hand. The macOS terminals that take `Option+←/→`
       (ADR-0026's 2026-11-11 amendment) want a note in `Alt+Y` and install.md.
@@ -759,17 +772,17 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    6. **Tab over a selection** (ADR-0050, the maintainer, 2026-11-11): Tab indents the selected
       lines, Shift+Tab un-indents (always, the cursor's line without a selection), and the other
       kind of indent moves from Shift+Tab to `Alt+1` (first `` Alt+` ``, which GNOME and KDE take;
-      moved by ADR-0051). **Built 2026-11-11**, merged 2026-11-12 after mod-verify's review.
+      moved by ADR-0051). **Built 2026-11-11**, merged 2026-11-12 after mod-verify's review, released in 0.6.0.
    7. **The panes both ways, the digits free** (ADR-0051, the maintainer, 2026-11-12): `Alt+>` the
       next pane, `Alt+<` the new `pane prev`; `Alt+P` the markdown preview; `Alt+1` `indent
       other`; `Alt+2` … `Alt+0` left for the user (`tab N` typed until remapping binds them);
-      `Alt+Shift+R` `revert-call`. **Built 2026-11-12**, merged after mod-verify's review.
+      `Alt+Shift+R` `revert-call`. **Built 2026-11-12**, merged after mod-verify's review, released in 0.6.0.
    8. **Editing keys** (ADR-0052, the maintainer, 2026-11-12): `Alt+2` duplicates the line or the
       selection's lines; `Alt+7`, `Alt+8`, `Alt+9` select a character, a word, a line (again takes
       in the next); `` Alt+\ `` the matching bracket; `Alt+/` comments lines out and back;
       `Alt+Shift+I/K` move lines; `Alt+Shift+J/L/U/O/H/;` move selected text along its line. Caps
       Lock makes the motion cluster the moves in the editor; elsewhere a move is its motion.
-      **Built 2026-11-12**, merged after mod-verify's reviews (BUG-12, long lines, since fixed). Next: multiple cursors (`Alt+5`, `Alt+Shift+N`),
+      **Built 2026-11-12**, merged after mod-verify's reviews (BUG-12, long lines, since fixed), released in 0.6.0. Next: multiple cursors (`Alt+5`, `Alt+Shift+N`),
       their own ADR.
    9. **Undo by step** (ADR-0031's 2026-11-12 amendment, the maintainer's yes): `Alt+Z` and
       `Alt+Shift+Z` move what one action applied together (a fast-forward's hunks, a revert's), so
