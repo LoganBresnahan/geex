@@ -31,7 +31,7 @@ byte or an undone MCP edit (BUG-14, BUG-15), and the shared property generators 
 ([adr/0044](adr/0044-property-tests-with-stream-data.md)'s amendment), each merged after
 mod-verify's review; 1583 tests + 54 properties + 183 doctests green. All of 2026-11-11 and
 2026-11-12 released in 0.6.0. Search ([adr/0053](adr/0053-search.md), accepted) and remapping are
-next. **2026-11-13:** search merged to main; then every command name of more than one word took
+next. **2026-11-13:** search merged to main (released in 0.7.0 with what follows); then every command name of more than one word took
 hyphens and an argument comes after a space (`search-all needle`, `tab 3`), and a line `Alt+M`
 doesn't know says so ([adr/0047](adr/0047-every-key-runs-a-named-command.md)'s amendment). Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
@@ -572,7 +572,12 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    and the digits free, ADR-0051; the editing keys, ADR-0052), undo by step (ADR-0031's
    amendment), trim trailing whitespace on save (ADR-0054, on by default), long lines costing
    their screen (BUG-12, BUG-13), and no crash on an invalid byte or an undone MCP edit (BUG-14,
-   BUG-15). The default keys changed: see ADR-0049 and the Keys tab in `Alt+Y`.
+   BUG-15). The default keys changed: see ADR-0049 and the Keys tab in `Alt+Y`. **0.7.0** ships
+   search (item 20.5, ADR-0053: `Alt+Q` in the file, `Alt+Shift+Q` across the project, `Alt+N`
+   the next match or result), command names of more than one word hyphenated with an argument
+   after a space (ADR-0047's amendment: `search-all needle`, `select-all`), `!!` after a restart
+   (ADR-0042's amendment), and the fix for BUG-17 (a long line with an emoji before an invalid
+   byte froze every key, in 0.6.0).
    1. **Goal:** depend on Burrito less, then not at all. Until then, the patched fork
       (`LoganBresnahan/burrito`, fork-only, never upstream) is the stopgap.
    2. **Approach:** plain release tarballs per target, built in GitHub Actions.
@@ -770,10 +775,11 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       `Alt+N` the next match (the keys kept by ADR-0049 §2a). Its ADR is
       [ADR-0053](adr/0053-search.md) (Accepted 2026-11-12, amended 2026-11-13): the query typed in
       the minibuffer, the match selected, `Alt+N` wrapping and stepping a project search's results;
-      `Alt+Shift+N` waits for multiple cursors. Being built on `search`: slice A (the pure core) and
-      slice B (search in the file: `Alt+Q`, `Alt+N`, the matches drawn and counted) built
-      2026-11-13; slice C (project search: `Alt+Shift+Q`, `search all`, `Alt+N` through the
-      results) built 2026-11-13.
+      `Alt+Shift+N` waits for multiple cursors. **Built 2026-11-13** in three slices on `search`
+      (the pure core; search in the file: `Alt+Q`, `Alt+N`, the matches drawn and counted; project
+      search: `Alt+Shift+Q`, `search-all`, `Alt+N` through the results), each after mod-verify's
+      review, merged 2026-11-13; then the maintainer's answers (a result goes to the pane that has
+      its file, a move drops the match, the first key replaces a pre-fill), released in 0.7.0.
    6. **Tab over a selection** (ADR-0050, the maintainer, 2026-11-11): Tab indents the selected
       lines, Shift+Tab un-indents (always, the cursor's line without a selection), and the other
       kind of indent moves from Shift+Tab to `Alt+1` (first `` Alt+` ``, which GNOME and KDE take;
@@ -815,7 +821,7 @@ paint), both older than that branch and found by mod-verify's review of it, are 
 (2026-11-12, on the `crash-fixes` branch). BUG-16 (the markdown preview can't render a file with
 a byte that isn't UTF-8; it says "render failed", gracefully) is **open**. BUG-17 (a long line with
 an emoji or © before an invalid byte froze every key on it; in 0.6.0) is **FIXED** (2026-11-13,
-on the `search` branch).
+on the `search` branch), released in 0.7.0.
 
 ---
 

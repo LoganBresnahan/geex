@@ -10,7 +10,8 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 ## BUG-17 — A long line holding an emoji or © before an invalid byte froze every key on it  ✅ FIXED (2026-11-13)
 
 - **Status:** **FIXED** 2026-11-13 on the branch `search` (slice A), found by mod-verify's review
-  of that slice. In **0.6.0** and on main at 30bccc8: a candidate for a patch release.
+  of that slice. In **0.6.0**; fixed in **0.7.0** (the maintainer chose a 0.7.0 from main over a
+  0.6.1 patch).
 - **Symptom:** on a Latin-1 line of 256 KB with one `©` + invalid byte at its start, each Right
   arrow took 19–21 s (55–65 ms without the pair); `Text.length` alone took 3.8 s. Search on that
   line took 4 s, and on a 1.5 MB line of such pairs ran for minutes.

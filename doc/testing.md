@@ -6801,3 +6801,23 @@ as typed; the test's scorer says the same. An example test (`every file` finds `
 description) fails on the old code. The failing seed green at 10,000 runs; then 1683 tests + 57
 properties + 201 doctests green twice and the whole deep run green, `--warnings-as-errors --force`
 clean.
+
+### 2026-11-13 — 0.7.0 (ADR-0041)
+
+At the maintainer's word (a 0.7.0 from main rather than a 0.6.1 patch for BUG-17): `@version`
+0.7.0. Since 0.6.0:
+- search (roadmap item 20.5, ADR-0053): `Alt+Q` in the file, the match selected as the query is
+  typed, the other matches drawn and counted; `Alt+Shift+Q` across the project (`git grep`, the
+  build and dependency folders left out; `search-all` everything, a General setting choosing
+  which `Alt+Shift+Q` runs) into the output pane; `Alt+N` the next match or result, a result going
+  to the pane that has its file; a move dropping the match, the first key replacing a pre-fill;
+- command names of more than one word hyphenated, an argument after a space, `search TEXT`, an
+  unknown command said (ADR-0047's amendment);
+- `!!` after a restart (ADR-0042's amendment);
+- BUG-17 fixed (a long line with an emoji before an invalid byte froze every key, in 0.6.0).
+
+The command names changed: `select all` is `select-all`, `word back` `word-back` and so on;
+the palette still finds them typed with spaces.
+
+Before the tag: 1683 tests + 57 properties + 201 doctests green twice, `--warnings-as-errors
+--force` clean, `GEEX_PROPERTY_RUNS=10000` green (after the counterexample above was fixed).
