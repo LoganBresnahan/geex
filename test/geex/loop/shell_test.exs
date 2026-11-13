@@ -240,5 +240,19 @@ defmodule Geex.Loop.ShellTest do
       File.write!(file, "not json")
       assert Recall.load(file) == %{}
     end
+
+    test "a line that isn't UTF-8 isn't kept, and every later save still writes (mod-verify's R2)",
+         %{root: root} do
+      file = Path.join(root, "state/history.json")
+      bad = "caf" <> <<0xE9>>
+      r = Recall.new() |> Recall.push("one") |> Recall.push(bad) |> Recall.push("two")
+      assert r.entries == ["two", "one"]
+
+      # Even handed one directly, save leaves it out instead of raising.
+      assert Recall.save(file, %{"command" => ["two", bad, "one"]}) == :ok
+      assert Recall.load(file) == %{"command" => ["two", "one"]}
+      assert Recall.save(file, %{"command" => ["three"]}) == :ok
+      assert Recall.load(file) == %{"command" => ["three"]}
+    end
   end
 end

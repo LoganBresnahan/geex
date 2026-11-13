@@ -6514,3 +6514,45 @@ then went past and failed with no shrunk case, and its seed never reproduced it.
 the long-line move property 15 s at 10,000 runs: "property timed out after 15000ms". A deep run
 now gives each test 20 minutes (`test_helper.exs`); the default run keeps 60 s. Seven deep runs
 in a row green before the change, two after.
+
+### 2026-11-13 — Search slice A: the pure core, the minibuffer and history on any bytes (ADR-0053)
+
+On the branch `search`, the maintainer's go-ahead to build search overnight with mod-verify
+reviewing each slice. ADR-0053's 2026-11-13 amendment records the decisions taken first (the
+maintainer's four answers, mod-verify's sixteen questions accepted, and its design notes R1–R17).
+- `Geex.Search` (pure): each line's leftmost non-overlapping matches from its start, never across
+  a line end, the text split on `"\n"` before segmenting and a CRLF line's `\r` dropped; graphemes
+  from `Geex.Text` (a byte that isn't UTF-8 is one grapheme, matching only itself); smart case (a
+  capital is a grapheme lowercasing changes; both sides lowercased per grapheme, positions the
+  original's); an empty query matches nothing. The answer is one packed binary, 12 bytes a match,
+  shared rather than copied between processes and read by binary search: `count/1`, `at/2`,
+  `next_at/2` (wrapping), `index_of/2` ("3 of 12"), `on_lines/3` (what is on screen);
+  `first_from/3` finds the first match at or after a position without counting them all;
+  `after_position/2` and `start_position/2` are where `Alt+N` and the search as typed start. An
+  ASCII line searched for an ASCII query goes by `:binary.matches/2`.
+- `Geex.Minibuffer` addresses its input through `Geex.Text` (a pre-fill of a Latin-1 selection,
+  © right before an invalid byte, no longer raises) and keeps at most 4,096 graphemes of one (R1).
+- `Geex.Minibuffer.Recall` keeps no line that isn't valid UTF-8 and leaves any out of a save, so
+  one can't stop every later save (R2).
+
+Tests: three properties over `Geex.Gen` text (invalid bytes, emoji, long lines in a deep run)
+against a reference that shares nothing with the implementation (every occurrence over plain
+grapheme lists, then the leftmost non-overlapping, R12); `next_at`, `index_of`, `on_lines` and
+`first_from` checked against the one match set (R3); cases for `aa` in `aaaa` on both paths, CRLF,
+ß, ǅ, the Kelvin sign, U+023A, é precomposed against decomposed, invalid bytes; a million matches
+packed into 12 MB and found by binary search; the minibuffer and history with invalid bytes. Each
+of eight planted bugs fails a test (overlapping matches on the grapheme path needed its own case).
+
+1596 tests + 57 properties + 194 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. Not yet: anything a user sees (slices B and C).
+
+**Slice A, after mod-verify's review (passed):** BUG-17 fixed (`Geex.Text.chunked/1`
+tail-recursive, `Text.length` counting without building the list; a 256 KB Latin-1 line with one
+pair at its start drew `Text.length` in 3.8 s, now within three times the clean line's: a guard
+that fails on main's code); `Search.on_line/4` reads one screen row's window of a line (a line of
+a million matches: 51 for a 100-column row, under 50 ms); a query holding a non-ASCII byte skips
+ASCII lines, and an ASCII grapheme folds by itself; Minibuffer.right over the pair is tested; the
+ADR index row and ADR-0053's See name the new pieces.
+
+1600 tests + 57 properties + 195 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean.

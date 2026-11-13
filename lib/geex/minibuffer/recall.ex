@@ -10,6 +10,11 @@ defmodule Geex.Minibuffer.Recall do
   **Kept** in `$XDG_STATE_HOME/geex/history.json` (default `~/.local/state/geex/`), `0600` in a
   `0700` directory: `{"command": [...], "grid": [...]}`, newest first, 500 entries each at
   most. A file that won't read is ignored and replaced on the next save.
+
+  A line that isn't valid UTF-8 (a search for a Latin-1 file's bytes, ADR-0053's 2026-11-13
+  amendment) isn't kept: the file is JSON, whose strings are UTF-8, and one such entry made
+  `JSON.encode!/1` raise on every later save, so no history was kept for the rest of the session
+  (mod-verify's R2). It is entered and searched for as usual; only the history skips it.
   """
 
   @max 500
@@ -23,16 +28,19 @@ defmodule Geex.Minibuffer.Recall do
   def new(entries \\ []), do: %__MODULE__{entries: Enum.take(entries, @max)}
 
   @doc """
-  Keep `line` as the newest entry (a blank one isn't kept), and stop walking.
+  Keep `line` as the newest entry (a blank one, or one that isn't valid UTF-8, isn't kept), and
+  stop walking.
 
       iex> r = Geex.Minibuffer.Recall.new(["b", "a"]) |> Geex.Minibuffer.Recall.push("a")
       iex> r.entries
+      ["a", "b"]
+      iex> Geex.Minibuffer.Recall.push(r, "caf" <> <<0xE9>>).entries
       ["a", "b"]
   """
   @spec push(t(), String.t()) :: t()
   def push(%__MODULE__{} = r, line) do
     entries =
-      if String.trim(line) == "",
+      if not String.valid?(line) or String.trim(line) == "",
         do: r.entries,
         else: Enum.take([line | List.delete(r.entries, line)], @max)
 
@@ -87,9 +95,13 @@ defmodule Geex.Minibuffer.Recall do
     end
   end
 
-  @doc "Write each mode's entries to `file`: private, whole or not at all (a temp file renamed)."
+  @doc """
+  Write each mode's entries to `file`: private, whole or not at all (a temp file renamed). An
+  entry that isn't valid UTF-8 is left out (`push/2` keeps none), so one can never stop the save.
+  """
   @spec save(Path.t(), %{String.t() => [String.t()]}) :: :ok | {:error, term()}
   def save(file, lists) do
+    lists = Map.new(lists, fn {mode, list} -> {mode, Enum.filter(list, &String.valid?/1)} end)
     dir = Path.dirname(file)
     tmp = file <> ".#{System.unique_integer([:positive])}.tmp"
 

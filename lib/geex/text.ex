@@ -58,7 +58,7 @@ defmodule Geex.Text do
   def length(text) do
     String.length(text)
   rescue
-    ArgumentError -> Kernel.length(chunked(text))
+    ArgumentError -> chunked_length(text, 0)
   end
 
   @doc """
@@ -157,15 +157,33 @@ defmodule Geex.Text do
   end
 
   # The valid stretches segmented as `String` does; each byte that isn't UTF-8 a grapheme alone.
-  defp chunked(<<>>), do: []
+  # The valid stretches segmented by String, each invalid byte alone. Tail-recursive, building the
+  # list once: a body-recursive version (one stack level and one list append per invalid byte)
+  # took 3.8 s on a 256 KB Latin-1 line, and every key on such a line paid it (BUG-17).
+  defp chunked(text), do: text |> chunked([]) |> Enum.reverse()
 
-  defp chunked(text) do
+  defp chunked(<<>>, acc), do: acc
+
+  defp chunked(text, acc) do
     case :unicode.characters_to_binary(text) do
       valid when is_binary(valid) ->
-        String.graphemes(valid)
+        Enum.reverse(String.graphemes(valid), acc)
 
       {kind, valid, <<byte, rest::binary>>} when kind in [:error, :incomplete] ->
-        String.graphemes(valid) ++ [<<byte>> | chunked(rest)]
+        chunked(rest, [<<byte>> | Enum.reverse(String.graphemes(valid), acc)])
+    end
+  end
+
+  # How many graphemes `chunked/1` would give, without building them.
+  defp chunked_length(<<>>, n), do: n
+
+  defp chunked_length(text, n) do
+    case :unicode.characters_to_binary(text) do
+      valid when is_binary(valid) ->
+        n + String.length(valid)
+
+      {kind, valid, <<_byte, rest::binary>>} when kind in [:error, :incomplete] ->
+        chunked_length(rest, n + String.length(valid) + 1)
     end
   end
 end

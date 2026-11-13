@@ -7,6 +7,23 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-17 — A long line holding an emoji or © before an invalid byte froze every key on it  ✅ FIXED (2026-11-13)
+
+- **Status:** **FIXED** 2026-11-13 on the branch `search` (slice A), found by mod-verify's review
+  of that slice. In **0.6.0** and on main at 30bccc8: a candidate for a patch release.
+- **Symptom:** on a Latin-1 line of 256 KB with one `©` + invalid byte at its start, each Right
+  arrow took 19–21 s (55–65 ms without the pair); `Text.length` alone took 3.8 s. Search on that
+  line took 4 s, and on a 1.5 MB line of such pairs ran for minutes.
+- **Verified cause:** `Geex.Text.chunked/1`, the fallback for where `String` raises, was
+  body-recursive with a list append per invalid byte: quadratic in the number of invalid bytes.
+  It runs on any line holding an Extended_Pictographic right before an invalid byte, and
+  `Keymap.line_len` and Session's cursor clamp call `Text.length` on the cursor's line every key.
+- **Fix:** a tail-recursive `chunked` (accumulate, reverse once) with identical output, and
+  `Text.length` counting without building the list. A guard: that 256 KB line's `Text.length` and
+  `Text.graphemes` within three times the clean line's.
+
+---
+
 ## BUG-16 — The markdown preview can't render a file holding a byte that isn't UTF-8
 
 - **Status:** open, found 2026-11-12 by mod-verify's review of `crash-fixes` (216e97b). Older than

@@ -1,6 +1,8 @@
 # ADR-0053: Search: Alt+Q in the file, Alt+Shift+Q in the project, Alt+N the next match
 
-- **Status:** Accepted 2026-11-12 (the maintainer's design, "all good"; not built yet)
+- **Status:** Accepted 2026-11-12 (the maintainer's design, "all good"; not built yet). **Amended
+  2026-11-13:** the maintainer's answers before building (`search all`, a setting, the highlights,
+  the prompt, project search's scope), and mod-verify's design notes
 - **Date:** 2026-11-12
 - **Amends:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the minibuffer's search mode,
   "incremental search is the next mode"), [ADR-0042](0042-shell-commands.md) (the output pane
@@ -65,7 +67,75 @@ palette. `open` keeps its alias `find`.
   at a time.
 - `Alt+Shift+N` stays unbound until multiple cursors have an ADR.
 
+## Amendment — 2026-11-13: decided before building
+
+**Context.** Before building, the plan went to mod-verify, whose sixteen questions the maintainer
+answered ("accept all, document 15"), with the maintainer's own four: may a slice be committed on
+the branch (yes, merging waits for the maintainer), the other matches' colour, `Alt+N` in the
+prompt, and project search's scope ("the default should skip common dirs but we should allow the
+user to search all as well … perhaps another setting"). mod-verify's seventeen design notes (R1–R17)
+are written in where they decide behaviour.
+
+**Decision.**
+
+1. **The highlights and the count stay until Esc or a new search**, as Vim's `hlsearch`, and
+   follow edits: a change searches again off the loop, the superseded search stopped, not only its
+   answer dropped (R6). While the prompt is open, the count shows at its end
+   (`search: foo   3 of 12`), since the prompt covers the status row.
+2. **Enter on an empty prompt repeats the last query**; an empty query is no search: the start is
+   restored, nothing is "no match" (R4). **Esc puts back the scroll too**, not only the cursor and
+   the selection. **`Alt+N` in the prompt goes to the next match and keeps the prompt open.**
+3. **One last query, for every file**: `Alt+N` in another file finds it there. **`Alt+Q` from the
+   tree, a pane or a preview searches the last file pane.**
+4. **One history list**, `"search"`, for both prompts (ADR-0042 §5's file); a query that isn't
+   valid UTF-8 isn't kept in it (the file is JSON; R2), though it is searched for.
+5. **A one-line selection pre-fills both prompts**, project search too, byte for byte: a Latin-1
+   file's bytes are searched for as they are, drawn `�` (BUG-15). The minibuffer addresses its
+   input through `Geex.Text` and keeps at most 4,096 graphemes of a pre-fill (R1).
+6. **Where matches are and where `Alt+N` goes** (R3, R4): the matches are each line's leftmost
+   non-overlapping occurrences from the line's start (`aa` in `aaaa` is at 0 and 2), never across
+   a line end; the text is split into lines before it is segmented, so a CRLF line's `\r` is no
+   part of a match (R5). The count, `Alt+N` and the highlights use that one set. `Alt+N` goes to
+   the first match at or after the selection's end (in document order) or the cursor; the search
+   as it is typed starts from the selection's start, so the pre-filled occurrence is match 1.
+7. **Smart case** (R11): a capital is a grapheme that lowercasing changes (so `ǅ` and the Kelvin
+   sign count); folding lowercases each grapheme, never uppercases (`ß` would become `SS`), and
+   offsets are never carried from a lowercased line back to the original (lowercasing can change a
+   grapheme's bytes). `é` precomposed and `é` as `e` plus a combining accent don't match each other
+   (graphemes are compared as they are; `git grep` agrees).
+8. **The other matches** are drawn in a theme's `search` style, an overlay like the selection's so
+   no syntax colour beats it; a theme without one gets a dim form of its selection colour, and the
+   terminal's own colours (where the selection is reverse video) get underline (R16).
+9. **Project search's scope.** `search project` searches the files git tracks and the untracked
+   ones it doesn't ignore (`git grep --untracked`, as the tree lists them), and outside git
+   `grep -r` leaving out `.git`, `_build`, `deps`, `node_modules`, `target`, `dist` and `.venv`.
+   **`search all`** searches everything: ignored files and those directories too. A General setting
+   chooses which one `Alt+Shift+Q` runs (`search project` by default) until remapping (roadmap 20.3)
+   binds any key to either. Outside git, a project root of `~` or `/` is refused with a notice,
+   not walked.
+10. **Project results.** `git grep` runs with `-c core.quotePath=false`, and its lines are read by a
+    parser of their own (a path with spaces or non-ASCII letters), not the output pane's general
+    one (R13); its `--column` is a byte offset and isn't used. The output pane keeps the first
+    5,000 result lines and says so (it keeps a command's newest lines otherwise). `Alt+N` stops
+    once per result line, selecting its first match, and puts the cursor at the line's start with a
+    notice when the line has none in the buffer (an unsaved edit, a decomposed accent `git grep`
+    matched by bytes: R14). When a later `!` command replaces the results, `Alt+N` searches the file
+    again. The query is quoted for the shell (`'…'\''…'`); one holding a NUL byte is refused; exit
+    status 1 is "no match" (R15).
+11. **Case folding in project search follows the system's locale** (Q15): under a UTF-8 locale `-i`
+    folds every letter, under the bare `C`/`POSIX` locale only A–Z, so `café` misses `CAFÉ` there.
+    It isn't forced: not every system has `C.UTF-8`.
+12. **Caps Lock with `Alt+q` runs `search project`** (`Alt+Shift+Q`), as Caps Lock turns the motions
+   into the moves (ADR-0052 §8): an `Alt+Shift` letter with its own command no longer falls back to
+   the plain letter (R17).
+
+**Consequences.** Search answers arrive from a monitored task keyed by the buffer, the text's
+sequence and the query (ADR-0035), the first match before the count on a big file (R7); presses of
+`Alt+N` while an answer is pending are counted and applied when it comes (R8); a buffer changed
+under an open prompt is searched again (R9). These are slice B's; slice A is the pure core
+(`Geex.Search`) and the minibuffer and history fixes above.
+
 ## See
 
-- `lib/geex/minibuffer.ex` (the `:search` mode), `lib/geex/loop.ex`, `lib/geex/shell.ex`,
+- `lib/geex/search.ex` (the pure matching core), `lib/geex/minibuffer.ex` (the `:search` mode), `lib/geex/loop.ex`, `lib/geex/shell.ex`,
   `lib/geex/loop/bindings.ex`, `lib/geex/command/catalog.ex`

@@ -42,7 +42,11 @@ defmodule Geex.MinibufferTest do
     mb = Minibuffer.open(:palette) |> Minibuffer.select(3)
     assert mb.sel == 3
     assert Minibuffer.insert(mb, "c").sel == 0
-    assert Minibuffer.open(:palette) |> Minibuffer.select(2) |> Minibuffer.insert("x") |> Map.fetch!(:sel) == 0
+
+    assert Minibuffer.open(:palette)
+           |> Minibuffer.select(2)
+           |> Minibuffer.insert("x")
+           |> Map.fetch!(:sel) == 0
   end
 
   test "backspace also resets the palette highlight" do
@@ -95,5 +99,42 @@ defmodule Geex.MinibufferTest do
 
     assert Minibuffer.value(mb) == "ac"
     assert mb.cursor == 1
+  end
+
+  describe "bytes that aren't UTF-8 (ADR-0053's 2026-11-13 amendment, mod-verify's R1)" do
+    # A © right before a Latin-1 é is where String.graphemes/1 raises (BUG-15); a search pre-filled
+    # from a selection in a Latin-1 file holds exactly that.
+    @bad "©" <> <<0xE9>> <> "x"
+
+    test "a pre-fill holding them opens, edits and moves without raising" do
+      mb = Minibuffer.open(:command, @bad)
+      assert {Minibuffer.value(mb), mb.cursor} == {@bad, 3}
+
+      mb = mb |> Minibuffer.left() |> Minibuffer.insert("y")
+      assert Minibuffer.value(mb) == "©" <> <<0xE9>> <> "yx"
+      mb = Minibuffer.backspace(mb)
+      assert Minibuffer.value(mb) == @bad
+      mb = mb |> Minibuffer.backspace() |> Minibuffer.right() |> Minibuffer.right()
+      assert {Minibuffer.value(mb), mb.cursor} == {"©x", 2}
+    end
+
+    test "right steps over the pair while it is still there" do
+      mb = Minibuffer.open(:command, @bad) |> Minibuffer.left() |> Minibuffer.left()
+      assert mb.cursor == 1
+      mb = Minibuffer.right(mb)
+      assert {Minibuffer.value(mb), mb.cursor} == {@bad, 2}
+      assert Minibuffer.right(Minibuffer.right(mb)).cursor == 3
+    end
+
+    test "typing such a byte after an emoji, and deleting it" do
+      mb = Minibuffer.open(:command, "👍") |> Minibuffer.insert(<<0xFF>>)
+      assert {Minibuffer.value(mb), mb.cursor} == {"👍" <> <<0xFF>>, 2}
+      assert Minibuffer.value(Minibuffer.backspace(mb)) == "👍"
+    end
+  end
+
+  test "a pre-fill is cut at 4,096 graphemes, as a paste is" do
+    mb = Minibuffer.open(:command, String.duplicate("é", 5_000))
+    assert {Geex.Text.length(Minibuffer.value(mb)), mb.cursor} == {4096, 4096}
   end
 end

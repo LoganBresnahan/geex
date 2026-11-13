@@ -227,6 +227,17 @@ defmodule Geex.InvalidBytesTest do
       assert ms(fn -> Doc.insert(doc, {0, 50}, "x") end) < 20
     end
 
+    test "a 256 KB Latin-1 line with one pair at its start costs what the clean line does" do
+      # BUG-17: the fallback's segmenting was body-recursive, 3.8 s for this line, paid by every
+      # key on it (Keymap.line_len and Session's clamp call Text.length on the cursor's line).
+      clean = String.duplicate("caf" <> <<0xE9>> <> " ", 52_000)
+      line = "©" <> <<0xE9>> <> clean
+      base = ms(fn -> Text.length(clean) end)
+      assert ms(fn -> Text.length(line) end) < 3 * base + 100
+      assert ms(fn -> Text.graphemes(line) end) < 3 * ms(fn -> Text.graphemes(clean) end) + 100
+      assert Text.length(line) == Text.length(clean) + 2
+    end
+
     test "a 32 KB line of ™ and invalid bytes, each pair a fallback", %{pairs: pairs} do
       assert ms(fn -> Paint.to_screen(pairs, [], Geex.Fixtures.birds(), 100, 5) end) < 300
       assert ms(fn -> Width.line(pairs, 4) end) < 300
