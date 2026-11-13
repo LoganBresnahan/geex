@@ -209,6 +209,33 @@ defmodule Geex.Loop.Panes do
         do: {id, i}
   end
 
+  @doc """
+  The pane to show `buffer` in without opening it again: the current pane when it has a source
+  tab of it, else the first pane (in reading order) that shows one, else the first that has
+  one in another tab; `nil` when no pane has it. A preview doesn't count.
+
+      iex> alias Geex.Loop.Panes
+      iex> {a, b} = {:c.pid(0, 1, 0), :c.pid(0, 2, 0)}
+      iex> {ps, _} = Panes.show(Panes.new(), a)
+      iex> ps = Panes.split(ps, :cols)
+      iex> {ps, _} = Panes.show(ps, b)
+      iex> ps = Panes.focus(ps, 1)
+      iex> {Panes.holding(ps, a), Panes.holding(ps, b), Panes.holding(ps, :c.pid(0, 3, 0))}
+      {1, 2, nil}
+  """
+  @spec holding(t(), pid()) :: pos_integer() | nil
+  def holding(ps, buffer) do
+    has? = fn id -> Enum.any?(ps.panes[id].tabs, &source_of?(&1, buffer)) end
+    shows? = fn id -> (tab = shown(ps, id)) != nil and source_of?(tab, buffer) end
+
+    cond do
+      has?.(ps.pane) -> ps.pane
+      id = Enum.find(ids(ps), shows?) -> id
+      id = Enum.find(ids(ps), has?) -> id
+      true -> nil
+    end
+  end
+
   @doc "Whether `buffer` has a source tab in any pane."
   @spec source?(t(), pid()) :: boolean()
   def source?(ps, buffer),

@@ -1236,6 +1236,33 @@ defmodule Geex.Loop do
     end
   end
 
+  # Open `path` where a file pane already has it (`Panes.holding/2`: the current pane, else one
+  # showing it, else one with it in another tab), focusing that pane; else as `open_tab/2` does,
+  # in the current pane. For a line of output that names a file: stepping through results
+  # shouldn't open a file again beside the pane already showing it.
+  defp open_where_held(path, state) do
+    state = leave(state)
+
+    case safe_open_file(path) do
+      {:ok, pid} ->
+        state =
+          case Panes.holding(state.panes, pid) do
+            id when id in [nil, state.panes.pane] ->
+              state
+
+            id ->
+              state
+              |> put_panes(elem(Panes.show(Panes.focus(state.panes, id), pid), 0))
+              |> enter()
+          end
+
+        {:ok, pid, show_opened(state, pid)}
+
+      {:error, reason} ->
+        {:error, reason, state}
+    end
+  end
+
   # Before the loop makes another tab current: copy Session's cursor (the current tab's while it
   # is current) into the tab.
   defp leave(state) do
@@ -4232,7 +4259,7 @@ defmodule Geex.Loop do
              true <- File.regular?(full) do
           # The cursor moves only once the file is shown: a failed open leaves the tab you were
           # on (perhaps a preview, whose buffer's cursor it must not move) as it was.
-          case open_tab(full, state) do
+          case open_where_held(full, state) do
             {:ok, _pid, state} ->
               set_cursor({line - 1, (col || 1) - 1})
               %{state | focus: :editor, goal: (col || 1) - 1, selection: nil}
@@ -6326,7 +6353,7 @@ defmodule Geex.Loop do
 
         state = Map.update!(state, :search, &Map.put(&1, :last, :project))
 
-        case open_tab(full, state) do
+        case open_where_held(full, state) do
           {:ok, pid, state} ->
             select_result(%{state | focus: :editor}, pid, line - 1, out.search.query, wrapped?)
 

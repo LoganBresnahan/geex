@@ -6702,3 +6702,35 @@ goes to `:file.read_link_all/1` as the binary it is, and a link's target comes b
 A test with a Latin-1 directory and a link to it (real_path and plan) fails with the old call.
 1667 tests + 57 properties + 199 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
 `mix compile --warnings-as-errors --force` clean.
+
+### 2026-11-13 — Merged `search` (7ff344a); deployed `0.6.0+7ff344a2.89a87236`
+
+`search` merged into main with `--no-ff` (main had not moved, so the tree is `search`'s tip).
+`mix geex.deploy` after the ship bar on the merge (1667 tests + 57 properties + 199 doctests green
+twice, `--warnings-as-errors --force` clean); install.sh kept 0.6.0 as the previous version and
+removed 0.5.0. Checked live with a scratch `XDG_STATE_HOME` in a tmux pty, in a scratch git repo
+with a tracked `a.txt`, an untracked `c.txt` and a `node_modules/` file: `geex --version` prints the
+version (exit 0), `geex --frob` exits 2; `geex a.txt` shows the tree and the file; `Alt+Q` then
+`needle` read `1 of 3` (smart case took `Needle` too), `Alt+N` twice read `3 of 3`; `Alt+Shift+Q`
+listed `search project “needle” · 4 lines` with `c.txt` and without `node_modules/`; `geex
+notes.txt` holding `IO.puts("x")` opens it and prints no `x`; Ctrl-X exited with the shell back;
+the attestation discovery file was gone after; the log reads "loading code in embedded mode" with
+no `terminating` lines and no crash dump. Seen again: a project-search prompt pre-filled from the
+search's selection appends what is typed (`Needleneedle`), morning question 2 in ADR-0053. Not
+checked: `geex highlight`, a bare `geex`, `search all`, the `search_key` setting, a macOS build,
+the release CI.
+
+### 2026-11-13 — A search result goes to the pane that has its file (ADR-0053 amendment; branch `result-pane`)
+
+The maintainer, on the deployed build: with two file panes, each showing a file with a match,
+`Alt+N` after `search all` opened the other pane's file as a tab in the current pane. Now a
+result (by `Alt+N`, or Enter on its line) opens where a file pane already has the file:
+`Panes.holding/2` takes the current pane when it has a tab of it, else the first pane showing it,
+else the first with it in a tab behind, whose tab is shown; that pane becomes current. Three loop
+tests (shown in the other pane; behind another tab there; Enter on a result line) fail on the old
+code and pass; one doctest. 1670 tests + 57 properties + 200 doctests green twice,
+`--warnings-as-errors --force` clean. Live in a tmux pty (the dev build, scratch
+`XDG_STATE_HOME`): two side-by-side panes holding `a.txt` and `b.txt` alone, `Alt+Shift+Q needle`,
+then `Alt+N` three times put the cursor after the match in the left pane, the right pane, the left
+pane again, each pane keeping its one tab. Not checked live: a file behind another tab, a preview
+tab, three or more panes. Not run: the deep property run (no property's code changed).

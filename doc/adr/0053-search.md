@@ -205,6 +205,20 @@ under an open prompt is searched again (R9). These are slice B's; slice A is the
     (a dotfiles repository) isn't refused: it is searched without `--untracked`, its tracked files
     only (untracked there is everything else in the home directory), and a notice says so.
 
+## Amendment — 2026-11-13: a result goes to the pane that has its file
+
+The maintainer, trying the merged build with two file panes side by side, each showing a file
+with a match: `Alt+N` opened the other pane's file again as a tab in the current pane, instead of
+going over to the pane that showed it.
+
+**A result's file opens where a file pane already has it** (`Panes.holding/2`): the current pane
+when it has a tab of the file, else the first pane, in reading order, that shows it, else the
+first that has it in a tab behind another, whose tab is then shown. That pane becomes the current
+one, and nothing is opened again. A file no pane has opens in the current pane, as before. This is
+`Alt+N` through the results and Enter on a result line alike; other opens (`Alt+F`, `open PATH`,
+the tree, a markdown link) still open in the current pane. A preview tab doesn't count as having
+the file.
+
 ## See
 
 - `lib/geex/search.ex` (the pure matching core), `lib/geex/minibuffer.ex` (the `:search` mode), `lib/geex/loop.ex`, `lib/geex/shell.ex`,
