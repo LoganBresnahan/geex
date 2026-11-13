@@ -210,12 +210,19 @@ defmodule Geex.InvalidBytesTest do
     setup do
       fr = String.duplicate("café crème brûlée ", 120_000)
       long = binary_part(fr, 0, 40) <> "©" <> <<0xE9>> <> binary_part(fr, 40, byte_size(fr) - 40)
-      %{long: long, pairs: String.duplicate("™" <> <<0xE9>>, 8_000)}
+      %{fr: fr, long: long, pairs: String.duplicate("™" <> <<0xE9>>, 8_000)}
     end
 
-    test "one © before an invalid byte near the start of a 2 MB French line", %{long: long} do
+    test "one © before an invalid byte near the start of a 2 MB French line", %{
+      fr: fr,
+      long: long
+    } do
       assert ms(fn -> Paint.to_screen(long, [], Geex.Fixtures.birds(), 100, 5) end) < 300
-      assert ms(fn -> Loop.cursor_xy(long, {0, 1_000_000}, 0, 4) end) < 300
+      # The cursor's column a million characters in walks the non-ASCII line, as on main (~80 ms
+      # here, ~300 ms on CI's runner), so the bound is against the same line without the pair:
+      # the fallback adds nothing to it (it cost the rest of the line per grapheme before).
+      clean = ms(fn -> Loop.cursor_xy(fr, {0, 1_000_000}, 0, 4) end)
+      assert ms(fn -> Loop.cursor_xy(long, {0, 1_000_000}, 0, 4) end) < 2 * clean + 50
       doc = Doc.new(long)
       assert ms(fn -> Doc.insert(doc, {0, 50}, "x") end) < 20
     end
