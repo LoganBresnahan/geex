@@ -5594,7 +5594,7 @@ defmodule Geex.Loop do
   defp edit_landing(_command, snap), do: changed(snap, 1)
 
   defp changed(%{changed: changed}, i), do: elem(changed, i)
-  defp changed(_snap, _i), do: Session.snapshot() |> elem(1) |> Map.get(:cursor, {0, 0})
+  defp changed(_snap, _i), do: {0, 0}
 
   # Clamp a {line, col} to a valid caret in `text` (a restored/removed line may be shorter).
   defp clamp_cursor({line, col}, text) do

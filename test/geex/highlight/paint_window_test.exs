@@ -210,4 +210,26 @@ defmodule Geex.Highlight.PaintWindowTest do
 
     assert ms < 100, "#{ms} ms"
   end
+
+  # mod-verify's review: the windows' answers can come in any order. Without the sort by start,
+  # the keyword (fetched for the later window first) wins bytes 13–17 that the whole list gives
+  # the string, the two being the same width.
+  test "spans fetched in reverse window order paint as the whole list does" do
+    text = "aaaaaaaaaa\n" <> String.duplicate("b", 50)
+    keyword = %Span{start_byte: 3, end_byte: 43, capture: "keyword"}
+    string = %Span{start_byte: 9, end_byte: 49, capture: "string"}
+    all = [keyword, string]
+    assert Paint.visible_ranges(text, 0, 2, 5, 2) == [{2, 7}, {13, 18}]
+
+    fetch = fn ranges ->
+      ranges
+      |> Enum.reverse()
+      |> Enum.flat_map(fn {from, to} ->
+        Enum.filter(all, &(&1.end_byte > from and &1.start_byte < to))
+      end)
+    end
+
+    assert Paint.to_screen(text, fetch, theme(), 5, 2, 0, 0, 2, nil, 4) ==
+             PaintReference.to_screen(text, all, theme(), 5, 2, 0, 0, 2, nil, 4)
+  end
 end

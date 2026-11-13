@@ -682,9 +682,16 @@ defmodule Geex.Markdown.Layout do
 
   defp math?(raw, text, e) when byte_size(raw) >= 3 do
     inner = binary_part(raw, 1, byte_size(raw) - 2)
-    after_ = String.first(binary_part(text, e, byte_size(text) - e)) || ""
 
-    String.starts_with?(raw, "$") and String.ends_with?(raw, "$") and
+    after_ =
+      case Geex.Text.next_grapheme(binary_part(text, e, byte_size(text) - e)) do
+        {g, _} -> g
+        nil -> ""
+      end
+
+    # A Unicode regex raises on a byte that isn't UTF-8 (BUG-15): such text isn't math.
+    String.valid?(inner) and String.valid?(after_) and
+      String.starts_with?(raw, "$") and String.ends_with?(raw, "$") and
       not String.match?(inner, ~r/\A\s|\s\z/u) and not String.match?(after_, ~r/\A[\p{L}\p{N}]/u)
   end
 

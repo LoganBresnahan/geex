@@ -7,6 +7,23 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-16 — The markdown preview can't render a file holding a byte that isn't UTF-8
+
+- **Status:** open, found 2026-11-12 by mod-verify's review of `crash-fixes` (216e97b). Older than
+  that branch: main behaves the same.
+- **Symptom:** opening the preview (`Alt+P`) of a Markdown file with a Latin-1 byte or any other
+  byte that isn't UTF-8 shows "render failed (see the log)" instead of the rendered file. The
+  editor itself draws and edits the file (BUG-15); only the preview gives up, gracefully.
+- **Verified cause:** `Geex.Markdown.Parse` hands the file's text to `TreeSitterWasm.highlight/2`
+  (`lib/geex/markdown/parse.ex`), which raises on text that isn't UTF-8 before any of geex's own
+  layout runs; the preview process catches it and reports the render failed.
+- **Recommended fix:** give the parser the text with each invalid byte replaced by U+FFFD
+  (`String.replace_invalid/1`), mapping byte offsets back where they matter (the preview is
+  read-only and lays out its own rows, so a replacement char per bad byte only shifts offsets
+  after it by two bytes each). Or leave it: a Markdown file that isn't UTF-8 is rare.
+
+---
+
 ## BUG-15 — An invalid UTF-8 byte on screen could crash a paint  ✅ FIXED (2026-11-12)
 
 - **Status:** **FIXED** 2026-11-12 on the branch `crash-fixes`, at the maintainer's word; found the

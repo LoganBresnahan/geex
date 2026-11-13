@@ -928,7 +928,7 @@ defmodule Geex.Loop.Keymap do
       end
 
     rest
-    |> Stream.unfold(&String.next_grapheme/1)
+    |> Stream.unfold(&Geex.Text.next_grapheme/1)
     |> Stream.with_index(col)
     |> Stream.map(fn {g, c} -> {g, i, c} end)
   end

@@ -35,9 +35,17 @@ defmodule Geex.Text do
   def next_grapheme(text) do
     String.next_grapheme(text)
   rescue
+    # Only the first grapheme is looked at: the valid run before the first invalid byte (or that
+    # byte alone), so a step costs the grapheme, not the rest of the text (mod-verify's review).
     ArgumentError ->
-      [g | _] = chunked(text)
-      {g, binary_part(text, byte_size(g), byte_size(text) - byte_size(g))}
+      case :unicode.characters_to_binary(text) do
+        {_, "", <<byte, rest::binary>>} ->
+          {<<byte>>, rest}
+
+        {_, valid, _rest} ->
+          {g, _} = String.next_grapheme(valid)
+          {g, binary_part(text, byte_size(g), byte_size(text) - byte_size(g))}
+      end
   end
 
   @doc """
@@ -64,10 +72,13 @@ defmodule Geex.Text do
     String.split_at(text, at)
   rescue
     ArgumentError ->
-      gs = chunked(text)
-      at = if at < 0, do: max(Kernel.length(gs) + at, 0), else: at
-      {front, back} = Enum.split(gs, at)
-      {Enum.join(front), Enum.join(back)}
+      if at >= 0 do
+        walk_split(text, at)
+      else
+        gs = chunked(text)
+        {front, back} = Enum.split(gs, max(Kernel.length(gs) + at, 0))
+        {Enum.join(front), Enum.join(back)}
+      end
   end
 
   @doc """
@@ -80,7 +91,13 @@ defmodule Geex.Text do
   def slice(text, start, count) do
     String.slice(text, start, count)
   rescue
-    ArgumentError -> text |> chunked() |> Enum.slice(start, count) |> Enum.join()
+    ArgumentError ->
+      if start >= 0 do
+        {_, rest} = walk_split(text, start)
+        elem(walk_split(rest, count), 0)
+      else
+        text |> chunked() |> Enum.slice(start, count) |> Enum.join()
+      end
   end
 
   @doc "The graphemes of `text` in `range`, as `String.slice/2`."
@@ -88,7 +105,11 @@ defmodule Geex.Text do
   def slice(text, %Range{} = range) do
     String.slice(text, range)
   rescue
-    ArgumentError -> text |> chunked() |> Enum.slice(range) |> Enum.join()
+    ArgumentError ->
+      case range do
+        first..last//1 when first >= 0 and last >= first -> slice(text, first, last - first + 1)
+        _ -> text |> chunked() |> Enum.slice(range) |> Enum.join()
+      end
   end
 
   @doc """
@@ -101,7 +122,30 @@ defmodule Geex.Text do
   def at(text, at) do
     String.at(text, at)
   rescue
-    ArgumentError -> text |> chunked() |> Enum.at(at)
+    ArgumentError ->
+      if at >= 0 do
+        {_, rest} = walk_split(text, at)
+
+        case next_grapheme(rest) do
+          {g, _} -> g
+          nil -> nil
+        end
+      else
+        text |> chunked() |> Enum.at(at)
+      end
+  end
+
+  # `text` split before grapheme `n`, walked a grapheme at a time: what it costs is the front.
+  defp walk_split(text, n), do: walk_split(text, n, 0)
+
+  defp walk_split(text, 0, off),
+    do: {binary_part(text, 0, off), binary_part(text, off, byte_size(text) - off)}
+
+  defp walk_split(text, n, off) do
+    case next_grapheme(binary_part(text, off, byte_size(text) - off)) do
+      nil -> {text, ""}
+      {g, _rest} -> walk_split(text, n - 1, off + byte_size(g))
+    end
   end
 
   @doc "The last grapheme of `text`, or `nil`."

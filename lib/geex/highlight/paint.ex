@@ -30,15 +30,8 @@ defmodule Geex.Highlight.Paint do
       span.end_byte > from and (to == :infinity or span.start_byte < to)
     end
 
-    # A span listed twice (two query patterns capturing the same node alike, or a fetch returning
-    # one span for two windows) counts once, at its last place: an equal-width tie goes to the
-    # span listed last, as it always did, however many copies came.
-    # (After the filter, which keeps the order: only the visible spans are compared.)
     spans
     |> Enum.filter(fn span -> Enum.any?(ranges, &within.(span, &1)) end)
-    |> Enum.reverse()
-    |> Enum.uniq()
-    |> Enum.reverse()
     |> Enum.map(fn span -> {span, Theme.style_for(theme, span.capture)} end)
     |> Enum.reject(fn {_span, style} -> is_nil(style) end)
     |> Enum.sort_by(fn {span, _style} ->
@@ -113,10 +106,10 @@ defmodule Geex.Highlight.Paint do
     # its 2 million characters). Only the spans over those bytes are resolved: a frame costs
     # what the screen shows, not what the file holds (ADR-0035).
     windows = windows(text, scroll, h, max(w - x0, 0), hscroll, tab)
-    # A span over two rows' windows comes back for each: counted once, in the order it first
-    # came (a later copy would win a tie of width it shouldn't, `styles/3`'s sort being stable).
-    # Fetched by window, a span comes once per window it crosses; in start order (stable), as the
-    # highlighter lists them, the copies sit where the whole list has the span.
+    # Fetched by window, a span comes once per window it crosses, and the windows' answers in any
+    # order. Sorted by start (stable), as the highlighter lists them, every copy sits beside the
+    # span's place in the whole list, so an equal-width tie goes where the whole list sends it
+    # (`styles/3`'s sort is stable, and a later copy only overwrites what it already set).
     spans =
       if is_function(spans, 1),
         do: spans.(ranges(windows)) |> Enum.sort_by(& &1.start_byte),

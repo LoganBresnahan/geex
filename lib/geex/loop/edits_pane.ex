@@ -79,7 +79,7 @@ defmodule Geex.Loop.EditsPane do
           [{String.t(), entry(), boolean()}]
   def lines(entries, root, w, n, sel, focused?, start \\ nil) do
     names = Enum.map(entries, &if(&1.path, do: relative(&1.path, root), else: ""))
-    name_w = names |> Enum.map(&String.length/1) |> Enum.max(fn -> 0 end) |> min(div(w, 2))
+    name_w = names |> Enum.map(&Geex.Text.length/1) |> Enum.max(fn -> 0 end) |> min(div(w, 2))
     who_w = entries |> Enum.map(&Geex.Text.length(&1.who)) |> Enum.max(fn -> 0 end) |> min(36)
     start = start || sel |> Kernel.-(n - 1) |> max(0) |> min(max(length(entries) - n, 0))
 
@@ -133,7 +133,7 @@ defmodule Geex.Loop.EditsPane do
   defp fit(text, w) do
     if Geex.Text.length(text) > w,
       do: Geex.Text.slice(text, 0, max(w - 1, 0)) <> "…",
-      else: String.pad_trailing(text, w)
+      else: text <> String.duplicate(" ", w - Geex.Text.length(text))
   end
 
   defp hhmm(%NaiveDateTime{} = at), do: Calendar.strftime(at, "%H:%M")

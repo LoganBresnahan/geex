@@ -6377,3 +6377,42 @@ later window first; a new example checks four duplicate orders against the refer
 green three times; `mix compile --warnings-as-errors --force` clean. (The span dedupe runs after
 the visible filter: deduping a 175,000-span list first made the highlighted 2 MB paint's 500 ms
 bound flaky.)
+
+### 2026-11-12 — `crash-fixes` review fixes (mod-verify's review of 216e97b)
+
+- **Alt+\ still crashed** on an extended pictographic right before an invalid byte (Latin-1
+  `(™\xE9 bracket)`, Alt+\ on `(`): `Keymap.forward_from/3` unfolded with `String.next_grapheme`.
+  It uses `Geex.Text.next_grapheme` now. EditsPane's name widths and padding and the markdown
+  layout's math check go through `Geex.Text` (and a Unicode regex only runs on valid text).
+- **`Geex.Text`'s fallbacks cost only what they read:** `next_grapheme`'s rescue looks at the valid
+  run before the first invalid byte (or that byte alone), not the rest of the text; `split_at`,
+  `slice` and `at` at a non-negative position walk to it a grapheme at a time. Before, one
+  `©\xE9` near the start of a 2 MB French line cost a frame and `cursor_xy` ~0.5 s, a 32 KB line of
+  `™\xE9` pairs 58 s a frame, `Doc.insert` 0.35 s a key; now a frame 0 ms, `cursor_xy` at the line's
+  end 83 ms (the non-ASCII walk to the cursor, as on main), the pairs' frame 0 ms, `Doc.insert`
+  near the start 0 ms. Guards (bounds generous for CI): those three under 300 ms, 300 ms and 20 ms;
+  the old fallback planted back fails them. `doctest Geex.Text` runs its six examples.
+- **BUG-14's landing** counted the bytes before the cut alone, so a byte 0xC0–0xFF right before the
+  change landed a column early: it now counts the graphemes of the cut's line that end at or
+  before the cut (`caf\xE9X` → col 4, `a\xC3Xb` → col 2, a change inside `e` + combining acute
+  lands before it). Computed only for a command with no coordinates. Tests; a plant that counts a
+  cut grapheme fails two.
+- **Tests for plants the suite missed:** a property drives random keys, typing, clicks, undo and a
+  frame after each through `Loop.handle_info/2` on text with invalid bytes and pictographic-plus-
+  invalid pairs (`test/geex/loop/invalid_bytes_loop_test.exs`); it fails with `String.length` put
+  back in Keymap's `line_len`, `Session.clamp_cursor`, `Loop.clamp_cursor` and the mouse, with
+  `String.graphemes` in Keymap's backward read, with `word?`'s guard removed, and with Alt+\'s
+  forward unfold. The long-line backward tail (a line over 800 KB above the cursor) has an example
+  test instead, which fails with its plant. The fetched-span sort has an example (spans fetched in
+  reverse window order paint as the whole list does; fails without the sort).
+- The styles dedupe is gone: with the fetched spans sorted by start, a later copy only overwrites
+  what it already set. The deep run passes the seeds that failed before (507480, 718496).
+- `Loop.changed/2`'s fallback returns `{0, 0}` (it read the Session, unreachable).
+- BUG-16 recorded (the markdown preview can't render a file with an invalid byte; graceful,
+  older than this branch).
+
+1581 tests + 53 properties + 183 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green twice
+(the loop property takes about a minute at that depth, so it has a 15-minute timeout);
+`mix compile --warnings-as-errors --force` clean. Live-verified via tmux: a Latin-1 file
+`(™\xE9 bracket)` and `next (©\xFF x)`; Alt+\ on `(` went to `)` (1:12), back (1:1), and on line 2
+(2:11); Ctrl-X quit with exit 0 and no error in the log.

@@ -12,6 +12,8 @@ defmodule Geex.InvalidBytesTest do
   alias Geex.Buffer.Doc
   alias Geex.Highlight.Paint
 
+  doctest Geex.Text
+
   # Bytes that are never UTF-8 on their own: continuation bytes, lead bytes cut short, 0xC0/0xC1,
   # 0xF5..0xFF.
   defp bad_byte,
@@ -144,6 +146,15 @@ defmodule Geex.InvalidBytesTest do
       assert Width.col_at_display(text, 2, 4) == 2
     end
 
+    test "Alt+\\ over invalid bytes: forward, backward, and through a long line's tail" do
+      line = "(™" <> <<0xE9>> <> " bracket)"
+      assert Geex.Loop.Keymap.matching_bracket({0, 0}, line) == {0, 11}
+      assert Geex.Loop.Keymap.matching_bracket({0, 11}, line) == {0, 0}
+      # A line over the backward search's budget above the cursor is read by its tail.
+      long = String.duplicate("é", 900_000) <> "(☀" <> <<0xFF>> <> "\n)"
+      assert Geex.Loop.Keymap.matching_bracket({1, 0}, long) == {0, 900_000}
+    end
+
     test "valid emoji are untouched: ZWJ, flags, keycaps, skin tones, CJK, combining marks" do
       for text <- ["👨‍👩‍👧 x", "🇫🇷🇯🇵", "1️⃣2️⃣", "👍🏽👍🏿", "日本語", "éa"] do
         assert Text.graphemes(text) == String.graphemes(text)
@@ -151,6 +162,31 @@ defmodule Geex.InvalidBytesTest do
       end
 
       assert row0("日本") == "日" <> "" <> "本"
+    end
+  end
+
+  describe "what a fallback costs (mod-verify's review)" do
+    # The fastest of three; bounds generous for CI's slower runner. Before, each fallback
+    # re-segmented the rest of the text: 0.4–0.5 s here, 58 s for the line of pairs.
+    defp ms(fun), do: for(_ <- 1..3, do: elem(:timer.tc(fun), 0)) |> Enum.min() |> div(1000)
+
+    setup do
+      fr = String.duplicate("café crème brûlée ", 120_000)
+      long = binary_part(fr, 0, 40) <> "©" <> <<0xE9>> <> binary_part(fr, 40, byte_size(fr) - 40)
+      %{long: long, pairs: String.duplicate("™" <> <<0xE9>>, 8_000)}
+    end
+
+    test "one © before an invalid byte near the start of a 2 MB French line", %{long: long} do
+      assert ms(fn -> Paint.to_screen(long, [], Geex.Fixtures.birds(), 100, 5) end) < 300
+      assert ms(fn -> Loop.cursor_xy(long, {0, 1_000_000}, 0, 4) end) < 300
+      doc = Doc.new(long)
+      assert ms(fn -> Doc.insert(doc, {0, 50}, "x") end) < 20
+    end
+
+    test "a 32 KB line of ™ and invalid bytes, each pair a fallback", %{pairs: pairs} do
+      assert ms(fn -> Paint.to_screen(pairs, [], Geex.Fixtures.birds(), 100, 5) end) < 300
+      assert ms(fn -> Width.line(pairs, 4) end) < 300
+      assert Text.length(pairs) == 16_000
     end
   end
 end

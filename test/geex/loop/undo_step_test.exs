@@ -98,4 +98,29 @@ defmodule Geex.Loop.UndoStepTest do
     # "wörld" and "wérld" share "w" and the lead byte of ö/é: the cursor goes before the ö.
     assert cursor() == {0, 7}
   end
+
+  # mod-verify's review: the landing counted the bytes before the cut alone, so a byte that isn't
+  # UTF-8 right before the change (0xC0–0xFF) put the cursor one column early.
+  test "an undone edit after a byte that isn't UTF-8 lands after that byte", %{dir: dir} do
+    for {text, search, replace, at} <- [
+          {"caf" <> <<0xE9>> <> "X\n", "X", "Y", {0, 4}},
+          {"a" <> <<0xC3>> <> "Xb\n", "X", "Y", {0, 2}},
+          # Inside a grapheme of several codepoints (e + a combining acute): before it.
+          {"ae\u0301z\n", "e\u0301", "e\u0300", {0, 1}}
+        ] do
+      {state, buf, _path} = open(dir, text)
+
+      {:ok, edit} =
+        Geex.Commands.Edit.parse(%{"edits" => [%{"search" => search, "replace" => replace}]})
+
+      {:ok, _} = Buffer.dispatch(buf, Geex.Command.put_meta(edit, Geex.Command.Meta.new(:human)))
+      refute Buffer.get_text(buf) == text
+      _ = key(state, {:alt, ?z})
+      assert Buffer.get_text(buf) == text
+      assert cursor() == at, inspect({text, cursor()})
+
+      for %{pid: pid} <- Session.buffers(),
+          do: DynamicSupervisor.terminate_child(Geex.BufferSupervisor, pid)
+    end
+  end
 end

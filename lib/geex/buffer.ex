@@ -854,14 +854,21 @@ defmodule Geex.Buffer do
     footprint = Footprint.between(History.text(state.history), after_text)
     notify_change(new_state, footprint)
 
-    # Where the text changed, in the text it left: for a command with no coordinates of its own
-    # (the MCP `edit` tool's search/replace blocks), the view places the cursor by this (BUG-14).
-    changed =
-      {position_at(after_text, footprint.at),
-       position_at(after_text, footprint.at + footprint.added)}
+    snapshot = build_snapshot(new_state) |> Map.put(:step, length(commands))
 
+    # Where the text changed, in the text it left, for a command with no coordinates of its own
+    # (the MCP `edit` tool's search/replace blocks): the view places the cursor by it (BUG-14).
+    # Only then: it reads the text up to the change.
     snapshot =
-      build_snapshot(new_state) |> Map.put(:step, length(commands)) |> Map.put(:changed, changed)
+      if elem(edit_start(command), 0) == 1 do
+        changed =
+          {position_at(after_text, footprint.at),
+           position_at(after_text, footprint.at + footprint.added)}
+
+        Map.put(snapshot, :changed, changed)
+      else
+        snapshot
+      end
 
     {:reply, {:ok, snapshot, command}, new_state}
   end
@@ -874,29 +881,37 @@ defmodule Geex.Buffer do
   defp edit_start(%{line: line, col: col}), do: {0, line, col}
   defp edit_start(_command), do: {1, 0, 0}
 
-  # The {line, grapheme column} at byte `at` of `text`, backed off to a whole character.
+  # The {line, grapheme column} at byte `at` of `text`: the graphemes of its line that end at or
+  # before `at`, so a cut inside a character (a split UTF-8 sequence, a grapheme of several
+  # codepoints) lands before it, and a byte that isn't UTF-8 counts as one, as Doc counts it.
   defp position_at(text, at) do
-    before = binary_part(text, 0, min(at, byte_size(text)))
-    line = before |> :binary.matches("\n") |> length()
-    last = before |> String.split("\n") |> List.last()
-    {line, Geex.Text.length(whole_chars(last))}
+    at = min(at, byte_size(text))
+    breaks = :binary.matches(binary_part(text, 0, at), "\n")
+
+    line_start =
+      case List.last(breaks) do
+        nil -> 0
+        {b, 1} -> b + 1
+      end
+
+    line_end =
+      case :binary.match(text, "\n", scope: {at, byte_size(text) - at}) do
+        {b, 1} -> b
+        :nomatch -> byte_size(text)
+      end
+
+    line = binary_part(text, line_start, line_end - line_start)
+    {length(breaks), graphemes_within(line, at - line_start, 0, 0)}
   end
 
-  # Without a character the cut split: a UTF-8 lead byte near the end whose sequence the cut left
-  # short. A byte that isn't UTF-8 at all stays: it is a character of its own, as Doc counts it.
-  defp whole_chars(bin) do
-    n = byte_size(bin)
+  defp graphemes_within(line, cut, off, n) do
+    case Geex.Text.next_grapheme(binary_part(line, off, byte_size(line) - off)) do
+      {g, _} when off + byte_size(g) <= cut ->
+        graphemes_within(line, cut, off + byte_size(g), n + 1)
 
-    Enum.find_value(1..min(3, n)//1, bin, fn back ->
-      case :binary.at(bin, n - back) do
-        b when b >= 0xF0 and back < 4 -> binary_part(bin, 0, n - back)
-        b when b >= 0xE0 and b < 0xF0 and back < 3 -> binary_part(bin, 0, n - back)
-        b when b >= 0xC0 and b < 0xE0 and back < 2 -> binary_part(bin, 0, n - back)
-        b when b >= 0xC0 -> bin
-        b when b < 0x80 -> bin
-        _continuation -> nil
-      end
-    end)
+      _ ->
+        n
+    end
   end
 
   # --- the durable ledger (ADR-0033) ---
