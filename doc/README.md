@@ -12,6 +12,7 @@ If you read one thing, read **[vision.md](vision.md)**.
 | **[vision.md](vision.md)** | The north star — what geex is & is not, the one shared path, the world-vs-brain boundary | First. Always. |
 | **[roadmap.md](roadmap.md)** | Staged plan, v0.1 → v0.5 → beyond (editor core + AI layer) | You want to know what's next / what ships when |
 | **[mcp-ai-integration.md](mcp-ai-integration.md)** | The detailed AI-layer design: the two directions, transport layers, the MCP server, security, the extension/capability model, testing & dogfooding | You're building or changing the AI layer |
+| **[stack.md](stack.md)** | How geex, pharos and captAInHook work together: each one's role, the rules between them, the connections, the cross-repo work in order | You're changing anything that crosses into pharos or captAInHook |
 | **[testing.md](testing.md)** | Test strategy (the pyramid) + the append-only **verification log** of what's been hand-checked and called "good", and when | You want the test approach, or the history of what's verified |
 | **[adr/](adr/)** | The decision ledger — every load-bearing decision, why, and its consequences | You're asking "why is it this way?" |
 | **[notes.md](notes.md)** | The original design-space exploration: why BEAM, extension substrates, frontend options, the command system, the AI loop, TTY fundamentals | You want the background reasoning / the road not taken |

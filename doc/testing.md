@@ -6821,3 +6821,11 @@ the palette still finds them typed with spaces.
 
 Before the tag: 1683 tests + 57 properties + 201 doctests green twice, `--warnings-as-errors
 --force` clean, `GEEX_PROPERTY_RUNS=10000` green (after the counterexample above was fixed).
+
+### 2026-11-13 — 0.7.0 published, smoke green (ADR-0041)
+
+`v0.7.0` tagged on 2434290 after `ci` passed on main (run 43461009836). The release run
+(43461780078, 22m51s) built all four targets (linux-x64, linux-arm64, darwin-arm64, darwin-x64),
+published six assets, and its smoke jobs installed the release from the public URL and ran it on
+ubuntu-22.04, ubuntu-24.04, ubuntu-22.04-arm, ubuntu-24.04-arm, macos-15 and macos-15-intel, all
+green; `v0.7.0` is the latest release. Not checked: the maintainer's `geex self update` to it.
