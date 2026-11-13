@@ -6756,3 +6756,17 @@ said no match in a file with only `needle` (smart case), `word back` said "unkno
 back", `search-all needle` listed both files' lines at once under "search-all “needle”", and
 `search all` in the palette put `search-all` first. Not checked: the deep property run, Alt+Y's
 Commands tab live, recalled history lines from before.
+
+### 2026-11-13 — Deployed `0.6.0+b78ceb97.89a87236` (main b78ceb9: result-pane and hyphen-names merged)
+
+`mix geex.deploy` after the ship bar on the merge (1679 tests + 57 properties + 200 doctests green
+twice, `--warnings-as-errors --force` clean); install.sh kept `0.6.0+7ff344a2.89a87236` as the
+previous version and removed 0.6.0. Checked live with a scratch `XDG_STATE_HOME` in a tmux pty, in a
+scratch git repo: `geex --version` prints the version, `geex --frob` exits 2; two side-by-side
+panes holding `a.txt` and `b.txt` alone, `search-all needle` typed at `Alt+M` ran at once
+("search-all “needle” · 2 lines"), and `Alt+N` three times went left pane, right pane, left pane
+with no tab added; `select all` said "unknown command: select all"; `geex notes.txt` holding
+`IO.puts("x")` opens it and prints no `x`; each Ctrl-X exited with the shell back; the attestation
+discovery file was gone after; the log reads "loading code in embedded mode" with no `terminating`
+lines and no crash dump. Not checked: `geex highlight`, a bare `geex`, Alt+Y's Commands tab, a
+macOS build, the release CI.
