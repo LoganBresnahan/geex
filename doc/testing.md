@@ -6474,3 +6474,17 @@ a next_grapheme walk against the whole text's segmentation, valid stretches by S
 byte alone, at positions -20..20); it catches both plants the suite missed (walk_split past the
 end, slice/2's positive range off by one). ADR-0044's Consequences say one crash, not two; the
 reference paint's opt-out comment says when it raises.
+
+### 2026-11-13 — Deployed `0.5.0+73113e85.89a87236` (main 73113e8)
+
+`mix geex.deploy` after the ship bar (1583 tests + 54 properties + 183 doctests green twice,
+`--warnings-as-errors` clean); install.sh kept 0.5.0 as the previous version and removed 0.4.0.
+Checked live with scratch `XDG_STATE_HOME`/`XDG_CONFIG_HOME` in a tmux pty: `geex --version`
+prints the version (exit 0), `geex --frob` exits 2; `geex a.txt` shows the file, `Alt+;` then `!`
+then Ctrl-O saved it; trim on save on `t.txt` wrote `trim me\nkeep\n`; bare `geex` in the repo
+shows the tree with a scratch buffer; `geex notes.txt` holding `IO.puts("x")` opens it and prints
+no `x`; `geex highlight some.json` prints in colour; each Ctrl-X exited 0 with the prompt back;
+the attestation discovery file existed while running and was gone after; the log reads "loading
+code in embedded mode" with no `terminating` lines and no crash dump. Not checked: the new keys,
+long lines and invalid bytes in the installed program (the suite and the branches' tmux runs cover
+them), a macOS build, the release CI.
