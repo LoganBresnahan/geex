@@ -6734,3 +6734,25 @@ code and pass; one doctest. 1670 tests + 57 properties + 200 doctests green twic
 then `Alt+N` three times put the cursor after the match in the left pane, the right pane, the left
 pane again, each pane keeping its one tab. Not checked live: a file behind another tab, a preview
 tab, three or more panes. Not run: the deep property run (no property's code changed).
+
+### 2026-11-13 — Command names hyphenated, an argument after a space, `search TEXT` (ADR-0047 amendment; branch `hyphen-names`)
+
+The maintainer's call: every command name of more than one word is hyphenated (`search-all`,
+`tab-next`, `word-back` …), and an argument comes after a space; `all`/`project` stay part of the
+name (asked: as arguments, `search all` couldn't say whether it searches for "all"). Every catalog
+name and alias renamed (`theme terminal` kept: it is `theme NAME`); the parser's clauses, the
+prompts (`search-project:`), the output title, the settings label and stored value (`search all`
+still read). `search TEXT` / `search-project TEXT` / `search-all TEXT` (and `find-in-file`, `grep`)
+run as if TEXT were typed in the prompt and Enter pressed, its case and inner spaces kept; an
+unknown `Alt+M` line says "unknown command: …". The palette and Commands tab split names at
+hyphens and match a typed space to a hyphen. Tests: the parser (hyphenated names, the spaced
+spelling unknown, the search text), the loop (`search needle` selects and Alt+N goes on, inline and
+off the loop; the pre-fill replaced; unknown said; `search-all needle` and `search-project needle`
+run at once; the old setting value read), the catalog (no name has a space; `search all`,
+`search-all`, `sea al` rank `search-all` first), and the band property's oracle now splitting at
+hyphens. 1676 tests + 57 properties + 199 doctests green twice, `--warnings-as-errors --force`
+clean. Live in a tmux pty (the branch's dev build, scratch `XDG_STATE_HOME`): `search Needle`
+said no match in a file with only `needle` (smart case), `word back` said "unknown command: word
+back", `search-all needle` listed both files' lines at once under "search-all “needle”", and
+`search all` in the palette put `search-all` first. Not checked: the deep property run, Alt+Y's
+Commands tab live, recalled history lines from before.

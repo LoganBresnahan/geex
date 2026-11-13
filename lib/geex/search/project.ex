@@ -5,10 +5,10 @@ defmodule Geex.Search.Project do
   whether a root is one to refuse. The loop runs the command through `Geex.Shell` into the output
   pane, as `!` runs one (ADR-0042).
 
-  - **`search project`**: in a git work tree, `git grep` over the tracked files and the untracked
+  - **`search-project`**: in a git work tree, `git grep` over the tracked files and the untracked
     ones git doesn't ignore (Q11), the common generated directories left out; outside one, `grep -r`
     leaving the same directories out.
-  - **`search all`**: everything: in git, ignored files too; outside, every file.
+  - **`search-all`**: everything: in git, ignored files too; outside, every file.
   - Plain text (`-F`), binary files skipped (`-I`), line numbers (`-n`); smart case as the file's
     search has it (`-i` when the query has no capital, `Geex.Search.capital?/1`). git's paths come
     unquoted (`core.quotePath=false`), so a name with a space or an `é` reads as it is (R13).
@@ -18,7 +18,7 @@ defmodule Geex.Search.Project do
 
   @excluded ~w(.git _build deps node_modules target dist .venv)
 
-  @doc "The directories `search project` leaves out."
+  @doc "The directories `search-project` leaves out."
   @spec excluded() :: [String.t()]
   def excluded, do: @excluded
 

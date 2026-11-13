@@ -196,7 +196,7 @@ defmodule Geex.Loop.EditingKeysTest do
 
     test "typed as `move down`", %{dir: dir} do
       {state, buf} = open(dir, "a.txt", "a\nb\n")
-      _ = run(state, "move down")
+      _ = run(state, "move-down")
       assert Buffer.get_text(buf) == "b\na\n"
     end
   end

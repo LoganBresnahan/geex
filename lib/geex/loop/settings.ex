@@ -230,7 +230,7 @@ defmodule Geex.Loop.Settings do
         cells: [
           "Alt+Shift+Q",
           search_key_label(Map.get(ctx, :search_key, :search_project)),
-          "search project skips build and dependency folders; search all reads everything"
+          "search-project skips build and dependency folders; search-all reads everything"
         ]
       },
       %{name: nil, cells: ["Settings", tilde(Geex.Settings.path()), ""], left_cut: 1},
@@ -243,8 +243,8 @@ defmodule Geex.Loop.Settings do
     ]
   end
 
-  defp search_key_label(:search_all), do: "search all"
-  defp search_key_label(_), do: "search project"
+  defp search_key_label(:search_all), do: "search-all"
+  defp search_key_label(_), do: "search-project"
 
   defp indent_label(:follow), do: "follow the file"
   defp indent_label(other), do: Atom.to_string(other)

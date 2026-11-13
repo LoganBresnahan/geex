@@ -103,7 +103,7 @@ defmodule Geex.Loop.ProjectSearchTest do
       assert Enum.any?(lines, &(&1 =~ "new.txt:1:"))
       refute Enum.any?(lines, &(&1 =~ ~r/_build|deps|x\.log/))
       assert state.focus == :output
-      assert Output.title(state.output, 0) =~ ~r/search project “needle” · 3 lines/
+      assert Output.title(state.output, 0) =~ ~r/search-project “needle” · 3 lines/
       assert state.recall.search.entries == ["needle"]
     end
 
@@ -114,7 +114,7 @@ defmodule Geex.Loop.ProjectSearchTest do
       lines = results(state)
       assert Enum.any?(lines, &(&1 =~ "_build/b.txt:1:"))
       assert Enum.any?(lines, &(&1 =~ "x.log:1:"))
-      assert Output.title(state.output, 0) =~ "search all"
+      assert Output.title(state.output, 0) =~ "search-all"
     end
 
     test "the query quoted: ' $ ` and \\ are searched for as typed", %{root: root} do
@@ -283,7 +283,7 @@ defmodule Geex.Loop.ProjectSearchTest do
       repo(root, %{"a.txt" => "needle a\n", "b.txt" => "needle b\n", "c.txt" => "x\n"})
       # Pane 1 shows a.txt; pane 2 (side by side) shows b.txt; pane 1 is current.
       state = editing(root, "a.txt") |> key({:alt, ?=}) |> command("open b.txt")
-      state = command(state, "pane next")
+      state = command(state, "pane-next")
       assert state.panes.pane == 1
       state = search(state, "needle")
 
@@ -309,7 +309,7 @@ defmodule Geex.Loop.ProjectSearchTest do
       repo(root, %{"a.txt" => "x\n", "b.txt" => "needle b\n", "c.txt" => "y\n"})
       # Pane 2 has b.txt behind c.txt; pane 1 shows a.txt and is current.
       state = editing(root, "a.txt") |> key({:alt, ?=}) |> command("open b.txt")
-      state = state |> command("open c.txt") |> command("pane next")
+      state = state |> command("open c.txt") |> command("pane-next")
       assert state.panes.pane == 1
       state = search(state, "needle")
 
@@ -323,7 +323,7 @@ defmodule Geex.Loop.ProjectSearchTest do
     test "Enter on a result line goes to the pane that shows its file too", %{root: root} do
       repo(root, %{"a.txt" => "a\n", "b.txt" => "x\nneedle b\n"})
       state = editing(root, "a.txt") |> key({:alt, ?=}) |> command("open b.txt")
-      state = state |> command("pane next") |> search("needle")
+      state = state |> command("pane-next") |> search("needle")
       state = key(%{state | focus: :output}, {:key, :enter})
       assert {state.panes.pane, Path.basename(shown_path()), cursor()} == {2, "b.txt", {1, 6}}
       assert tab_names(state, 1) == ["a.txt"]
@@ -345,6 +345,27 @@ defmodule Geex.Loop.ProjectSearchTest do
       state = key(%{state | focus: :editor, selection: nil}, {:alt, ?n})
       assert state.search.last == :file
       assert sel(state) == {{0, 0}, {0, 2}}
+    end
+  end
+
+  describe "typed at Alt+M with the text (2026-11-13)" do
+    test "`search-all TEXT` and `search-project TEXT` run at once, the prompt skipped", %{
+      root: root
+    } do
+      repo(root, %{"a.txt" => "needle\n"}, %{"_build/b.txt" => "needle\n"})
+      state = editing(root, "a.txt") |> command("search-all needle") |> ran()
+      assert state.minibuffer.mode == :inactive
+      assert Enum.sort(results(state)) == ["_build/b.txt:1:needle", "a.txt:1:needle"]
+      assert Output.title(state.output, 0) =~ "search-all “needle”"
+
+      state = %{state | focus: :editor} |> command("search-project needle") |> ran()
+      assert results(state) == ["a.txt:1:needle"]
+    end
+
+    test "a setting kept as `search all` (before the hyphens) is still read", %{root: root} do
+      repo(root, %{"a.txt" => "x\n"})
+      state = Loop.apply_settings(editing(root, "a.txt"), %{"search_key" => "search all"})
+      assert state.keys[{:alt, ?Q}] == :search_all
     end
   end
 
@@ -377,7 +398,7 @@ defmodule Geex.Loop.ProjectSearchTest do
     repo(root, %{"a.txt" => "x\n"})
     state = editing(root, "a.txt")
     assert Loop.Bindings.translate({:alt, ?Q}, state.keys) == {:cmd, :search_project}
-    state = Loop.apply_settings(state, %{"search_key" => "search all"})
+    state = Loop.apply_settings(state, %{"search_key" => "search-all"})
     assert Loop.Bindings.translate({:alt, ?Q}, state.keys) == {:cmd, :search_all}
     state = key(state, {:alt, ?Q})
     assert state.minibuffer.mode == :search_all

@@ -260,7 +260,7 @@ defmodule Geex.Loop.IndentLinesTest do
 
     test "typed as `indent other`", %{dir: dir} do
       {state, buf} = open(dir, "a.txt", "ab\n", {0, 1})
-      _ = run(state, "indent other")
+      _ = run(state, "indent-other")
       assert Buffer.get_text(buf) == "a\tb\n"
     end
   end

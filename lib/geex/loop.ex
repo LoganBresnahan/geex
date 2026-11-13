@@ -344,8 +344,12 @@ defmodule Geex.Loop do
     end)
     |> then(fn state ->
       case settings["search_key"] do
-        "search all" -> %{state | keys: Map.put(state.keys, {:alt, ?Q}, :search_all)}
-        _ -> state
+        # "search all" is how it was kept before the names took hyphens.
+        all when all in ["search-all", "search all"] ->
+          %{state | keys: Map.put(state.keys, {:alt, ?Q}, :search_all)}
+
+        _ ->
+          state
       end
     end)
     |> then(fn state ->
@@ -1086,7 +1090,7 @@ defmodule Geex.Loop do
   # A key for the editor: resolve it against the current text + cursor (read fresh from
   # Session).
   # A preview's keys go to a handler of their own: it is read-only (ADR-0043 §1).
-  # A command named for one of the editor's own keys (`line break` …, ADR-0047 §2) is that key.
+  # A command named for one of the editor's own keys (`line-break` …, ADR-0047 §2) is that key.
   defp apply_editor_key(event, state) do
     event =
       with {:cmd, command} <- event,
@@ -3496,7 +3500,7 @@ defmodule Geex.Loop do
 
   defp settings_rows(view, state), do: Settings.rows(view, settings_ctx(state))
 
-  # What Alt+Shift+Q runs: `search project`, or `search all` by the General setting.
+  # What Alt+Shift+Q runs: `search-project`, or `search-all` by the General setting.
   defp search_key(state), do: Map.get(state.keys, {:alt, ?Q}, :search_project)
 
   defp say(%{settings: %Settings{} = view} = state, message),
@@ -3578,11 +3582,11 @@ defmodule Geex.Loop do
     )
   end
 
-  # What Alt+Shift+Q runs (ADR-0053's 2026-11-13 amendment): `search project` or `search all`,
+  # What Alt+Shift+Q runs (ADR-0053's 2026-11-13 amendment): `search-project` or `search-all`,
   # kept in settings.json as `search_key`; the bindings take it, so the help shows it.
   defp settings_action({:toggle, :search_key}, state) do
     next = if search_key(state) == :search_all, do: :search_project, else: :search_all
-    label = if next == :search_all, do: "search all", else: "search project"
+    label = if next == :search_all, do: "search-all", else: "search-project"
 
     keep(
       %{state | keys: Map.put(state.keys, {:alt, ?Q}, next)},
@@ -4874,9 +4878,9 @@ defmodule Geex.Loop do
     end
   end
 
-  # Tab, Shift+Tab and `indent other` (ADR-0050): over a live selection they indent or un-indent
+  # Tab, Shift+Tab and `indent-other` (ADR-0050): over a live selection they indent or un-indent
   # its lines; Shift+Tab un-indents the cursor's line without one. With no selection, Tab and
-  # `indent other` insert at the cursor (`resolve_key/4`).
+  # `indent-other` insert at the cursor (`resolve_key/4`).
   defp apply_key(event, cursor, text, state)
        when event in [{:key, :tab}, {:key, :shift_tab}, {:cmd, :indent_other}] do
     sel =
@@ -5157,7 +5161,7 @@ defmodule Geex.Loop do
   defp indent_with(text, state),
     do: Keymap.indent_with(text, current_path(state), state.indent_with)
 
-  # The other kind of indent level from `indent_unit/2`'s (`indent other`, ADR-0050).
+  # The other kind of indent level from `indent_unit/2`'s (`indent-other`, ADR-0050).
   defp other_unit(text, state) do
     case Keymap.other_indent(indent_with(text, state)) do
       :tabs -> "\t"
@@ -5170,7 +5174,7 @@ defmodule Geex.Loop do
     # the keymap doesn't hold (roadmap item 18.7).
     pairs = live_pairs(state)
 
-    # Tab inserts what the file indents with; `indent other` (Alt+1) the other kind (ADR-0050).
+    # Tab inserts what the file indents with; `indent-other` (Alt+1) the other kind (ADR-0050).
     # The tab size and the file's kind are the loop's, not the keymap's.
     action =
       case event do
@@ -6247,7 +6251,7 @@ defmodule Geex.Loop do
     end
   end
 
-  ## Project search (ADR-0053 §6–§7): Alt+Shift+Q (`search project`, or `search all` by the
+  ## Project search (ADR-0053 §6–§7): Alt+Shift+Q (`search-project`, or `search-all` by the
   ## General setting) runs `git grep` (or `grep -r`) through `Geex.Shell` into the output pane,
   ## the first 5,000 lines kept; Alt+N then opens the next result, selecting its match.
 
@@ -6653,9 +6657,27 @@ defmodule Geex.Loop do
       :shell_again -> run_shell(state, state.last_shell)
       {:pipe, cmd} -> run_pipe(state, cmd)
       {:command, command} -> typed_command(command, state)
+      {:search, mode, text} -> typed_search(mode, text, state)
       {:action, action} -> apply_verb(action, state)
       :cancel -> state
-      :unknown -> state
+      :unknown -> %{state | notice: "unknown command: #{String.trim(input)}"}
+    end
+  end
+
+  # `search TEXT`, `search-project TEXT`, `search-all TEXT`: the command's prompt, opened as its
+  # key opens it, then TEXT in it in place of any pre-fill, then Enter, as if typed there. A
+  # prompt that didn't open (a preview has no text to search) leaves its notice.
+  defp typed_search(mode, text, state) do
+    state = typed_command(mode, state)
+
+    case state.minibuffer do
+      %Minibuffer{mode: ^mode} ->
+        state = %{state | minibuffer: Minibuffer.open(mode, text)}
+        state = if mode == :search, do: search_typed(state), else: state
+        apply_minibuffer_key({:key, :enter}, state)
+
+      _ ->
+        state
     end
   end
 
@@ -6712,7 +6734,7 @@ defmodule Geex.Loop do
   # A typed or picked command (ADR-0047 §6). Those whose keys work from anywhere (`settings`,
   # `stop`, `resize …`) run as their key does, on what has focus; the rest act on the file you
   # were last in, whatever has focus, as the older typed verbs do (`apply_verb/2`), and focus
-  # stays. `pane next` reads the focus too (it goes to the pane after the focused one), since
+  # stays. `pane-next` reads the focus too (it goes to the pane after the focused one), since
   # moving focus is what it does.
   defp typed_command(command, state) do
     if command in [:settings, :stop_shell] or match?({:resize, _}, command),

@@ -51,8 +51,8 @@ defmodule Geex.Loop.VerbsTest do
     test "selection verbs (= Alt+S / Alt+A, ADR-0029)" do
       assert Verbs.parse("highlight") == {:action, :select_start}
       assert Verbs.parse("select") == {:action, :select_start}
-      assert Verbs.parse("highlight all") == {:action, :select_all}
-      assert Verbs.parse("select all") == {:action, :select_all}
+      assert Verbs.parse("highlight-all") == {:action, :select_all}
+      assert Verbs.parse("select-all") == {:action, :select_all}
     end
 
     test "save (= Ctrl-O) and quit/exit (= Ctrl-X)" do
@@ -112,9 +112,34 @@ defmodule Geex.Loop.VerbsTest do
       assert Verbs.parse("   ") == :cancel
     end
 
-    test "anything else is unknown (a no-op until the catalog backs the parser)" do
+    test "anything else is unknown (the loop says so)" do
       assert Verbs.parse("frobnicate") == :unknown
       assert Verbs.parse("copy that") == :unknown
+    end
+  end
+
+  describe "parse/1 — names take hyphens, an argument comes after a space (2026-11-13)" do
+    test "a multi-word name is hyphenated; the spaced spelling is no command" do
+      assert Verbs.parse("select-all") == {:action, :select_all}
+      assert Verbs.parse("tab-next") == {:action, :tab_next}
+      assert Verbs.parse("word-back") == {:command, :word_back}
+      assert Verbs.parse("resize-left") == {:command, {:resize, :left}}
+      assert Verbs.parse("word back") == :unknown
+      assert Verbs.parse("tab next") == :unknown
+      # An argument after a space, as before.
+      assert Verbs.parse("tab 3") == {:action, {:tab, 2}}
+      assert Verbs.parse("theme terminal") == {:action, {:theme, "terminal"}}
+    end
+
+    test "the search commands take their text after a space, its case and inner spaces kept" do
+      assert Verbs.parse("search") == {:command, :search}
+      assert Verbs.parse("search Needle") == {:search, :search, "Needle"}
+      assert Verbs.parse("SEARCH-ALL foo  Bar") == {:search, :search_all, "foo  Bar"}
+      assert Verbs.parse("search-project x") == {:search, :search_project, "x"}
+      assert Verbs.parse("grep x") == {:search, :search_project, "x"}
+      assert Verbs.parse("find-in-file x") == {:search, :search, "x"}
+      # `all` is the text here: the file is searched for it.
+      assert Verbs.parse("search all") == {:search, :search, "all"}
     end
   end
 

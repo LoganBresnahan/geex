@@ -17,7 +17,7 @@ defmodule Geex.Command.CatalogTest do
         assert v in names, "expected #{v} in the catalog"
       end
 
-      assert "select all" in names
+      assert "select-all" in names
     end
 
     test "every entry carries a dispatchable invoke" do
@@ -108,9 +108,9 @@ defmodule Geex.Command.CatalogTest do
 
     test "a fuzzy subsequence still matches (even when a prefix outranks it)" do
       results = Catalog.search("sa")
-      # "save" is a prefix of the query, so it leads; "select all" is matched as an acronym
+      # "save" is a prefix of the query, so it leads; "select-all" is matched as an acronym
       assert hd(results).name == "save"
-      assert "select all" in names(results)
+      assert "select-all" in names(results)
     end
 
     test "a description-only hit is found, but ranks below any name match" do
@@ -137,16 +137,16 @@ defmodule Geex.Command.CatalogTest do
   describe "search/2" do
     test "a good name match beats a better-scored loose one" do
       # `enter` is scattered through `indent other`'s name; nothing is named `enter`.
-      keyed = &(&1.name == "line break")
-      assert hd(Catalog.search("enter", keyed)).name == "line break"
-      assert hd(Catalog.search("line e")).name == "line end"
-      assert hd(Catalog.search("sel al")).name == "select all"
+      keyed = &(&1.name == "line-break")
+      assert hd(Catalog.search("enter", keyed)).name == "line-break"
+      assert hd(Catalog.search("line e")).name == "line-end"
+      assert hd(Catalog.search("sel al")).name == "select-all"
     end
 
     test "a command named like the key comes before the key's command" do
-      results = Catalog.search("delete", &(&1.name == "delete forward"))
+      results = Catalog.search("delete", &(&1.name == "delete-forward"))
       assert hd(results).name == "delete"
-      assert Enum.count(results, &(&1.name == "delete forward")) == 1
+      assert Enum.count(results, &(&1.name == "delete-forward")) == 1
     end
 
     # Where the catalog's order and the score disagree: the score orders within a band
@@ -156,7 +156,7 @@ defmodule Geex.Command.CatalogTest do
             {"clipboard", "paste"},
             {"clear", "no"},
             {"create", "new"},
-            {"under", "delete forward"}
+            {"under", "delete-forward"}
           ],
           do: assert(hd(Catalog.search(q)).name == top, q)
     end
@@ -201,18 +201,23 @@ defmodule Geex.Command.CatalogTest do
       end
     end
 
-    # The rule, written apart from the code: every query word starts a name word, in order.
+    # The rule, written apart from the code: every query word starts a name word, in order; a
+    # name's words are split at its hyphens, and a query's at spaces or hyphens.
     defp good?(entry, q) do
-      words = String.split(String.downcase(q))
+      words = String.split(String.downcase(q), ~r/[\s-]+/, trim: true)
 
       Enum.any?([entry.name | entry.aliases], fn name ->
         rest =
-          Enum.reduce_while(words, String.split(String.downcase(name)), fn w, name_words ->
-            case Enum.drop_while(name_words, &(not String.starts_with?(&1, w))) do
-              [] -> {:halt, :miss}
-              [_ | after_it] -> {:cont, after_it}
+          Enum.reduce_while(
+            words,
+            String.split(String.downcase(name), ~r/[\s-]+/, trim: true),
+            fn w, name_words ->
+              case Enum.drop_while(name_words, &(not String.starts_with?(&1, w))) do
+                [] -> {:halt, :miss}
+                [_ | after_it] -> {:cont, after_it}
+              end
             end
-          end)
+          )
 
         rest != :miss
       end)
@@ -243,8 +248,22 @@ defmodule Geex.Command.CatalogTest do
   end
 
   test "the pane commands answer to their plain names (ADR-0051)" do
-    for {typed, name} <- [{"previous pane", "pane prev"}, {"next pane", "pane next"}] do
+    for {typed, name} <- [{"previous-pane", "pane-prev"}, {"next-pane", "pane-next"}] do
       assert Enum.any?(Catalog.all(), &(&1.name == name and typed in &1.aliases)), typed
     end
+  end
+
+  test "multi-word names are hyphenated; the palette takes a space for a hyphen (2026-11-13)" do
+    for %{name: name, aliases: aliases, usage: usage} <- Catalog.all(),
+        n <- [name | aliases],
+        # `theme terminal` is `theme NAME` with its argument; `tab N`, `line N` are usages.
+        n != "theme terminal" do
+      refute n =~ " ", "#{n} has a space (usage #{inspect(usage)})"
+    end
+
+    for q <- ["search all", "search-all", "sea al"],
+        do: assert(hd(Catalog.search(q)).name == "search-all", q)
+
+    assert hd(Catalog.search("move word b")).name == "move-word-back"
   end
 end

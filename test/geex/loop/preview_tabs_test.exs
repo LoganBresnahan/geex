@@ -226,7 +226,7 @@ defmodule Geex.Loop.PreviewTabsTest do
       state = key(state, {:alt, ?>})
       assert state.panes.pane == 2 and Panes.preview?(Panes.current(state.panes))
 
-      for event <- [{:alt, ?<}, {:alt, ?>}, {:typed, "pane prev"}, {:typed, "pane next"}] do
+      for event <- [{:alt, ?<}, {:alt, ?>}, {:typed, "pane-prev"}, {:typed, "pane-next"}] do
         s =
           case event do
             {:typed, verb} -> type(state, verb)
@@ -300,7 +300,7 @@ defmodule Geex.Loop.PreviewTabsTest do
             "undo",
             "paste",
             "revert",
-            "select all",
+            "select-all",
             "line 3",
             "|cat",
             "duplicate",

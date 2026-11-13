@@ -113,7 +113,7 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "tree",
-      description: "Show or hide the file tree (`pane next` moves into it).",
+      description: "Show or hide the file tree (`pane-next` moves into it).",
       invoke: {:action, :toggle_tree}
     },
     %Entry{
@@ -137,12 +137,12 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, :split_cols}
     },
     %Entry{
-      name: "tab next",
+      name: "tab-next",
       description: "Show the pane's next tab.",
       invoke: {:action, :tab_next}
     },
     %Entry{
-      name: "tab prev",
+      name: "tab-prev",
       description: "Show the pane's previous tab.",
       invoke: {:action, :tab_prev}
     },
@@ -175,8 +175,8 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, :select_start}
     },
     %Entry{
-      name: "select all",
-      aliases: ["highlight all"],
+      name: "select-all",
+      aliases: ["highlight-all"],
       description: "Select the whole buffer.",
       invoke: {:action, :select_all}
     },
@@ -212,7 +212,7 @@ defmodule Geex.Command.Catalog do
     # The commands that had only a key until ADR-0047: typed, or picked here, they do what
     # their key does in the editor (ADR-0047 §6).
     %Entry{
-      name: "command line",
+      name: "command-line",
       description: "Type a command (this line).",
       invoke: {:command, :minibuffer}
     },
@@ -234,36 +234,40 @@ defmodule Geex.Command.Catalog do
     },
     %Entry{
       name: "search",
-      aliases: ["find in file"],
-      description: "Search this file: type, Enter keeps the match selected, Esc goes back.",
+      aliases: ["find-in-file"],
+      usage: "search [TEXT]",
+      description:
+        "Search this file: type, Enter keeps the match selected, Esc goes back; `search TEXT` searches for TEXT.",
       invoke: {:command, :search}
     },
     %Entry{
-      name: "search project",
+      name: "search-project",
+      usage: "search-project [TEXT]",
       aliases: ["grep"],
       description:
         "Search the project's files (git grep), build and dependency folders left out; results below.",
       invoke: {:command, :search_project}
     },
     %Entry{
-      name: "search all",
+      name: "search-all",
+      usage: "search-all [TEXT]",
       description: "Search every file in the project, ignored ones too; results below.",
       invoke: {:command, :search_all}
     },
     %Entry{
-      name: "next match",
+      name: "next-match",
       description: "Select the next match of the last search, wrapping at the end of the file.",
       invoke: {:command, :next_match}
     },
     %Entry{
-      name: "pane next",
-      aliases: ["next pane"],
+      name: "pane-next",
+      aliases: ["next-pane"],
       description: "Move to the next pane: the tree, the editor's panes, the edits pane.",
       invoke: {:command, :next_pane}
     },
     %Entry{
-      name: "pane prev",
-      aliases: ["previous pane"],
+      name: "pane-prev",
+      aliases: ["previous-pane"],
       description: "Move to the previous pane: the edits pane, the editor's panes, the tree.",
       invoke: {:command, :prev_pane}
     },
@@ -293,57 +297,57 @@ defmodule Geex.Command.Catalog do
       invoke: {:command, :right}
     },
     %Entry{
-      name: "word back",
+      name: "word-back",
       description: "Move to the start of the word before.",
       invoke: {:command, :word_back}
     },
     %Entry{
-      name: "word forward",
+      name: "word-forward",
       description: "Move to the start of the next word.",
       invoke: {:command, :word_forward}
     },
     %Entry{
-      name: "line start",
+      name: "line-start",
       description: "Move to the line's start; in the output pane or a preview, the top.",
       invoke: {:command, :line_start}
     },
     %Entry{
-      name: "line end",
+      name: "line-end",
       description: "Move to the line's end; in the output pane or a preview, the bottom.",
       invoke: {:command, :line_end}
     },
     %Entry{
-      name: "page up",
+      name: "page-up",
       description: "Scroll a preview up a page.",
       invoke: {:command, :page_up}
     },
     %Entry{
-      name: "page down",
+      name: "page-down",
       description: "Scroll a preview down a page.",
       invoke: {:command, :page_down}
     },
     %Entry{
-      name: "resize up",
+      name: "resize-up",
       description: "Move the focused pane's edge up.",
       invoke: {:command, {:resize, :up}}
     },
     %Entry{
-      name: "resize down",
+      name: "resize-down",
       description: "Move the focused pane's edge down.",
       invoke: {:command, {:resize, :down}}
     },
     %Entry{
-      name: "resize left",
+      name: "resize-left",
       description: "Move the focused pane's edge left.",
       invoke: {:command, {:resize, :left}}
     },
     %Entry{
-      name: "resize right",
+      name: "resize-right",
       description: "Move the focused pane's edge right.",
       invoke: {:command, {:resize, :right}}
     },
     %Entry{
-      name: "line break",
+      name: "line-break",
       aliases: ["newline"],
       description: "Break the line here, keeping the indent.",
       invoke: {:command, :newline}
@@ -361,7 +365,7 @@ defmodule Geex.Command.Catalog do
       invoke: {:command, :unindent}
     },
     %Entry{
-      name: "indent other",
+      name: "indent-other",
       description:
         "Insert the other kind of indent: a tab where `indent` gives spaces, or spaces.",
       invoke: {:command, :indent_other}
@@ -372,23 +376,23 @@ defmodule Geex.Command.Catalog do
       invoke: {:command, :duplicate}
     },
     %Entry{
-      name: "select character",
-      aliases: ["select char"],
+      name: "select-character",
+      aliases: ["select-char"],
       description: "Select the character at the cursor, or one more.",
       invoke: {:command, :select_char}
     },
     %Entry{
-      name: "select word",
+      name: "select-word",
       description: "Select the word at the cursor, or take in the next word.",
       invoke: {:command, :select_word}
     },
     %Entry{
-      name: "select line",
+      name: "select-line",
       description: "Select the cursor's whole line, or take in the next line.",
       invoke: {:command, :select_line}
     },
     %Entry{
-      name: "matching bracket",
+      name: "matching-bracket",
       aliases: ["bracket"],
       description:
         "Go to the bracket paired with the one at the cursor, or to the one around it.",
@@ -401,54 +405,54 @@ defmodule Geex.Command.Catalog do
       invoke: {:command, :comment}
     },
     %Entry{
-      name: "move up",
-      aliases: ["move line up"],
+      name: "move-up",
+      aliases: ["move-line-up"],
       description: "Swap the cursor's line, or the selection's lines, with the line above.",
       invoke: {:command, :move_up}
     },
     %Entry{
-      name: "move down",
-      aliases: ["move line down"],
+      name: "move-down",
+      aliases: ["move-line-down"],
       description: "Swap the cursor's line, or the selection's lines, with the line below.",
       invoke: {:command, :move_down}
     },
     %Entry{
-      name: "move left",
+      name: "move-left",
       description: "Move the selected text one character left.",
       invoke: {:command, :move_left}
     },
     %Entry{
-      name: "move right",
+      name: "move-right",
       description: "Move the selected text one character right.",
       invoke: {:command, :move_right}
     },
     %Entry{
-      name: "move word back",
+      name: "move-word-back",
       description: "Swap the selected text with the word before it.",
       invoke: {:command, :move_word_back}
     },
     %Entry{
-      name: "move word forward",
+      name: "move-word-forward",
       description: "Swap the selected text with the word after it.",
       invoke: {:command, :move_word_forward}
     },
     %Entry{
-      name: "move to line start",
+      name: "move-to-line-start",
       description: "Move the selected text to the start of its line, after the indent.",
       invoke: {:command, :move_line_start}
     },
     %Entry{
-      name: "move to line end",
+      name: "move-to-line-end",
       description: "Move the selected text to the end of its line.",
       invoke: {:command, :move_line_end}
     },
     %Entry{
-      name: "delete back",
+      name: "delete-back",
       description: "Delete the character before the cursor (or the selection).",
       invoke: {:command, :delete_back}
     },
     %Entry{
-      name: "delete forward",
+      name: "delete-forward",
       description: "Delete the character under the cursor (or the selection).",
       invoke: {:command, :delete_forward}
     },
@@ -478,7 +482,7 @@ defmodule Geex.Command.Catalog do
 
       iex> Geex.Command.Catalog.all() |> Enum.find(&(&1.name == "undo")) |> Geex.Command.Catalog.commands()
       [:undo]
-      iex> Geex.Command.Catalog.all() |> Enum.find(&(&1.name == "word back")) |> Geex.Command.Catalog.commands()
+      iex> Geex.Command.Catalog.all() |> Enum.find(&(&1.name == "word-back")) |> Geex.Command.Catalog.commands()
       [:word_back]
   """
   @spec commands(Entry.t()) :: [term()]
@@ -490,12 +494,15 @@ defmodule Geex.Command.Catalog do
   @spec all() :: [Entry.t()]
   def all, do: @entries
 
+  # Where a query or a name breaks into words: spaces, and a name's hyphens.
+  @word_break ~r/[\s-]+/
+
   @doc """
   The catalog filtered + ranked against `query` (ADR-0048), in three bands:
 
   1. the commands whose **name matches well**: each word of the query starts a word of the name
-     or an alias, in order (`line e` → `line end`);
-  2. the commands `keyed?` says the query's key runs (`enter` → `line break`; the caller knows
+     or an alias, in order (`line e` → `line-end`; a typed space matches a hyphen);
+  2. the commands `keyed?` says the query's key runs (`enter` → `line-break`; the caller knows
      the bindings, the catalog doesn't);
   3. every other match (`Geex.Fuzzy`): a name match above a description-only one.
 
@@ -503,20 +510,21 @@ defmodule Geex.Command.Catalog do
   shows once, in its highest band. An empty/blank query returns every command in canonical order.
 
       iex> Geex.Command.Catalog.search("line e") |> hd() |> Map.fetch!(:name)
-      "line end"
-      iex> Geex.Command.Catalog.search("enter", &(&1.name == "line break")) |> hd() |> Map.fetch!(:name)
-      "line break"
-      iex> Geex.Command.Catalog.search("delete", &(&1.name == "delete forward")) |> hd() |> Map.fetch!(:name)
+      "line-end"
+      iex> Geex.Command.Catalog.search("enter", &(&1.name == "line-break")) |> hd() |> Map.fetch!(:name)
+      "line-break"
+      iex> Geex.Command.Catalog.search("delete", &(&1.name == "delete-forward")) |> hd() |> Map.fetch!(:name)
       "delete"
   """
   @spec search(String.t(), (Entry.t() -> boolean())) :: [Entry.t()]
+
   def search(query, keyed? \\ fn _ -> false end) when is_binary(query) do
     case String.trim(query) do
       "" ->
         @entries
 
       q ->
-        words = q |> String.downcase() |> String.split()
+        words = q |> String.downcase() |> String.split(@word_break, trim: true)
 
         @entries
         |> Enum.map(fn entry -> {entry, band(entry, words, keyed?), rank(entry, q)} end)
@@ -528,13 +536,16 @@ defmodule Geex.Command.Catalog do
 
   defp band(%Entry{name: name, aliases: aliases} = entry, words, keyed?) do
     cond do
-      Enum.any?([name | aliases], &word_starts?(String.split(String.downcase(&1)), words)) -> 1
+      Enum.any?([name | aliases], &word_starts?(name_words(&1), words)) -> 1
       keyed?.(entry) -> 2
       true -> 3
     end
   end
 
-  # Each query word starts a word of the name, in order: `sel al` in `select all`.
+  # A name's words, split where it has a hyphen: `search-all` is `search` and `all`.
+  defp name_words(name), do: name |> String.downcase() |> String.split(@word_break, trim: true)
+
+  # Each query word starts a word of the name, in order: `sel al` in `select-all`.
   defp word_starts?(_name, []), do: true
   defp word_starts?([], _words), do: false
 
@@ -547,6 +558,9 @@ defmodule Geex.Command.Catalog do
   # Name matches live in a high band (+1000) so they always sort above description-only matches;
   # a description hit keeps its raw score. `nil` (neither matches) drops the entry.
   defp rank(%Entry{name: name, aliases: aliases, description: desc}, q) do
+    # A space typed matches a name's hyphen: `search-all` scores as `search-all` does.
+    q = String.replace(q, " ", "-")
+
     case [name | aliases] |> Enum.map(&Fuzzy.score(&1, q)) |> Enum.reject(&is_nil/1) do
       [] -> Fuzzy.score(desc, q)
       scores -> Enum.max(scores) + 1000
