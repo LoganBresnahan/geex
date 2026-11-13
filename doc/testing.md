@@ -6556,3 +6556,64 @@ ADR index row and ADR-0053's See name the new pieces.
 
 1600 tests + 57 properties + 195 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
 `mix compile --warnings-as-errors --force` clean.
+
+### 2026-11-13 — ADR-0053 slice B: search in the file (branch `search`)
+
+Built on `search` after slice A (8720b1d): `Alt+Q` `search` opens the `search:` prompt (pre-filled
+from a one-line selection, the exact bytes), each key selecting the first match from where it
+started, wrapping; Enter keeps the match and the query (one history list, "search"), Enter on an
+empty prompt runs the last query again; Esc puts back the cursor, the selection and the scroll; an
+emptied query puts back what was there. `Alt+N` `next match` steps from the selection's end, in
+the prompt (which stays open) and out of it, with the last query (every file's), else the
+selection's text, else a notice naming `Alt+Q`. The matches show in the palette's new `search`
+colour (a theme's `"search"`, else halfway to its selection; underlined in the terminal theme
+without its background) and follow edits and the file in view; the count shows at the prompt's end
+and on the status line; `Esc` in the editor stops showing them. A text past 16 KB is searched in a
+monitored process (first match, then every match; a newer search stops it; presses while it runs
+add up; a text changed under the open prompt is searched again). From a panel or a preview,
+`Alt+Q` searches the file pane. The cursor's line tints only the editor background's cells, so a
+match on it keeps its colour.
+
+Tests: `search_loop_test.exs` (21, through `Loop.handle_info/2`: incremental selection, smart
+case, wrapping, Esc restoring the scroll, emptied query and no match, pre-fill with an invalid
+byte, empty Enter, from the tree and a preview, Alt+N in and out of the prompt, the last query
+across files, the async path's first-then-all, a superseded search stopped, pending presses, the
+text changed under the prompt, the highlights in a theme's colour and underlined in the terminal
+theme, following an edit, a line of a million matches); the invalid-bytes loop property presses
+`Alt+Q` and `Alt+N`; the Alt+N notice pinned in key_notices_test; the defaults and keymap tests.
+
+Live-verified via tmux (100×12, a scratch project): on an ASCII file typing `be`/`beta` selected
+the first match ("1 of 3"), `Alt+N` in the prompt "2 of 3", Enter kept it (status "2 of 3"), two
+`Alt+N` wrapped ("wrapped to the top", "1 of 3"), a pre-filled `betazzz` said "no match", Esc put
+the cursor back; on a French file `caf` found `CAFÉ` too ("1 of 3", `Alt+N` "2 of 3"); on a Latin-1
+file `caf` found both `caf\xE9` ("1 of 2"); the other matches underlined (SGR 4), the selected one
+reverse video.
+
+1622 tests + 57 properties + 195 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. Not tested here: project search (slice C), a
+macOS terminal, a theme file that sets `"search"` (the fallback and the terminal theme are).
+
+**Slice B, after mod-verify's review (not yet passed):**
+- **An answer still to come selected whatever happened since** (it checked only the pid): Esc,
+  a motion or another file shown before a big file's search answered, and the match was selected
+  anyway (live: a 10 MB file, `x`, `Alt+N`, Esc; 8 s later the cursor jumped), in another file at
+  the old file's coordinates. The goal now holds the buffer and the cursor and selection as the key
+  left them; an answer applies only while they hold, and is otherwise kept as `found` (the count,
+  the highlights, the next `Alt+N`). Esc in the editor clears the goal too.
+- Tests for the five plants that passed the suite, each failing with its plant: Esc after the text
+  changed under the prompt (no stale selection put back); queued presses wrapping past the last
+  match; only the shown query's matches drawn; a pre-fill after `©` + `\xE9`; a superseded search
+  stopped while it still runs (4 MB). The stale-answer cases (Esc, a motion, another file) each
+  fail with `goal_holds?/2` made always true, Esc's also with Esc not clearing the goal.
+- A frame reads the active buffer's snapshot once and hands it to the search's refresh (again only
+  when that search moved the cursor); `find`/`next_from` take the caller's snapshot.
+- The inline gate also limits the query: 64 graphemes (a 4,000-grapheme query took 217 ms inline
+  on 16 KB); ADR-0053's 1.4 ms is for short queries.
+
+Live-verified via tmux: a 12 MB file, `needle` searched and kept, Esc, line 1, `x`, `Alt+N` then
+Esc at once: ten seconds later the cursor was still at 1:2, nothing selected; a fresh `Alt+N` then
+used the kept answer at once ("1 of 1", 200001:7).
+
+1630 tests + 57 properties + 195 doctests green twice; `GEEX_PROPERTY_RUNS=10000` green;
+`mix compile --warnings-as-errors --force` clean. Left for the maintainer: a motion after a search
+extends the match's selection (geex's selection model), as mod-verify noted.

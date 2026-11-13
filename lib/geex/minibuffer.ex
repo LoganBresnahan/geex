@@ -18,7 +18,7 @@ defmodule Geex.Minibuffer do
   finder, `Alt+F` — the input filters the root's files through `Geex.Finder`), `:confirm` (a y/n
   question, before a file operation deletes something or makes a missing directory) and `:ask` (a
   path typed under a question, the tree's `r`; ADR-0019's 2026-10-19 amendment). Both carry their
-  question in `ask`, shown as the prompt. Incremental search is the next mode.
+  question in `ask`, shown as the prompt. `:search` is the file search's query (ADR-0053).
 
   The input is addressed by grapheme through `Geex.Text`, so a pre-fill holding a byte that isn't
   UTF-8 (a search started from a selection in a Latin-1 file, ADR-0053's 2026-11-13 amendment) is
@@ -38,7 +38,8 @@ defmodule Geex.Minibuffer do
 
   alias Geex.Text
 
-  @type mode :: :inactive | :command | :grid | :palette | :buffers | :files | :confirm | :ask
+  @type mode ::
+          :inactive | :command | :grid | :palette | :buffers | :files | :search | :confirm | :ask
   @type t :: %__MODULE__{
           mode: mode(),
           input: String.t(),
@@ -98,6 +99,7 @@ defmodule Geex.Minibuffer do
   def prompt(%__MODULE__{mode: :palette}), do: "palette:"
   def prompt(%__MODULE__{mode: :buffers}), do: "buffer:"
   def prompt(%__MODULE__{mode: :files}), do: "open:"
+  def prompt(%__MODULE__{mode: :search}), do: "search:"
   def prompt(%__MODULE__{mode: mode, ask: ask}) when mode in [:confirm, :ask], do: ask
   def prompt(%__MODULE__{}), do: ""
 

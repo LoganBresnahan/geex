@@ -152,6 +152,8 @@ defmodule Geex.Loop.BindingsTest do
         {:alt, ?y} => :settings,
         {:alt, ?r} => :revert_hunk,
         {:alt, ?f} => :find_file,
+        {:alt, ?q} => :search,
+        {:alt, ?n} => :next_match,
         {:alt, ?w} => :close,
         {:alt, ?t} => :toggle_tree,
         {:alt, ?e} => :toggle_edits,
@@ -181,9 +183,10 @@ defmodule Geex.Loop.BindingsTest do
       for {chord, command} <- expected,
           do: assert(Bindings.translate(chord, @defaults) == {:cmd, command}, inspect(chord))
 
-      # Alt+Q and Alt+N are kept for find (ADR-0049 §2a), unbound until find is built; Esc
-      # clears a selection.
-      for c <- [?q, ?Q, ?n, ?N], do: assert(Bindings.translate({:alt, c}, @defaults) == {:alt, c})
+      # Alt+Shift+Q (search project) comes with slice C of ADR-0053; until then it falls back to
+      # Alt+Q, and Alt+Shift+N (kept for multiple cursors) to Alt+N.
+      assert Bindings.translate({:alt, ?Q}, @defaults) == {:cmd, :search}
+      assert Bindings.translate({:alt, ?N}, @defaults) == {:cmd, :next_match}
 
       # Alt+3, Alt+4, Alt+6 and Alt+0 are the user's (ADR-0051, ADR-0052), Alt+5 kept for
       # multiple cursors, and Alt+` the user's too, which the desktop often takes.

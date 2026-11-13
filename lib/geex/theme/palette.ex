@@ -11,6 +11,11 @@ defmodule Geex.Theme.Palette do
   `[:reverse]` for the terminal palette when it doesn't know the terminal's background, so the
   pick still shows.
 
+  `search` is the background of a search's other matches on screen (ADR-0053's 2026-11-13
+  amendment): a theme sets it as `"search"`; one that doesn't gets the colour halfway between
+  its background and its selection. `nil` (the terminal palette without the terminal's
+  background, where the selection is reverse video) draws them underlined instead.
+
   `accent` is a light blue for what is yours or in hand: what is installed in the `Alt+Y` view
   (a grammar, a theme, the theme in use), the files open in a tab in the tree, and the edits
   pane's highlighted entry while it has focus (ADR-0040 §7). A theme file sets it as
@@ -26,6 +31,7 @@ defmodule Geex.Theme.Palette do
     :active_line_bg,
     :cursor,
     :selection,
+    search: nil,
     accent: {:ansi, 14},
     mark: []
   ]
@@ -38,6 +44,7 @@ defmodule Geex.Theme.Palette do
           active_line_bg: Geex.Cell.colour(),
           cursor: Geex.Cell.colour(),
           selection: Geex.Cell.colour(),
+          search: Geex.Cell.colour() | nil,
           accent: Geex.Cell.colour(),
           mark: [Geex.Cell.attr()]
         }

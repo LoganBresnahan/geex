@@ -50,7 +50,8 @@ defmodule Geex.Loop.InvalidBytesLoopTest do
   defp event do
     one_of([
       member_of(
-        for(c <- ~c"ijkluoh;78923\\/zZIJKLUOH:sa", do: {:alt, c}) ++
+        # Alt+Q and Alt+N search (ADR-0053): a pre-fill from a selection can hold the bad bytes.
+        for(c <- ~c"ijkluoh;78923\\/zZIJKLUOH:saqn", do: {:alt, c}) ++
           [
             {:alt, ?\\},
             {:key, :backspace},

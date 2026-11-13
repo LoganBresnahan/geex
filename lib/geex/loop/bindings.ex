@@ -72,6 +72,9 @@ defmodule Geex.Loop.Bindings do
     {:fast_forward, [{:alt, ?d}]},
     # Files and panes (ADR-0037, ADR-0038, ADR-0043, ADR-0051).
     {:find_file, [{:alt, ?f}]},
+    # Search (ADR-0053): the file's, and the next match.
+    {:search, [{:alt, ?q}]},
+    {:next_match, [{:alt, ?n}]},
     {:close, [{:alt, ?w}]},
     {:toggle_tree, [{:alt, ?t}]},
     {:toggle_edits, [{:alt, ?e}]},

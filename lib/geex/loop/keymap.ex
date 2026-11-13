@@ -93,6 +93,8 @@ defmodule Geex.Loop.Keymap do
     :prev_pane,
     :toggle_preview,
     :find_file,
+    :search,
+    :next_match,
     :close,
     :toggle_tree,
     :toggle_edits,

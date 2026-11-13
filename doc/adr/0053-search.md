@@ -135,6 +135,34 @@ sequence and the query (ADR-0035), the first match before the count on a big fil
 under an open prompt is searched again (R9). These are slice B's; slice A is the pure core
 (`Geex.Search`) and the minibuffer and history fixes above.
 
+**As built, slice B (2026-11-13, search in the file).**
+- `Alt+Q` and `Alt+N` are bound (`search`, `next match`); `Alt+Shift+Q` falls back to `Alt+Q`
+  until slice C binds it, and `Alt+Shift+N` to `Alt+N` until multiple cursors take it.
+- The loop keeps one search: the last query (every file's), whether its matches show, the
+  matches of `{buffer, seq, query}` (`Geex.Search`'s packed set), the task running and what its
+  answer selects: the n-th match at or after a place, with the buffer, the cursor and the selection
+  as the key left them. A text up to 16 KB with a query of up to 64 graphemes is searched in the key
+  itself (measured for short queries: at most 1.4 ms on the slowest text; the scan compares every
+  grapheme of the query, so a 4,000-grapheme query took 217 ms on 16 KB, hence the query limit); a
+  bigger one in a monitored process that sends the first match, then every match. A newer search
+  stops the one it replaces.
+- An answer still to come selects only if the same buffer is in view and the cursor and the
+  selection are as the key left them; after Esc, a motion or another file it is kept (for the
+  count, the highlights and the next `Alt+N`) and selects nothing (mod-verify's review).
+- A selected match puts the cursor at its end. An emptied query puts back what was there; no match
+  clears the selection and puts the cursor back where the search started.
+- The matches follow the text and the file in view: before each frame, a search whose key no longer
+  fits (an edit, another tab) starts again; with the prompt open it selects again from where it
+  started.
+- The other matches take the palette's `search` colour (a theme's `"search"`, else halfway from
+  its background to its selection; the terminal theme with a known background half its selection
+  shade), underlined where there is none. The cursor's line tints only cells on the editor's
+  background, so a match on it still shows.
+- `Esc` in the editor also stops showing the matches. The status line shows the count while they
+  show; the prompt shows it at its end with "wrapped to the top".
+- From a panel, `Alt+Q` searches the current file pane; from a preview, the pane it was opened
+  from.
+
 ## See
 
 - `lib/geex/search.ex` (the pure matching core), `lib/geex/minibuffer.ex` (the `:search` mode), `lib/geex/loop.ex`, `lib/geex/shell.ex`,

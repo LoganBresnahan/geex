@@ -73,6 +73,11 @@ defmodule Geex.Highlight.Paint do
   line of a multi-line span) has the run from its content end to the right edge filled with
   the selection background too — so a spanned line reads as fully selected rather than
   stopping ragged at its last glyph.
+
+  `found` is a search's matches (`Geex.Search`'s packed set, ADR-0053) or `nil`: the cells of a
+  match on screen take the palette's `search` background (underlined where it has none), under
+  the selection, which is drawn over them. Each row reads only its own window of the set
+  (`Geex.Search.on_line/4`), so a line of a million matches costs its row.
   """
   @spec to_screen(
           String.t(),
@@ -84,7 +89,8 @@ defmodule Geex.Highlight.Paint do
           non_neg_integer(),
           non_neg_integer(),
           Selection.t() | nil,
-          pos_integer()
+          pos_integer(),
+          binary() | nil
         ) ::
           Screen.t()
   def to_screen(
@@ -97,7 +103,8 @@ defmodule Geex.Highlight.Paint do
         x0 \\ 0,
         hscroll \\ 0,
         selection \\ nil,
-        tab \\ 2
+        tab \\ 2,
+        found \\ nil
       )
       when is_binary(text) and w >= 0 and h >= 0 and scroll >= 0 and x0 >= 0 and hscroll >= 0 do
     # Only the rows on screen are walked, sliced out of the text by their byte offsets (one
@@ -121,6 +128,7 @@ defmodule Geex.Highlight.Paint do
     sel_bg = theme.palette.selection
     # Reverse video for the selection when the palette has no colour for it (ADR-0040 §1).
     sel_attrs = theme.palette.mark
+    found_cell = found_style(theme.palette.search)
 
     # Paint the whole pane with the theme's editor background first, then overlay
     # the glyphs — so blank lines, the gaps after short lines, and the area below
@@ -131,10 +139,12 @@ defmodule Geex.Highlight.Paint do
     # `Geex.Selection`, in caret coordinates, tints the right cells) and their display column.
     Enum.reduce(windows, base, fn %{row: row, byte0: byte0} = win, screen ->
       sy = row - scroll
+      marks = found_on(found, row, win.graphemes)
 
       screen =
         Enum.reduce(win.graphemes, screen, fn {g, byte, col, v, wd}, screen ->
           cell = cell_for(g, style_at(by_byte, byte0 + byte, byte_size(g)), fg, bg)
+          cell = if found_at?(marks, col), do: found_cell.(cell), else: cell
 
           cell =
             if selected?(selection, row, col),
@@ -284,6 +294,21 @@ defmodule Geex.Highlight.Paint do
     do: Enum.reduce(sx..(w - 1)//1, screen, fn x, acc -> Screen.set_cell(acc, x, sy, cell) end)
 
   defp fill_eol(screen, _sy, _sx, _w, _cell), do: screen
+
+  # A search's matches on `row` within the columns its window shows.
+  defp found_on(nil, _row, _graphemes), do: []
+  defp found_on(_found, _row, []), do: []
+
+  defp found_on(found, row, [{_, _, first, _, _} | _] = graphemes) do
+    {_, _, last, _, _} = List.last(graphemes)
+    Geex.Search.on_line(found, row, first, last + 1)
+  end
+
+  defp found_at?(marks, col), do: Enum.any?(marks, fn {_l, s, e} -> col >= s and col < e end)
+
+  # How a match's cell changes: the palette's search background, or underlined without one.
+  defp found_style(nil), do: fn cell -> %{cell | attrs: Enum.uniq([:underline | cell.attrs])} end
+  defp found_style(colour), do: fn cell -> %{cell | bg: colour} end
 
   defp selected?(nil, _row, _col), do: false
   defp selected?(%Selection{} = sel, row, col), do: Selection.contains?(sel, {row, col})
