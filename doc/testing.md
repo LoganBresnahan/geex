@@ -6467,3 +6467,10 @@ Rebased onto `crash-fixes`' review fixes (69a728d), whose Alt+\ fix is the same 
 green four times with full output kept (seeds 697863, 105210, 497535, 419809). The one deep-run
 failure of "drawing and measuring text with invalid bytes never raises" seen before the rebase
 didn't recur; still recorded as open until a run reproduces or a cause is found.
+
+Before merging, from mod-verify's re-review of 69a728d and aab5496 (both passed): its reference
+property for `Geex.Text`'s walks is added to InvalidBytesTest (split_at, slice/3, slice/2, at and
+a next_grapheme walk against the whole text's segmentation, valid stretches by String and each bad
+byte alone, at positions -20..20); it catches both plants the suite missed (walk_split past the
+end, slice/2's positive range off by one). ADR-0044's Consequences say one crash, not two; the
+reference paint's opt-out comment says when it raises.

@@ -310,7 +310,7 @@ inputs in the shared generators.
    move that joins or parts graphemes at its seams (bytes compared, positions only where the
    segmentation is unchanged).
 
-**Consequences.** The wider generators found two crashes and a lost character, fixed with them:
+**Consequences.** The wider generators found a crash and a lost character, fixed with them:
 `Alt+\\` reading forward past an emoji before an invalid byte (`Keymap`'s bracket search still
 stepped with `String.next_grapheme/1`); and uncommenting a line whose text starts with a combining
 mark or a lone VS16, which took the mark with the marker's space (the space and the mark are one

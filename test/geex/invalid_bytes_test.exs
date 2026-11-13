@@ -113,6 +113,34 @@ defmodule Geex.InvalidBytesTest do
     end
   end
 
+  property "Geex.Text's walks match the segmentation: valid stretches by String, each bad byte alone" do
+    # mod-verify's reference (review of 69a728d): split_at, slice and at walk to a position
+    # instead of segmenting the whole text, so they're checked against the whole text's
+    # graphemes at every position, past either end and from the end, on text where String
+    # raises and where it doesn't.
+    check all(
+            bin <- map(list_of(piece(), max_length: 12), &Enum.join/1),
+            i <- integer(-20..20),
+            j <- integer(-20..20),
+            count <- integer(0..6)
+          ) do
+      gs = reference_graphemes(bin)
+      n = Kernel.length(gs)
+      cut = if i >= 0, do: min(i, n), else: max(n + i, 0)
+
+      assert Text.graphemes(bin) == gs
+      assert Text.length(bin) == n
+
+      assert Text.split_at(bin, i) ==
+               {Enum.join(Enum.take(gs, cut)), Enum.join(Enum.drop(gs, cut))}
+
+      assert Text.slice(bin, i, count) == Enum.join(Enum.slice(gs, i, count))
+      assert Text.slice(bin, i..j//1) == Enum.join(Enum.slice(gs, i..j//1))
+      assert Text.at(bin, i) == Enum.at(gs, i)
+      assert walk(bin) == gs
+    end
+  end
+
   describe "the cases" do
     defp row0(text, w \\ 20) do
       screen = Paint.to_screen(text, [], Geex.Fixtures.birds(), w, 1, 0, 0, 0, nil, 4)
@@ -196,6 +224,26 @@ defmodule Geex.InvalidBytesTest do
       assert ms(fn -> Paint.to_screen(pairs, [], Geex.Fixtures.birds(), 100, 5) end) < 300
       assert ms(fn -> Width.line(pairs, 4) end) < 300
       assert Text.length(pairs) == 16_000
+    end
+  end
+
+  # The valid stretches segmented by String, each byte that isn't UTF-8 alone.
+  defp reference_graphemes(<<>>), do: []
+
+  defp reference_graphemes(bin) do
+    case :unicode.characters_to_binary(bin) do
+      valid when is_binary(valid) ->
+        String.graphemes(valid)
+
+      {_kind, valid, <<byte, rest::binary>>} ->
+        String.graphemes(valid) ++ [<<byte>>] ++ reference_graphemes(rest)
+    end
+  end
+
+  defp walk(bin) do
+    case Text.next_grapheme(bin) do
+      nil -> []
+      {g, rest} -> [g | walk(rest)]
     end
   end
 end

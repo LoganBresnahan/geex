@@ -56,9 +56,10 @@ defmodule Geex.Highlight.PaintWindowTest do
 
   property "the windowed paint draws every cell the full paint does" do
     check all(
-            # The reference is the paint before BUG-15, which raises on a byte that isn't UTF-8, so
-            # it can only judge valid text (ADR-0044's 2026-11-12 amendment); the invalid bytes'
-            # own properties are InvalidBytesTest's, and the fetched paint's below.
+            # The reference is the paint before BUG-15, which raises when an Extended_Pictographic
+            # (an emoji, ©, ™) comes right before a byte that isn't UTF-8, a pair Gen makes, so it
+            # judges valid text only (ADR-0044's 2026-11-12 amendment); the invalid bytes' own
+            # properties are InvalidBytesTest's and width_test's, and the fetched paint's below.
             lines <- list_of(row(invalid: false), min_length: 1, max_length: 6),
             text = Enum.join(lines, "\n"),
             spans <- spans(text),
