@@ -41,9 +41,15 @@ defmodule Geex.Input.PasteTest do
 
   property "however the reads fall, the paste is the bytes between the markers" do
     check all(
+            # The bytes a marker is made of, and the shared generator's pieces (ADR-0044's
+            # 2026-11-12 amendment): a multi-byte character or an invalid byte cut by a read.
             body <-
               map(
-                list_of(member_of(["a", "é", "\r\n", "\e", "[", "2", "0", "~", "\t"]),
+                list_of(
+                  frequency([
+                    {3, member_of(["a", "é", "\r\n", "\e", "[", "2", "0", "~", "\t"])},
+                    {1, Geex.Gen.piece()}
+                  ]),
                   max_length: 40
                 ),
                 &Enum.join/1
@@ -63,7 +69,8 @@ defmodule Geex.Input.PasteTest do
       [first | more] = Enum.reverse([rest | reads])
       {first, more} = merge_until(first, more, 6)
       {_p, events, _rest} = gather([first | more])
-      assert Enum.map_join(events, fn {:paste, t} -> t end) == body
+      # Bytes that aren't UTF-8 arrive replaced (BUG-11), a character cut by a read whole.
+      assert Enum.map_join(events, fn {:paste, t} -> t end) == String.replace_invalid(body)
     end
   end
 

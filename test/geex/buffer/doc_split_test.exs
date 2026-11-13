@@ -22,7 +22,7 @@ defmodule Geex.Buffer.DocSplitTest do
 
   # The operations as they were, on grapheme lists.
   defp ref_insert(line, col, text) do
-    gs = String.graphemes(line)
+    gs = Geex.Text.graphemes(line)
 
     if col >= 0 and col <= length(gs) do
       {pre, post} = Enum.split(gs, col)
@@ -33,7 +33,7 @@ defmodule Geex.Buffer.DocSplitTest do
   end
 
   defp ref_delete(line, col, count) do
-    gs = String.graphemes(line)
+    gs = Geex.Text.graphemes(line)
 
     if col >= 0 and col <= length(gs) do
       {pre, rest} = Enum.split(gs, col)
@@ -44,7 +44,7 @@ defmodule Geex.Buffer.DocSplitTest do
   end
 
   defp ref_slice(line, c1, c2) do
-    gs = String.graphemes(line)
+    gs = Geex.Text.graphemes(line)
 
     if c1 >= 0 and c2 <= length(gs) and c1 <= c2,
       do: {:ok, gs |> Enum.slice(c1, c2 - c1) |> Enum.join()},
@@ -54,7 +54,7 @@ defmodule Geex.Buffer.DocSplitTest do
   property "insert, delete, replace, slice and byte_offset cut a line where the graphemes do" do
     check all(
             line <- row(),
-            len = String.length(line),
+            len = Geex.Text.length(line),
             col <- integer(-1..(len + 2)),
             col2 <- integer(0..(len + 2)),
             count <- integer(0..5),
@@ -83,12 +83,12 @@ defmodule Geex.Buffer.DocSplitTest do
             {:ok,
              "top\n" <>
                kept <>
-               text <> (line |> String.graphemes() |> Enum.drop(c2) |> Enum.join()) <> "\nend"}
+               text <> (line |> Geex.Text.graphemes() |> Enum.drop(c2) |> Enum.join()) <> "\nend"}
           end
 
         assert got == want
 
-        prefix = line |> String.graphemes() |> Enum.take(c1) |> Enum.join()
+        prefix = line |> Geex.Text.graphemes() |> Enum.take(c1) |> Enum.join()
         assert Doc.byte_offset(doc, {1, c1}) == 4 + byte_size(prefix)
       end
     end

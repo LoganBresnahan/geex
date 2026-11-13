@@ -6416,3 +6416,54 @@ bound flaky.)
 `mix compile --warnings-as-errors --force` clean. Live-verified via tmux: a Latin-1 file
 `(™\xE9 bracket)` and `next (©\xFF x)`; Alt+\ on `(` went to `)` (1:12), back (1:1), and on line 2
 (2:11); Ctrl-X quit with exit 0 and no error in the log.
+
+### 2026-11-12 — The shared generators by default, wider (ADR-0044's 2026-11-12 amendment)
+
+Built on `gen-inputs` (from `crash-fixes`) at the maintainer's word ("i agree with just 2"):
+`Geex.Gen` gained a keycap, VS16 alone, Prepend characters (U+0600, U+0D4E), a no-break space, a
+form feed, a vertical tab and U+3000; invalid UTF-8 bytes by default, rarely (`invalid: false` to
+opt out, with the reason in a comment); and `long_line/1`, lines past 4 KB, in a deep run only
+(or `long: true`). The editing keys' and Tab's line generators, the long-line properties, the
+paste body and the invalid-bytes pieces now mix in the shared ones; property oracles read
+graphemes with `Geex.Text`.
+
+**Found by the wider generators, fixed:**
+- `Alt+\` raised on a line with an emoji right before an invalid byte: the bracket search read
+  forward with `String.next_grapheme/1` (`Keymap.graphemes_fwd/2`), missed by BUG-15's fix. Now
+  `Geex.Text.next_grapheme/1`; an example test pins `"(😀\x80 x)"`.
+- Uncommenting a line whose text starts with a combining mark or a lone VS16 deleted the mark:
+  commenting puts `# ` before it, the space and the mark are one grapheme, and taking off "the
+  marker and one space" took that grapheme. Uncommenting now removes the marker's bytes and one
+  space byte. An example test pins four such lines.
+
+**Properties that were wrong, made explicit:**
+- The width and seek oracles, and the history, coord, blame, resolve, doc-split, editing-keys and
+  keymap helpers used `String.graphemes/length/at`, which raise where geex doesn't: now
+  `Geex.Text`.
+- The painter's law: an invalid byte's cell is `�` (BUG-15). The paste's law: the bytes between
+  the markers with invalid ones replaced (BUG-11).
+- The comment property's "blank" used `String.trim` (a no-break space counted as blank); ADR-0052
+  §5's blank is spaces and tabs only.
+- A move that joins or parts graphemes at its seams (a Prepend character joins what follows it):
+  the long-line move property compares bytes, and positions only where the segmentation is
+  unchanged.
+- A line ending in `\r\r`: which `\r` is the ending can't be told, so the endings laws (move,
+  duplicate) leave such lines out, said in a comment.
+- Opted out of invalid bytes, with the reason: the command field-spec's JSON round trip (JSON
+  strings are UTF-8) and the windowed-vs-reference paint (the reference predates BUG-15).
+
+1578 tests + 52 properties + 177 doctests green twice; default `mix test` 34.5 s (40.4 s before,
+the same machine, so no slower). `mix compile --warnings-as-errors --force` clean.
+`GEEX_PROPERTY_RUNS=10000 mix test --only property`: 1 min 31–35 s (1 min 15 s before; the long
+lines). Six full deep runs: five green, and one in which "drawing and measuring text with invalid
+bytes never raises" failed once. Its output wasn't kept (the run's output was filtered to the
+summary line), and it hasn't come back: not in four more full deep runs with the output saved, 41
+seeds at 10,000 runs, or 5 seeds at 100,000 runs of that property alone (it is pure and
+deterministic, and takes 4.3 s at 10,000 runs alone). **Open, not explained**: a property failure
+is a bug, not a flake (ADR-0044), so the next deep run that fails keeps its output.
+
+Rebased onto `crash-fixes`' review fixes (69a728d), whose Alt+\ fix is the same as this branch's
+(one kept): 1583 tests + 53 properties + 183 doctests green twice; `GEEX_PROPERTY_RUNS=10000`
+green four times with full output kept (seeds 697863, 105210, 497535, 419809). The one deep-run
+failure of "drawing and measuring text with invalid bytes never raises" seen before the rebase
+didn't recur; still recorded as open until a run reproduces or a cause is found.

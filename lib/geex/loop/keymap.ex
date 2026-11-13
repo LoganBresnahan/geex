@@ -659,9 +659,14 @@ defmodule Geex.Loop.Keymap do
         changes =
           Map.new(filled, fn {i, l, n} ->
             if commented? do
-              rest = Geex.Text.slice(l, (n + mlen)..-1//1)
-              gone = if String.starts_with?(rest, " "), do: mlen + 1, else: mlen
-              {i, {n, -gone, Geex.Text.slice(l, 0, n) <> Geex.Text.slice(l, (n + gone)..-1//1)}}
+              # By bytes: the marker and one space are ASCII, but the space can share a grapheme
+              # with a combining mark after it (commenting `\u0301x` gives `# \u0301x`, the
+              # space and the mark one grapheme), and taking that grapheme would take the mark.
+              indent = Geex.Text.slice(l, 0, n)
+              skip = byte_size(indent) + byte_size(marker)
+              rest = binary_part(l, skip, byte_size(l) - skip)
+              new = indent <> with(" " <> r <- rest, do: r)
+              {i, {n, Geex.Text.length(new) - Geex.Text.length(l), new}}
             else
               {i,
                {at, mlen + 1,

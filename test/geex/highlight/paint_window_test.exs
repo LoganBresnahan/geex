@@ -14,10 +14,10 @@ defmodule Geex.Highlight.PaintWindowTest do
   @captures ~w(keyword string comment function number punctuation.bracket string.special.key)
 
   # Lines of every kind: short and long (past any pane), tabs, wide CJK, emoji, combining marks,
-  # control characters, CRLF's `\r`.
-  defp row do
+  # control characters, CRLF's `\r`, and invalid bytes unless `invalid: false`.
+  defp row(opts \\ []) do
     gen all(
-          pieces <- list_of(Gen.piece(), max_length: 30),
+          pieces <- list_of(Gen.piece(opts), max_length: 30),
           extra <- member_of(["", "", "\t\tx", "日本語", "👍🏽é", "\r", "a\u0007b"]),
           times <- frequency([{3, constant(1)}, {1, integer(2..12)}])
         ) do
@@ -56,7 +56,10 @@ defmodule Geex.Highlight.PaintWindowTest do
 
   property "the windowed paint draws every cell the full paint does" do
     check all(
-            lines <- list_of(row(), min_length: 1, max_length: 6),
+            # The reference is the paint before BUG-15, which raises on a byte that isn't UTF-8, so
+            # it can only judge valid text (ADR-0044's 2026-11-12 amendment); the invalid bytes'
+            # own properties are InvalidBytesTest's, and the fetched paint's below.
+            lines <- list_of(row(invalid: false), min_length: 1, max_length: 6),
             text = Enum.join(lines, "\n"),
             spans <- spans(text),
             selection <- selection(lines),
@@ -136,7 +139,7 @@ defmodule Geex.Highlight.PaintWindowTest do
   # Where a place is, walking the line a grapheme at a time.
   defp walk(line, target, tab) do
     line
-    |> String.graphemes()
+    |> Geex.Text.graphemes()
     |> Enum.reduce_while({0, 0, 0}, fn g, {b, c, v} ->
       wd = Width.advance(g, v, tab)
 

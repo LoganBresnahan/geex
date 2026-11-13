@@ -169,7 +169,7 @@ defmodule Geex.BlameTest do
       Enum.reduce(ops, {[], start}, fn {line_seed, col_seed, text, actor, group}, {acc, editor} ->
         lines = EditorState.lines(editor)
         line = rem(line_seed, length(lines))
-        col = rem(col_seed, String.length(Enum.at(lines, line)) + 1)
+        col = rem(col_seed, Geex.Text.length(Enum.at(lines, line)) + 1)
         {:ok, cmd} = Insert.parse(%{line: line, col: col, text: text})
 
         stamp =

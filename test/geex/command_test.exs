@@ -16,7 +16,11 @@ defmodule Geex.CommandTest do
     end
 
     test "__fields__/0 is the neutral field-spec in declaration order" do
-      assert [%Field{name: :line, type: :integer, required: true}, %Field{name: :col}, %Field{name: :text, type: :string}] =
+      assert [
+               %Field{name: :line, type: :integer, required: true},
+               %Field{name: :col},
+               %Field{name: :text, type: :string}
+             ] =
                Insert.__fields__()
     end
 
@@ -54,7 +58,8 @@ defmodule Geex.CommandTest do
     end
 
     test "errors with the arg name on a bad cast" do
-      assert {:error, "arg line: " <> _} = Insert.parse(%{"line" => "abc", "col" => "0", "text" => "x"})
+      assert {:error, "arg line: " <> _} =
+               Insert.parse(%{"line" => "abc", "col" => "0", "text" => "x"})
     end
   end
 
@@ -101,15 +106,18 @@ defmodule Geex.CommandTest do
   end
 
   defp value_for(:integer), do: integer()
-  defp value_for(:string), do: Gen.text()
+
+  # JSON strings are UTF-8 by definition, so an argument that round-trips through an MCP call's JSON
+  # can't hold an invalid byte: `invalid: false` (ADR-0044's 2026-11-12 amendment).
+  defp value_for(:string), do: Gen.text(invalid: false)
   defp value_for(:boolean), do: boolean()
 
   defp value_for(:edits) do
     block =
       gen all(
-            search <- Gen.text(),
-            replace <- Gen.text(),
-            description <- one_of([constant(nil), Gen.text()])
+            search <- Gen.text(invalid: false),
+            replace <- Gen.text(invalid: false),
+            description <- one_of([constant(nil), Gen.text(invalid: false)])
           ) do
         %{search: search, replace: replace, description: description}
         |> Map.reject(fn {_k, v} -> is_nil(v) end)

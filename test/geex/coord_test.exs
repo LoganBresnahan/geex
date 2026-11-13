@@ -117,7 +117,7 @@ defmodule Geex.CoordTest do
     check all(
             text <- Gen.text(),
             lines = String.split(text, "\n"),
-            widest = lines |> Enum.map(&String.length/1) |> Enum.max(),
+            widest = lines |> Enum.map(&Geex.Text.length/1) |> Enum.max(),
             a <- coord(length(lines) + 1, widest + 2),
             b <- coord(length(lines) + 1, widest + 2),
             a != b
@@ -132,16 +132,16 @@ defmodule Geex.CoordTest do
         {:ok, {{r1, c1} = start, {r2, c2} = stop} = span} ->
           assert to.y <= length(lines)
           assert start <= stop
-          assert c1 <= String.length(Enum.at(lines, r1))
-          assert c2 <= String.length(Enum.at(lines, r2))
+          assert c1 <= Geex.Text.length(Enum.at(lines, r1))
+          assert c2 <= Geex.Text.length(Enum.at(lines, r2))
 
-          len = fn y -> String.length(Enum.at(lines, y - 1)) end
+          len = fn y -> Geex.Text.length(Enum.at(lines, y - 1)) end
           first = {from.y, min(from.x, len.(from.y) + 1)}
           last = {to.y, min(to.x, len.(to.y))}
 
           expected =
             for {line, y} <- Enum.with_index(lines, 1),
-                {g, x} <- Enum.with_index(String.graphemes(line) ++ ["\n"], 1),
+                {g, x} <- Enum.with_index(Geex.Text.graphemes(line) ++ ["\n"], 1),
                 {y, x} >= first and {y, x} <= last,
                 into: "",
                 do: g

@@ -299,26 +299,31 @@ defmodule Geex.Loop.KeymapTest do
   end
 
   # ADR-0050: indenting lines, then un-indenting them, by the same kind of level.
+  # Indents of every kind, and the shared generator's lines (ADR-0044's 2026-11-12 amendment).
   defp shift_line,
     do:
-      member_of([
-        "",
-        "x",
-        "  x",
-        "\tx",
-        "   ",
-        "\t\ty",
-        " \tz",
-        "a b",
-        "x\r",
-        "  y\r",
-        "\r",
-        "é",
-        "  👍🏽 e\u0301",
-        " \t\r",
-        "\f",
-        "\u00A0x",
-        "  \u00A0"
+      frequency([
+        {3,
+         member_of([
+           "",
+           "x",
+           "  x",
+           "\tx",
+           "   ",
+           "\t\ty",
+           " \tz",
+           "a b",
+           "x\r",
+           "  y\r",
+           "\r",
+           "é",
+           "  👍🏽 e\u0301",
+           " \t\r",
+           "\f",
+           "\u00A0x",
+           "  \u00A0"
+         ])},
+        {1, Geex.Gen.line()}
       ])
 
   defp apply_shift(text, nil), do: text
@@ -384,7 +389,7 @@ defmodule Geex.Loop.KeymapTest do
             seed <- non_negative_integer(),
             g <- member_of(["(", "[", "{", "'", "\"", "`"])
           ) do
-      col = rem(seed, String.length(line) + 1)
+      col = rem(seed, Geex.Text.length(line) + 1)
 
       with {:edit, cmd, cursor} = action <- Keymap.autoclose({:char, g}, {0, col}, line, []) do
         pairs = Keymap.track([], {:char, g}, action, {0, col})
@@ -413,7 +418,8 @@ defmodule Geex.Loop.KeymapTest do
                 max_length: 30
               )
           ) do
-      Enum.reduce(keys, {start, {0, String.length(start)}, []}, fn key, {text, cursor, pairs} ->
+      Enum.reduce(keys, {start, {0, Geex.Text.length(start)}, []}, fn key,
+                                                                      {text, cursor, pairs} ->
         action =
           case key do
             {:char, _} -> Keymap.autoclose(key, cursor, text, pairs)
@@ -433,13 +439,13 @@ defmodule Geex.Loop.KeymapTest do
         {_, c} = cursor
 
         for {0, o, cl} <- pairs do
-          open = String.at(text, o)
+          open = Geex.Text.at(text, o)
 
           assert Map.get(
                    %{"(" => ")", "[" => "]", "{" => "}", "'" => "'", "\"" => "\"", "`" => "`"},
                    open
                  ) ==
-                   String.at(text, cl),
+                   Geex.Text.at(text, cl),
                  "#{inspect(text)}: #{inspect({o, cl})} isn't a pair"
 
           assert o < c and c <= cl, "#{inspect(text)}: cursor #{c} outside #{inspect({o, cl})}"
@@ -470,12 +476,12 @@ defmodule Geex.Loop.KeymapTest do
 
       run =
         Enum.reduce(
-          [{:char, g} | for(c <- String.graphemes(fill), do: {:char, c})],
+          [{:char, g} | for(c <- Geex.Text.graphemes(fill), do: {:char, c})],
           {"", {0, 0}, []},
           &type.(&2, &1)
         )
 
-      moves = rem(back, String.length(fill) + 1)
+      moves = rem(back, Geex.Text.length(fill) + 1)
 
       run =
         Enum.reduce(
@@ -502,16 +508,16 @@ defmodule Geex.Loop.KeymapTest do
             colon <- boolean()
           ) do
       line = indent <> "a" <> body
-      col = rem(seed, String.length(line) + 1)
+      col = rem(seed, Geex.Text.length(line) + 1)
       {:edit, cmd, {1, new_col}} = Keymap.newline({0, col}, line, unit, colon: colon)
       [_first, second | _] = cmd |> apply_text(line) |> String.split("\n")
 
       squash = &String.replace(&1, ~r/\s/u, "")
       assert squash.(apply_text(cmd, line)) == squash.(line)
 
-      base = String.slice(indent, 0, col)
+      base = Geex.Text.slice(indent, 0, col)
       assert String.starts_with?(second, base)
-      assert new_col >= String.length(base)
+      assert new_col >= Geex.Text.length(base)
     end
   end
 

@@ -471,7 +471,7 @@ defmodule Geex.HistoryTest do
   defp run_op({:delete, line_seed, col_seed, actor}, h) do
     lines = EditorState.lines(h.editor)
     line = rem(line_seed, length(lines))
-    len = String.length(Enum.at(lines, line))
+    len = Geex.Text.length(Enum.at(lines, line))
 
     if len == 0 do
       h
@@ -496,7 +496,7 @@ defmodule Geex.HistoryTest do
   defp run_op({:insert, line_seed, col_seed, text, actor}, h) do
     lines = EditorState.lines(h.editor)
     line = rem(line_seed, length(lines))
-    col = rem(col_seed, String.length(Enum.at(lines, line)) + 1)
+    col = rem(col_seed, Geex.Text.length(Enum.at(lines, line)) + 1)
     {:ok, cmd} = Insert.parse(%{line: line, col: col, text: text})
 
     case History.dispatch(h, Command.put_meta(cmd, Meta.new(actor))) do

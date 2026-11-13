@@ -110,7 +110,7 @@ defmodule Geex.Edit.ResolveTest do
 
       check all(
               text <- Gen.text(),
-              graphemes = String.graphemes(text),
+              graphemes = Geex.Text.graphemes(text),
               start <- integer(0..max(length(graphemes) - 1, 0)),
               take <- integer(1..12),
               replace <- Gen.insertion()

@@ -8,23 +8,30 @@ defmodule Geex.Loop.EditingKeysPureTest do
   alias Geex.Commands.{Insert, Replace}
   alias Geex.Loop.Keymap
 
+  # Lines the edits act on (indents, comments, brackets, CRLF), and the shared generator's lines
+  # (ADR-0044's 2026-11-12 amendment): its awkward pieces, invalid bytes and, in a deep run, long
+  # lines.
   defp line,
     do:
-      member_of([
-        "",
-        "x",
-        "  x",
-        "\tx",
-        "   ",
-        "a b",
-        "x\r",
-        "  y\r",
-        "\r",
-        "é",
-        "  👍🏽 é",
-        "# c",
-        "  #d",
-        "f(a, [b])"
+      frequency([
+        {3,
+         member_of([
+           "",
+           "x",
+           "  x",
+           "\tx",
+           "   ",
+           "a b",
+           "x\r",
+           "  y\r",
+           "\r",
+           "é",
+           "  👍🏽 é",
+           "# c",
+           "  #d",
+           "f(a, [b])"
+         ])},
+        {1, Geex.Gen.line()}
       ])
 
   defp text_of(lines, final_break?),
@@ -43,9 +50,15 @@ defmodule Geex.Loop.EditingKeysPureTest do
   defp ending(l), do: if(String.ends_with?(l, "\r"), do: "\r", else: "")
   defp body(l), do: String.replace_suffix(l, "\r", "")
 
+  # A line whose content itself ends in `\r` (`"\r\r"`): a `\r` right before a line's end reads as
+  # its ending (a CRLF line, or a bare `\r` at the end of the text, ADR-0019's 2026-11-09
+  # amendment), so which `\r` is content and which the ending can't be told, and a law about
+  # endings staying put doesn't hold for it. The properties about endings leave such lines out.
+  defp clear_endings?(lines), do: not Enum.any?(lines, &String.ends_with?(&1, "\r\r"))
+
   property "moving lines up then down (or down then up) gives the text back; endings stay put" do
     check all(
-            lines <- list_of(line(), min_length: 1, max_length: 10),
+            lines <- filter(list_of(line(), min_length: 1, max_length: 10), &clear_endings?/1),
             final <- boolean(),
             a <- integer(0..(length(lines) - 1)),
             b <- integer(a..(length(lines) - 1)),
@@ -88,7 +101,7 @@ defmodule Geex.Loop.EditingKeysPureTest do
 
   property "duplicating lines adds exactly them, below, and changes nothing else" do
     check all(
-            lines <- list_of(line(), min_length: 1, max_length: 10),
+            lines <- filter(list_of(line(), min_length: 1, max_length: 10), &clear_endings?/1),
             final <- boolean(),
             a <- integer(0..(length(lines) - 1)),
             b <- integer(a..(length(lines) - 1))
@@ -120,18 +133,18 @@ defmodule Geex.Loop.EditingKeysPureTest do
 
       case Keymap.comment_lines(text, {a, b}, marker) do
         nil ->
-          assert Enum.all?(Enum.slice(lines, a..b), &(String.trim(&1) == ""))
+          assert Enum.all?(Enum.slice(lines, a..b), &blank?/1)
 
         {cmd, _changes} ->
           commented = run(text, cmd)
           new = String.split(commented, "\n")
 
           for {{old, now}, i} <- Enum.with_index(Enum.zip(lines, new)),
-              i < a or i > b or String.trim(old) == "",
+              i < a or i > b or blank?(old),
               do: assert(now == old)
 
-          filled = for l <- Enum.slice(lines, a..b), String.trim(l) != "", do: l
-          all? = Enum.all?(filled, &(&1 |> String.trim_leading() |> String.starts_with?(marker)))
+          filled = for l <- Enum.slice(lines, a..b), not blank?(l), do: l
+          all? = Enum.all?(filled, &(&1 |> trim_indent() |> String.starts_with?(marker)))
 
           if not all? do
             {cmd2, _} = Keymap.comment_lines(commented, {a, b}, marker)
@@ -141,11 +154,18 @@ defmodule Geex.Loop.EditingKeysPureTest do
     end
   end
 
+  # Blank and indent as ADR-0052 §5 has them (and Tab, ADR-0050): spaces and tabs only, so a
+  # no-break space or a form feed is text.
+  defp blank?(l), do: String.match?(l, ~r/\A[ \t]*\r?\z/)
+  defp trim_indent(" " <> l), do: trim_indent(l)
+  defp trim_indent("\t" <> l), do: trim_indent(l)
+  defp trim_indent(l), do: l
+
   property "moving selected text keeps it whole, keeps the line's graphemes; there and back" do
     check all(
             l <- string(Enum.concat([?a..?c, [?\s, ?,, ?(]]), min_length: 1, max_length: 12),
-            a <- integer(0..(String.length(l) - 1)),
-            b <- integer((a + 1)..String.length(l)),
+            a <- integer(0..(Geex.Text.length(l) - 1)),
+            b <- integer((a + 1)..Geex.Text.length(l)),
             how <-
               member_of([:left, :right, :word_back, :word_forward, :line_start, :line_end]),
             eol <- member_of(["", "\r"])
@@ -153,15 +173,15 @@ defmodule Geex.Loop.EditingKeysPureTest do
       # A CRLF line's \r is no part of the text a move takes or passes: it stays last.
       text = "first\n" <> l <> eol <> "\nlast"
       # A word or line-end move takes the selection's words; the spaces at its ends stay as gap.
-      raw = String.slice(l, a..(b - 1))
+      raw = Geex.Text.slice(l, a..(b - 1))
       sel = if how in [:left, :right], do: raw, else: String.trim(raw, " ")
 
       {a, b} =
         if how in [:left, :right],
           do: {a, b},
           else:
-            {a + String.length(raw) - String.length(String.trim_leading(raw, " ")),
-             b - String.length(raw) + String.length(String.trim_trailing(raw, " "))}
+            {a + Geex.Text.length(raw) - Geex.Text.length(String.trim_leading(raw, " ")),
+             b - Geex.Text.length(raw) + Geex.Text.length(String.trim_trailing(raw, " "))}
 
       with {cmd, {1, f}, {1, t}} <- Keymap.move_text(text, {{1, a}, {1, b}}, how) do
         moved = run(text, cmd)
@@ -169,8 +189,8 @@ defmodule Geex.Loop.EditingKeysPureTest do
         assert {first, last} == {"first", "last"}
         assert String.ends_with?(new_l, eol)
         new_l = String.replace_suffix(new_l, eol, "")
-        assert String.slice(new_l, f..(t - 1)) == sel
-        assert Enum.sort(String.graphemes(new_l)) == Enum.sort(String.graphemes(l))
+        assert Geex.Text.slice(new_l, f..(t - 1)) == sel
+        assert Enum.sort(Geex.Text.graphemes(new_l)) == Enum.sort(Geex.Text.graphemes(l))
 
         back = %{left: :right, right: :left, word_back: :word_forward, word_forward: :word_back}
         # A word swap undoes itself when the selection is a whole word (space to space, ADR-0052
@@ -178,8 +198,8 @@ defmodule Geex.Loop.EditingKeysPureTest do
         space? = &(&1 in [nil, " "])
 
         whole_word? =
-          not String.contains?(sel, " ") and a > 0 and space?.(String.at(l, a - 1)) and
-            space?.(String.at(l, b))
+          not String.contains?(sel, " ") and a > 0 and space?.(Geex.Text.at(l, a - 1)) and
+            space?.(Geex.Text.at(l, b))
 
         if back[how] && (how in [:left, :right] or whole_word? or a == 0) do
           {cmd2, {1, ^a}, {1, ^b}} = Keymap.move_text(moved, {{1, f}, {1, t}}, back[how])
@@ -197,10 +217,10 @@ defmodule Geex.Loop.EditingKeysPureTest do
                 max_length: 5
               ),
             l <- integer(0..(length(lines) - 1)),
-            c <- integer(0..String.length(Enum.at(lines, l)))
+            c <- integer(0..Geex.Text.length(Enum.at(lines, l)))
           ) do
       text = Enum.join(lines, "\n")
-      g = String.at(Enum.at(lines, l), c)
+      g = Geex.Text.at(Enum.at(lines, l), c)
 
       if g in ~w|( ) [ ] { }| do
         case Keymap.matching_bracket({l, c}, text) do
@@ -215,7 +235,7 @@ defmodule Geex.Loop.EditingKeysPureTest do
     check all(
             lines <- list_of(line(), min_length: 1, max_length: 6),
             l <- integer(0..(length(lines) - 1)),
-            c <- integer(0..String.length(body(Enum.at(lines, l)))),
+            c <- integer(0..Geex.Text.length(body(Enum.at(lines, l)))),
             kind <- member_of([:char, :word, :line])
           ) do
       text = Enum.join(lines, "\n")
@@ -224,7 +244,7 @@ defmodule Geex.Loop.EditingKeysPureTest do
         assert from < to
         # A word never takes a CRLF's \r: it ends by the line's last character.
         {wl, wc} = to
-        if kind == :word, do: assert(wc <= String.length(body(Enum.at(lines, wl))))
+        if kind == :word, do: assert(wc <= Geex.Text.length(body(Enum.at(lines, wl))))
 
         with {from2, to2} <- Keymap.select_more(kind, text, to, range) do
           assert from2 <= from and to2 >= to and {from2, to2} != range
@@ -282,6 +302,18 @@ defmodule Geex.Loop.EditingKeysPureTest do
                {0, 1001}
     end
 
+    test "uncommenting keeps a combining mark the marker's space joined" do
+      # Found by the shared generator (ADR-0044's 2026-11-12 amendment): `# ` before a line that
+      # starts with a combining mark (or a lone VS16) makes the space and the mark one grapheme.
+      for line <- ["\u0301x", "\u{FE0F}", "  \u0301", "\u0301"] do
+        text = "a\n" <> line <> "\n"
+        {cmd, _} = Keymap.comment_lines(text, {1, 1}, "#")
+        commented = run(text, cmd)
+        {cmd2, _} = Keymap.comment_lines(commented, {1, 1}, "#")
+        assert run(commented, cmd2) == text, inspect(line)
+      end
+    end
+
     test "comment on mixed indent: the marker goes where the indents part" do
       text = "def f():\n    a = 1\n\tb = 2\n    c = 3\n"
       {cmd, _} = Keymap.comment_lines(text, {1, 3}, "#")
@@ -325,7 +357,7 @@ defmodule Geex.Loop.EditingKeysPureTest do
         {cmd, from, to} = Keymap.move_text("foo bar baz", {{0, 4}, {0, 8}}, how)
         moved = run("foo bar baz", cmd)
         assert moved == want, inspect(how)
-        assert String.slice(moved, elem(from, 1)..(elem(to, 1) - 1)) == "bar"
+        assert Geex.Text.slice(moved, elem(from, 1)..(elem(to, 1) - 1)) == "bar"
       end
 
       # Only spaces after it: at the end already; they don't become indent.

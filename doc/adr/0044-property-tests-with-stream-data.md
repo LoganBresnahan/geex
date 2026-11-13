@@ -7,7 +7,7 @@
   building them changed the design. Slice 2 found and fixed BUG-8. A verify pass the same day
   (session geex-d3) found BUG-8's fix incomplete, three weak properties and some overclaiming;
   all addressed below ("the verify pass"), and BUG-9 logged. §8.4's slices wait for their
-  consumers.
+  consumers. **Amended 2026-11-12:** the shared generators are the default for any property over text, and carry invalid bytes, more awkward characters and long lines.
 - **Date:** 2026-11-09
 - **Relates to:** [ADR-0006](0006-elixir-not-gleam.md) (which promised property tests for the
   boundary), [ADR-0020](0020-diff-edit-tool.md) (the edit tool's grapheme property),
@@ -277,6 +277,44 @@ measuring what the properties catch. What it found, and what changed:
   `GEEX_PROPERTY_RUNS`. A trade-off, stated here rather than hidden in "the same laws".
 - **BUG-9**, older than this ADR: an attestation doesn't relabel a checkpoint's `base_blame`.
   Logged in [bugs.md](../bugs.md), not fixed.
+
+## Amendment — 2026-11-12: the shared generators by default, wider
+
+**Context.** The reviews of ADR-0052 and the long-line work found bugs the suite's properties
+missed because their generators never made the input: the editing keys' move property had no
+`\r`, the long-line properties no invalid bytes, and a paint property's failure surfaced only in a
+deep run. Several properties carried their own small generators beside `Geex.Gen`. The
+maintainer, 2026-11-12, of the proposals that followed: "i agree with just 2", putting the awkward
+inputs in the shared generators.
+
+**Decision.**
+
+1. **`Geex.Gen` is the default** for any property over text. A property with a generator of its
+   own for the cases its law is about (indents, comment markers, brackets, a marker's bytes) mixes
+   in `Geex.Gen.line/1` or `piece/1` beside it, so the awkward cases still reach it.
+2. **The awkward set grows:** a keycap, VS16 alone, Prepend characters (U+0600, U+0D4E), and
+   whitespace that isn't a space or a tab (no-break space, form feed, vertical tab, U+3000), so a
+   rule about "blank" or "whitespace" has to say which it means.
+3. **Invalid UTF-8, by default, rarely** (`Geex.Gen.invalid_byte/0`: a continuation byte, a Latin-1
+   `é`, a truncated lead, `0xC0`, `0xFF`; each one grapheme, BUG-15). A property whose law or
+   oracle can't hold for them passes `invalid: false` and says why in a comment: an MCP argument's
+   JSON round trip (JSON strings are UTF-8), the reference paint from before BUG-15.
+4. **Long lines in a deep run** (`Geex.Gen.long_line/1`: past 4 KB, ASCII or not, words, gaps
+   and brackets, now and then a word or a gap longer than a window), by default only when
+   `max_runs` is 1,000 or more (`GEEX_PROPERTY_RUNS`), so the default `mix test` stays quick; a
+   property asks for them always with `long: true`.
+5. **Oracles say what text they handle.** A property's own model reads graphemes with
+   `Geex.Text`, not `String`, so it doesn't raise where the code under test doesn't. Where a law
+   genuinely excludes a case, the property says so in a comment and a guard, never by narrowing
+   the generator silently: a line ending in `\r\r` (which `\r` is the ending can't be told), a
+   move that joins or parts graphemes at its seams (bytes compared, positions only where the
+   segmentation is unchanged).
+
+**Consequences.** The wider generators found two crashes and a lost character, fixed with them:
+`Alt+\\` reading forward past an emoji before an invalid byte (`Keymap`'s bracket search still
+stepped with `String.next_grapheme/1`); and uncommenting a line whose text starts with a combining
+mark or a lone VS16, which took the mark with the marker's space (the space and the mark are one
+grapheme). The deep run takes a little longer for the long lines.
 
 ## See
 

@@ -24,12 +24,13 @@ defmodule Geex.InvalidBytesTest do
       )
 
   # Valid pieces of every kind, with an emoji often right before an invalid byte (where OTP's
-  # segmentation raises).
+  # segmentation raises). `Gen.piece/0` carries invalid bytes too, rarely (ADR-0044's 2026-11-12
+  # amendment); this property is about them, so it wants them often and of every kind.
   defp piece,
     do:
       frequency([
         {4, Gen.piece()},
-        {2, bad_byte()},
+        {2, one_of([bad_byte(), Gen.invalid_byte()])},
         {1, member_of(["👍", "👍🏽", "👨‍👩‍👧", "🇫🇷", "1️⃣", "日本", "é", "\t", "\r"])}
       ])
 
@@ -153,6 +154,14 @@ defmodule Geex.InvalidBytesTest do
       # A line over the backward search's budget above the cursor is read by its tail.
       long = String.duplicate("é", 900_000) <> "(☀" <> <<0xFF>> <> "\n)"
       assert Geex.Loop.Keymap.matching_bracket({1, 0}, long) == {0, 900_000}
+    end
+
+    test "Alt+\\ steps past an emoji right before an invalid byte" do
+      # Found by the shared generator's long lines (ADR-0044's 2026-11-12 amendment): the bracket
+      # search read forward with String.next_grapheme/1, which raises there.
+      text = "(\u{1F600}" <> <<0x80>> <> " x)"
+      assert Geex.Loop.Keymap.matching_bracket({0, 0}, text) == {0, 5}
+      assert Geex.Loop.Keymap.matching_bracket({0, 5}, text) == {0, 0}
     end
 
     test "valid emoji are untouched: ZWJ, flags, keycaps, skin tones, CJK, combining marks" do

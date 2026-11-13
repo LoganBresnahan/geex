@@ -111,7 +111,7 @@ defmodule Geex.WidthTest do
   # grapheme.
   property "col_at_display/3 maps each display column to the grapheme drawn in it" do
     check all(line <- Gen.fragment(max_length: 20), extra <- integer(1..4), tab <- integer(1..8)) do
-      graphemes = String.graphemes(line)
+      graphemes = Geex.Text.graphemes(line)
       columns = model_columns(graphemes, tab)
 
       for display_x <- 1..(length(columns) + extra) do
@@ -127,7 +127,7 @@ defmodule Geex.WidthTest do
   # one drawn there.
   property "the cursor's display column addresses the grapheme it sits on" do
     check all(line <- Gen.fragment(max_length: 20), tab <- integer(1..8)) do
-      graphemes = String.graphemes(line)
+      graphemes = Geex.Text.graphemes(line)
       columns = model_columns(graphemes, tab)
 
       for {_g, col} <- Enum.with_index(graphemes), (col + 1) in columns do
@@ -157,7 +157,7 @@ defmodule Geex.WidthTest do
             x0 <- integer(0..5),
             hscroll <- integer(0..24)
           ) do
-      graphemes = String.graphemes(line)
+      graphemes = Geex.Text.graphemes(line)
       width = Width.line(line, tab)
       w = x0 + width + 2
       screen = Paint.to_screen(line, [], theme, w, 1, 0, x0, hscroll, nil, tab)
@@ -177,8 +177,10 @@ defmodule Geex.WidthTest do
             # A wide glyph's second column: its continuation, or a blank when its lead is off.
             assert cell.char == if(display_x - 1 > hscroll, do: "", else: " ")
 
+          # A byte that isn't UTF-8 is drawn as U+FFFD (BUG-15, ADR-0027's amendment).
           true ->
-            assert cell.char == Enum.at(graphemes, gx - 1)
+            g = Enum.at(graphemes, gx - 1)
+            assert cell.char == if(String.valid?(g), do: g, else: "\u{FFFD}")
         end
       end
     end

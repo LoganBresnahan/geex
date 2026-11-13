@@ -10,39 +10,22 @@ defmodule Geex.Loop.LongLinesTest do
   alias Geex.Commands.Replace
   alias Geex.Loop.Keymap
 
-  # A line long enough to be read through a window (over 4 KB), from pieces that put words,
-  # spaces, brackets and characters of several bytes everywhere; now and then a word or a gap
-  # longer than the window, so a read runs into its side and falls back to the whole line.
-  defp piece(ascii?) do
-    common = [
-      {8, member_of(~w(a bc xyz q))},
-      {5, member_of([" ", "  ", "\t"])},
-      {2, member_of(~w|( ) [ ] { } ,|)},
-      {1, constant(String.duplicate("w", 1500))},
-      {1, constant(String.duplicate(" ", 1500))}
-    ]
-
-    wide = [{2, member_of(["é", "é", "👍🏽", "λ", "日"])}]
-    frequency(if ascii?, do: common, else: common ++ wide)
-  end
-
-  # A few dozen pieces, then more of them, until the line passes 4.5 KB: a short list to shrink.
-  defp long_line do
-    gen all(
-          ascii? <- boolean(),
-          head <- list_of(piece(ascii?), min_length: 1, max_length: 40),
-          tail <- list_of(piece(ascii?), min_length: 1, max_length: 40),
-          crlf? <- boolean()
-        ) do
-      unit = Enum.join(tail)
-      head = Enum.join(head)
-      reps = div(4500, max(byte_size(unit), 1)) + 1
-      head <> String.duplicate(unit, reps) <> if(crlf?, do: "\r", else: "")
-    end
-  end
+  # A line long enough to be read through a window (over 4 KB): the shared generator's
+  # (`Geex.Gen.long_line/1`, ADR-0044's 2026-11-12 amendment), with words, gaps and brackets
+  # everywhere, the awkward pieces and invalid bytes, and now and then a word or a gap longer than
+  # the window.
+  defp long_line, do: Geex.Gen.long_line()
 
   defp body(l), do: String.replace_suffix(l, "\r", "")
   defp space?(g), do: g in [" ", "\t"]
+
+  defp trim_st(gs),
+    do:
+      gs
+      |> Enum.drop_while(&space?/1)
+      |> Enum.reverse()
+      |> Enum.drop_while(&space?/1)
+      |> Enum.reverse()
 
   # The whole-line answers, as Keymap computed them before BUG-12's window.
   defp ref_word_forward(gs, col) do
@@ -82,7 +65,7 @@ defmodule Geex.Loop.LongLinesTest do
 
   property "on a long line the word motions and Alt+8 answer as reading it whole would" do
     check all(l <- long_line(), seed <- integer(0..1_000_000)) do
-      gs = String.graphemes(body(l))
+      gs = Geex.Text.graphemes(body(l))
       col = rem(seed, length(gs) + 1)
       text = "first\n" <> l <> "\nlast"
 
@@ -110,7 +93,7 @@ defmodule Geex.Loop.LongLinesTest do
             len <- integer(1..8),
             how <- member_of([:left, :right, :word_back, :word_forward])
           ) do
-      b_gs = String.graphemes(body(l))
+      b_gs = Geex.Text.graphemes(body(l))
       a = rem(seed, max(length(b_gs) - len, 1))
       b = min(a + len, length(b_gs))
       text = "first\n" <> l <> "\nlast"
@@ -119,13 +102,22 @@ defmodule Geex.Loop.LongLinesTest do
         moved = run(text, cmd)
         [_, new_l, _] = String.split(moved, "\n")
         assert String.ends_with?(new_l, if(String.ends_with?(l, "\r"), do: "\r", else: ""))
-        new_gs = String.graphemes(body(new_l))
-        assert Enum.sort(new_gs) == Enum.sort(b_gs)
+        new_gs = Geex.Text.graphemes(body(new_l))
+        # The bytes are kept. Graphemes can join or part where the moved text meets new
+        # neighbours (a Prepend character joins what follows it, a lone combining mark what
+        # precedes it), so their positions are compared only where the segmentation is unchanged.
+        assert Enum.sort(:binary.bin_to_list(new_l)) == Enum.sort(:binary.bin_to_list(l))
+        same_segments? = Enum.sort(new_gs) == Enum.sort(b_gs)
 
-        assert Enum.slice(new_gs, f..(t - 1)//1) |> Enum.join() |> String.trim() ==
-                 Enum.slice(b_gs, a..(b - 1)//1) |> Enum.join() |> String.trim()
+        # The words moved, without the spaces and tabs at the selection's ends (ADR-0052 §7).
+        if same_segments?,
+          do:
+            assert(
+              trim_st(Enum.slice(new_gs, f..(t - 1)//1)) ==
+                trim_st(Enum.slice(b_gs, a..(b - 1)//1))
+            )
 
-        if how in [:left, :right] do
+        if how in [:left, :right] and same_segments? do
           back = if how == :left, do: :right, else: :left
           {cmd2, {1, ^a}, {1, ^b}} = Keymap.move_text(moved, {{1, f}, {1, t}}, back)
           assert run(moved, cmd2) == text
@@ -136,7 +128,7 @@ defmodule Geex.Loop.LongLinesTest do
 
   property "on a long line a bracket's pair's pair is the bracket" do
     check all(l <- long_line(), seed <- integer(0..1_000_000)) do
-      gs = String.graphemes(body(l))
+      gs = Geex.Text.graphemes(body(l))
       text = "x\n" <> l <> "\ny"
       brackets = for {g, c} <- Enum.with_index(gs), g in ~w|( ) [ ] { }|, do: c
 
