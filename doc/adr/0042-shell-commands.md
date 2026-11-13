@@ -120,6 +120,14 @@ band's handle too ([ADR-0038](0038-split-panes-and-tabs.md) §6): it draws `⠛�
 title and the hint, a drag resizes the band (the same height the edits pane uses), and a press on
 it focuses the output pane, not the edits pane it covers.
 
+## Amendment (2026-11-13): `!!` after a restart
+
+The last `!` command was the loop's alone, so after a restart `!!` said "no ! command yet" though
+the kept history of typed lines (ADR-0042's `history.json`) had it. Now `!!` runs the loop's last
+`!` command, else the newest `!` line in that history. A restart itself still runs nothing, and
+the output pane isn't kept across one: it is a snapshot of when the command ran (the maintainer's
+call, 2026-11-13); `Alt+M` then Up, or `!!`, runs it again.
+
 ## See
 
 `lib/geex/shell.ex`, `lib/geex/shell/text.ex`, `lib/geex/loop/output.ex`,

@@ -467,6 +467,9 @@ defmodule Geex.Loop do
       shell: nil,
       output: nil,
       last_shell: nil,
+      # The selection a search made (a match, ADR-0053): while it is still the selection, a
+      # plain move drops it instead of extending it.
+      found: nil,
       # The minibuffer's history, per mode (`Geex.Minibuffer.Recall`), and the file it's kept in
       # (nil: in memory only, as under test).
       recall: %{command: Recall.new(), grid: Recall.new(), search: Recall.new()},
@@ -3110,17 +3113,29 @@ defmodule Geex.Loop do
   # **active-line background** (the same tint the cursor's row gets — see cursor_line_overlay/5) so
   # the input field reads as a focused, distinct surface, yet stays clearly different from the
   # reverse-video status bar it replaces.
+  # A pre-fill the first key replaces (`Minibuffer.prefill/2`) is drawn the other way round from
+  # the row, as selected text reads: reversed, or plain where the row itself is reversed (the
+  # terminal palette's `mark` when it doesn't know the terminal's background).
   defp draw_minibuffer(screen, %{w: w, h: h, theme: %Theme{palette: pal}, minibuffer: mb} = state) do
     line = Minibuffer.prompt(mb) <> Minibuffer.value(mb) <> prompt_tail(state)
+    style = %Cell{fg: pal.fg, bg: pal.active_line_bg, attrs: pal.mark}
 
-    screen
-    |> Screen.fill_rect(0, h - 1, w, 1, %Cell{
-      char: " ",
-      fg: pal.fg,
-      bg: pal.active_line_bg,
-      attrs: pal.mark
-    })
-    |> Screen.draw_text(0, h - 1, line, %Cell{fg: pal.fg, bg: pal.active_line_bg, attrs: pal.mark})
+    screen =
+      screen
+      |> Screen.fill_rect(0, h - 1, w, 1, %{style | char: " "})
+      |> Screen.draw_text(0, h - 1, line, style)
+
+    if mb.fresh do
+      flipped =
+        if :reverse in style.attrs,
+          do: List.delete(style.attrs, :reverse),
+          else: [:reverse | style.attrs]
+
+      x = Width.string(Minibuffer.prompt(mb))
+      Screen.draw_text(screen, x, h - 1, Minibuffer.value(mb), %{style | attrs: flipped})
+    else
+      screen
+    end
   end
 
   # What follows the search's query in its prompt: the count, and "wrapped" (Q3); the prompt is
@@ -5561,7 +5576,8 @@ defmodule Geex.Loop do
   # A vertical move keeps the goal column (re-derive the landing column from it, so the
   # horizontal position is preserved across a run of up/down and sticks to line ends);
   # any other cursor move refreshes the goal from where it landed. A live selection
-  # extends to the new cursor (the cursor *is* its active end, ADR-0029).
+  # extends to the new cursor (the cursor *is* its active end, ADR-0029), unless it is still the
+  # match a search selected: the move drops that, as other editors do (ADR-0053, 2026-11-13).
   defp apply_move(state, event, new_cursor, text) do
     {final, goal} =
       if Keymap.vertical?(event) do
@@ -5573,9 +5589,11 @@ defmodule Geex.Loop do
     set_cursor(final)
     state = %{state | goal: goal}
 
-    if state.selection,
-      do: %{state | selection: Selection.extend(state.selection, final)},
-      else: state
+    cond do
+      state.selection == nil -> state
+      state.selection == state.found -> %{state | selection: nil, found: nil}
+      true -> %{state | selection: Selection.extend(state.selection, final)}
+    end
   end
 
   # The caret at the very end of the buffer — `{last line, its length}` — for select-all.
@@ -5856,7 +5874,7 @@ defmodule Geex.Loop do
       prompt = %{start: Search.start_position(range, cursor), saved: saved}
       fill = one_line_text(range, text)
       search = %{state.search | prompt: prompt, note: nil, last: :file}
-      state = %{state | search: search, minibuffer: Minibuffer.open(:search, fill)}
+      state = %{state | search: search, minibuffer: Minibuffer.prefill(:search, fill)}
       schedule_repaint(if fill == "", do: state, else: search_typed(state))
     else
       true -> %{state | notice: "nothing to search here: a preview has no text to select"}
@@ -6101,7 +6119,7 @@ defmodule Geex.Loop do
     sel = Selection.new({l, s}) |> Selection.extend({l, e})
     panes = Panes.update_current(state.panes, &%{&1 | hold: nil})
     note = if wrapped?, do: "wrapped to the top"
-    state = %{state | selection: sel, goal: e, panes: panes}
+    state = %{state | selection: sel, found: sel, goal: e, panes: panes}
 
     if state.search.prompt,
       do: put_in(state.search.note, note),
@@ -6265,7 +6283,7 @@ defmodule Geex.Loop do
           ""
       end
 
-    %{state | minibuffer: Minibuffer.open(mode, fill)}
+    %{state | minibuffer: Minibuffer.prefill(mode, fill)}
   end
 
   defp run_project_search(%{shell: %{}} = state, _query, _mode), do: %{state | notice: @running}
@@ -6390,7 +6408,7 @@ defmodule Geex.Loop do
          [{s, e} | _] <- Search.line_matches(l, query) do
       set_cursor({line, e})
       sel = Selection.new({line, s}) |> Selection.extend({line, e})
-      %{state | selection: sel, goal: e, notice: note}
+      %{state | selection: sel, found: sel, goal: e, notice: note}
     else
       _ ->
         set_cursor({line, 0})
@@ -6653,8 +6671,7 @@ defmodule Geex.Loop do
       {:mkdir, path} -> with_path(state, path, &start_file_op(state, {:mkdir, &1}))
       {:rename, path} -> rename_current(state, path)
       {:shell, cmd} -> run_shell(state, cmd)
-      :shell_again when state.last_shell == nil -> %{state | notice: "no ! command yet"}
-      :shell_again -> run_shell(state, state.last_shell)
+      :shell_again -> shell_again(state)
       {:pipe, cmd} -> run_pipe(state, cmd)
       {:command, command} -> typed_command(command, state)
       {:search, mode, text} -> typed_search(mode, text, state)
@@ -6678,6 +6695,20 @@ defmodule Geex.Loop do
 
       _ ->
         state
+    end
+  end
+
+  # `!!`: the last `!` command run here, else (after a restart) the newest one in the kept
+  # history of typed lines; it runs only because `!!` was typed.
+  defp shell_again(state) do
+    kept =
+      Enum.find_value(state.recall.command.entries, fn line ->
+        with {:shell, cmd} <- Verbs.parse(line), do: cmd, else: (_ -> nil)
+      end)
+
+    case state.last_shell || kept do
+      nil -> %{state | notice: "no ! command yet"}
+      cmd -> run_shell(state, cmd)
     end
   end
 

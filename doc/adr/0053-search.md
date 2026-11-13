@@ -194,7 +194,7 @@ under an open prompt is searched again (R9). These are slice B's; slice A is the
   the results, `Alt+N` is the file's search again (Q14); `Alt+Q` makes it so too.
 - **Caps Lock with `Alt+q` runs `Alt+Shift+Q`'s command** (R17), as with the moves (ADR-0052 §8).
 - The title says "1 line" for one result.
-- **Decided overnight, pending the maintainer** (mod-verify's review of slice C, the
+- **Decided overnight, accepted by the maintainer 2026-11-13** (mod-verify's review of slice C, the
   coordinator's call):
   - **Outside git, grep runs in the C locale** (`LC_ALL=C`): under a UTF-8 locale GNU grep takes a
     file holding a byte that isn't UTF-8 for binary, and `-I` skips it without a word, so a Latin-1
@@ -218,6 +218,24 @@ one, and nothing is opened again. A file no pane has opens in the current pane, 
 `Alt+N` through the results and Enter on a result line alike; other opens (`Alt+F`, `open PATH`,
 the tree, a markdown link) still open in the current pane. A preview tab doesn't count as having
 the file.
+
+## Amendment — 2026-11-13: the maintainer's answers to the open questions
+
+The maintainer took every recommendation:
+
+1. **The first plain move after a search drops its match** instead of extending it, as other
+   editors do: the loop keeps the selection a search made (Enter, `Alt+N`, a project result) as
+   `found`, and a move while that is still the selection clears it and moves the cursor from the
+   match's end. A selection started any other way (`Alt+S`, `Alt+7/8/9`, the mouse) extends as
+   before.
+2. **A pre-fill is replaced by the first typed key** (or a paste), as a find box's is;
+   Backspace or an arrow keeps it, to edit (`Minibuffer.prefill/2`'s `fresh`). The pre-fill is
+   drawn the other way round from the prompt's row (reversed, or plain where the row is), as
+   selected text reads. Only the search prompts pre-fill this way; the palette's hand-off to
+   `line ` and the other prompts are as before.
+3. The overnight decisions of slice C's review are **accepted**: grep outside git in the C locale,
+   the refusal following symlinks and covering the directories above home, and a home directory
+   kept in git searched in its tracked files only.
 
 ## See
 

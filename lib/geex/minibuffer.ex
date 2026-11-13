@@ -30,7 +30,7 @@ defmodule Geex.Minibuffer do
   clamp against), the struct just carries and resets it.
   """
 
-  defstruct mode: :inactive, input: "", cursor: 0, sel: 0, ask: nil
+  defstruct mode: :inactive, input: "", cursor: 0, sel: 0, ask: nil, fresh: false
 
   # The longest pre-fill kept, in graphemes: the loop's `@paste_line`, so a pre-fill costs what a
   # paste does (each key re-splits the input up to the cursor).
@@ -55,7 +55,8 @@ defmodule Geex.Minibuffer do
           input: String.t(),
           cursor: non_neg_integer(),
           sel: non_neg_integer(),
-          ask: String.t() | nil
+          ask: String.t() | nil,
+          fresh: boolean()
         }
 
   @doc "A closed (inactive) minibuffer."
@@ -75,6 +76,27 @@ defmodule Geex.Minibuffer do
   def open(mode \\ :command, input \\ "") when mode != :inactive and is_binary(input) do
     input = Text.slice(input, 0, @prefill_max)
     %__MODULE__{mode: mode, input: input, cursor: Text.length(input)}
+  end
+
+  @doc """
+  Open the minibuffer in `mode` **pre-filled** with `input` that the first typed key (or paste)
+  replaces, as a find box's pre-fill is replaced (ADR-0053's 2026-11-13 decision); Backspace or
+  an arrow key keeps it, to edit. The loop shows a `fresh` pre-fill as selected.
+
+      iex> mb = Geex.Minibuffer.prefill(:search, "Needle")
+      iex> {mb.fresh, Geex.Minibuffer.insert(mb, "x").input}
+      {true, "x"}
+      iex> mb |> Geex.Minibuffer.backspace() |> Geex.Minibuffer.insert("x") |> Geex.Minibuffer.value()
+      "Needlx"
+      iex> mb |> Geex.Minibuffer.left() |> Geex.Minibuffer.insert("x") |> Geex.Minibuffer.value()
+      "Needlxe"
+      iex> Geex.Minibuffer.prefill(:search, "").fresh
+      false
+  """
+  @spec prefill(mode(), String.t()) :: t()
+  def prefill(mode, input) do
+    mb = open(mode, input)
+    %{mb | fresh: mb.input != ""}
   end
 
   @doc """
@@ -116,10 +138,14 @@ defmodule Geex.Minibuffer do
   def prompt(%__MODULE__{}), do: ""
 
   @doc """
-  Insert grapheme(s) `g` at the cursor, advancing it past them. Editing the input changes the
-  candidate set, so the palette's highlight resets to the top match (`sel: 0`).
+  Insert grapheme(s) `g` at the cursor, advancing it past them; a `fresh` pre-fill is replaced
+  instead (`prefill/2`). Editing the input changes the candidate set, so the palette's highlight
+  resets to the top match (`sel: 0`).
   """
   @spec insert(t(), String.t()) :: t()
+  def insert(%__MODULE__{fresh: true} = mb, g) when is_binary(g),
+    do: insert(%{mb | input: "", cursor: 0, fresh: false}, g)
+
   def insert(%__MODULE__{input: input, cursor: cursor} = mb, g) when is_binary(g) do
     {before, rest} = split(input, cursor)
     %{mb | input: before <> g <> rest, cursor: cursor + Text.length(g), sel: 0}
@@ -127,6 +153,7 @@ defmodule Geex.Minibuffer do
 
   @doc "Delete the grapheme before the cursor (a no-op at the start); resets the palette highlight."
   @spec backspace(t()) :: t()
+  def backspace(%__MODULE__{fresh: true} = mb), do: backspace(%{mb | fresh: false})
   def backspace(%__MODULE__{cursor: 0} = mb), do: mb
 
   def backspace(%__MODULE__{input: input, cursor: cursor} = mb) do
@@ -139,14 +166,15 @@ defmodule Geex.Minibuffer do
   @spec select(t(), non_neg_integer()) :: t()
   def select(%__MODULE__{} = mb, i) when is_integer(i) and i >= 0, do: %{mb | sel: i}
 
-  @doc "Move the cursor one grapheme left (clamped to the start)."
+  @doc "Move the cursor one grapheme left (clamped to the start); a pre-fill is kept, to edit."
   @spec left(t()) :: t()
-  def left(%__MODULE__{cursor: cursor} = mb), do: %{mb | cursor: max(cursor - 1, 0)}
+  def left(%__MODULE__{cursor: cursor} = mb),
+    do: %{mb | cursor: max(cursor - 1, 0), fresh: false}
 
-  @doc "Move the cursor one grapheme right (clamped to the input end)."
+  @doc "Move the cursor one grapheme right (clamped to the input end); a pre-fill is kept."
   @spec right(t()) :: t()
   def right(%__MODULE__{input: input, cursor: cursor} = mb),
-    do: %{mb | cursor: min(cursor + 1, Text.length(input))}
+    do: %{mb | cursor: min(cursor + 1, Text.length(input)), fresh: false}
 
   defp split(input, cursor), do: Text.split_at(input, cursor)
 end

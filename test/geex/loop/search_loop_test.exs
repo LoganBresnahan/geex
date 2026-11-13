@@ -180,6 +180,62 @@ defmodule Geex.Loop.SearchLoopTest do
     end
   end
 
+  describe "the maintainer's answers of 2026-11-13" do
+    test "the first plain move after a search drops its match; a later selection extends", %{
+      dir: dir
+    } do
+      {state, _pid} = open(dir, "a.txt", "x needle y\n")
+      state = state |> key({:alt, ?q}) |> type("needle") |> key({:key, :enter})
+      assert sel(state) == {{0, 2}, {0, 8}}
+      state = key(state, {:cmd, :right})
+      assert {sel(state), cursor()} == {nil, {0, 9}}
+
+      # Alt+N's match too; then Alt+S starts a selection a move extends, as before.
+      state = key(state, {:alt, ?n}) |> key({:cmd, :left})
+      assert sel(state) == nil
+      state = state |> key({:alt, ?s}) |> key({:cmd, :right})
+      assert sel(state) != nil
+    end
+
+    test "typing over the match replaces it, as before: no selection left to drop", %{dir: dir} do
+      {state, _pid} = open(dir, "a.txt", "needle a\nneedle b\n")
+      state = state |> key({:alt, ?q}) |> type("needle") |> key({:key, :enter})
+      # Typing over the match replaces it: no selection is left to drop.
+      state = type(state, "N")
+      assert sel(state) == nil
+      assert Buffer.snapshot(Session.active_buffer() |> elem(1)).text =~ "N a"
+    end
+
+    test "a pre-fill from the selection is replaced by the first key, kept by Backspace", %{
+      dir: dir
+    } do
+      {state, _pid} = open(dir, "a.txt", "Needle needle\n")
+      state = state |> key({:alt, ?8}) |> key({:alt, ?q})
+      assert {state.minibuffer.input, state.minibuffer.fresh} == {"Needle", true}
+      # Drawn as selected: the pre-fill the other way round from the prompt before it.
+      reverse? = fn x ->
+        screen = Geex.Renderer.current()
+        :reverse in Screen.get_cell(screen, x, screen.h - 1).attrs
+      end
+
+      repaint(state)
+      assert reverse?.(7) != reverse?.(0)
+      assert reverse?.(12) == reverse?.(7)
+      state = type(state, "needle")
+      repaint(state)
+      assert reverse?.(7) == reverse?.(0)
+      assert state.minibuffer.input == "needle"
+      # Smart case: the lower-case query found the first `Needle`, now selected.
+      assert sel(state) == {{0, 0}, {0, 6}}
+
+      # Esc puts back the selection the search started from; Alt+Q pre-fills it again.
+      state = key(state, {:key, :esc}) |> key({:alt, ?q})
+      assert {state.minibuffer.input, state.minibuffer.fresh} == {"Needle", true}
+      state = state |> key({:key, :backspace}) |> type("x")
+      assert {state.minibuffer.input, state.minibuffer.fresh} == {"Needlx", false}
+    end
+  end
+
   describe "typed at Alt+M: `search TEXT` (2026-11-13)" do
     defp command(state, line), do: state |> key({:alt, ?m}) |> type(line) |> key({:key, :enter})
 

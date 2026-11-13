@@ -6770,3 +6770,20 @@ with no tab added; `select all` said "unknown command: select all"; `geex notes.
 discovery file was gone after; the log reads "loading code in embedded mode" with no `terminating`
 lines and no crash dump. Not checked: `geex highlight`, a bare `geex`, Alt+Y's Commands tab, a
 macOS build, the release CI.
+
+### 2026-11-13 — The maintainer's answers: a move drops a search's match, the first key replaces a pre-fill, `!!` after a restart (ADR-0053, ADR-0042 amendments)
+
+The first plain move after a search (Enter, `Alt+N`, a project result) drops the match instead of
+extending it (the loop keeps the search's selection as `found`); a selection made any other way
+extends as before. A search prompt's pre-fill (`Minibuffer.prefill/2`) is replaced by the first
+typed key or paste, kept by Backspace or an arrow, and drawn the other way round from the prompt's
+row. `!!` with no `!` run since the start runs the newest `!` line in the kept history. The
+overnight decisions of slice C's review accepted, recorded in ADR-0053. Tests: the move dropping
+the match from Enter and from `Alt+N`, `Alt+S`'s selection still extending, typing over the
+match; the pre-fill replaced, kept by Backspace, drawn flipped and back; `!!` with nothing kept
+and with a kept `!echo kept` behind other lines; `prefill/2`'s doctests. 1683 tests + 57 properties
++ 201 doctests green twice, `--warnings-as-errors --force` clean. Live in a tmux pty (dev build,
+scratch `XDG_STATE_HOME`): Right after a search moved the cursor one column with no selection
+left; `Alt+8` then `Alt+Q` showed the word reversed after `search:`, and typing `Needle` replaced
+it; `!echo from-before`, Ctrl-X, a new geex, `!!` ran it again. Not checked: the terminal palette
+without a known background live (the flip is tested), the deep property run.

@@ -119,6 +119,20 @@ defmodule Geex.Loop.ShellTest do
       assert ran(state).output.status == {:exit, 0}
     end
 
+    test "!! after a restart runs the newest ! line kept in the history (2026-11-13)", %{
+      root: root
+    } do
+      {state, _} = editing(Path.join(root, "notes.txt"))
+      assert typed(state, "!!").notice == "no ! command yet"
+
+      # A fresh loop whose kept history has `!echo kept` behind other lines (and a `!!`).
+      kept = Recall.new(["!!", "save", "!echo kept", "!echo older"])
+      state = %{state | last_shell: nil, recall: %{state.recall | command: kept}}
+      state = typed(state, "!!")
+      assert state.output.cmd == "echo kept"
+      assert ran(state).output.status == {:exit, 0}
+    end
+
     test "Ctrl-G stops it; a second one waits for the first", %{root: root} do
       {state, _} = editing(Path.join(root, "notes.txt"))
       state = typed(state, "!echo go; sleep 30")
