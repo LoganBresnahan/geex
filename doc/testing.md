@@ -6787,3 +6787,17 @@ scratch `XDG_STATE_HOME`): Right after a search moved the cursor one column with
 left; `Alt+8` then `Alt+Q` showed the word reversed after `search:`, and typing `Needle` replaced
 it; `!echo from-before`, Ctrl-X, a new geex, `!!` ran it again. Not checked: the terminal palette
 without a known background live (the flip is tested), the deep property run.
+
+### 2026-11-13 — The deep run's counterexample: a multi-word query lost its description matches (ADR-0047 amendment)
+
+The deep run before 0.7.0 (`GEEX_PROPERTY_RUNS=10000`) failed the palette's band property after
+4,602 runs: `"split cut"` with `copy` and `search-project` keyed ordered that band unlike the
+test's scorer. The cause, in today's hyphenated names: `Catalog`'s rank turned a query's spaces
+into hyphens before *every* score, the description's too, so a query of several words no longer
+matched a description (words between spaces), and the test's own scorer still used the query as
+typed. Fixed: a name scores the better of the query as typed and with its spaces as hyphens (so
+`search all` still finds `search-all`, and `theme term` `theme terminal`); a description the query
+as typed; the test's scorer says the same. An example test (`every file` finds `search-all` by its
+description) fails on the old code. The failing seed green at 10,000 runs; then 1683 tests + 57
+properties + 201 doctests green twice and the whole deep run green, `--warnings-as-errors --force`
+clean.

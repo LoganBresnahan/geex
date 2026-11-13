@@ -191,10 +191,18 @@ defmodule Geex.Command.CatalogTest do
       ])
     end
 
-    # A name match above a description-only one, as Catalog's rank; no match scores 0.
+    # A name match above a description-only one, as Catalog's rank; no match scores 0. A name
+    # scores the better of the query and the query with its spaces as hyphens.
     defp score(entry, q) do
+      named = fn name ->
+        [q, String.replace(q, " ", "-")]
+        |> Enum.map(&Geex.Fuzzy.score(name, &1))
+        |> Enum.reject(&is_nil/1)
+        |> Enum.max(fn -> nil end)
+      end
+
       case [entry.name | entry.aliases]
-           |> Enum.map(&Geex.Fuzzy.score(&1, q))
+           |> Enum.map(named)
            |> Enum.reject(&is_nil/1) do
         [] -> Geex.Fuzzy.score(entry.description, q) || 0
         scores -> Enum.max(scores) + 1000
@@ -265,5 +273,9 @@ defmodule Geex.Command.CatalogTest do
         do: assert(hd(Catalog.search(q)).name == "search-all", q)
 
     assert hd(Catalog.search("move word b")).name == "move-word-back"
+    # A description is words between spaces: a query of several words still finds one there
+    # (the deep run's counterexample: the spaces had been made hyphens for descriptions too).
+    assert "search-all" in Enum.map(Catalog.search("every file"), & &1.name)
+    assert hd(Catalog.search("theme term")).name == "theme terminal"
   end
 end

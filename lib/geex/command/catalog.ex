@@ -558,14 +558,22 @@ defmodule Geex.Command.Catalog do
   # Name matches live in a high band (+1000) so they always sort above description-only matches;
   # a description hit keeps its raw score. `nil` (neither matches) drops the entry.
   defp rank(%Entry{name: name, aliases: aliases, description: desc}, q) do
-    # A space typed matches a name's hyphen: `search-all` scores as `search-all` does.
-    q = String.replace(q, " ", "-")
+    # A name scores the better of the query as typed and with its spaces as hyphens, so
+    # "search all" scores as `search-all` does; a description (words between spaces) the query
+    # as typed.
+    hyphened = String.replace(q, " ", "-")
 
-    case [name | aliases] |> Enum.map(&Fuzzy.score(&1, q)) |> Enum.reject(&is_nil/1) do
+    case [name | aliases]
+         |> Enum.map(&max_score(Fuzzy.score(&1, q), Fuzzy.score(&1, hyphened)))
+         |> Enum.reject(&is_nil/1) do
       [] -> Fuzzy.score(desc, q)
       scores -> Enum.max(scores) + 1000
     end
   end
+
+  defp max_score(nil, b), do: b
+  defp max_score(a, nil), do: a
+  defp max_score(a, b), do: max(a, b)
 
   @doc """
   An entry narrowed to one of its commands, to run rather than hand off: `tab N` found by a key
