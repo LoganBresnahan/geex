@@ -766,9 +766,12 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       (ADR-0026's 2026-11-11 amendment) want a note in `Alt+Y` and install.md.
    5. **Find**: `Alt+Q` in the file, `Alt+Shift+Q` across the project (the maintainer, 2026-11-11),
       `Alt+N` the next match (the keys kept by ADR-0049 §2a). Its ADR is
-      [ADR-0053](adr/0053-search.md) (Accepted 2026-11-12, not built): the query typed in the
-      minibuffer, the match selected, `Alt+N` wrapping and stepping a project search's results;
-      `Alt+Shift+N` waits for multiple cursors.
+      [ADR-0053](adr/0053-search.md) (Accepted 2026-11-12, amended 2026-11-13): the query typed in
+      the minibuffer, the match selected, `Alt+N` wrapping and stepping a project search's results;
+      `Alt+Shift+N` waits for multiple cursors. Being built on `search`: slice A (the pure core) and
+      slice B (search in the file: `Alt+Q`, `Alt+N`, the matches drawn and counted) built
+      2026-11-13; slice C (project search: `Alt+Shift+Q`, `search all`, `Alt+N` through the
+      results) built 2026-11-13.
    6. **Tab over a selection** (ADR-0050, the maintainer, 2026-11-11): Tab indents the selected
       lines, Shift+Tab un-indents (always, the cursor's line without a selection), and the other
       kind of indent moves from Shift+Tab to `Alt+1` (first `` Alt+` ``, which GNOME and KDE take;
@@ -808,7 +811,9 @@ of a long line, found measuring BUG-12) are **FIXED** (2026-11-12, on the `long-
 an MCP `edit` command crashed the loop) and BUG-15 (an invalid UTF-8 byte on screen could crash a
 paint), both older than that branch and found by mod-verify's review of it, are **FIXED**
 (2026-11-12, on the `crash-fixes` branch). BUG-16 (the markdown preview can't render a file with
-a byte that isn't UTF-8; it says "render failed", gracefully) is **open**.
+a byte that isn't UTF-8; it says "render failed", gracefully) is **open**. BUG-17 (a long line with
+an emoji or © before an invalid byte froze every key on it; in 0.6.0) is **FIXED** (2026-11-13,
+on the `search` branch).
 
 ---
 

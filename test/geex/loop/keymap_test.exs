@@ -146,12 +146,13 @@ defmodule Geex.Loop.KeymapTest do
   end
 
   describe "resolve/3 — selection (ADR-0029)" do
-    test "Alt+S starts a selection, Alt+A selects all, Esc clears; Alt+N is unbound" do
+    test "Alt+S starts a selection, Alt+A selects all, Esc clears; Alt+N is the next match" do
       assert :select_start = resolve({:alt, ?s}, {0, 0}, "abc")
       assert :select_start = resolve({:alt, ?S}, {0, 0}, "abc")
       assert :select_all = resolve({:alt, ?a}, {0, 0}, "abc")
       assert :select_all = resolve({:alt, ?A}, {0, 0}, "abc")
-      assert :ignore = resolve({:alt, ?n}, {0, 0}, "abc")
+      assert :next_match = resolve({:alt, ?n}, {0, 0}, "abc")
+      assert :search = resolve({:alt, ?q}, {0, 0}, "abc")
       assert :select_clear = resolve({:key, :esc}, {0, 0}, "abc")
     end
 

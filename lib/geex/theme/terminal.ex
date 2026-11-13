@@ -125,6 +125,8 @@ defmodule Geex.Theme.Terminal do
       palette(nil)
       | active_line_bg: mix(bg, toward, @active_line),
         selection: mix(bg, toward, @selection),
+        # A search's other matches: half the selection's shade (ADR-0053).
+        search: mix(bg, toward, @selection / 2),
         # On a light background cyan washes out: blue.
         accent: if(dark?, do: {:ansi, 14}, else: {:ansi, 4}),
         mark: []

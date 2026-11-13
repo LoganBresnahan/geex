@@ -106,9 +106,11 @@ defmodule Geex.Loop.BindingsTest do
       # Alt+Shift+P isn't bound: it falls back to Alt+P, the preview (ADR-0051).
       assert Bindings.translate({:alt, ?P}, @defaults) == {:cmd, :toggle_preview}
 
-      # The motion cluster's Shift chords are the moves (ADR-0052).
+      # The motion cluster's Shift chords are the moves (ADR-0052); Alt+Shift+Q the project's
+      # search (ADR-0053).
       shifted = for {{:alt, c}, _} <- @defaults, c in ?A..?Z, do: c
-      assert Enum.sort(shifted) == ~c"HIJKLORUZ"
+      assert Enum.sort(shifted) == ~c"HIJKLOQRUZ"
+      assert Bindings.translate({:alt, ?Q}, @defaults) == {:cmd, :search_project}
     end
 
     # The property's "never the other way" needs a lower case dropped and its Shift chord kept,
@@ -152,6 +154,8 @@ defmodule Geex.Loop.BindingsTest do
         {:alt, ?y} => :settings,
         {:alt, ?r} => :revert_hunk,
         {:alt, ?f} => :find_file,
+        {:alt, ?q} => :search,
+        {:alt, ?n} => :next_match,
         {:alt, ?w} => :close,
         {:alt, ?t} => :toggle_tree,
         {:alt, ?e} => :toggle_edits,
@@ -181,9 +185,10 @@ defmodule Geex.Loop.BindingsTest do
       for {chord, command} <- expected,
           do: assert(Bindings.translate(chord, @defaults) == {:cmd, command}, inspect(chord))
 
-      # Alt+Q and Alt+N are kept for find (ADR-0049 §2a), unbound until find is built; Esc
-      # clears a selection.
-      for c <- [?q, ?Q, ?n, ?N], do: assert(Bindings.translate({:alt, c}, @defaults) == {:alt, c})
+      # Alt+Shift+Q searches the project (ADR-0053 §6); Alt+Shift+N, kept for multiple cursors,
+      # falls back to Alt+N.
+      assert Bindings.translate({:alt, ?Q}, @defaults) == {:cmd, :search_project}
+      assert Bindings.translate({:alt, ?N}, @defaults) == {:cmd, :next_match}
 
       # Alt+3, Alt+4, Alt+6 and Alt+0 are the user's (ADR-0051, ADR-0052), Alt+5 kept for
       # multiple cursors, and Alt+` the user's too, which the desktop often takes.

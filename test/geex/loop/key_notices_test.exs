@@ -63,6 +63,11 @@ defmodule Geex.Loop.KeyNoticesTest do
                "(#{key(:toggle_tree)}, #{key(:toggle_edits)})"
   end
 
+  test "Alt+N with nothing to search for names the key that searches", %{state: state} do
+    state = send_io(state, {:cmd, :next_match})
+    assert state.notice == "nothing to search for (#{key(:search)} searches)"
+  end
+
   test "a buffer behind its file names the fast-forward key", %{state: state, dir: dir, buf: buf} do
     File.write!(Path.join(dir, "a.txt"), "new\n")
     :behind = Buffer.disk_changed(buf, "new\n")

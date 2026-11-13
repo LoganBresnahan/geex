@@ -29,7 +29,11 @@ defmodule Geex.Loop.Output do
             sel: 0,
             top: 0,
             follow: true,
-            max: @max
+            max: @max,
+            # A project search's results (ADR-0053 §6): `%{query, mode}`, and `capped` once the
+            # first `max` lines came and the rest went unread.
+            search: nil,
+            capped: false
 
   @type status :: :running | {:exit, integer()} | :needs_tty | :overflow
   @type t :: %__MODULE__{
@@ -44,13 +48,22 @@ defmodule Geex.Loop.Output do
           sel: non_neg_integer(),
           top: non_neg_integer(),
           follow: boolean(),
-          max: pos_integer()
+          max: pos_integer(),
+          search: %{query: String.t(), mode: :search_project | :search_all} | nil,
+          capped: boolean()
         }
 
   @doc "A pane for `cmd` (`:show` for `!`, `:pipe` for a `|` whose stderr it shows), started `now` (ms)."
   @spec new(String.t(), :show | :pipe, integer(), keyword()) :: t()
-  def new(cmd, kind, now, opts \\ []),
-    do: %__MODULE__{cmd: cmd, kind: kind, started: now, max: Keyword.get(opts, :max, @max)}
+  def new(cmd, kind, now, opts \\ []) do
+    %__MODULE__{
+      cmd: cmd,
+      kind: kind,
+      started: now,
+      max: Keyword.get(opts, :max, @max),
+      search: Keyword.get(opts, :search)
+    }
+  end
 
   @doc """
   Add a chunk of raw output.
@@ -149,6 +162,21 @@ defmodule Geex.Loop.Output do
       "! mix test · exit 1 · 1.3s"
   """
   @spec title(t(), integer()) :: String.t()
+  def title(%__MODULE__{search: %{query: q, mode: mode}} = out, now) do
+    name = if mode == :search_all, do: "search all", else: "search project"
+    head = "#{name} “#{Text.clean(q)}”"
+
+    case out.status do
+      :running -> "#{head} · running #{div(max(now - out.started, 0), 1000)}s"
+      {:exit, 1} when out.count == 0 -> "#{head} · no matches · #{seconds(out.ms)}"
+      _ when out.capped -> "#{head} · the first #{out.max} lines · #{seconds(out.ms)}"
+      {:exit, 0} -> "#{head} · #{lines(size(out))} · #{seconds(out.ms)}"
+      {:exit, code} -> "#{head} · exit #{code} · #{seconds(out.ms)}"
+      :needs_tty -> "#{head} · stopped"
+      :overflow -> "#{head} · stopped: too much output"
+    end
+  end
+
   def title(%__MODULE__{} = out, now) do
     sigil = if out.kind == :pipe, do: "|", else: "!"
 
@@ -159,6 +187,9 @@ defmodule Geex.Loop.Output do
       :overflow -> "#{sigil} #{out.cmd} · stopped: too much output"
     end
   end
+
+  defp lines(1), do: "1 line"
+  defp lines(n), do: "#{n} lines"
 
   defp seconds(ms) when ms < 10_000, do: :erlang.float_to_binary(ms / 1000, decimals: 1) <> "s"
   defp seconds(ms), do: "#{div(ms, 1000)}s"

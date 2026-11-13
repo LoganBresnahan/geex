@@ -170,6 +170,7 @@ defmodule Geex.Theme do
          {:ok, active_line_bg} <- opt_color(pal, "active_line_bg", bg, bg),
          {:ok, cursor} <- opt_color(pal, "cursor", bg, fg),
          {:ok, selection} <- opt_color(pal, "selection", bg, fg),
+         {:ok, search} <- opt_color(pal, "search", bg, halfway(bg, selection)),
          {:ok, accent} <- opt_color(pal, "accent", bg, accent_default(appearance)) do
       {:ok,
        %Palette{
@@ -180,12 +181,20 @@ defmodule Geex.Theme do
          active_line_bg: active_line_bg,
          cursor: cursor,
          selection: selection,
+         search: search,
          accent: accent
        }}
     end
   end
 
   defp build_palette(_, _appearance), do: {:error, {:missing, "palette"}}
+
+  # A search's other matches, for a theme that doesn't say: halfway from the background to the
+  # selection, dimmer than the selection (the current match) itself.
+  defp halfway({:rgb, r, g, b}, {:rgb, r2, g2, b2}),
+    do: {:rgb, div(r + r2, 2), div(g + g2, 2), div(b + b2, 2)}
+
+  defp halfway(_bg, _selection), do: nil
 
   # A theme that doesn't say: the terminal's light blue on a dark theme (bright cyan, which
   # Windows Terminal's Campbell draws #61D6D6), its blue on a light one, where cyan washes out.
