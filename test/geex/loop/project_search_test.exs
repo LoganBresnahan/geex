@@ -56,6 +56,11 @@ defmodule Geex.Loop.ProjectSearchTest do
 
   defp type(state, text), do: Enum.reduce(String.graphemes(text), state, &key(&2, {:char, &1}))
 
+  defp command(state, line), do: state |> key({:alt, ?m}) |> type(line) |> key({:key, :enter})
+
+  defp tab_names(state, id),
+    do: for(t <- state.panes.panes[id].tabs, do: Path.basename(Geex.Buffer.status(t.buffer).path))
+
   # Run a search for `query` with Alt+Shift+Q and deliver the runner's messages until it ends.
   defp search(state, query),
     do: state |> key({:alt, ?Q}) |> type(query) |> key({:key, :enter}) |> ran()
@@ -270,6 +275,58 @@ defmodule Geex.Loop.ProjectSearchTest do
       assert cursor() == {0, 0}
       assert sel(state) == nil
       assert state.notice =~ "isn't on line 1"
+    end
+
+    test "a result in a file another pane has goes to that pane, opening nothing again", %{
+      root: root
+    } do
+      repo(root, %{"a.txt" => "needle a\n", "b.txt" => "needle b\n", "c.txt" => "x\n"})
+      # Pane 1 shows a.txt; pane 2 (side by side) shows b.txt; pane 1 is current.
+      state = editing(root, "a.txt") |> key({:alt, ?=}) |> command("open b.txt")
+      state = command(state, "pane next")
+      assert state.panes.pane == 1
+      state = search(state, "needle")
+
+      state = key(state, {:alt, ?n})
+      assert {state.panes.pane, Path.basename(shown_path())} == {1, "a.txt"}
+
+      state = key(state, {:alt, ?n})
+      assert {state.panes.pane, Path.basename(shown_path())} == {2, "b.txt"}
+      assert sel(state) == {{0, 0}, {0, 6}}
+      # Neither pane gained a tab: pane 1 still has a.txt alone, pane 2 a.txt and b.txt.
+      assert tab_names(state, 1) == ["a.txt"]
+      assert tab_names(state, 2) == ["a.txt", "b.txt"]
+
+      # Back to a.txt: pane 2 has it too, in a tab behind b.txt, but pane 2 is current now.
+      state = key(state, {:alt, ?n})
+      assert {state.panes.pane, Path.basename(shown_path())} == {2, "a.txt"}
+      assert tab_names(state, 2) == ["a.txt", "b.txt"]
+    end
+
+    test "a result in a file another pane has only in a tab behind: that pane, that tab", %{
+      root: root
+    } do
+      repo(root, %{"a.txt" => "x\n", "b.txt" => "needle b\n", "c.txt" => "y\n"})
+      # Pane 2 has b.txt behind c.txt; pane 1 shows a.txt and is current.
+      state = editing(root, "a.txt") |> key({:alt, ?=}) |> command("open b.txt")
+      state = state |> command("open c.txt") |> command("pane next")
+      assert state.panes.pane == 1
+      state = search(state, "needle")
+
+      state = key(state, {:alt, ?n})
+      assert {state.panes.pane, Path.basename(shown_path())} == {2, "b.txt"}
+      assert sel(state) == {{0, 0}, {0, 6}}
+      assert tab_names(state, 1) == ["a.txt"]
+      assert tab_names(state, 2) == ["a.txt", "b.txt", "c.txt"]
+    end
+
+    test "Enter on a result line goes to the pane that shows its file too", %{root: root} do
+      repo(root, %{"a.txt" => "a\n", "b.txt" => "x\nneedle b\n"})
+      state = editing(root, "a.txt") |> key({:alt, ?=}) |> command("open b.txt")
+      state = state |> command("pane next") |> search("needle")
+      state = key(%{state | focus: :output}, {:key, :enter})
+      assert {state.panes.pane, Path.basename(shown_path()), cursor()} == {2, "b.txt", {1, 6}}
+      assert tab_names(state, 1) == ["a.txt"]
     end
 
     test "a `!` replacing the results: Alt+N is the file's search again (Q14)", %{root: root} do
