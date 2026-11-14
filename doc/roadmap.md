@@ -350,7 +350,9 @@ Orthogonal to the AI-layer staging above — this is the *"build the world well"
 
 ### The command surface & shell (in flight — the minibuffer track)
 
-The minibuffer is built (one mode); these are the next steps, ordered by dependency. Shared
+The minibuffer is built, with its modes: typed commands, grid, the palette, the file finder, the
+buffer picker and search (items 2, 4 and 20.5), plus its y/n and path prompts. These are its
+steps, ordered by dependency. Shared
 design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
 [adr/0027](adr/0027-grid-command-addressing.md) (grid + ruler), and
 [notes.md](notes.md) "Editing & selection bindings".
@@ -362,18 +364,21 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    wiring (loop selection field, `Alt+S` + `Alt+A` select-all since ADR-0049, first `Alt+H` +
    `Alt+B`, render highlight incl. the multi-line / CRLF cases, Esc clear, `Alt+N` too until
    ADR-0049),
-   and clipboard `cut`/`copy`/`paste` (`Alt+X/C/V`) consuming `range/1`. The **typed** verbs
-   and grid-range ops remain (they ride item 2).
+   and clipboard `cut`/`copy`/`paste` (`Alt+X/C/V`) consuming `range/1`. The typed verbs are
+   built (`select`, `select-all`, `copy`, `cut`, `paste`: item 2's typed surface), and grid mode's
+   `copy`/`cut` take ranges; what remains is a grid range as the selection, item 4's coordinate
+   `select`.
 2. **The command catalog + the view-action tool category** — **built, first slice**
    ([adr/0030](adr/0030-view-action-tool-category.md), *Accepted*): `Geex.MCP.ViewActions`
    (field-spec → `tools/list`; the fourth `tools/call` route) with **`line`** as the first
    member, and the **typed-verb surface** `Geex.Loop.Verbs` — chords and typed verbs share one
    action vocabulary through the loop's `apply_action` (the parity mechanism); an agent-moved
    cursor now repaints (`{:geex_cursor}` notify). The agent's grid tools (`goto`, `copy`) landed
-   as their own category, `Geex.MCP.Grid` (item 4). Remaining: `scroll` / coordinate `select`
-   members, and re-basing the rest of the `Verbs` table on `Geex.Command.Catalog` (the commands
-   that run as their key does, and the searches, resolve through the catalog since ADR-0047 and
-   ADR-0053; the hand-written clauses remain), and undo/redo/paste aren't agent tools yet.
+   as their own category, `Geex.MCP.Grid` (item 4). Remaining: re-basing the rest of the `Verbs`
+   table on `Geex.Command.Catalog` (the commands that run as their key does, and the searches,
+   resolve through the catalog since ADR-0047 and ADR-0053; the hand-written clauses remain).
+   The agent members once planned here (`scroll`, coordinate `select`, undo/redo/paste as tools)
+   are frozen with the MCP ([adr/0032](adr/0032-listener-first-agent-integration.md) §5).
 3. ~~**Refactor go-to-line through the real system**~~ — **done** (rode item 2): the
    `run_command` hack is deleted; bare `N`, typed `line N`, and `tools/call line` converge on
    `ViewActions.line/1`.
@@ -384,8 +389,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      overlay**; `copy`/`cut`/`goto` over coordinates, live-verified against a wide glyph.
      The **agent half is built** too (ADR-0027 grid-agent amendment): `Geex.Command.Type`
      `:coord`/`:coord_range` (the same `Coord.parse/1` grammar, resolved as buffer-absolute
-     graphemes) + `Geex.MCP.Grid` (`goto`, `copy` onto the shared clipboard ring). Remaining: agent
-     `cut`, coordinate `select`, block/multi ranges, the `cursor_x`-oracle *automated* cast test.
+     graphemes) + `Geex.MCP.Grid` (`goto`, `copy` onto the shared clipboard ring). Remaining:
+     coordinate `select` in grid mode, block/multi ranges, the `cursor_x`-oracle *automated* cast
+     test; the agent's `cut` is frozen with the MCP (ADR-0032 §5).
    - **palette** (`Alt+B` since ADR-0049; first `Alt+P`, then `Alt+I` by ADR-0037) — **built**
      (ADR-0028 §3 amendment): `Geex.Fuzzy` + `Geex.Command.Catalog` + the `:palette` minibuffer
      mode with a candidate popup (up and down navigate: `Alt+I`/`Alt+K` since ADR-0049, first
