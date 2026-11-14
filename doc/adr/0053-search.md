@@ -274,7 +274,7 @@ restore throws away a file's other changes too). Which needs `save-all`. Filed a
    with `expect_seq:`, so a buffer that changed since its plan refuses it; a closed file is
    opened in the background (`Session.open_in_background/1`: listed among the buffers, the view
    left alone) and changed only if it still holds the text its plan came from; one opened only to
-   be refused is closed again. The notice counts what was replaced and names any file changed
+   be refused is closed again, unless its ledger brought back unsaved edits, which keep it open. The notice counts what was replaced and names any file changed
    since, not replaced.
 5. **Left unsaved.** The changed files show `[+]` where they are open; nothing touches the disk
    until a save. **`save-all`** saves every buffer with unsaved edits as `Ctrl-O` saves the one
