@@ -324,29 +324,37 @@ Orthogonal to the AI-layer staging above — this is the *"build the world well"
   stream (async, coalesced, latest-wins) and exposes the overlay
   ([adr/0022](adr/0022-capability-reactor.md)).
 - **Themes are data** — native JSON keyed on tree-sitter captures, longest-prefix resolution,
-  truecolor SGR + alpha-flatten; Birds of Paradise is the bundled reference; a Zed importer reads
-  the in-vocabulary ecosystem ([adr/0023](adr/0023-theming-and-extension-loading.md)).
+  truecolor SGR + alpha-flatten; Birds of Paradise is the reference, in the catalog since geex
+  went bare ([adr/0040](adr/0040-bare-geex-and-the-catalog.md)); a Zed importer reads the
+  in-vocabulary ecosystem ([adr/0023](adr/0023-theming-and-extension-loading.md)).
 - **The TUI core** — `TerminalIO` (`:prim_tty`, NIF-free) + `Screen`/`Cell`/`Renderer`/`Sgr`
   (cell diff → bytes); extractable but kept in geex for now
   ([adr/0024](adr/0024-tui-core-extractable.md)).
 - **Display width** — `Geex.Width` (`:unicode_util`-backed, NIF-free): wide/CJK/emoji glyphs take
   two columns via a lead + continuation cell, zero-width marks take none. Closes the first of
   ADR-0024's "half a toolkit" gaps.
+- **The interactive TUI loop** — `Geex.Loop` renders the reactor's overlay each frame against the
+  open buffers ([adr/0024](adr/0024-tui-core-extractable.md)), with a line-number gutter, the
+  active-line tint, both scroll bars, and the cursor and clipboard consumers
+  ([adr/0014](adr/0014-editor-state-and-dispatch-ownership.md),
+  [adr/0015](adr/0015-clipboard-subsystem.md)). Its keys, minibuffer, panes, tabs and mouse grew
+  in the command-surface track below (the bindings as data,
+  [adr/0047](adr/0047-every-key-runs-a-named-command.md); IJKL,
+  [adr/0049](adr/0049-ijkl-default-keys.md); the mouse, [adr/0039](adr/0039-mouse.md)). The
+  default theme is the terminal's own colours ([adr/0040](adr/0040-bare-geex-and-the-catalog.md)).
 
 **Pending (each gated on its named consumer):**
-- **The user-config layer** — theme selection + grammar/extension paths in `~/.config/geex/
-  config.toml`, precedence + cache ([adr/0025](adr/0025-user-config-layer.md), *Proposed*). The
-  theme loader is path-ready; this is the reader that points at it (the userpath-theme install
-  story).
-- **The interactive TUI loop** — render the reactor's overlay each frame against an open buffer
-  ([adr/0024](adr/0024-tui-core-extractable.md)). Brings the keymap (→ user-config) and the
-  cursor/clipboard consumers ([adr/0014](adr/0014-editor-state-and-dispatch-ownership.md),
-  [adr/0015](adr/0015-clipboard-subsystem.md)). **In flight:** the loop runs, with a
-  line-number gutter, active-line highlight, vertical + horizontal scroll bars, the
-  Birds-of-Paradise theme, the `Alt`-key keymap (WASD/Q-E/R-F motion, `Alt+M`), and the
-  **minibuffer first slice** (`:command` mode = bare-line-number go-to-line). Syntax overlay
-  rendering + the cursor/clipboard consumers are the remaining pieces.
-- **Remaining toolkit gaps** — truecolor→256/16 degradation (capability detect), mouse input.
+- **The hand-edited user config** — `~/.config/geex/config.toml`
+  ([adr/0025](adr/0025-user-config-layer.md), *Accepted*, unbuilt), read over the `settings.json`
+  that `Alt+Y` writes (ADR-0040 §7). Choosing a theme and installing grammars and themes no longer
+  wait on it (`Alt+Y`, `geex install`, ADR-0040); a grammar from your own path (`[grammars] lang =
+  "path.wasm"`, ADR-0023) still does. So do extension paths (`[extensions]`, ADR-0025 §4), which
+  wait on extensions themselves (ADR-0009).
+- **Colour degradation** — truecolor → 256/16 colours on a terminal without truecolor: nothing
+  detects what the terminal supports yet (no `COLORTERM` check), so a theme's truecolor reaches
+  every terminal. The default "terminal" theme is the way around it today: its text is in the
+  terminal's 16 ANSI colours (only its tints are truecolor: the active line, the selection and a
+  search's other matches, blended from the background the terminal reports).
 
 ### The command surface & shell (in flight — the minibuffer track)
 
