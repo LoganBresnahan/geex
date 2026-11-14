@@ -6890,3 +6890,39 @@ before, two properties), the doctests, and `test/geex/loop/shell_test.exs` (Ente
 opens the file there). 1694 tests + 203 doctests + 59 properties, green twice; the two new
 properties also at `GEEX_PROPERTY_RUNS=10000`. Not checked: `npx tsc` (a local install) and
 MSBuild's output live; a path with spaces (neither form reads one, as before).
+
+### 2026-11-13 — Each agent session in its own colour: the gutter and the edits pane (ADR-0032)
+
+On `agent-colours`, stacked on `tsc-locations`. Live in a tmux pty (the worktree's build, scratch
+`XDG_STATE_HOME` and `XDG_RUNTIME_DIR`, so no real geex got the attestations), the real payload
+(`integrations/captainhook/geex-attest.sh`) fed hand-made PostToolUse Edit envelopes with
+`GEEX_ATTEST_DIR` at the scratch discovery dir:
+- Sessions `eeee5555-…` and `ffff6666-…` each edited `f.txt` (the file's exact text as
+  `originalFile`), each followed by `Alt+D` (the buffer held the write): line 3 got a blue `▌`
+  (`ESC[34m`, ANSI 4) and line 1 a cyan one (`ESC[36m`, ANSI 6).
+- The edits pane (`Alt+E`): each row's `claude-code/<session>` in its session's colour, the
+  file name in the pane's foreground; `ffff6666` cyan and `eeee5555` blue, as their marks. Six
+  sessions shared the terminal theme's five colours, three of them yellow.
+- Found on the way, not changed: four sessions' writes made while the buffer was held and then
+  taken in by one `Alt+D` stayed `:external` (no marks), as ADR-0034 has it for writes combined
+  by one fast-forward, though each has its row in the edits pane. A first try sent
+  `originalFile` without the file's final newline (shell `$(cat)`), so nothing matched; that was
+  the test's mistake.
+- `Ctrl-X` quit clean; no `terminating` in the log; the discovery file removed.
+
+Tests: `Geex.Theme` now doctested (`agent_colours/1`: the terminal theme's five ANSI colours;
+`agent_colour/2`: the same session the same colour, one of the theme's, none for `:external` or
+`:human`); `loop_test` (two sessions in different colours, an MCP edit coloured, `:external` and
+`:human` unmarked, the same frame twice the same; Birds of Paradise's colours distinct and none
+its fg or bg; the terminal theme's all ANSI); `mouse_click_test` (an agent's edits row: the who
+column in the session's colour, the file name in the foreground). 1697 tests + 206 doctests + 59
+properties, green twice. Not checked: a light theme live; the colours against every catalog
+theme by eye.
+
+mod-verify's review found the edits row's colour drawn at the who column's grapheme offset while
+the row is laid out by display width, so a wide character in the file's name put it a column to
+the left per character; it is now placed by display width and clipped to the pane. A test with
+`文档.txt` (fails on the first version: the label's tail was left showing after the coloured
+copy) and the other row tests pass; 1698 tests + 206 doctests + 59 properties, green twice. The
+ADR no longer says red is left out: the terminal theme has none among the agent colours, but a
+theme whose keywords or tags are red gives that red; filtering reds is the maintainer's call.

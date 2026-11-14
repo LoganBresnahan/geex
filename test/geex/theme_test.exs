@@ -6,6 +6,7 @@ defmodule Geex.ThemeTest do
 
   defp theme, do: Geex.Fixtures.birds()
 
+  doctest Geex.Theme
   doctest Geex.Theme.Terminal
 
   # ADR-0040 §1: the built-in theme that is the terminal's own colours.

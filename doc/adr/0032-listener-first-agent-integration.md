@@ -3,7 +3,8 @@
 - **Status:** Accepted (amended 2026-10-14: attestation safety + write completion; 2026-10-18: a
   created file is sent as `created`; 2026-11-09: an attestation credits the group's undone
   commands too, and can match the newest write's group when fully undone; 2026-11-12: a command
-  that keeps the line count marks only the lines it changed). For open
+  that keeps the line count marks only the lines it changed; 2026-11-13: each agent session's
+  marks and edits rows in its own colour). For open
   buffers, step b's disk-wins merge and the pending table are superseded by
   [ADR-0034](0034-panes-tree-edits-hold.md) (buffers hold; `git merge-file`; held attestations)
 - **Date:** 2026-10-14
@@ -531,3 +532,28 @@ property test, [ADR-0044](0044-property-tests-with-stream-data.md)):
   geex-d3) found it. Its recheck found the second version stopping at the first matching group
   even when attested (`:ignored`), which lost a credit the first version gave; hence "still
   unattested".
+
+## Amendment — 2026-11-13: each agent session in its own colour
+
+The maintainer, 2026-11-13: a colour per agent session (roadmap item 8's first idea), "in the
+edits list as well so entries are color coated".
+
+- **The colour comes from the writer, never from timing** (invariant 6). Only an attested
+  writer (`{:agent, %{harness, session, …}}`) or an MCP edit (`{:llm, name}`) has one;
+  `:external`, `:human` and a line as loaded get none and no mark, as before.
+  `Geex.Theme.agent_colour/2` hashes the harness and the session id (`:erlang.phash2`) into
+  the theme's agent colours, so a session keeps its colour across frames and restarts.
+- **The colours are the theme's own:** `Geex.Theme.agent_colours/1` takes the foregrounds of
+  `keyword`, `string`, `function`, `type`, `number` and `tag`, each once, leaving out the
+  theme's foreground and background. They are drawn readable on the background by every theme
+  already. Under the terminal theme they are ANSI colours (magenta, green, blue, cyan, yellow),
+  never truecolor, and none is red; a theme whose keywords or tags are red (gruvbox's keyword,
+  One Dark's and Tokyo Night's tag) gives that red too, so a session can be drawn red there.
+  Whether to filter reds out is left to the maintainer. A theme with none of the captures gives
+  its cursor colour, the old mark colour.
+- **Where:** the gutter's `▌` (`Loop.agent_marks/5`) and the edits pane's who column for an
+  agent row (`EditsPane.who_at/3` says where the column is); the rest of the row keeps the
+  pane's foreground, and the focused, highlighted row keeps the accent.
+- **Two sessions can share a colour** (five colours under the terminal theme): the status line
+  and the edits row still name the session. Blame stays pure; the colour is chosen at paint.
+

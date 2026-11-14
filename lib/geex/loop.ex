@@ -3294,6 +3294,7 @@ defmodule Geex.Loop do
       })
     else
       sel = min(state.edits_sel, length(entries) - 1)
+      who_at = EditsPane.who_at(entries, safe_start().root, w)
 
       entries
       |> EditsPane.lines(safe_start().root, w, h - 1, sel, focused?, state.edits_view.top)
@@ -3315,8 +3316,43 @@ defmodule Geex.Loop do
         acc
         |> Screen.fill_rect(x, row, w, 1, %Cell{char: " ", fg: fg, bg: bg, attrs: attrs})
         |> Screen.draw_text(x, row, palette_clip(text, w), %Cell{fg: fg, bg: bg, attrs: attrs})
+        |> agent_who(entry, text, who_at, {x, row, w}, selected? and focused?, state.theme)
       end)
     end
+  end
+
+  # An agent's row: its who column in the session's colour, the colour of its `▌` marks
+  # (2026-11-13). The highlighted row keeps the accent, so the bar still reads as one. The row
+  # is laid out by display width, so the column's grapheme offset becomes a screen column the
+  # same way (a wide character in the file's name takes two; mod-verify's review).
+  defp agent_who(screen, %{row: %{who: {:agent, _} = who}}, text, {col, n}, at, highlit?, theme) do
+    {x, row, w} = at
+    dx = Geex.Width.string(Geex.Text.slice(text, 0, col))
+
+    case {highlit?, Theme.agent_colour(theme, who)} do
+      {false, colour} when colour != nil and dx < w ->
+        part = text |> Geex.Text.slice(col, n) |> clip_cells(w - dx)
+        cell = Screen.get_cell(screen, x + dx, row)
+        Screen.draw_text(screen, x + dx, row, part, %{cell | fg: colour})
+
+      _ ->
+        screen
+    end
+  end
+
+  defp agent_who(screen, _entry, _text, _who_at, _at, _highlit?, _theme), do: screen
+
+  # The longest start of `text` that fits in `cols` display columns.
+  defp clip_cells(text, cols) do
+    text
+    |> Geex.Text.graphemes()
+    |> Enum.reduce_while({[], 0}, fn g, {acc, used} ->
+      used = used + Geex.Width.cells(g)
+      if used <= cols, do: {:cont, {[g | acc], used}}, else: {:halt, {acc, used}}
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+    |> Enum.join()
   end
 
   # The file tree (ADR-0034 §5): a title row, then the rows, with a divider on its right edge.
@@ -4663,20 +4699,23 @@ defmodule Geex.Loop do
   defp edited_by_you(_who), do: ""
 
   @doc """
-  Mark the gutter's left margin column with `▌`, in the theme's accent (`cursor`) colour, on
-  each visible row whose line an agent last wrote (an attested write or an MCP edit). The
-  cell's background is kept, so the mark sits on the cursor-line tint too. Derived from the
-  blame on every frame, so an edit, undo or late attestation moves or clears it.
+  Mark the gutter's left margin column with `▌` on each visible row whose line an agent last
+  wrote (an attested write or an MCP edit), in that agent session's colour
+  (`Geex.Theme.agent_colour/2`, 2026-11-13), so two sessions' lines tell apart at a glance and
+  match their rows in the edits pane. The cell's background is kept, so the mark sits on the
+  cursor-line tint too. Derived from the blame on every frame, so an edit, undo or late
+  attestation moves or clears it.
   """
   @spec agent_marks(Screen.t(), Geex.Blame.t(), non_neg_integer(), non_neg_integer(), Theme.t()) ::
           Screen.t()
-  def agent_marks(screen, blame, scroll, h, %Theme{palette: pal}) do
+  def agent_marks(screen, blame, scroll, h, %Theme{palette: pal} = theme) do
     blame
     |> Enum.slice(scroll, h)
     |> Enum.with_index()
     |> Enum.reduce(screen, fn
-      {{{kind, _}, _group}, row}, acc when kind in [:agent, :llm] ->
-        Screen.set_cell(acc, 0, row, %{Screen.get_cell(acc, 0, row) | char: "▌", fg: pal.cursor})
+      {{{kind, _} = actor, _group}, row}, acc when kind in [:agent, :llm] ->
+        fg = Theme.agent_colour(theme, actor) || pal.cursor
+        Screen.set_cell(acc, 0, row, %{Screen.get_cell(acc, 0, row) | char: "▌", fg: fg})
 
       _unmarked, acc ->
         acc
