@@ -20,7 +20,7 @@ defmodule Geex.Loop.KeyHelp do
     {"Move", {[:word_back, :word_forward]}, "a word back, a word forward"},
     {"Move", {[:line_start, :line_end]}, "the line's start, its end"},
     {"Move", {[:top, :bottom]}, "the top, the bottom (a file, a list, a preview)"},
-    {"Move", {[:page_up, :page_down]}, "a preview a page up, a page down"},
+    {"Move", {[:page_up, :page_down]}, "a page up, a page down (a preview)"},
     {"Select", {[:select_start]}, "start a selection at the cursor; moving extends it"},
     {"Select", {[:select_all]}, "select the whole file"},
     {"Select", {[:select_clear]}, "clear the selection"},

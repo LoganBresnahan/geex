@@ -4228,8 +4228,9 @@ defmodule Geex.Loop do
   end
 
   # Keys while the output pane has focus: up and down move, line start and end (and top and
-  # bottom, Home and End) go to the top and the bottom, Enter opens the `path:line` on the highlighted line, `!` runs the command again,
-  # `q` closes the pane (stopping the command), Esc goes back.
+  # bottom, Home and End) go to the top and the bottom, Enter opens the `path:line` on the
+  # highlighted line, `!` runs the command again, `q` closes the pane (stopping the command), Esc
+  # goes back.
   defp apply_output_key(event, %{output: out} = state) do
     case event do
       {:cmd, :up} ->
