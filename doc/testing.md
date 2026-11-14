@@ -6874,3 +6874,19 @@ Delete leaving the buffer alone, a picker's filter, the output pane, the tree, s
 green twice; `mix compile --warnings-as-errors --force` clean. Not checked: Home/End in the edits
 pane and `Alt+Y` live (tests only), and a terminal that sends Home/End some other way than the
 four the parser reads.
+
+### 2026-11-13 — Enter opens tsc's `path(line,col): error` (ADR-0042)
+
+On `tsc-locations`, stacked on `keys-batch`. Live in a tmux pty (the worktree's build, scratch
+`XDG_STATE_HOME`): a scratch project with `src/a.ts` (`let s: string = n;` on line 2, `n` a
+number) and a strict `tsconfig.json`; `geex` on the directory, `Alt+M` `!tsc`: the output pane
+showed `! tsc · exit 2` and `src/a.ts(2,5): error TS2322: Type 'number' is not assignable to type
+'string'.`; Enter opened `a.ts` with the cursor at 2:5 (the status line). The globally installed
+`tsc` was used. `Ctrl-X` quit clean, no `terminating` in the log.
+
+Tests: `test/geex/shell/text_test.exs` (tsc's and MSBuild's lines, a line with no column, other
+severities, calls in ordinary output not read, the leftmost form winning, the colon form as
+before, two properties), the doctests, and `test/geex/loop/shell_test.exs` (Enter on a tsc line
+opens the file there). 1694 tests + 203 doctests + 59 properties, green twice; the two new
+properties also at `GEEX_PROPERTY_RUNS=10000`. Not checked: `npx tsc` (a local install) and
+MSBuild's output live; a path with spaces (neither form reads one, as before).

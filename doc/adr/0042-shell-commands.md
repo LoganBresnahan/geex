@@ -127,6 +127,18 @@ the kept history of typed lines (ADR-0042's `history.json`) had it. Now `!!` run
 `!` command, else the newest `!` line in that history. A restart itself still runs nothing, and
 the output pane isn't kept across one: it is a snapshot of when the command ran (the maintainer's
 call, 2026-11-13); `Alt+M` then Up, or `!!`, runs it again.
+## Amendment (2026-11-13): Enter opens tsc's `path(line,col): error` too
+
+The maintainer is learning TypeScript in geex, checking with `!tsc` (or `!npx tsc --noEmit`).
+Run by `!`, tsc has no terminal, so it prints `src/a.ts(2,5): error TS2322: …`, not the
+`src/a.ts:2:5 - error …` of `--pretty`, and Enter said "no path:line on this line".
+`Geex.Shell.Text.location/1` now also reads `path(line,col)` and `path(line)` (MSBuild's and the
+C# compiler's form too), but only followed by `: error`, `: warning`, `: info`, `: message` or
+`: note` (any case), so a call in ordinary output (`Math.max(1,2)`) is never one. When a line
+holds both forms, the one further left wins. Project search's own results (`Search.Project`)
+are untouched. Two properties pin it (`test/geex/shell/text_test.exs`): the form reads back as
+`{path, line, col}` at any indent, and without the severity word a parenthesised pair is never
+a location.
 
 ## See
 

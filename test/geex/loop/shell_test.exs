@@ -102,6 +102,22 @@ defmodule Geex.Loop.ShellTest do
       assert state.focus == :editor
     end
 
+    # tsc without a terminal (the `!` runner gives it none) prints `path(line,col): error`
+    # (2026-11-13).
+    test "Enter on tsc's path(line,col): error opens the file there", %{root: root} do
+      File.write!(Path.join(root, "a.ts"), "let x: number = 1;\nx = 'y';\n")
+      {state, _pid} = editing(Path.join(root, "notes.txt"))
+      line = "a.ts(2,5): error TS2322: Type 'string' is not assignable to type 'number'."
+      state = typed(state, "!echo \"#{line}\"") |> ran()
+      assert Output.rows(state.output, 5) == [line]
+
+      state = key(state, {:key, :enter})
+      assert {:ok, a} = Geex.BufferSupervisor.whereis(Path.join(root, "a.ts"))
+      assert Session.active_buffer() == {:ok, a}
+      assert {:ok, %{cursor: {1, 4}}} = Session.snapshot()
+      assert state.focus == :editor
+    end
+
     test "! in the pane runs it again, !! from the minibuffer too; q closes the pane",
          %{root: root} do
       {state, _} = editing(Path.join(root, "notes.txt"))
