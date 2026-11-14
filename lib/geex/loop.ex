@@ -1562,6 +1562,8 @@ defmodule Geex.Loop do
   defp preview_scroll({:cmd, :page_down}), do: :page_down
   defp preview_scroll({:cmd, :line_start}), do: :top
   defp preview_scroll({:cmd, :line_end}), do: :bottom
+  defp preview_scroll({:cmd, :top}), do: :top
+  defp preview_scroll({:cmd, :bottom}), do: :bottom
   defp preview_scroll(_event), do: nil
 
   # Scroll pane `id`'s preview tab: by rows, a page (its text rows less one), or to the top or
@@ -3875,6 +3877,12 @@ defmodule Geex.Loop do
       {:cmd, :down} ->
         schedule_repaint(put_in(state.tree.sel, min(tree.sel + 1, max(count - 1, 0))))
 
+      {:cmd, :top} ->
+        schedule_repaint(put_in(state.tree.sel, 0))
+
+      {:cmd, :bottom} ->
+        schedule_repaint(put_in(state.tree.sel, max(count - 1, 0)))
+
       {:key, :enter} when is_map(row) and row.dir? ->
         schedule_repaint(set_open(state, row.path, not row.open?))
 
@@ -4219,9 +4227,10 @@ defmodule Geex.Loop do
     end
   end
 
-  # Keys while the output pane has focus: up and down move, line start and end go to the top and
-  # the bottom, Enter opens the `path:line` on the highlighted line, `!` runs the command again,
-  # `q` closes the pane (stopping the command), Esc goes back.
+  # Keys while the output pane has focus: up and down move, line start and end (and top and
+  # bottom, Home and End) go to the top and the bottom, Enter opens the `path:line` on the
+  # highlighted line, `!` runs the command again, `q` closes the pane (stopping the command), Esc
+  # goes back.
   defp apply_output_key(event, %{output: out} = state) do
     case event do
       {:cmd, :up} ->
@@ -4230,10 +4239,10 @@ defmodule Geex.Loop do
       {:cmd, :down} ->
         schedule_repaint(%{state | output: Output.move(out, +1)})
 
-      {:cmd, :line_start} ->
+      {:cmd, top} when top in [:line_start, :top] ->
         schedule_repaint(%{state | output: Output.move(out, -out.sel)})
 
-      {:cmd, :line_end} ->
+      {:cmd, bottom} when bottom in [:line_end, :bottom] ->
         schedule_repaint(%{state | output: Output.move(out, Output.size(out))})
 
       {:key, :enter} when out.search != nil ->
@@ -4348,6 +4357,12 @@ defmodule Geex.Loop do
       {:cmd, :down} ->
         sel = min(state.edits_sel + 1, max(count - 1, 0))
         schedule_repaint(%{state | edits_sel: past_divider(entries, sel, +1)})
+
+      {:cmd, :top} ->
+        schedule_repaint(%{state | edits_sel: past_divider(entries, 0, +1)})
+
+      {:cmd, :bottom} ->
+        schedule_repaint(%{state | edits_sel: past_divider(entries, max(count - 1, 0), -1)})
 
       {:key, :enter} ->
         case Enum.at(edits_entries(), min(state.edits_sel, count - 1)) do
@@ -6561,6 +6576,21 @@ defmodule Geex.Loop do
 
       {:cmd, :right} ->
         schedule_repaint(%{state | minibuffer: Minibuffer.right(mb)})
+
+      # The rest of the motion cluster on the input (2026-11-13): a word back and forward by the
+      # editor's own word rule, the line's start and end, and Home and End as the same.
+      {:cmd, word} when word in [:word_back, :word_forward] ->
+        {:move, {0, col}} = Keymap.resolve({:cmd, word}, {0, mb.cursor}, mb.input)
+        schedule_repaint(%{state | minibuffer: Minibuffer.move_to(mb, col)})
+
+      {:cmd, start} when start in [:line_start, :top] ->
+        schedule_repaint(%{state | minibuffer: Minibuffer.move_to(mb, 0)})
+
+      {:cmd, finish} when finish in [:line_end, :bottom] ->
+        schedule_repaint(%{state | minibuffer: Minibuffer.move_to(mb, :end)})
+
+      {:key, :delete} ->
+        schedule_repaint(typed(%{state | minibuffer: Minibuffer.delete(mb)}))
 
       {:key, :enter} ->
         submit_minibuffer(state)

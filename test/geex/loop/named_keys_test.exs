@@ -159,6 +159,100 @@ defmodule Geex.Loop.NamedKeysTest do
     end
   end
 
+  # The maintainer, 2026-11-13: Home and End are the top and the bottom wherever there is one,
+  # Alt+H and Alt+; stay the line's start and end; the whole motion cluster and Delete work on
+  # the minibuffer's input.
+  describe "Home and End, the top and the bottom; the minibuffer's moves (2026-11-13)" do
+    test "in the editor, Home and End go to the file's first and last line; Alt+H/; stay", %{
+      state: state
+    } do
+      Session.set_cursor({1, 3})
+      state = key(state, {:key, :end})
+      assert cursor() == {2, 0}
+      state = key(state, {:key, :home})
+      assert cursor() == {0, 0}
+      state = key(state, {:alt, ?;})
+      assert cursor() == {0, 11}
+      state = key(state, {:alt, ?h})
+      assert cursor() == {0, 0}
+      state = run(state, "bottom")
+      assert cursor() == {2, 0}
+      _ = run(state, "top")
+      assert cursor() == {0, 0}
+    end
+
+    test "Home and End extend a selection like any move", %{state: state} do
+      Session.set_cursor({1, 2})
+      state = state |> key({:alt, ?s}) |> key({:key, :end})
+      assert {state.selection.anchor, state.selection.active} == {{1, 2}, {2, 0}}
+    end
+
+    test "in the minibuffer: a word back and forward, the start and end, Delete", %{
+      state: state,
+      buf: buf
+    } do
+      Session.set_cursor({1, 2})
+      state = state |> key({:alt, ?m}) |> type("search-all foo bar")
+      mb = fn s -> {Minibuffer.value(s.minibuffer), s.minibuffer.cursor} end
+
+      state = key(state, {:alt, ?u})
+      assert mb.(state) == {"search-all foo bar", 15}
+      state = key(state, {:alt, ?u})
+      assert mb.(state) == {"search-all foo bar", 11}
+      state = key(state, {:alt, ?o})
+      assert mb.(state) == {"search-all foo bar", 15}
+      state = key(state, {:alt, ?h})
+      assert mb.(state) == {"search-all foo bar", 0}
+      state = key(state, {:key, :delete})
+      assert mb.(state) == {"earch-all foo bar", 0}
+      state = key(state, {:alt, ?;})
+      assert mb.(state) == {"earch-all foo bar", 17}
+      # Delete at the end does nothing; Home and End are the start and the end here too.
+      state = key(state, {:key, :delete})
+      assert mb.(state) == {"earch-all foo bar", 17}
+      state = key(state, {:key, :home})
+      assert mb.(state) == {"earch-all foo bar", 0}
+      state = key(state, {:key, :end})
+      assert mb.(state) == {"earch-all foo bar", 17}
+
+      # None of it touched the buffer or its cursor.
+      assert text(buf) == "hello world\nline 2\n"
+      assert cursor() == {1, 2}
+      assert state.minibuffer.mode == :command
+    end
+
+    test "in a picker, Delete edits the filter and the highlight goes back to the top", %{
+      state: state
+    } do
+      picker = state |> key({:alt, ?b}) |> type("line") |> key({:alt, ?k})
+      assert picker.minibuffer.sel == 1
+      picker = picker |> key({:alt, ?h}) |> key({:key, :delete})
+      assert {Minibuffer.value(picker.minibuffer), picker.minibuffer.sel} == {"ine", 0}
+    end
+
+    test "in the output pane, the tree and settings, Home and End go to the first and last row",
+         %{state: state} do
+      out = Output.new("ls", :show, 0) |> Output.add(~w(a b c d e), "")
+      output = %{state | output: out, focus: :output}
+      output = key(output, {:key, :end})
+      assert output.output.sel == Output.size(out) - 1
+      assert key(output, {:key, :home}).output.sel == 0
+
+      tree = %{state | tree_shown: true, focus: :tree}
+      rows = for p <- ~w(a b c d), do: %{path: p, dir?: false}
+      tree = put_in(tree.tree.rows, rows)
+      tree = key(tree, {:key, :end})
+      assert tree.tree.sel == 3
+      assert key(tree, {:key, :home}).tree.sel == 0
+
+      settings = key(state, {:alt, ?y}) |> key({:alt, ?l})
+      last = key(settings, {:key, :end})
+      assert last.settings.sel > 0
+      assert key(last, {:alt, ?k}).settings.sel == last.settings.sel
+      assert key(last, {:key, :home}).settings.sel == 0
+    end
+  end
+
   describe "the bindings are a value (§7)" do
     # `up` moved from Alt+I to Alt+B (the palette's key, so the palette goes to Alt+Shift+I).
     defp moved(state) do

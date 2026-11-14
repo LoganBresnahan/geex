@@ -35,8 +35,11 @@ defmodule Geex.Loop.Bindings do
     {:right, [{:alt, ?l}, {:key, :right}]},
     {:word_back, [{:alt, ?u}]},
     {:word_forward, [{:alt, ?o}]},
-    {:line_start, [{:alt, ?h}, {:key, :home}]},
-    {:line_end, [{:alt, ?;}, {:key, :end}]},
+    {:line_start, [{:alt, ?h}]},
+    {:line_end, [{:alt, ?;}]},
+    # Home and End: the top and the bottom, of a file or a list (2026-11-13).
+    {:top, [{:key, :home}]},
+    {:bottom, [{:key, :end}]},
     {:page_up, [{:key, :page_up}]},
     {:page_down, [{:key, :page_down}]},
     # Selection (ADR-0029) and the clipboard (ADR-0015).
@@ -148,7 +151,7 @@ defmodule Geex.Loop.Bindings do
       iex> Geex.Loop.Bindings.defaults()[{:alt, ?z}]
       :undo
       iex> Geex.Loop.Bindings.defaults()[{:key, :home}]
-      :line_start
+      :top
   """
   @spec defaults() :: t()
   def defaults do
@@ -369,8 +372,8 @@ defmodule Geex.Loop.Bindings do
       iex> b = Geex.Loop.Bindings.defaults()
       iex> Geex.Loop.Bindings.labels(b, [:undo, :redo])
       "Alt+Z  Alt+Shift+Z"
-      iex> Geex.Loop.Bindings.labels(b, [:line_start])
-      "Alt+H Home"
+      iex> Geex.Loop.Bindings.labels(b, [:up])
+      "Alt+I ↑"
       iex> tabs = Map.new(0..8, &{{:alt, ?1 + &1}, {:tab, &1}})
       iex> Geex.Loop.Bindings.labels(tabs, for(i <- 0..8, do: {:tab, i}), range: true)
       "Alt+1 … Alt+9"

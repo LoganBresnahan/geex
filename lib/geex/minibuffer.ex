@@ -5,7 +5,8 @@ defmodule Geex.Minibuffer do
 
   A small, **pure** struct the editor loop drives: a `mode`, the `input` string, and a
   grapheme-indexed `cursor`. It is inactive by default; the loop `open/1`s it for a mode,
-  routes keystrokes to it (`insert/2`, `backspace/1`, `left/1`, `right/1`) while it is
+  routes keystrokes to it (`insert/2`, `backspace/1`, `delete/1`, `left/1`, `right/1`,
+  `move_to/2`) while it is
   `active?/1`, renders `prompt/1 <> value/1` over the status row, and `close/1`s it on
   submit or cancel.
 
@@ -175,6 +176,48 @@ defmodule Geex.Minibuffer do
   @spec right(t()) :: t()
   def right(%__MODULE__{input: input, cursor: cursor} = mb),
     do: %{mb | cursor: min(cursor + 1, Text.length(input)), fresh: false}
+
+  @doc """
+  Move the cursor to grapheme `col` (clamped to the input), or to its end with `:end`; a pre-fill
+  is kept, to edit, as `left/1` keeps it.
+
+      iex> mb = Geex.Minibuffer.open(:command, "search-all foo")
+      iex> Geex.Minibuffer.move_to(mb, 0).cursor
+      0
+      iex> Geex.Minibuffer.move_to(mb, 99).cursor
+      14
+      iex> mb |> Geex.Minibuffer.move_to(0) |> Geex.Minibuffer.move_to(:end) |> Map.get(:cursor)
+      14
+  """
+  @spec move_to(t(), non_neg_integer() | :end) :: t()
+  def move_to(%__MODULE__{input: input} = mb, :end),
+    do: %{mb | cursor: Text.length(input), fresh: false}
+
+  def move_to(%__MODULE__{input: input} = mb, col) when is_integer(col) and col >= 0,
+    do: %{mb | cursor: min(col, Text.length(input)), fresh: false}
+
+  @doc """
+  Delete the grapheme after the cursor (a no-op at the end), as Delete does in the buffer; resets
+  the palette highlight. A pre-fill stays as it is, as Backspace leaves it to edit.
+
+      iex> mb = Geex.Minibuffer.open(:command, "abc") |> Geex.Minibuffer.move_to(1)
+      iex> Geex.Minibuffer.delete(mb) |> Map.take([:input, :cursor])
+      %{input: "ac", cursor: 1}
+      iex> Geex.Minibuffer.open(:command, "abc") |> Geex.Minibuffer.delete() |> Map.get(:input)
+      "abc"
+  """
+  @spec delete(t()) :: t()
+  def delete(%__MODULE__{fresh: true} = mb), do: delete(%{mb | fresh: false})
+
+  def delete(%__MODULE__{input: input, cursor: cursor} = mb) do
+    if cursor >= Text.length(input) do
+      mb
+    else
+      {before, rest} = split(input, cursor)
+      {_gone, kept} = Text.split_at(rest, 1)
+      %{mb | input: before <> kept, sel: 0}
+    end
+  end
 
   defp split(input, cursor), do: Text.split_at(input, cursor)
 end

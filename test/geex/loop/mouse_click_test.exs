@@ -287,6 +287,12 @@ defmodule Geex.Loop.MouseClickTest do
       state = send_io(state, {:key, :up})
       assert state.edits_sel == 0
 
+      # End and Home: the last row and the first (2026-11-13), past the divider either way.
+      state = send_io(state, {:key, :end})
+      assert state.edits_sel == 3
+      state = send_io(state, {:key, :home})
+      assert state.edits_sel == 0
+
       # A click on the divider does nothing.
       state = click(state, 40, 22) |> repaint()
       assert {state.edits_sel, active()} == {0, a}

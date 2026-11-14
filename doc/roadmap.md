@@ -428,13 +428,17 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    [adr/0026](adr/0026-terminal-input-model.md) is the input model): arrows, Home, End and Delete
    work, and every other special key is **dropped** (never typed as text). Each of these needs a
    decision about what it should do, then a small build:
-   *(Checked against the code 2026-11-13: Home, End, Delete, Page Up/Down and Alt+arrows work in
-   the editor; what is still open below says so.)*
-   - **Home / End / Delete inside the minibuffer.** Still open: the minibuffer's own key handling
-     (`apply_minibuffer_key` in `loop.ex`) takes Left, Right and Backspace, and drops the rest.
-     Likely just "same as in the buffer"; small.
-   - **Page Up / Page Down.** Done: `page_up` / `page_down` move a screen in the editor and scroll
-     the markdown preview (`8ec8604`, 2026-11-06), bound in `Loop.Bindings`.
+   *(Checked against the code 2026-11-13: Home, End, Delete and Alt+arrows work in the editor;
+   what is still open below says so.)*
+   - **Home / End / Delete inside the minibuffer.** **Built 2026-11-13** on `keys-batch`
+     ([ADR-0049](adr/0049-ijkl-default-keys.md)'s 2026-11-13 amendment), with the maintainer's
+     answers: Home and End became `top` and `bottom` everywhere (a file's first and last line, a
+     list's first and last row, a preview's top and bottom; `Alt+H`/`Alt+;` stay the line's ends),
+     and the minibuffer takes the whole motion cluster (`Alt+U`/`Alt+O` a word, `Alt+H`/`Alt+;`
+     and Home/End its start and end) and Delete.
+   - **Page Up / Page Down.** Done for a preview: `page_up` / `page_down` scroll the markdown
+     preview (`8ec8604`, 2026-11-06); elsewhere they do nothing (a correction of 2026-11-13's
+     first note here, which said they move a screen in the editor; they don't).
    - **Ctrl+Left / Ctrl+Right.** Still open. Likely word motion, which exists as `Alt+U` / `Alt+O`
      (ADR-0049). The parser decodes only Alt's arrow modifier (`ESC [ 1 ; 3 X`); Ctrl's is
      `ESC [ 1 ; 5 C`. Small.

@@ -254,9 +254,20 @@ defmodule Geex.Loop.KeymapTest do
   end
 
   describe "Home, End, Delete" do
-    test "Home and End go to the line's start and end" do
-      assert {:move, {1, 0}} = resolve({:key, :home}, {1, 2}, "ab\ncdef")
-      assert {:move, {1, 4}} = resolve({:key, :end}, {1, 2}, "ab\ncdef")
+    test "Alt+H and Alt+; go to the line's start and end" do
+      assert {:move, {1, 0}} = resolve({:alt, ?h}, {1, 2}, "ab\ncdef")
+      assert {:move, {1, 4}} = resolve({:alt, ?;}, {1, 2}, "ab\ncdef")
+    end
+
+    # The maintainer, 2026-11-13: Home and End are the top and the bottom, Alt+H and Alt+; the
+    # line's start and end.
+    test "Home and End go to the file's first line's start and its last line's end" do
+      assert {:move, {0, 0}} = resolve({:key, :home}, {1, 2}, "ab\ncdef\ngh")
+      assert {:move, {2, 2}} = resolve({:key, :end}, {1, 2}, "ab\ncdef\ngh")
+      assert {:move, {2, 0}} = resolve({:key, :end}, {0, 1}, "ab\ncd\n")
+      assert {:move, {0, 0}} = resolve({:key, :end}, {0, 0}, "")
+      assert {:move, {1, 3}} = resolve({:key, :end}, {0, 0}, "a\r\nbcd")
+      refute Keymap.vertical?({:cmd, :top}) or Keymap.vertical?({:cmd, :bottom})
     end
 
     test "Delete removes the grapheme under the cursor and stays put" do
@@ -628,8 +639,10 @@ defmodule Geex.Loop.KeymapTest do
   end
 
   # geex-d3's last note: only the line ending's `\r` is its end; one before it is text.
-  test "End stops before a CRLF line's CR, not before an extra one" do
-    assert resolve({:key, :end}, {0, 0}, "foo\r\nbar") == {:move, {0, 3}}
-    assert resolve({:key, :end}, {0, 0}, "a\r\r\nb") == {:move, {0, 2}}
+  test "line end stops before a CRLF line's CR, not before an extra one" do
+    assert resolve({:alt, ?;}, {0, 0}, "foo\r\nbar") == {:move, {0, 3}}
+    assert resolve({:alt, ?;}, {0, 0}, "a\r\r\nb") == {:move, {0, 2}}
+    # End, the bottom, stops before the last line's CR too.
+    assert resolve({:key, :end}, {0, 0}, "foo\r\nbar\r") == {:move, {1, 3}}
   end
 end

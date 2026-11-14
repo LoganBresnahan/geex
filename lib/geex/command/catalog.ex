@@ -317,6 +317,18 @@ defmodule Geex.Command.Catalog do
       invoke: {:command, :line_end}
     },
     %Entry{
+      name: "top",
+      description:
+        "Move to the file's first line; in a list (the tree, the panes, settings), its first row.",
+      invoke: {:command, :top}
+    },
+    %Entry{
+      name: "bottom",
+      description:
+        "Move to the file's last line; in a list (the tree, the panes, settings), its last row.",
+      invoke: {:command, :bottom}
+    },
+    %Entry{
       name: "page-up",
       description: "Scroll a preview up a page.",
       invoke: {:command, :page_up}
