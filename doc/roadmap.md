@@ -647,6 +647,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    pane (follows at the bottom, Enter opens `path:line`, `!` again, `q` closes), `!!`, `|cmd`
    replacing the selection as one undoable edit, and the minibuffer's history kept in
    `history.json`. For the next release.
+   - **2026-11-13, on `tsc-locations`** ([ADR-0042](adr/0042-shell-commands.md)'s amendment):
+     Enter also opens tsc's `path(line,col): error` (what `!tsc` prints with no terminal), and
+     MSBuild's; built.
    - **Later, if wanted:** colours in the output pane (SGR into cells); a status-line mark for a
      `|` still running.
 16. **A read-only markdown preview** ([adr/0043](adr/0043-markdown-preview.md), built, merged to

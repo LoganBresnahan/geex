@@ -132,26 +132,69 @@ defmodule Geex.Shell.Text do
   grep print them: `{path, line, col}`, `col` nil when absent. Lines and columns are 1-based as
   printed. A URL's `host:port` is not one.
 
+  Also the form `tsc` prints without a terminal, and MSBuild and the C# compiler always:
+  `path(line,col): error …` (or `(line)`, and `warning`, `info`, `message`, `note`). It counts
+  only with that `: error`-style word after it, so a call in ordinary output (`Math.max(1,2)`)
+  is never read as one. When a line holds both forms, the one further left wins.
+
       iex> Geex.Shell.Text.location("** (CompileError) lib/geex/loop.ex:120:5: undefined")
       {"lib/geex/loop.ex", 120, 5}
       iex> Geex.Shell.Text.location("test/a_test.exs:12")
       {"test/a_test.exs", 12, nil}
       iex> Geex.Shell.Text.location("listening on http://localhost:4000")
       nil
+      iex> Geex.Shell.Text.location("src/a.ts(3,5): error TS2322: Type 'string' is not assignable")
+      {"src/a.ts", 3, 5}
+      iex> Geex.Shell.Text.location("Math.max(1,2) is 2")
+      nil
   """
   @spec location(String.t()) :: {String.t(), pos_integer(), pos_integer() | nil} | nil
   def location(line) do
-    ~r"(?<![\w./~-])((?:~|\.{1,2})?/?[\w.\-+@]+(?:/[\w.\-+@]+)*):(\d+)(?::(\d+))?"
-    |> Regex.scan(line)
-    |> Enum.find_value(fn
-      [whole | [path, l | col]] ->
-        if url?(line, whole) or path in [".", ".."] do
-          nil
-        else
-          {path, String.to_integer(l), col_of(col)}
-        end
+    [colon_location(line), paren_location(line)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.min_by(&elem(&1, 0), fn -> nil end)
+    |> case do
+      nil -> nil
+      {_at, location} -> location
+    end
+  end
+
+  @path ~S"((?:~|\.{1,2})?/?[\w.\-+@]+(?:/[\w.\-+@]+)*)"
+
+  # `path:line[:col]`, the first that isn't a URL's `host:port`, with where it starts.
+  defp colon_location(line) do
+    Regex.compile!("(?<![\\w./~-])" <> @path <> ~S":(\d+)(?::(\d+))?")
+    |> Regex.scan(line, return: :index)
+    |> Enum.find_value(fn [{at, len} | groups] ->
+      whole = binary_part(line, at, len)
+      [path, l | col] = Enum.map(groups, &part(line, &1))
+
+      if url?(line, whole) or path in [".", ".."],
+        do: nil,
+        else: {at, {path, String.to_integer(l), col_of(col)}}
     end)
   end
+
+  # `path(line[,col]): error …`, tsc's and MSBuild's form, with where it starts.
+  defp paren_location(line) do
+    re =
+      Regex.compile!(
+        "(?<![\\w./~-])" <>
+          @path <> ~S"\((\d+)(?:,(\d+))?\): (?i:error|warning|info|message|note)\b"
+      )
+
+    case Regex.run(re, line, return: :index) do
+      [{at, _len} | groups] ->
+        [path, l | col] = Enum.map(groups, &part(line, &1))
+        if path in [".", ".."], do: nil, else: {at, {path, String.to_integer(l), col_of(col)}}
+
+      nil ->
+        nil
+    end
+  end
+
+  defp part(_line, {-1, 0}), do: ""
+  defp part(line, {at, len}), do: binary_part(line, at, len)
 
   defp col_of([c]) when c != "", do: String.to_integer(c)
   defp col_of(_), do: nil
