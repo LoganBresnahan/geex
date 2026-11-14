@@ -105,6 +105,29 @@ remapping (roadmap 20.3).
 
 `Alt+1` is `indent other`; `Alt+2` … `Alt+0` run nothing, left for the user. `Alt+>` and `Alt+<`
 are the next pane and the one before, `Alt+P` the preview, and `Alt+Shift+R` is `revert-call`.
+## Amendment (2026-11-13): Home and End are the top and the bottom; the cluster in the minibuffer
+
+The maintainer, 2026-11-13: "home/end are not needed for what they do now" (`Alt+H`/`Alt+;` are
+the line's ends), "home/end should work on ! output as well and i guess we could do it for files
+as well", and "yes to ijkluoh; and the delete key working in the minibuffer".
+
+- **Home and End run their own commands, `top` and `bottom`** (catalog names, typed in `Alt+M`).
+  In a file: the first line's start and the last line's end (a CRLF last line's `\r` is its end,
+  as `Alt+;` already treats one); not a vertical move, so the goal column follows the landing,
+  and a live selection extends. In a list: the output pane, the tree, the edits pane (past the
+  `earlier` divider either way) and `Alt+Y`'s rows go to the first row and the last; a preview to
+  its top and bottom. `Alt+H` and `Alt+;` stay `line-start` and `line-end` (in the output pane
+  and a preview still the top and the bottom, as before).
+- **The minibuffer takes the whole motion cluster.** `Alt+J`/`Alt+L` already moved its cursor and
+  `Alt+I`/`Alt+K` brought back history or moved a picker's highlight; now `Alt+U`/`Alt+O` move a
+  word back and forward (by the editor's own word rule, `Keymap.resolve/3` on the one line),
+  `Alt+H`/`Alt+;` and Home/End go to the input's start and end, and **Delete** removes the grapheme
+  after the cursor (`Minibuffer.delete/1`; a no-op at the end). They act on the input only, never
+  the buffer. Delete leaves a pre-fill to edit, as Backspace does (ADR-0053's 2026-11-13 answers),
+  and resets a picker's highlight to the top, as any edit of the filter does.
+- Page Up and Page Down are unchanged: they scroll a preview and do nothing elsewhere
+  (ADR-0043). The maintainer's keyboard has them on a volume rocker, so they were checked here
+  instead (testing.md, 2026-11-13).
 
 ## See
 

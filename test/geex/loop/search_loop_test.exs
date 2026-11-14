@@ -551,7 +551,7 @@ defmodule Geex.Loop.SearchLoopTest do
       {state, _buf} = open(dir, "a.txt", "ab\n")
       state = %{state | theme: Geex.Fixtures.birds()}
       state = state |> key({:alt, ?q}) |> type("ab") |> key({:key, :enter})
-      state = %{state | selection: nil} |> key({:key, :end}) |> type(" ab") |> repaint()
+      state = %{state | selection: nil} |> key({:alt, ?;}) |> type(" ab") |> repaint()
       gw = Loop.gutter_width("ab ab\n")
       assert cell(gw + 3, 1).bg == state.theme.palette.search
     end

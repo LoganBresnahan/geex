@@ -379,7 +379,7 @@ defmodule Geex.Loop.AssistTest do
       dir: dir
     } do
       {state, buf} = open(state, dir, "v5.txt", "foo\r\nbar", {0, 0})
-      state = key(state, {:key, :end})
+      state = key(state, {:alt, ?;})
       assert cursor() == {0, 3}
       state = key(state, {:paste, "X\nY"})
       assert text(buf) == "fooX\r\nY\r\nbar"
@@ -387,7 +387,7 @@ defmodule Geex.Loop.AssistTest do
       {state, buf} = open(state, dir, "v6.txt", "a\r\nb\r\nc", {1, 0})
       state = key(state, {:key, :backspace})
       assert text(buf) == "ab\r\nc"
-      state = key(state, {:key, :end}) |> key({:key, :delete})
+      state = key(state, {:alt, ?;}) |> key({:key, :delete})
       assert text(buf) == "abc"
 
       {state, buf} = open(%{state | auto_indent: false}, dir, "v7.txt", "a\r\nb", {0, 1})

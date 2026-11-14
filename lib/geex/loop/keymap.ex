@@ -69,6 +69,8 @@ defmodule Geex.Loop.Keymap do
     :word_forward,
     :line_start,
     :line_end,
+    :top,
+    :bottom,
     :matching_bracket
   ]
 
@@ -1586,6 +1588,9 @@ defmodule Geex.Loop.Keymap do
   defp motion(:word_forward, cursor, text), do: word_forward(cursor, text)
   defp motion(:line_start, cursor, _text), do: line_start(cursor)
   defp motion(:line_end, cursor, text), do: line_end(cursor, text)
+  # Home and End (2026-11-13): the file's first line's start, its last line's end.
+  defp motion(:top, _cursor, _text), do: {0, 0}
+  defp motion(:bottom, _cursor, text), do: line_end({last_line(text), 0}, text)
   defp motion(:matching_bracket, cursor, text), do: matching_bracket(cursor, text) || cursor
 
   defp line_start({line, _col}), do: {line, 0}

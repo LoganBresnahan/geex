@@ -6845,3 +6845,32 @@ the release's `install.sh`), or a live session in the installed 0.7.0.
 mod-verify's review the same evening checked it against the release itself: the published
 linux-x64 tarball's sha256 matches the release's `SHA256SUMS`, and the installed tree matches it
 in all 1,275 entries (contents, modes and mtimes; the tar's owner is the CI runner).
+
+### 2026-11-13 — Home and End the top and the bottom; the minibuffer's moves and Delete (ADR-0049)
+
+On `keys-batch` (base 71d999e). Home and End run `top`/`bottom`; `Alt+H`/`Alt+;` stay the line's
+ends; the minibuffer takes `Alt+U`/`Alt+O`, `Alt+H`/`Alt+;`, Home/End and Delete.
+
+Live in a tmux pty (dogfood, the worktree's build, scratch `XDG_STATE_HOME` and a scratch repo of
+`a.txt` and an 80-line `notes.md`):
+- In `a.txt` (3 lines and a final newline) from 2:3: End → 4:1 (the empty last line), Home → 1:1,
+  `Alt+;` → 1:16, `Alt+H` → 1:1. The status line's position read after each key.
+- `Alt+M`, `search-all foo bar` typed (cursor at 23, the prompt `geex:` 5 wide): `Alt+U` → 20,
+  `Alt+U` → 16, `Alt+O` → 20, `Alt+H` → 5, Delete → the input `earch-all foo bar`, cursor 5; End →
+  22, Home → 5, `Alt+;` → 22; Esc closed it; the buffer unchanged (no `[+]`), the cursor at 1:1.
+- `!seq 1 60`: in the output pane, End highlighted `60`, Home `1`.
+- The tree (`Alt+<`): End highlighted `notes.md`, Home `a.txt`.
+- Page Up/Down (the maintainer's keyboard has them on a volume rocker): in the editor they do
+  nothing (1:1 before and after, as built); in `notes.md`'s preview (`Alt+P`, focused with
+  `Alt+>`), Page Down scrolled to "line 8", End to the bottom, Page Up a page back ("line 63"),
+  Home to the title.
+- `Ctrl-X` quit clean; the log has no `terminating` line.
+
+Tests: `Keymap` (Home/End top and bottom, a CRLF last line, not vertical; `Alt+;` keeps the
+CRLF rule), `Bindings` (the defaults pinned), `Minibuffer` doctests (`move_to/2`, `delete/1`),
+the loop (`named_keys_test`: the editor, a selection extended by End, the minibuffer's moves and
+Delete leaving the buffer alone, a picker's filter, the output pane, the tree, settings;
+`mouse_click_test`: the edits pane past its divider). 1689 tests + 203 doctests + 57 properties,
+green twice; `mix compile --warnings-as-errors --force` clean. Not checked: Home/End in the edits
+pane and `Alt+Y` live (tests only), and a terminal that sends Home/End some other way than the
+four the parser reads.

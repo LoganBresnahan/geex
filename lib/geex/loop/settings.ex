@@ -300,6 +300,12 @@ defmodule Geex.Loop.Settings do
       {:cmd, :down} ->
         move(view, +1, rows, h)
 
+      {:cmd, :top} ->
+        move(view, -view.sel, rows, h)
+
+      {:cmd, :bottom} ->
+        move(view, length(rows), rows, h)
+
       {:key, :enter} ->
         {view, act(view, rows)}
 
