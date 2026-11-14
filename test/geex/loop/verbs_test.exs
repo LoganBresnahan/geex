@@ -141,6 +141,15 @@ defmodule Geex.Loop.VerbsTest do
       # `all` is the text here: the file is searched for it.
       assert Verbs.parse("search all") == {:search, :search, "all"}
     end
+
+    test "replace and replace-all take their text after a space, its case kept; save-all" do
+      assert Verbs.parse("replace New Name") == {:replace, :file, "New Name"}
+      assert Verbs.parse("REPLACE-ALL Bar") == {:replace, :all, "Bar"}
+      assert Verbs.parse("replace") == {:replace, :file, ""}
+      assert Verbs.parse("replace-all") == {:replace, :all, ""}
+      assert Verbs.parse("save-all") == {:action, :save_all}
+      assert Verbs.parse("replace all x") == {:replace, :file, "all x"}
+    end
   end
 
   describe "parse/1 — the file operations (ADR-0019's 2026-10-19 amendment)" do

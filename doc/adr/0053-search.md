@@ -4,7 +4,8 @@
   2026-11-13:** the maintainer's answers before building (`search all`, a setting, the highlights,
   the prompt, project search's scope), and mod-verify's design notes. **Built 2026-11-13** in three
   slices on `search`, merged the same day, released in 0.7.0; amended twice more that day (a
-  result goes to the pane that has its file; the maintainer's answers to the open questions)
+  result goes to the pane that has its file; the maintainer's answers to the open questions).
+  **Amended 2026-11-13:** `replace`, `replace-all` and `save-all`
 - **Date:** 2026-11-12
 - **Amends:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the minibuffer's search mode,
   "incremental search is the next mode"), [ADR-0042](0042-shell-commands.md) (the output pane
@@ -238,6 +239,48 @@ The maintainer took every recommendation:
 3. The overnight decisions of slice C's review are **accepted**: grep outside git in the C locale,
    the refusal following symlinks and covering the directories above home, and a home directory
    kept in git searched in its tracked files only.
+
+## Amendment — 2026-11-13: `replace`, `replace-all` and `save-all`
+
+The maintainer, 2026-11-13: after `search-all` shows every match, "replace-all <target text>
+<replacement text>"; the changed files left unsaved; and, having weighed one undo across every
+file against git, one undo step per file (git is too blunt: it doesn't see unsaved text, and its
+restore throws away a file's other changes too). Which needs `save-all`. Filed as
+[geex#4](https://github.com/LoganBresnahan/geex/issues/4).
+
+1. **The target is the search you're looking at.** `replace TEXT` replaces the file search's
+   matches (the last `Alt+Q` query) in the file you're in; `replace-all TEXT` the project
+   search's (`search-all` / `search-project`, the results in the output pane) in every file its
+   results name. TEXT is everything after the first space, its case and inner spaces kept (the
+   line is trimmed, so a leading or trailing space isn't kept). Bare, each opens the command
+   line again with the query after it, to edit into the replacement. With no search, or with a
+   project search still running or cut short at the pane's line cap, it says so.
+2. **The matches are the file search's own** (`Geex.Replace`, over `Geex.Search.matches/2`):
+   smart case, a line's leftmost non-overlapping occurrences, never across a line end, a CRLF
+   line's `\r` no part of one, a byte that isn't UTF-8 one grapheme. For `replace-all` the
+   results only say which files; each file's matches are worked out again this way, so they are
+   what `Alt+Q` would find there, not grep's locale-dependent `-i`.
+3. **One command per file:** a `Replace` from the start of the first line with a match to the
+   end of the last, its text those lines with every match replaced. One undo step per file, one
+   history entry, the human's provenance; the line count never changes, so the blame marks only
+   the lines that held a match. The replacement isn't searched again.
+4. **Off the key loop (ADR-0035), then a y/n.** A process works the plans out: an open buffer's
+   from its snapshot (with its change clock), a closed file's from the disk (with its sha256),
+   opening nothing. The question says how many: "replace 4 matches in 2 files? (y/n)". A yes
+   applies them in a process too, each through `Dispatch.run_on/3` (`run/1` on a named buffer)
+   with `expect_seq:`, so a buffer that changed since its plan refuses it; a closed file is
+   opened in the background (`Session.open_in_background/1`: listed among the buffers, the view
+   left alone) and changed only if it still holds the text its plan came from. The notice counts
+   what was replaced and names any file changed since, not replaced.
+5. **Left unsaved.** The changed files show `[+]` where they are open; nothing touches the disk
+   until a save. **`save-all`** saves every buffer with unsaved edits as `Ctrl-O` saves the one
+   you're in (`Reconcile.save/2`: one behind merges first; a conflict or a leftover conflict block
+   isn't written), and says how many, naming any not saved. It runs on the key loop, as `Ctrl-O`
+   does; saving off the loop is roadmap item 9's, not decided yet.
+
+Not built: one undo across files (the issue sketches it: a step id shared across buffers, which
+would also let one undo take back an agent's whole turn); replacing with an empty text by typing
+(there is no way to type an empty argument; deleting every match needs another spelling).
 
 ## See
 

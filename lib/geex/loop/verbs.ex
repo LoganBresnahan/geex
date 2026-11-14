@@ -85,6 +85,7 @@ defmodule Geex.Loop.Verbs do
           | {:shell | :pipe, String.t()}
           | {:command, term()}
           | {:search, :search | :search_project | :search_all, String.t()}
+          | {:replace, :file | :all, String.t()}
           | :shell_again
           | :cancel
           | :unknown
@@ -144,6 +145,10 @@ defmodule Geex.Loop.Verbs do
   # A search's text keeps its case too: smart case reads it (ADR-0053).
   defp path_verb(verb, text) when is_map_key(@searches, verb),
     do: {:search, Map.fetch!(@searches, verb), text}
+
+  # A replacement keeps its case and inner spaces too (2026-11-13).
+  defp path_verb("replace", text), do: {:replace, :file, text}
+  defp path_verb("replace-all", text), do: {:replace, :all, text}
 
   defp path_verb(_verb, _path), do: :lower
 
@@ -212,6 +217,10 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("highlight-all"), do: {:action, :select_all}
   defp do_parse("select-all"), do: {:action, :select_all}
   defp do_parse("save"), do: {:action, :save}
+  defp do_parse("save-all"), do: {:action, :save_all}
+  # Bare, a replace asks for its text: the command line again, the query in it to edit.
+  defp do_parse("replace"), do: {:replace, :file, ""}
+  defp do_parse("replace-all"), do: {:replace, :all, ""}
   defp do_parse("fast-forward"), do: {:action, :fast_forward}
   # The file operations on the current file (ADR-0019's 2026-10-19 amendment): `delete` asks
   # y/n first; `rename` alone asks for the new path.

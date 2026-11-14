@@ -496,6 +496,18 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    - **Save and fast-forward** (they read the file; a two-sided save runs `git merge-file`): a
      clean merge and save 93 ms at 1 MB, 759 ms at 10 MB; a fast-forward 29 ms and 445 ms. Needs a
      "saving…" status, with edits to that buffer queued meanwhile.
+     *2026-11-13, measured again and deferred to the maintainer* (asked for that evening, not built):
+     at 10 MB (100,000 lines, `MIX_ENV=test`) the loop's save (`Reconcile.save/2`, nothing to trim)
+     took 418 ms: the fast-forward check 141 ms and the conflict-block scan 71 ms in the caller,
+     `Buffer.save` about 200 ms inside the buffer (the trim scan and the write); a behind save that
+     merges 801 ms; a first save whose trim takes every line's trailing space 3,561 ms, all inside
+     the buffer. Running the save in a process of its own isn't enough: every frame reads the
+     buffer (`Session.snapshot/0` calls `Buffer.snapshot/1`), so the screen stalls while the buffer
+     is in its save. The real fix moves the write out of the buffer process: the buffer holds a
+     "pending write" text so reconcile takes the watcher's sight of that text as geex's own write
+     (never `:external`), and its in-sync baseline becomes that text, not the current one, when
+     edits land during the write. That touches the shared path's neighbourhood and reconcile, so
+     it waits for the maintainer's decision and its own ADR amendment (ADR-0035).
    - **Opening a file** replays its ledger in `Buffer.init/1`: 9 ms at 1,000 entries, 137 ms at
      10,000. `geex a b c` could also start its buffers in parallel.
    - **Reconcile, one file at a time.** It never blocks typing; parallel would only land a big
@@ -850,9 +862,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      `sed -i`, formatters and scripts get credited like Edit and Write. Needs a PreToolUse
      registration the maintainer makes.
    - **`replace` / `replace-all`** ([geex#4](https://github.com/LoganBresnahan/geex/issues/4)): over
-     the current search's matches; the changed files left unsaved; one undo takes back the whole
-     replace-all (decided 2026-11-13). Undo across files is new: today a step lives in one
-     buffer's history (ADR-0031's amendment), and `revert-call` is per file.
+     the current search's matches; the changed files left unsaved. **Built 2026-11-13** on
+     `replace-all` with `save-all` ([ADR-0053](adr/0053-search.md)'s amendment): the maintainer
+     then chose one undo step per file over one undo across files (which stays sketched in the
+     issue; today a step lives in one buffer's history, ADR-0031's amendment).
    - **A diff view** ([geex#5](https://github.com/LoganBresnahan/geex/issues/5)): a git mark on tabs
      and tree rows beside `[+]`, a read-only diff tab beside the file (like the markdown preview),
      Alt+N through the changed sections, and `diff-all` in the output pane for reviewing an agent's

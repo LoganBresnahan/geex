@@ -461,6 +461,9 @@ defmodule Geex.Loop do
       # `:ask` waits for the new path.
       file_ops: %{},
       asking: nil,
+      # `replace` / `replace-all` (2026-11-13): the process working one out or applying it,
+      # `%{pid, ref, step: :plan | :apply, scope: :file | :all}`, or nil.
+      replace: nil,
       # Shell commands (ADR-0042): the one running, `%{pid, ref, kind: :show | :pipe, …}` from
       # `Geex.Shell.start/2`; the output pane's `Geex.Loop.Output`, shown in the edits pane's
       # band while it is open; the last `!` command, for `!!`.
@@ -952,6 +955,15 @@ defmodule Geex.Loop do
     do: {:noreply, schedule_repaint(search_answered(msg, state))}
 
   # The search died before answering: say so, and stop waiting on it.
+  # A replace's plan or its result (2026-11-13), from the process `start_replace/3` started.
+  def handle_info({:geex_replace, pid, answer}, %{replace: %{pid: pid, ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, schedule_repaint(replace_answer(answer, %{state | replace: nil}))}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{replace: %{ref: ref}} = state),
+    do: {:noreply, schedule_repaint(%{state | replace: nil, notice: "the replace failed"})}
+
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{search: %{task: %{ref: ref}}} = state) do
     Logger.warning("geex search: the search failed: #{inspect(reason)}")
     search = %{state.search | task: nil, goal: nil}
@@ -5521,6 +5533,239 @@ defmodule Geex.Loop do
     schedule_repaint(state)
   end
 
+  ## replace / replace-all / save-all (2026-11-13, ADR-0053's amendment)
+  #
+  # `replace TEXT` replaces the file search's matches (the last `Alt+Q` query) in the file you're
+  # in; `replace-all TEXT` the project search's (`search-all` / `search-project`) in every file its
+  # results list. The matches are worked out per file by the file search's own rules
+  # (`Geex.Replace`), off the key loop: one `Replace` command per file, so each file's change is
+  # one undo step. A y/n question says how many; a yes dispatches each file's command through
+  # the one shared path (`Dispatch.run_on/3`), refused for a file that changed since it was
+  # worked out. The files are left unsaved: `save-all` writes them.
+
+  @search_first "nothing to replace: search the file first (Alt+Q)"
+  @search_all_first "nothing to replace: search the project first (search-all)"
+
+  defp start_replace(_scope, _text, %{replace: %{}} = state),
+    do: %{state | notice: "a replace is still being worked out"}
+
+  # Bare: the command line again, with the query to edit into the replacement.
+  defp start_replace(:file, "", state) do
+    case state.search.query do
+      q when q in [nil, ""] -> %{state | notice: @search_first}
+      q -> schedule_repaint(%{state | minibuffer: Minibuffer.open(:command, "replace " <> q)})
+    end
+  end
+
+  defp start_replace(:all, "", state) do
+    case state.output do
+      %Output{search: %{query: q}} ->
+        schedule_repaint(%{state | minibuffer: Minibuffer.open(:command, "replace-all " <> q)})
+
+      _ ->
+        %{state | notice: @search_all_first}
+    end
+  end
+
+  defp start_replace(:file, text, state) do
+    cond do
+      preview_current?(state) ->
+        %{state | notice: @read_only}
+
+      state.search.query in [nil, ""] ->
+        %{state | notice: @search_first}
+
+      true ->
+        case safe_active_buffer() do
+          {:ok, pid} ->
+            query = state.search.query
+            path = safe_status(pid)[:path]
+            replace_task(state, :plan, :file, fn -> plan_buffer(pid, path, query, text) end)
+
+          _ ->
+            %{state | notice: @search_first}
+        end
+    end
+  end
+
+  defp start_replace(:all, text, %{output: %Output{search: %{query: query}} = out} = state) do
+    cond do
+      out.status == :running ->
+        %{state | notice: "the search is still running"}
+
+      out.capped ->
+        %{state | notice: "the results were cut short; search for something narrower first"}
+
+      true ->
+        lines = for i <- 0..(Output.size(out) - 1)//1, do: Output.line(out, i)
+        replace_task(state, :plan, :all, fn -> plan_results(lines, query, text) end)
+    end
+  end
+
+  defp start_replace(:all, _text, state), do: %{state | notice: @search_all_first}
+
+  # Run `fun` in a process of its own; its answer comes back as `{:geex_replace, pid, answer}`.
+  defp replace_task(state, step, scope, fun) do
+    loop = self()
+
+    {pid, ref} =
+      spawn_monitor(fn -> send(loop, {:geex_replace, self(), {step, scope, fun.()}}) end)
+
+    %{state | replace: %{pid: pid, ref: ref, step: step, scope: scope}}
+  end
+
+  # The open buffer's plan: from its snapshot, so the command carries the change clock it was
+  # worked out at.
+  defp plan_buffer(pid, path, query, text) do
+    snap = Buffer.snapshot(pid)
+
+    case Geex.Replace.plan(snap.text, query, text) do
+      {:ok, cmd, n} -> [%{path: path, pid: pid, seq: snap.seq, sha: nil, cmd: cmd, count: n}]
+      :none -> []
+    end
+  catch
+    :exit, _ -> []
+  end
+
+  # Each file a project search's results name, once, in their order: an open buffer's plan from
+  # the buffer, a closed file's from the disk (it is opened only on a yes, and only if the disk
+  # still holds what the plan was worked out from).
+  defp plan_results(lines, query, text) do
+    lines
+    |> Enum.flat_map(fn line ->
+      case result_target(line) do
+        {full, _path, _line} -> [full]
+        nil -> []
+      end
+    end)
+    |> Enum.uniq()
+    |> Enum.flat_map(fn full ->
+      case Geex.BufferSupervisor.whereis(full) do
+        {:ok, pid} -> plan_buffer(pid, full, query, text)
+        :error -> plan_disk(full, query, text)
+      end
+    end)
+  end
+
+  defp plan_disk(full, query, text) do
+    with {:ok, disk} <- File.read(full),
+         {:ok, cmd, n} <- Geex.Replace.plan(disk, query, text) do
+      [%{path: full, pid: nil, seq: nil, sha: :crypto.hash(:sha256, disk), cmd: cmd, count: n}]
+    else
+      _ -> []
+    end
+  end
+
+  # A plan worked out: ask; nothing to replace says so. A replace done: say what happened.
+  defp replace_answer({:plan, _scope, []}, state),
+    do: %{state | notice: "nothing to replace: no match"}
+
+  defp replace_answer({:plan, scope, plans}, state) do
+    n = plans |> Enum.map(& &1.count) |> Enum.sum()
+    files = length(plans)
+
+    question =
+      case scope do
+        :file ->
+          "replace #{plural(n, "match", "matches")}? (y/n) "
+
+        :all ->
+          "replace #{plural(n, "match", "matches")} in #{plural(files, "file", "files")}? (y/n) "
+      end
+
+    %{state | minibuffer: Minibuffer.ask(:confirm, question), asking: {:replace, scope, plans}}
+  end
+
+  defp replace_answer({:apply, scope, results}, state) do
+    done = for {:ok, plan} <- results, do: plan
+    changed = for {:changed, plan} <- results, do: name_of(plan.path)
+    n = done |> Enum.map(& &1.count) |> Enum.sum()
+
+    replaced =
+      case scope do
+        :file ->
+          "replaced #{plural(n, "match", "matches")}"
+
+        :all ->
+          "replaced #{plural(n, "match", "matches")} in #{plural(length(done), "file", "files")}"
+      end
+
+    unsaved = if done == [], do: "", else: " (unsaved: save-all writes them)"
+
+    skipped =
+      if changed == [],
+        do: "",
+        else: "; changed since, not replaced: " <> Enum.join(changed, ", ")
+
+    %{state | notice: replaced <> unsaved <> skipped}
+  end
+
+  defp plural(1, one, _many), do: "1 " <> one
+  defp plural(n, _one, many), do: "#{n} " <> many
+
+  defp name_of(nil), do: "[scratch]"
+  defp name_of(path), do: FileOps.name(path, file_root())
+
+  # A yes: each file's command through the one shared path, off the key loop.
+  defp apply_replace(state, scope, plans),
+    do: replace_task(state, :apply, scope, fn -> Enum.map(plans, &apply_plan/1) end)
+
+  # An open buffer: only at the change clock the plan was worked out at. A closed file: opened in
+  # the background, only if it still holds the text the plan was worked out from.
+  defp apply_plan(%{pid: nil} = plan) do
+    with {:ok, pid} <- Session.open_in_background(plan.path),
+         snap = Buffer.snapshot(pid),
+         true <- :crypto.hash(:sha256, snap.text) == plan.sha do
+      apply_plan(%{plan | pid: pid, seq: snap.seq})
+    else
+      _ -> {:changed, plan}
+    end
+  catch
+    :exit, _ -> {:changed, plan}
+  end
+
+  defp apply_plan(plan) do
+    case Dispatch.run_on(plan.pid, plan.cmd, expect_seq: plan.seq) do
+      {:ok, _snapshot} -> {:ok, plan}
+      {:error, _reason} -> {:changed, plan}
+    end
+  catch
+    :exit, _ -> {:changed, plan}
+  end
+
+  # `save-all`: every buffer with unsaved edits, saved as Ctrl-O saves the one you're in
+  # (`Reconcile.save/2`: one behind merges first; a conflict or a leftover conflict block isn't
+  # written). The notice counts them and names the ones not saved.
+  defp save_all(state) do
+    opts = [final_newline: state.final_newline]
+
+    results =
+      for %{pid: pid, dirty: true} = buf <- safe_buffers(), is_binary(buf[:path]) do
+        trim = state.trim_whitespace and Keymap.trims_on_save?(buf.path)
+        result = safe_save(pid, [{:trim_trailing_whitespace, trim} | opts])
+        if match?({:ok, _}, result), do: Edits.saved(buf.path)
+        {buf.path, result}
+      end
+
+    saved = Enum.count(results, &match?({_, {:ok, _}}, &1))
+    failed = for {path, result} <- results, not match?({:ok, _}, result), do: name_of(path)
+
+    notice =
+      cond do
+        results == [] -> "nothing to save"
+        failed == [] -> "saved #{plural(saved, "file", "files")}"
+        true -> "saved #{plural(saved, "file", "files")}; not saved: " <> Enum.join(failed, ", ")
+      end
+
+    schedule_repaint(%{state | notice: notice})
+  end
+
+  defp safe_save(pid, opts) do
+    Reconcile.save(pid, opts)
+  catch
+    :exit, _ -> {:error, :down}
+  end
+
   # Show `path`, opening it if needed (`open PATH`, ADR-0034). A relative path is from the
   # project root, as for the file operations and the finder, and may not leave it; an absolute
   # one goes anywhere (ADR-0037's 2026-10-19 amendment).
@@ -6548,8 +6793,10 @@ defmodule Geex.Loop do
   defp apply_minibuffer_key(event, %{minibuffer: %Minibuffer{mode: :confirm}} = state) do
     case event do
       {:char, c} when c in ["y", "Y"] ->
-        op = state.asking
-        start_file_op(close_minibuffer(state), op)
+        case state.asking do
+          {:replace, scope, plans} -> apply_replace(close_minibuffer(state), scope, plans)
+          op -> start_file_op(close_minibuffer(state), op)
+        end
 
       e when e in [{:char, "n"}, {:char, "N"}, {:key, :enter}, {:key, :esc}] ->
         %{close_minibuffer(state) | notice: "nothing done"}
@@ -6744,6 +6991,7 @@ defmodule Geex.Loop do
       {:pipe, cmd} -> run_pipe(state, cmd)
       {:command, command} -> typed_command(command, state)
       {:search, mode, text} -> typed_search(mode, text, state)
+      {:replace, scope, text} -> start_replace(scope, text, state)
       {:action, action} -> apply_verb(action, state)
       :cancel -> state
       :unknown -> %{state | notice: "unknown command: #{String.trim(input)}"}
@@ -6943,12 +7191,15 @@ defmodule Geex.Loop do
         :tab_prev,
         :toggle_mouse,
         :save,
+        :save_all,
         :fast_forward,
         :select_clear,
         :delete_file,
         :rename_file,
         :toggle_preview
       ]
+
+  defp verb(:save_all, state), do: save_all(state)
 
   # `delete` checks what's there and asks y/n (`Geex.Loop.FileOps`); `rename` alone asks for
   # the path.

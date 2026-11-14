@@ -73,6 +73,15 @@ defmodule Geex.Session do
     do: GenServer.call(__MODULE__, {:open_file, path})
 
   @doc """
+  `open_file/1` without making the buffer active: it is found or started, watched and
+  highlighted the same way, and listed among the buffers (after the active one), but the view
+  stays where it was. For `replace-all`, which changes files you aren't looking at (2026-11-13).
+  """
+  @spec open_in_background(String.t()) :: {:ok, pid()} | {:error, term()}
+  def open_in_background(path) when is_binary(path),
+    do: GenServer.call(__MODULE__, {:open_file, path, :background})
+
+  @doc """
   Create a new file at `path` on disk with optional initial `content` (ADR-0019).
 
   A pure **disk** operation: it does **not** open a buffer (call `open_file/1` to edit
@@ -275,7 +284,10 @@ defmodule Geex.Session do
     {:reply, :ok, put_in(state.view.cursor, cursor)}
   end
 
-  def handle_call({:open_file, path}, _from, state) do
+  def handle_call({:open_file, path}, from, state),
+    do: handle_call({:open_file, path, :active}, from, state)
+
+  def handle_call({:open_file, path, how}, _from, state) do
     # Serialized inside this GenServer, so the find-or-start is race-free even if
     # two harness calls open the same path at once.
     full = Path.expand(path)
@@ -288,7 +300,14 @@ defmodule Geex.Session do
         # Start a highlight reactor for this buffer (ADR-0022). A no-op when gated
         # off, the language is unsupported, or one is already running.
         Geex.Highlight.Reactor.watch(pid, full)
-        {:reply, {:ok, pid}, put_active(state, pid)}
+
+        state =
+          case how do
+            :active -> put_active(state, pid)
+            :background -> put_listed(state, pid)
+          end
+
+        {:reply, {:ok, pid}, state}
 
       {:error, _reason} = error ->
         {:reply, error, state}
@@ -597,6 +616,19 @@ defmodule Geex.Session do
       msg = {:geex_active_buffer, pid}
       Enum.each(Map.values(state.subscribers), &send(&1, msg))
       state
+    end
+  end
+
+  # A buffer opened in the background: listed (after the active one, so the buffers list and
+  # `save-all` see it), the view left as it was.
+  defp put_listed(state, pid) do
+    if pid in state.recent do
+      state
+    else
+      case state.recent do
+        [active | rest] -> %{state | recent: [active, pid | rest]}
+        [] -> %{state | recent: [pid]}
+      end
     end
   end
 
