@@ -30,3 +30,21 @@ shipped on its own.
 ## See
 
 [mcp-ai-integration.md](../mcp-ai-integration.md) §14, §13 (pharos co-location vs subprocess).
+
+## Amendment — 2026-11-13: the stack, and pharos on trial
+
+The decision stands: geex reaches pharos as an MCP client over stdio. Two things are new since.
+
+- **The client joins pharos's shared daemon.** pharos now runs one daemon per version (pharos
+  ADR-034); each `pharos` process is a thin front end relaying a session's stdio to it. So geex
+  and an agent's session share the same warm language servers: one index, one cold start, no
+  co-location needed for that.
+- **pharos is on trial.** The maintainer (2026-11-13): capable models with the compiler, the
+  tests and grep may already cover what a language server offers; pharos stays only if a
+  language-server hook clearly beats a plain compiler hook in a three-arm experiment
+  ([pharos-mcp#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7)). The MCP-client
+  subsystem this ADR costs out ([geex#2](https://github.com/LoganBresnahan/geex/issues/2)) is
+  parked until the verdict.
+
+How the three tools (geex, pharos, captAInHook) connect, the rules between them, and the work in
+order: [stack.md](../stack.md).

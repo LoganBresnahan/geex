@@ -135,7 +135,7 @@ seconds from a warm server instead of minutes from a build); large codebases wit
 names (grep's hundreds of matches against twelve real references); exact renames across many
 files.
 
-**The experiment: three arms, same tasks, on a project where pharos should win** (a large
+**The experiment ([pharos#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7)): three arms, same tasks, on a project where pharos should win** (a large
 TypeScript or Rust repo; pharos's existing benchmark is the place to build it):
 
 1. no hook;
@@ -157,7 +157,7 @@ captAInHook's payloads), park pharos, and close or park the pharos-dependent iss
 |---|---|---|---|---|
 | 1 | [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3) | pharos | **bug:** a file opened once is never re-synced; later saves are invisible to the server (verified 2026-11-13, pharos 0.2.2, pyright). The trial means nothing until this is fixed | — |
 | 2 | [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6) | pharos | `pharos diagnostics` CLI + the captAInHook payload: arm 3 | pharos#3 |
-| 2 | (trial) | pharos | the compiler-hook arm and the three-arm run, written up with the verdict | pharos#6 |
+| 2 | [pharos#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7) | pharos | the trial: the compiler-hook arm and the three-arm run, written up with the verdict | pharos#3, pharos#6 |
 | — | [captAInHook#2](https://github.com/LoganBresnahan/captAInHook/issues/2) | captAInHook | docs: the README says Stop can't block; it can (ADR-0016). Independent, any time | — |
 
 **Parked until the verdict** (built only if pharos stays):

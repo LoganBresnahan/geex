@@ -23,9 +23,9 @@ Each ADR: **Status** · **Context** (the forces) · **Decision** · **Consequenc
 | [0005](0005-provenance-on-every-command.md) | Provenance on every command | Accepted |
 | [0006](0006-elixir-not-gleam.md) | Elixir, not Gleam, for the MCP boundary | Accepted (amended 2026-11-09 by 0044: the property tests arrive, with StreamData; no Dialyzer) |
 | [0007](0007-world-not-brain.md) | geex owns the world, not the brain | Accepted |
-| [0008](0008-pharos-not-bundled.md) | pharos not bundled; geex is an MCP client | Accepted |
+| [0008](0008-pharos-not-bundled.md) | pharos not bundled; geex is an MCP client | Accepted (amended 2026-11-13: the shared daemon; pharos on trial, see stack.md) |
 | [0009](0009-three-tier-extension-model.md) | Three-tier extension / capability model | Accepted |
-| [0010](0010-disk-truth-lsp-v05.md) | Disk-truth-only LSP for v0.5 | Accepted |
+| [0010](0010-disk-truth-lsp-v05.md) | Disk-truth-only LSP for v0.5 | Accepted (amended 2026-11-13: needs pharos to re-sync, pharos-mcp#3) |
 | [0011](0011-direction-b-balance-beam.md) | Direction B on balance_beam; drop instructor_ex | Accepted |
 | [0012](0012-trust-and-enforcement.md) | Trust & enforcement: cooperative vs enforced | Accepted (amended by 0016/0017) |
 | [0013](0013-jido-deferred.md) | Jido deferred (not adopted for the command system) | Accepted |
@@ -36,7 +36,7 @@ Each ADR: **Status** · **Context** (the forces) · **Decision** · **Consequenc
 | [0018](0018-mcp-transport-streamable-http.md) | MCP transport: Streamable HTTP, connect-first, dogfood == production | Accepted (frozen by 0032) |
 | [0019](0019-file-lifecycle-and-operation-tools.md) | File lifecycle (load/save, multi-buffer) & MCP operation tools (a third tool category) | Accepted (amended 2026-10-19: the TUI's `new`, `mkdir`, `delete`, `rename` and the tree's `a`/`d`/`r`, paths from the project root, a y/n before deleting, off the loop; the ledger moves with a rename, edits rows don't; amended 2026-11-09: a save adds a missing final newline as a recorded edit (off by default; on, every save); amended 2026-11-12: by 0054: a save trims trailing whitespace) |
 | [0020](0020-diff-edit-tool.md) | Diff / search-replace edit tool (compiles to `replace`; ports Moby's tiered matcher) | Accepted |
-| [0021](0021-capability-connections.md) | Capability connections — contracts, adapters & hosting tiers (consume-MCP model; LSP + highlighting) | Accepted |
+| [0021](0021-capability-connections.md) | Capability connections — contracts, adapters & hosting tiers (consume-MCP model; LSP + highlighting) | Accepted (amended 2026-11-13: first LSP consumers sketched; parked on the pharos trial) |
 | [0022](0022-capability-reactor.md) | The capability reactor — when highlighting & LSP fire (per-buffer process; async cadence) | Accepted |
 | [0023](0023-theming-and-extension-loading.md) | Theming & loading themes/grammars/extensions (capture-vocab theme; config-path install; fetch-nothing) | Accepted (§5, §7 amended by 0040: a catalog fixed per release, installs on the user's word) |
 | [0024](0024-tui-core-extractable.md) | TUI core is extractable but stays in geex until mature + a second consumer (no-NIF `prim_tty`) | Accepted |

@@ -29,3 +29,20 @@ bridge, the exact transport §8 exists to avoid, and pharos has no such ingest t
 ## See
 
 [mcp-ai-integration.md](../mcp-ai-integration.md) §8, §14, §13 (pharos co-location).
+
+## Amendment — 2026-11-13: disk truth needs pharos to re-sync; the stack's rule
+
+- **This rule is geex's, not pharos's** (pharos's own default is disk-only too, with an editor
+  bridge proposed in its ADR-028). It is now rule 1 of [stack.md](../stack.md): content meets on
+  disk, and no tool pushes file text to another.
+- **It only holds if pharos notices a write.** Verified 2026-11-13 (pharos 0.2.2, pyright):
+  pharos sends a file's `didOpen` once and never a `didChange`, so after a save the server keeps
+  answering about the first version until it idles out
+  ([pharos-mcp#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3)). Until that is fixed,
+  "stale until save" is really "stale until the server restarts".
+- **The mitigation this ADR deferred** is now a shape: diagnostics after a save, pulled first,
+  pushed later through MCP resource subscriptions
+  ([pharos-mcp#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5)); marks dim while the
+  buffer has unsaved changes ([geex#2](https://github.com/LoganBresnahan/geex/issues/2)). Parked
+  with the rest of the pharos work until the trial's verdict
+  ([pharos-mcp#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7)).

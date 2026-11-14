@@ -407,14 +407,19 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    [adr/0026](adr/0026-terminal-input-model.md) is the input model): arrows, Home, End and Delete
    work, and every other special key is **dropped** (never typed as text). Each of these needs a
    decision about what it should do, then a small build:
-   - **Home / End / Delete inside the minibuffer.** The minibuffer has its own key handling (only
-     Left, Right, Backspace today). Likely just "same as in the buffer"; small.
-   - **Page Up / Page Down.** Move the cursor one screen. The parser side is one line; the screen
-     height lives in the loop, not the pure keymap, so the loop handles it. Small.
-   - **Ctrl+Left / Ctrl+Right.** Likely word motion, which exists as `Alt+U` / `Alt+O` (ADR-0049). The parser
-     needs to decode the modifier (`ESC [ 1 ; 5 C`). Small.
-   - **Shift+arrows.** The common convention is "extend the selection" (selection exists,
-     `Alt+S`, ADR-0049). Decide whether to adopt it. Small to medium.
+   *(Checked against the code 2026-11-13: Home, End, Delete, Page Up/Down and Alt+arrows work in
+   the editor; what is still open below says so.)*
+   - **Home / End / Delete inside the minibuffer.** Still open: the minibuffer's own key handling
+     (`apply_minibuffer_key` in `loop.ex`) takes Left, Right and Backspace, and drops the rest.
+     Likely just "same as in the buffer"; small.
+   - **Page Up / Page Down.** Done: `page_up` / `page_down` move a screen in the editor and scroll
+     the markdown preview (`8ec8604`, 2026-11-06), bound in `Loop.Bindings`.
+   - **Ctrl+Left / Ctrl+Right.** Still open. Likely word motion, which exists as `Alt+U` / `Alt+O`
+     (ADR-0049). The parser decodes only Alt's arrow modifier (`ESC [ 1 ; 3 X`); Ctrl's is
+     `ESC [ 1 ; 5 C`. Small.
+   - **Shift+arrows.** Still open, same parser gap (`ESC [ 1 ; 2 X`). The common convention is
+     "extend the selection" (selection exists, `Alt+S`, ADR-0049). Decide whether to adopt it.
+     Small to medium.
    - **Alt + a digit or symbol** (`Alt+1` sends `ESC 1`). Done: digits since ADR-0038, symbols as
      they got commands (`Alt+;`, `Alt+<`, `Alt+>`; ADR-0049, ADR-0051).
    - **F-keys, Insert.** Nothing to bind them to yet (no overwrite mode). Leave them dropped until
@@ -429,7 +434,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      from the session id (the glyph unchanged) would show it at a glance. Small.
    - **Labelling shell writes.** A `sed` or script run through an agent's Bash tool is recorded
      `:external`: the hook sees the command text but has no before/after content to prove what
-     it changed. Proposed: a hook before each Bash call and the existing one after it bracket the
+     it changed. *(2026-11-13: a hash-proved first step is now
+     [geex#3](https://github.com/LoganBresnahan/geex/issues/3): a git snapshot before the call and
+     a compare after it, sent as the existing attestation; the "while" label below becomes its
+     fallback.)* Proposed: a hook before each Bash call and the existing one after it bracket the
      call in time, and changes to open files in between are labelled "changed **while** session X
      ran `cmd`", never "by", so attribution by timing never claims authorship (ADR-0032's rule).
      Needs a `pre-tool-use` registration in `~/.captainHook/handlers.json`, a new message to geex,
@@ -788,6 +796,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       next pane, `Alt+<` the new `pane prev`; `Alt+P` the markdown preview; `Alt+1` `indent
       other`; `Alt+2` … `Alt+0` left for the user (`tab N` typed until remapping binds them);
       `Alt+Shift+R` `revert-call`. **Built 2026-11-12**, merged after mod-verify's review, released in 0.6.0.
+      *(Since then (2026-11-13, from `Loop.Bindings`): item 8 took `Alt+2` (duplicate) and
+      `Alt+7`/`8`/`9` (select), and `Alt+5` is kept for multiple cursors, so only `Alt+3`, `Alt+4`,
+      `Alt+6` and `Alt+0` are free.)*
    8. **Editing keys** (ADR-0052, the maintainer, 2026-11-12): `Alt+2` duplicates the line or the
       selection's lines; `Alt+7`, `Alt+8`, `Alt+9` select a character, a word, a line (again takes
       in the next); `` Alt+\ `` the matching bracket; `Alt+/` comments lines out and back;
@@ -803,6 +814,23 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       the maintainer, 2026-11-12): a General setting, on by default; every save trims each line's
       trailing spaces and tabs, but Markdown, diffs and patches keep theirs; one step with the
       final newline. **Built 2026-11-12** on `save-undo`.
+21. **Asks from 2026-11-13, filed as issues** (the maintainer, while setting up the
+   [stack](stack.md)); none started, each needs its ADR or amendment first:
+   - **Attest an agent's Bash changes** ([geex#3](https://github.com/LoganBresnahan/geex/issues/3)):
+     a git snapshot before the call and a compare after, sent as the existing attestation, so
+     `sed -i`, formatters and scripts get credited like Edit and Write. Needs a PreToolUse
+     registration the maintainer makes.
+   - **`replace` / `replace-all`** ([geex#4](https://github.com/LoganBresnahan/geex/issues/4)): over
+     the current search's matches; the changed files left unsaved; one undo takes back the whole
+     replace-all (decided 2026-11-13). Undo across files is new: today a step lives in one
+     buffer's history (ADR-0031's amendment), and `revert-call` is per file.
+   - **A diff view** ([geex#5](https://github.com/LoganBresnahan/geex/issues/5)): a git mark on tabs
+     and tree rows beside `[+]`, a read-only diff tab beside the file (like the markdown preview),
+     Alt+N through the changed sections, and `diff-all` in the output pane for reviewing an agent's
+     turn.
+   - **The pharos-dependent work** ([geex#1](https://github.com/LoganBresnahan/geex/issues/1),
+     [geex#2](https://github.com/LoganBresnahan/geex/issues/2)) is parked until the pharos trial's
+     verdict ([stack.md](stack.md#the-pharos-trial)).
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the

@@ -177,3 +177,20 @@ unsaved buffers; co-location is a later transport swap.
 [ADR-0004](0004-neutral-field-spec.md), [ADR-0011](0011-direction-b-balance-beam.md),
 [mcp-ai-integration.md](../mcp-ai-integration.md) §3 / §14, the
 [research notes](../research/capability-connections.md).
+
+## Amendment — 2026-11-13: the first LSP consumers, sketched; parked on the pharos trial
+
+- **The first adapter is pharos over MCP,** through its shared daemon, behind this ADR's
+  contracts: geex code asks for definitions, references, hover and diagnostics at a file and a
+  grapheme position, and the adapter converts to LSP's UTF-16 positions and back (invariant 5).
+  A direct-LSP adapter could replace it later without touching callers; that, not an LSP
+  passthrough in pharos, is the road if geex ever needs completion as you type.
+- **Edits as data:** a rename or format comes back as edits that geex applies as the human's
+  `%Command{}`s through `Dispatch.run/1`; geex never asks pharos to write files.
+- **Slices:** the client plus definition and references (results in the output pane, stepped with
+  Alt+N), then hover, then diagnostics after a save
+  ([geex#2](https://github.com/LoganBresnahan/geex/issues/2)).
+- **Parked** until the pharos trial's verdict
+  ([pharos-mcp#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7)): pharos stays only if a
+  language-server hook clearly beats a plain compiler hook. The rules between geex, pharos and
+  captAInHook: [stack.md](../stack.md).
