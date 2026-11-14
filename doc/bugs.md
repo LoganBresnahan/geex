@@ -7,6 +7,32 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-18 — A first save that trims every line's trailing whitespace stalls for seconds
+
+- **Status:** open. Found 2026-11-13 measuring roadmap item 9 (saving off the key loop) for the
+  maintainer; not fixed (the evening's run left item 9 to the maintainer).
+- **Symptom:** a 10 MB file of 100,000 lines, each ending in a space, saved with "Trim trailing
+  whitespace" on (the default, ADR-0054): `Buffer.save` took 3,561 ms, against 78 ms for the
+  same save without the trim and about 200 ms for a later one with nothing left to trim. It runs
+  inside the buffer process, so the key loop and every frame wait for it (ADR-0035). A 2 MB file of
+  20,000 such lines took 1.8 s under eprof (not timed without it).
+- **Verified cause:** `Geex.Buffer`'s `trim_line/1`. For each line whose body ends in a space or
+  a tab it splits the whole line into graphemes (`Geex.Text.graphemes/1`), reverses, drops the
+  trailing ones and joins. eprof on the 2 MB file: 2,000,000 `String.do_graphemes` and
+  `unicode_util:gc` calls take about half the save's time, `Enum.map`, `reverse` and
+  `entry_to_string` most of the rest; the `Replace` itself and the blame are small beside it.
+  The cost is the line's length, paid on every line that has trailing whitespace, not on the
+  whitespace.
+- **Recommended fix:** find the trailing run of space and tab *bytes* and cut it, and segment
+  graphemes only across its edge: the run is all whitespace graphemes unless the character just
+  before it is a Prepend character joining the first space (ADR-0054 §4 keeps that space). So
+  look at the last code point before the run and, only when it is a Prepend, keep one space;
+  every other line costs a byte scan. Pin it with the existing trim properties, plus an example
+  of the 10 MB case under a time bound like BUG-17's guard.
+- **Ruled out:** the write (78 ms) and the conflict-block scan (71 ms, in the caller).
+
+---
+
 ## BUG-17 — A long line holding an emoji or © before an invalid byte froze every key on it  ✅ FIXED (2026-11-13)
 
 - **Status:** **FIXED** 2026-11-13 on the branch `search` (slice A), found by mod-verify's review

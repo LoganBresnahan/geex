@@ -891,7 +891,8 @@ paint), both older than that branch and found by mod-verify's review of it, are 
 (2026-11-12, on the `crash-fixes` branch). BUG-16 (the markdown preview can't render a file with
 a byte that isn't UTF-8; it says "render failed", gracefully) is **open**. BUG-17 (a long line with
 an emoji or © before an invalid byte froze every key on it; in 0.6.0) is **FIXED** (2026-11-13,
-on the `search` branch), released in 0.7.0.
+on the `search` branch), released in 0.7.0. BUG-18 (a first save trimming every line's trailing
+whitespace stalls for seconds on a big file; found measuring item 9) is **open**.
 
 ---
 
