@@ -6918,3 +6918,11 @@ its fg or bg; the terminal theme's all ANSI); `mouse_click_test` (an agent's edi
 column in the session's colour, the file name in the foreground). 1697 tests + 206 doctests + 59
 properties, green twice. Not checked: a light theme live; the colours against every catalog
 theme by eye.
+
+mod-verify's review found the edits row's colour drawn at the who column's grapheme offset while
+the row is laid out by display width, so a wide character in the file's name put it a column to
+the left per character; it is now placed by display width and clipped to the pane. A test with
+`文档.txt` (fails on the first version: the label's tail was left showing after the coloured
+copy) and the other row tests pass; 1698 tests + 206 doctests + 59 properties, green twice. The
+ADR no longer says red is left out: the terminal theme has none among the agent colours, but a
+theme whose keywords or tags are red gives that red; filtering reds is the maintainer's call.

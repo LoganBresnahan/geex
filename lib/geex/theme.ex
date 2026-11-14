@@ -120,8 +120,9 @@ defmodule Geex.Theme do
   end
 
   # The captures an agent session's colour is picked from, in this order: colours every theme
-  # gives and draws readable on its background (2026-11-13). Red is left out (it reads as an
-  # error), as are the theme's plain foreground and background.
+  # gives and draws readable on its background (2026-11-13), not the theme's plain foreground
+  # or background. None of them is red under the terminal theme; a theme whose keywords or tags
+  # are red (gruvbox's, One Dark's) gives that red too.
   @agent_captures ~w(keyword string function type number tag)
 
   @doc """

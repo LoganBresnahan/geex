@@ -245,6 +245,67 @@ defmodule Geex.Loop.MouseClickTest do
       assert Geex.Screen.get_cell(screen, nx, y).fg == state.theme.palette.fg
     end
 
+    # mod-verify's review: the row is laid out by display width, so with a wide character in the
+    # file's name the colour still lands on the who text, not a column to its left.
+    test "an agent's edits row with a wide character in its name: the colour on the who text",
+         %{dir: dir} do
+      {state, _a} = start_panels(dir)
+      session = "wide-#{Geex.Fixtures.uniq()}"
+      File.write!(Path.join(dir, "文档.txt"), "x\n")
+
+      Edits.attested(%{
+        path: Path.join(dir, "文档.txt"),
+        before: "b",
+        sha256: "h",
+        harness: "claude-code",
+        session: session,
+        turn: "t",
+        tool_use: "u"
+      })
+
+      _ = Edits.rows()
+      state = repaint(state)
+      screen = Renderer.current()
+      label = "claude-code/" <> String.slice(session, 0, 8)
+
+      colour =
+        Geex.Theme.agent_colour(
+          state.theme,
+          {:agent, %{harness: "claude-code", session: session}}
+        )
+
+      # Find the label by its cells (a wide character's second cell holds no grapheme of its own).
+      chars = fn y -> Enum.map(0..119, &Geex.Screen.get_cell(screen, &1, y).char) end
+      graphemes = String.graphemes(label)
+
+      {x, y} =
+        Enum.find_value(0..29, fn y ->
+          row = chars.(y)
+
+          x =
+            Enum.find(
+              0..(119 - length(graphemes)),
+              &(Enum.slice(row, &1, length(graphemes)) == graphemes)
+            )
+
+          x && {x, y}
+        end)
+
+      for dx <- 0..(length(graphemes) - 1),
+          do: assert(Geex.Screen.get_cell(screen, x + dx, y).fg == colour)
+
+      # Nothing of the label is left over after it, as a coloured copy drawn a column or two to
+      # its left would leave (the real label's tail).
+      assert Geex.Screen.get_cell(screen, x + length(graphemes), y).char == " "
+      assert Enum.count(chars.(y), &(&1 == "/")) == 1
+
+      # The cells just before the label (the gap after the name) and the name's own cells keep
+      # the pane's foreground.
+      name_x = Enum.find(0..119, &(Geex.Screen.get_cell(screen, &1, y).char == "文"))
+      assert name_x < x
+      for cx <- name_x..(x - 1), do: refute(Geex.Screen.get_cell(screen, cx, y).fg == colour)
+    end
+
     # The accent (ADR-0040 §7, amended 2026-10-18): the files open in a tab, in the tree; the
     # focused edits pane's highlighted entry.
     test "the tree shows open files in the accent, the current one bold; tabs closing follow",

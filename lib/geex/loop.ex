@@ -3316,34 +3316,44 @@ defmodule Geex.Loop do
         acc
         |> Screen.fill_rect(x, row, w, 1, %Cell{char: " ", fg: fg, bg: bg, attrs: attrs})
         |> Screen.draw_text(x, row, palette_clip(text, w), %Cell{fg: fg, bg: bg, attrs: attrs})
-        |> agent_who(entry, text, who_at, {x, row, w}, fg, state.theme)
+        |> agent_who(entry, text, who_at, {x, row, w}, selected? and focused?, state.theme)
       end)
     end
   end
 
   # An agent's row: its who column in the session's colour, the colour of its `▌` marks
-  # (2026-11-13). The highlighted row keeps the accent, so the bar still reads as one.
-  defp agent_who(
-         screen,
-         %{row: %{who: {:agent, _} = who}},
-         text,
-         {col, n},
-         {x, row, w},
-         fg,
-         theme
-       ) do
-    case {fg == theme.palette.accent, Theme.agent_colour(theme, who)} do
-      {false, colour} when colour != nil and col < w ->
-        part = Geex.Text.slice(text, col, min(n, w - col))
-        cell = Screen.get_cell(screen, x + col, row)
-        Screen.draw_text(screen, x + col, row, part, %{cell | fg: colour})
+  # (2026-11-13). The highlighted row keeps the accent, so the bar still reads as one. The row
+  # is laid out by display width, so the column's grapheme offset becomes a screen column the
+  # same way (a wide character in the file's name takes two; mod-verify's review).
+  defp agent_who(screen, %{row: %{who: {:agent, _} = who}}, text, {col, n}, at, highlit?, theme) do
+    {x, row, w} = at
+    dx = Geex.Width.string(Geex.Text.slice(text, 0, col))
+
+    case {highlit?, Theme.agent_colour(theme, who)} do
+      {false, colour} when colour != nil and dx < w ->
+        part = text |> Geex.Text.slice(col, n) |> clip_cells(w - dx)
+        cell = Screen.get_cell(screen, x + dx, row)
+        Screen.draw_text(screen, x + dx, row, part, %{cell | fg: colour})
 
       _ ->
         screen
     end
   end
 
-  defp agent_who(screen, _entry, _text, _who_at, _at, _fg, _theme), do: screen
+  defp agent_who(screen, _entry, _text, _who_at, _at, _highlit?, _theme), do: screen
+
+  # The longest start of `text` that fits in `cols` display columns.
+  defp clip_cells(text, cols) do
+    text
+    |> Geex.Text.graphemes()
+    |> Enum.reduce_while({[], 0}, fn g, {acc, used} ->
+      used = used + Geex.Width.cells(g)
+      if used <= cols, do: {:cont, {[g | acc], used}}, else: {:halt, {acc, used}}
+    end)
+    |> elem(0)
+    |> Enum.reverse()
+    |> Enum.join()
+  end
 
   # The file tree (ADR-0034 §5): a title row, then the rows, with a divider on its right edge.
   defp draw_tree(screen, nil, _state), do: screen

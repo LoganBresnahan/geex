@@ -545,10 +545,12 @@ edits list as well so entries are color coated".
   the theme's agent colours, so a session keeps its colour across frames and restarts.
 - **The colours are the theme's own:** `Geex.Theme.agent_colours/1` takes the foregrounds of
   `keyword`, `string`, `function`, `type`, `number` and `tag`, each once, leaving out the
-  theme's foreground and background (and red, which reads as an error). They are drawn readable
-  on the background by every theme already. Under the terminal theme they are ANSI colours
-  (magenta, green, blue, cyan, yellow), never truecolor; a theme with none gives its cursor
-  colour, the old mark colour.
+  theme's foreground and background. They are drawn readable on the background by every theme
+  already. Under the terminal theme they are ANSI colours (magenta, green, blue, cyan, yellow),
+  never truecolor, and none is red; a theme whose keywords or tags are red (gruvbox's keyword,
+  One Dark's and Tokyo Night's tag) gives that red too, so a session can be drawn red there.
+  Whether to filter reds out is left to the maintainer. A theme with none of the captures gives
+  its cursor colour, the old mark colour.
 - **Where:** the gutter's `▌` (`Loop.agent_marks/5`) and the edits pane's who column for an
   agent row (`EditsPane.who_at/3` says where the column is); the rest of the row keeps the
   pane's foreground, and the focused, highlighted row keeps the accent.
