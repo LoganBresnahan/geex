@@ -1,8 +1,10 @@
 # ADR-0053: Search: Alt+Q in the file, Alt+Shift+Q in the project, Alt+N the next match
 
-- **Status:** Accepted 2026-11-12 (the maintainer's design, "all good"; not built yet). **Amended
+- **Status:** Accepted 2026-11-12 (the maintainer's design, "all good"). **Amended
   2026-11-13:** the maintainer's answers before building (`search all`, a setting, the highlights,
-  the prompt, project search's scope), and mod-verify's design notes
+  the prompt, project search's scope), and mod-verify's design notes. **Built 2026-11-13** in three
+  slices on `search`, merged the same day, released in 0.7.0; amended twice more that day (a
+  result goes to the pane that has its file; the maintainer's answers to the open questions)
 - **Date:** 2026-11-12
 - **Amends:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the minibuffer's search mode,
   "incremental search is the next mode"), [ADR-0042](0042-shell-commands.md) (the output pane

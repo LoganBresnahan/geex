@@ -383,13 +383,17 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      `:coord`/`:coord_range` (the same `Coord.parse/1` grammar, resolved as buffer-absolute
      graphemes) + `Geex.MCP.Grid` (`goto`, `copy` onto the shared clipboard ring). Remaining: agent
      `cut`, coordinate `select`, block/multi ranges, the `cursor_x`-oracle *automated* cast test.
-   - **palette** (`Alt+P`, `Alt+I` since ADR-0037) — **built** (ADR-0028 §3 amendment): `Geex.Fuzzy` + `Geex.Command.Catalog`
-     + the `:palette` minibuffer mode with a candidate popup (`Alt+W`/`Alt+S` navigate, Enter runs).
-   - **file finder** (`Alt+O`) — **built 2026-10-17** (ADR-0028's 2026-10-17 amendment):
-     `Geex.Finder` over the tree's file list, searched off the loop; the buffer picker
-     (`buffers`) shipped with ADR-0034.
-   - Remaining: incremental **search** (`/`) and path **tab-completion** (where the one
-     `Completion` abstraction, sources per mode, would earn its keep).
+   - **palette** (`Alt+B` since ADR-0049; first `Alt+P`, then `Alt+I` by ADR-0037) — **built**
+     (ADR-0028 §3 amendment): `Geex.Fuzzy` + `Geex.Command.Catalog` + the `:palette` minibuffer
+     mode with a candidate popup (up and down navigate, `Alt+I`/`Alt+K` or the arrows since
+     ADR-0049; Enter runs).
+   - **file finder** (`Alt+F` since ADR-0049, first `Alt+O`) — **built 2026-10-17** (ADR-0028's
+     2026-10-17 amendment): `Geex.Finder` over the tree's file list, searched off the loop; the
+     buffer picker (`buffers`) shipped with ADR-0034.
+   - **search** — **built 2026-11-13** as item 20.5 ([adr/0053](adr/0053-search.md), which amends
+     ADR-0028's search mode): `Alt+Q`, the match selected as the query is typed; released in 0.7.0.
+   - Remaining: path **tab-completion** (where the one `Completion` abstraction, sources per mode,
+     would earn its keep).
 5. **undo / redo** — **built** ([adr/0031](adr/0031-undo-redo-history-operations.md)): history
    operations on `Alt+Z` / `Alt+Shift+Z` (replay-from-base over the recorded history + the loaded
    `base`, [adr/0014](adr/0014-editor-state-and-dispatch-ownership.md)); a fresh edit clears the

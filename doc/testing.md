@@ -6829,3 +6829,15 @@ Before the tag: 1683 tests + 57 properties + 201 doctests green twice, `--warnin
 published six assets, and its smoke jobs installed the release from the public URL and ran it on
 ubuntu-22.04, ubuntu-24.04, ubuntu-22.04-arm, ubuntu-24.04-arm, macos-15 and macos-15-intel, all
 green; `v0.7.0` is the latest release. Not checked: the maintainer's `geex self update` to it.
+
+### 2026-11-13 — The maintainer's install of 0.7.0, found by `/orient` (ADR-0041)
+
+The entry above left the maintainer's move to 0.7.0 unchecked; it had happened. Read from the
+install, not watched: `~/.local/bin/geex` links `versions/0.7.0/bin/geex` and `geex --version`
+says `geex 0.7.0`; `previous` names `0.6.0+b78ceb97.89a87236`; `integrations/geex-attest.sh`
+links 0.7.0's payload. The link, `previous` and the payload link were written at 12:09 CST, after
+the release was published (10:32 CST). It is the release's own tarball, not a local build: its
+files carry the release run's build time (10:22 CST, kept by `tar`), it carries erts 16.1.1
+(`rel/build-runtime.sh`'s; the OTP here is erts 16.1), and `_build/package/` holds no 0.7.0
+tarball. Not checked: whether `geex self update` or the curl installer put it there (both run
+the release's `install.sh`), or a live session in the installed 0.7.0.
