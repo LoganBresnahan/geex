@@ -1,7 +1,7 @@
 # ADR-0042: Shell commands from the minibuffer
 
 - **Status:** Accepted 2026-10-19 (the maintainer's ask, relayed by the coordinator session,
-  which also passed on the maintainer's choice of `!` to run a command again). Built the same day. **Amended 2026-11-09 (recorded 2026-11-10):** the output pane's title row is the band's handle. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+<` / `Alt+>` reach the output pane, not `Alt+P`. **Amended 2026-11-12 by [ADR-0053](0053-search.md):** the output pane also holds a project search's results (`Alt+Shift+Q`), `Alt+N` stepping them. **Amended 2026-11-13:** `!!` after a restart runs the newest kept `!` line.
+  which also passed on the maintainer's choice of `!` to run a command again). Built the same day. **Amended 2026-11-09 (recorded 2026-11-10):** the output pane's title row is the band's handle. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+<` / `Alt+>` reach the output pane, not `Alt+P`. **Amended 2026-11-12 by [ADR-0053](0053-search.md):** the output pane also holds a project search's results (`Alt+Shift+Q`), `Alt+N` stepping them. **Amended 2026-11-13:** `!!` after a restart runs the newest kept `!` line. **Amended 2026-11-13:** Enter opens tsc's `path(line,col): error` too.
 - **Date:** 2026-10-19
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the minibuffer and its typed
   verbs), [ADR-0035](0035-the-loop-never-waits.md) (slow work runs off the key loop),
@@ -127,6 +127,7 @@ the kept history of typed lines (ADR-0042's `history.json`) had it. Now `!!` run
 `!` command, else the newest `!` line in that history. A restart itself still runs nothing, and
 the output pane isn't kept across one: it is a snapshot of when the command ran (the maintainer's
 call, 2026-11-13); `Alt+M` then Up, or `!!`, runs it again.
+
 ## Amendment (2026-11-13): Enter opens tsc's `path(line,col): error` too
 
 The maintainer is learning TypeScript in geex, checking with `!tsc` (or `!npx tsc --noEmit`).
