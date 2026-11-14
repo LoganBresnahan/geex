@@ -1,8 +1,8 @@
 # ADR-0028: The editor shell — screen regions, the minibuffer, and the buffer/view/pane model
 
 - **Status:** Accepted. **Keys amended** 2026-10-17 by [ADR-0037](0037-pane-and-file-keys.md):
-  the palette is `Alt+I` (`Alt+P` is now the next pane). **Amended 2026-11-09 (recorded 2026-11-10):** catalog entries carry `usage` and `aliases`, and the catalog covers every typed verb (for `Alt+Y`'s Commands tab). **Amended 2026-11-11 by [ADR-0047](0047-every-key-runs-a-named-command.md):** parity is per key now: every key runs a named command, typed in `Alt+M`. **Amended 2026-11-11 by [ADR-0049](0049-ijkl-default-keys.md):** `Alt+N` no longer closes the minibuffer; Esc and `no` do. **Amended** 2026-10-17: the file finder
-  is built (`Alt+O`). Tabs and splits built 2026-10-17 by
+  the palette is `Alt+I` (`Alt+P` is now the next pane). **Amended 2026-11-09 (recorded 2026-11-10):** catalog entries carry `usage` and `aliases`, and the catalog covers every typed verb (for `Alt+Y`'s Commands tab). **Amended 2026-11-11 by [ADR-0047](0047-every-key-runs-a-named-command.md):** parity is per key now: every key runs a named command, typed in `Alt+M`. **Amended 2026-11-11 by [ADR-0048](0048-the-palette-ranks-names-keys-then-loose.md):** the palette ranks in bands. **Amended 2026-11-11 by [ADR-0049](0049-ijkl-default-keys.md):** `Alt+N` no longer closes the minibuffer; Esc and `no` do; the palette is `Alt+B`, the finder `Alt+F`, and a popup's highlight moves with `Alt+I`/`Alt+K` (first `Alt+W`/`Alt+S`) or the arrows. **Amended 2026-11-12 by [ADR-0053](0053-search.md):** search is `Alt+Q`, not the `/` trigger §2 suggests (`Alt+/` comments, ADR-0052), the match selected as the query is typed; `Alt+Shift+Q` searches the project into the output pane. **Amended** 2026-10-17: the file finder
+  is built (`Alt+O`, `Alt+F` since ADR-0049). Tabs and splits built 2026-10-17 by
   [ADR-0038](0038-split-panes-and-tabs.md).
 - **Date:** 2026-06-08
 - **Relates to:** [ADR-0027](0027-grid-command-addressing.md) (grid commands — the minibuffer's

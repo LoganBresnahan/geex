@@ -356,10 +356,12 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
 [notes.md](notes.md) "Editing & selection bindings".
 
 1. **The `Selection` primitive** (`%Selection{anchor, active}`) — the shared dependency under
-   both highlight mode (`Alt+H`, interactive) and grid ranges (declarative); one span, two
-   input surfaces. **Built and live-verified** ([adr/0029](adr/0029-selection-primitive.md),
-   *Accepted*): the pure core, the interactive wiring (loop selection field, `Alt+H` +
-   `Alt+B` select-all, render highlight incl. the multi-line / CRLF cases, `Alt+N`/Esc clear),
+   both the interactive selection (`Alt+S` since ADR-0049, first `Alt+H` highlight mode) and grid
+   ranges (declarative); one span, two input surfaces. **Built and live-verified**
+   ([adr/0029](adr/0029-selection-primitive.md), *Accepted*): the pure core, the interactive
+   wiring (loop selection field, `Alt+S` + `Alt+A` select-all since ADR-0049, first `Alt+H` +
+   `Alt+B`, render highlight incl. the multi-line / CRLF cases, Esc clear, `Alt+N` too until
+   ADR-0049),
    and clipboard `cut`/`copy`/`paste` (`Alt+X/C/V`) consuming `range/1`. The **typed** verbs
    and grid-range ops remain (they ride item 2).
 2. **The command catalog + the view-action tool category** — **built, first slice**
@@ -369,8 +371,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    action vocabulary through the loop's `apply_action` (the parity mechanism); an agent-moved
    cursor now repaints (`{:geex_cursor}` notify). The agent's grid tools (`goto`, `copy`) landed
    as their own category, `Geex.MCP.Grid` (item 4). Remaining: `scroll` / coordinate `select`
-   members, and re-basing the `Verbs` table on `Geex.Command.Catalog` (the palette shipped the
-   catalog; the verbs don't resolve against it yet, nor are undo/redo/paste agent tools).
+   members, and re-basing the rest of the `Verbs` table on `Geex.Command.Catalog` (the commands
+   that run as their key does, and the searches, resolve through the catalog since ADR-0047 and
+   ADR-0053; the hand-written clauses remain), and undo/redo/paste aren't agent tools yet.
 3. ~~**Refactor go-to-line through the real system**~~ — **done** (rode item 2): the
    `run_command` hack is deleted; bare `N`, typed `line N`, and `tools/call line` converge on
    `ViewActions.line/1`.
@@ -385,8 +388,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      `cut`, coordinate `select`, block/multi ranges, the `cursor_x`-oracle *automated* cast test.
    - **palette** (`Alt+B` since ADR-0049; first `Alt+P`, then `Alt+I` by ADR-0037) — **built**
      (ADR-0028 §3 amendment): `Geex.Fuzzy` + `Geex.Command.Catalog` + the `:palette` minibuffer
-     mode with a candidate popup (up and down navigate, `Alt+I`/`Alt+K` or the arrows since
-     ADR-0049; Enter runs).
+     mode with a candidate popup (up and down navigate: `Alt+I`/`Alt+K` since ADR-0049, first
+     `Alt+W`/`Alt+S`, or the arrows; Enter runs).
    - **file finder** (`Alt+F` since ADR-0049, first `Alt+O`) — **built 2026-10-17** (ADR-0028's
      2026-10-17 amendment): `Geex.Finder` over the tree's file list, searched off the loop; the
      buffer picker (`buffers`) shipped with ADR-0034.

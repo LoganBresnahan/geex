@@ -6841,3 +6841,7 @@ files carry the release run's build time (10:22 CST, kept by `tar`), it carries 
 (`rel/build-runtime.sh`'s; the OTP here is erts 16.1), and `_build/package/` holds no 0.7.0
 tarball. Not checked: whether `geex self update` or the curl installer put it there (both run
 the release's `install.sh`), or a live session in the installed 0.7.0.
+
+mod-verify's review the same evening checked it against the release itself: the published
+linux-x64 tarball's sha256 matches the release's `SHA256SUMS`, and the installed tree matches it
+in all 1,275 entries (contents, modes and mtimes; the tar's owner is the CI runner).

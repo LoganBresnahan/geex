@@ -1,7 +1,7 @@
 # ADR-0042: Shell commands from the minibuffer
 
 - **Status:** Accepted 2026-10-19 (the maintainer's ask, relayed by the coordinator session,
-  which also passed on the maintainer's choice of `!` to run a command again). Built the same day. **Amended 2026-11-09 (recorded 2026-11-10):** the output pane's title row is the band's handle. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+<` / `Alt+>` reach the output pane, not `Alt+P`.
+  which also passed on the maintainer's choice of `!` to run a command again). Built the same day. **Amended 2026-11-09 (recorded 2026-11-10):** the output pane's title row is the band's handle. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+<` / `Alt+>` reach the output pane, not `Alt+P`. **Amended 2026-11-12 by [ADR-0053](0053-search.md):** the output pane also holds a project search's results (`Alt+Shift+Q`), `Alt+N` stepping them. **Amended 2026-11-13:** `!!` after a restart runs the newest kept `!` line.
 - **Date:** 2026-10-19
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the minibuffer and its typed
   verbs), [ADR-0035](0035-the-loop-never-waits.md) (slow work runs off the key loop),
