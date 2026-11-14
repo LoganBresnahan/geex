@@ -78,9 +78,7 @@ defmodule Geex.Loop.EditsPane do
         ) ::
           [{String.t(), entry(), boolean()}]
   def lines(entries, root, w, n, sel, focused?, start \\ nil) do
-    names = Enum.map(entries, &if(&1.path, do: relative(&1.path, root), else: ""))
-    name_w = names |> Enum.map(&Geex.Text.length/1) |> Enum.max(fn -> 0 end) |> min(div(w, 2))
-    who_w = entries |> Enum.map(&Geex.Text.length(&1.who)) |> Enum.max(fn -> 0 end) |> min(36)
+    {names, name_w, who_w} = widths(entries, root, w)
     start = start || sel |> Kernel.-(n - 1) |> max(0) |> min(max(length(entries) - n, 0))
 
     entries
@@ -99,6 +97,29 @@ defmodule Geex.Loop.EditsPane do
         pad = max(w - Geex.Text.length(left) - Geex.Text.length(entry.time) - 1, 1)
         {left <> String.duplicate(" ", pad) <> entry.time, entry, selected?}
     end)
+  end
+
+  @doc """
+  Where the who column is in `lines/7`'s rows: `{column, width}`, so a row's writer can be drawn
+  in its own colour (2026-11-13).
+
+      iex> e = %{kind: :edit, path: "/r/lib/a.ex", who: "you", time: "17:21", row: nil}
+      iex> Geex.Loop.EditsPane.who_at([e], "/r", 30)
+      {12, 3}
+  """
+  @spec who_at([entry()], String.t() | nil, non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()}
+  def who_at(entries, root, w) do
+    {_names, name_w, who_w} = widths(entries, root, w)
+    {2 + name_w + 2, who_w}
+  end
+
+  # The rows' names, the name column's width and the who column's.
+  defp widths(entries, root, w) do
+    names = Enum.map(entries, &if(&1.path, do: relative(&1.path, root), else: ""))
+    name_w = names |> Enum.map(&Geex.Text.length/1) |> Enum.max(fn -> 0 end) |> min(div(w, 2))
+    who_w = entries |> Enum.map(&Geex.Text.length(&1.who)) |> Enum.max(fn -> 0 end) |> min(36)
+    {names, name_w, who_w}
   end
 
   @doc "`path` relative to `root` when under it; else `~`-relative, or as is."

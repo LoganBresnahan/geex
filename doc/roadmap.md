@@ -454,9 +454,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
 8. **Attribution ideas awaiting a decision** — *to review during UI testing* (noted 2026-10-15;
    design in [adr/0032](adr/0032-listener-first-agent-integration.md) and
    [adr/0033](adr/0033-durable-ledger.md)). Floated while building the ledger; none is decided:
-   - **A mark colour per agent session.** Today every agent's `▌` is the same accent colour, so
-     telling two sessions apart takes moving the cursor to read the status line. A colour picked
-     from the session id (the glyph unchanged) would show it at a glance. Small.
+   - **A mark colour per agent session.** **Built 2026-11-13** on `agent-colours`
+     ([ADR-0032](adr/0032-listener-first-agent-integration.md)'s 2026-11-13 amendment), with the
+     maintainer's addition: the edits pane's who column in the same colour. The colours are the
+     theme's syntax colours (ANSI under the terminal theme), picked by a hash of the session.
    - **Labelling shell writes.** A `sed` or script run through an agent's Bash tool is recorded
      `:external`: the hook sees the command text but has no before/after content to prove what
      it changed. *(2026-11-13: a hash-proved first step is now

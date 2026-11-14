@@ -259,12 +259,48 @@ defmodule Geex.LoopTest do
       marked = Loop.agent_marks(screen, blame, 0, 4, theme)
 
       assert Screen.get_cell(marked, 0, 2).char == "▌"
-      assert Screen.get_cell(marked, 0, 2).fg == theme.palette.cursor
+      assert Screen.get_cell(marked, 0, 2).fg == Geex.Theme.agent_colour(theme, @agent)
       # the cursor row's tint survives under the mark
       assert Screen.get_cell(marked, 0, 2).bg == Screen.get_cell(screen, 0, 2).bg
 
       for row <- [0, 1, 3],
           do: assert(Screen.get_cell(marked, 0, row) == Screen.get_cell(screen, 0, row))
+    end
+
+    # 2026-11-13: each agent session its own colour, the same every frame; an MCP edit has
+    # one too; :external and :human lines get no mark (invariant 6: nothing inferred).
+    test "agent_marks/5: two sessions in their own colours, from the theme's" do
+      theme = Geex.Fixtures.birds()
+      {:agent, who} = @agent
+      [one, two] = find_two_sessions(theme, who)
+      blame = [{one, 1}, {two, 2}, {{:llm, "claude"}, nil}, {:external, 3}, {:human, nil}]
+      {screen, _cursor, _h} = Loop.frame("a\nb\nc\nd\ne", [], theme, {4, 0}, 20, 5, 0)
+
+      marked = Loop.agent_marks(screen, blame, 0, 5, theme)
+      colours = Geex.Theme.agent_colours(theme)
+
+      assert Screen.get_cell(marked, 0, 0).fg == Geex.Theme.agent_colour(theme, one)
+      assert Screen.get_cell(marked, 0, 1).fg == Geex.Theme.agent_colour(theme, two)
+      assert Screen.get_cell(marked, 0, 0).fg != Screen.get_cell(marked, 0, 1).fg
+      assert Screen.get_cell(marked, 0, 2).fg in colours
+
+      for row <- [3, 4],
+          do: assert(Screen.get_cell(marked, 0, row) == Screen.get_cell(screen, 0, row))
+
+      assert Loop.agent_marks(screen, blame, 0, 5, theme) == marked
+    end
+
+    test "the theme's agent colours: none is its fg or bg; the terminal theme's are ANSI" do
+      birds = Geex.Fixtures.birds()
+      colours = Geex.Theme.agent_colours(birds)
+      assert length(colours) >= 3
+      assert colours == Enum.uniq(colours)
+      refute Enum.any?(colours, &(&1 in [birds.palette.fg, birds.palette.bg]))
+
+      assert Enum.all?(
+               Geex.Theme.agent_colours(Geex.Theme.default()),
+               &match?({:ansi, n} when n in 0..15, &1)
+             )
     end
 
     test "agent_marks/5: follows the scroll; rows past the blame are untouched" do
@@ -276,5 +312,18 @@ defmodule Geex.LoopTest do
       assert Screen.get_cell(marked, 0, 0).char == "▌"
       assert Screen.get_cell(marked, 0, 1) == Screen.get_cell(screen, 0, 1)
     end
+  end
+
+  # Two sessions whose colours differ (two random ids can share one of the theme's few).
+  defp find_two_sessions(theme, who) do
+    one = {:agent, %{who | session: "session-0"}}
+
+    two =
+      Enum.find_value(1..50, fn i ->
+        two = {:agent, %{who | session: "session-#{i}"}}
+        if Geex.Theme.agent_colour(theme, two) != Geex.Theme.agent_colour(theme, one), do: two
+      end)
+
+    [one, two]
   end
 end

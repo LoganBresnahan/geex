@@ -119,6 +119,58 @@ defmodule Geex.Theme do
     end
   end
 
+  # The captures an agent session's colour is picked from, in this order: colours every theme
+  # gives and draws readable on its background (2026-11-13). Red is left out (it reads as an
+  # error), as are the theme's plain foreground and background.
+  @agent_captures ~w(keyword string function type number tag)
+
+  @doc """
+  The colours agent sessions are told apart by: the foregrounds of a few syntax captures, each
+  once, in order, leaving out the theme's own foreground and background. Under the terminal
+  theme they are ANSI colours (magenta, green, blue, cyan, yellow), never truecolor. A theme with
+  none of them gives its cursor colour alone.
+
+      iex> Geex.Theme.agent_colours(Geex.Theme.default())
+      [ansi: 5, ansi: 2, ansi: 4, ansi: 6, ansi: 3]
+  """
+  @spec agent_colours(t()) :: [term()]
+  def agent_colours(%__MODULE__{palette: pal} = theme) do
+    colours =
+      @agent_captures
+      |> Enum.map(&(style_for(theme, &1) || %Style{}).fg)
+      |> Enum.reject(&(&1 in [nil, :default, pal.fg, pal.bg]))
+      |> Enum.uniq()
+
+    if colours == [], do: [pal.cursor], else: colours
+  end
+
+  @doc """
+  The colour of an agent writer, the same every time for the same session (the harness and the
+  session id, hashed), or `nil` for anyone else: you, an outside writer, a line as loaded.
+  Only an attested writer (`{:agent, _}`) or an MCP edit (`{:llm, _}`) has one (invariant 6:
+  nothing is inferred). Two sessions can share a colour; the status line names them apart.
+
+      iex> t = Geex.Theme.default()
+      iex> a = {:agent, %{harness: "claude-code", session: "7ccbf3d1-aaaa"}}
+      iex> Geex.Theme.agent_colour(t, a) == Geex.Theme.agent_colour(t, a)
+      true
+      iex> Geex.Theme.agent_colour(t, a) in Geex.Theme.agent_colours(t)
+      true
+      iex> {Geex.Theme.agent_colour(t, :external), Geex.Theme.agent_colour(t, :human)}
+      {nil, nil}
+  """
+  @spec agent_colour(t(), term()) :: term() | nil
+  def agent_colour(theme, {:agent, %{} = who}),
+    do: pick(theme, {Map.get(who, :harness), Map.get(who, :session)})
+
+  def agent_colour(theme, {:llm, name}), do: pick(theme, {:llm, name})
+  def agent_colour(_theme, _writer), do: nil
+
+  defp pick(theme, key) do
+    colours = agent_colours(theme)
+    Enum.at(colours, :erlang.phash2(key, length(colours)))
+  end
+
   @doc "Build a theme from a decoded native-format map (the validating core)."
   @spec from_json(map()) :: {:ok, t()} | {:error, term()}
   def from_json(%{} = data) do
