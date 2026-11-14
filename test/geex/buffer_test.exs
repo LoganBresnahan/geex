@@ -258,6 +258,17 @@ defmodule Geex.BufferTest do
       assert Buffer.get_text(buf) == "xa\nb\nc\n"
     end
 
+    # `replace-all` (2026-11-13): one command worked out off the key loop, applied only at the
+    # change clock it was worked out at.
+    test "dispatch/3 with expect_seq: applies at that clock, refuses after a change", %{buf: buf} do
+      seq = Buffer.snapshot(buf).seq
+      assert {:ok, _} = Buffer.dispatch(buf, insert(0, 0, "x"), expect_seq: seq)
+      assert Buffer.dispatch(buf, insert(0, 0, "y"), expect_seq: seq) == {:error, :stale}
+      assert Buffer.get_text(buf) == "xa\nb\nc\n"
+      assert {:ok, _} = Geex.Dispatch.run_on(buf, insert(0, 0, "z"), expect_seq: seq + 1)
+      assert Buffer.get_text(buf) == "zxa\nb\nc\n"
+    end
+
     test "baseline: re-syncs and recomputes dirty; a notice reaches subscribers", %{buf: buf} do
       {:ok, _v} = Buffer.subscribe(buf, self())
 

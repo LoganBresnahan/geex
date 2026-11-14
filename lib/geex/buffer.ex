@@ -142,10 +142,19 @@ defmodule Geex.Buffer do
   @doc """
   Apply a provenance-stamped `command` to this buffer. Returns `{:ok, snapshot}`
   (text + history as data) or `{:error, reason}`, leaving state unchanged on error.
+
+  With `expect_seq: n`, apply it only if the buffer's change clock (`snapshot.seq`) still equals
+  `n`, else `{:error, :stale}` and nothing changes: for a caller that worked the command out from
+  a snapshot off the key loop (`replace-all`, 2026-11-13), as `dispatch_group/3`'s option is for
+  reconcile.
   """
-  @spec dispatch(GenServer.server(), struct()) :: {:ok, map()} | {:error, term()}
-  def dispatch(server, command) when is_struct(command),
-    do: GenServer.call(server, {:dispatch, command})
+  @spec dispatch(GenServer.server(), struct(), keyword()) :: {:ok, map()} | {:error, term()}
+  def dispatch(server, command, opts \\ []) when is_struct(command) do
+    case Keyword.fetch(opts, :expect_seq) do
+      {:ok, seq} -> GenServer.call(server, {:dispatch, command, seq})
+      :error -> GenServer.call(server, {:dispatch, command})
+    end
+  end
 
   @doc """
   Apply `commands` in order as **one atomic group**: all of them land, or none do.
@@ -362,6 +371,13 @@ defmodule Geex.Buffer do
         {:reply, error, state}
     end
   end
+
+  def handle_call({:dispatch, _command, seq}, _from, %{history: %{seq: now}} = state)
+      when seq != now,
+      do: {:reply, {:error, :stale}, state}
+
+  def handle_call({:dispatch, command, _seq}, from, state),
+    do: handle_call({:dispatch, command}, from, state)
 
   def handle_call({:dispatch_group, commands, opts}, _from, state) do
     case Keyword.fetch(opts, :expect_seq) do

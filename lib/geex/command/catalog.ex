@@ -193,6 +193,11 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, :save}
     },
     %Entry{
+      name: "save-all",
+      description: "Write every file with unsaved changes (after a replace-all, say).",
+      invoke: {:action, :save_all}
+    },
+    %Entry{
       name: "no",
       description: "Clear the selection; in the command line, close it.",
       invoke: {:action, :select_clear}
@@ -231,6 +236,20 @@ defmodule Geex.Command.Catalog do
       name: "settings",
       description: "Languages, themes, keys, commands and settings.",
       invoke: {:command, :settings}
+    },
+    %Entry{
+      name: "replace",
+      usage: "replace TEXT",
+      description:
+        "Replace the file search's matches (the last `search`) in this file with TEXT, after a y/n; one undo step.",
+      invoke: {:typed, "replace"}
+    },
+    %Entry{
+      name: "replace-all",
+      usage: "replace-all TEXT",
+      description:
+        "Replace the project search's matches in every file it listed with TEXT, after a y/n; left unsaved, one undo step per file.",
+      invoke: {:typed, "replace-all"}
     },
     %Entry{
       name: "search",

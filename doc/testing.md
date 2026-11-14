@@ -6926,3 +6926,42 @@ the left per character; it is now placed by display width and clipped to the pan
 copy) and the other row tests pass; 1698 tests + 206 doctests + 59 properties, green twice. The
 ADR no longer says red is left out: the terminal theme has none among the agent colours, but a
 theme whose keywords or tags are red gives that red; filtering reds is the maintainer's call.
+
+### 2026-11-13 — `replace`, `replace-all` and `save-all` (ADR-0053)
+
+On `replace-all`, stacked on `agent-colours`. Live in a tmux pty (the worktree's build, scratch
+`XDG_STATE_HOME` and `XDG_RUNTIME_DIR`), a scratch git repo of `a.ts` (`let foo = 1;` /
+`foo += foo;`), `b.ts` (`export const foo = 2;`) and `c.ts` (no match), `a.ts` open:
+- `Alt+Q` `foo` Enter, then `replace count`: the question "replace 3 matches? (y/n)"; `y`: both
+  lines read `count`, the status line `a.ts [+]  replaced 3 matches (unsaved: save-all writes
+  them)`; one `Alt+Z` put all three back (`[+]` gone).
+- `search-all foo`: three result lines (a.ts twice, b.ts); `replace-all bar`: "replace 4 matches
+  in 2 files? (y/n)"; `y`: `a.ts` reads `bar`, "replaced 4 matches in 2 files (unsaved …)", and
+  `b.ts` on disk still `foo` (its buffer opened in the background, unsaved).
+- `save-all`: "saved 2 files"; on disk `a.ts` and `b.ts` both read `bar`.
+- `Ctrl-X` quit clean; no `terminating` or error line in the log.
+
+Tests: `Geex.Replace` (examples: smart case, CRLF kept, an invalid byte and wide characters, a
+replacement holding the query not searched again, an empty replacement, the human's command; a
+property against an independent oracle, with the deep run's counterexample (a combining mark as
+the replacement, the first oracle's mistake) kept as an example; the property green at
+`GEEX_PROPERTY_RUNS=10000`); `Buffer.dispatch/3` and `Dispatch.run_on/3` with `expect_seq:`;
+`Verbs` (`replace TEXT`, `replace-all TEXT`, bare, `save-all`); the loop
+(`replace_loop_test.exs`: the y/n, one undo step, unsaved, `n`, bare, no search, no match, an
+edit between the question and the yes refused; `replace-all` over an open and a closed file, the
+closed one not opened before the yes, the view kept, the buffer listed, `save-all` and "nothing
+to save", a closed file changed on disk after the plan refused, cut-short and running results
+refused). 1716 tests + 207 doctests + 60 properties, green twice; `mix compile
+--warnings-as-errors --force` clean. Not checked: a large project (hundreds of files) live; a
+file with no trailing newline or CRLF live (tests only); the buffers list showing the background
+buffer live (a test checks `Session.buffers/0`).
+
+Item 4 of the evening's list, saving off the key loop, was measured and deferred to the
+maintainer instead of built; roadmap item 9 has the numbers and why.
+
+mod-verify's review found replace-all would rewrite files under a nested repository's `.git`
+(outside git, `search-all` greps everything); `plan_results` now drops any file with a `.git`
+segment under the root, and a background file opened only to be refused is closed again. Tests:
+a result naming `sub/.git/config` skipped while `sub/notes.txt` is replaced; the refused closed
+file left closed (both fail on the first version). 1717 tests + 207 doctests + 60 properties,
+green twice.

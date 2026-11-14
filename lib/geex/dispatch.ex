@@ -78,4 +78,13 @@ defmodule Geex.Dispatch do
       :error -> {:error, :no_active_buffer}
     end
   end
+
+  @doc """
+  `run/1` against a named buffer rather than the active one: `replace-all` changes files you
+  aren't looking at (2026-11-13). The same door into the buffer's one history; `opts` as
+  `Geex.Buffer.dispatch/3`'s (`expect_seq:`). Provenance is the caller's, as for `run/1`.
+  """
+  @spec run_on(pid(), struct(), keyword()) :: {:ok, map()} | {:error, term()}
+  def run_on(pid, command, opts \\ []) when is_pid(pid) and is_struct(command),
+    do: Geex.Buffer.dispatch(pid, command, opts)
 end
