@@ -6958,3 +6958,10 @@ buffer live (a test checks `Session.buffers/0`).
 
 Item 4 of the evening's list, saving off the key loop, was measured and deferred to the
 maintainer instead of built; roadmap item 9 has the numbers and why.
+
+mod-verify's review found replace-all would rewrite files under a nested repository's `.git`
+(outside git, `search-all` greps everything); `plan_results` now drops any file with a `.git`
+segment under the root, and a background file opened only to be refused is closed again. Tests:
+a result naming `sub/.git/config` skipped while `sub/notes.txt` is replaced; the refused closed
+file left closed (both fail on the first version). 1717 tests + 207 doctests + 60 properties,
+green twice.

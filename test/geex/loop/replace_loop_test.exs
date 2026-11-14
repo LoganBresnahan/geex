@@ -160,7 +160,7 @@ defmodule Geex.Loop.ReplaceLoopTest do
       assert run(state, "save-all").notice == "nothing to save"
     end
 
-    test "a closed file changed on disk after the plan is refused", %{dir: dir} do
+    test "a closed file changed on disk after the plan is refused, and left closed", %{dir: dir} do
       File.write!(Path.join(dir, "b.txt"), "foo\n")
       {state, _a} = open(dir, "a.txt", "x\n")
       state = results(state, "foo", ["b.txt:1:foo"]) |> run("replace-all bar") |> answer()
@@ -168,8 +168,35 @@ defmodule Geex.Loop.ReplaceLoopTest do
 
       state = state |> key({:char, "y"}) |> answer()
       assert state.notice =~ "changed since, not replaced: b.txt"
-      {:ok, b} = BufferSupervisor.whereis(Path.join(dir, "b.txt"))
-      assert text(b) == "foo changed\n"
+      assert File.read!(Path.join(dir, "b.txt")) == "foo changed\n"
+      # Opened only to check it, then closed again (mod-verify's review).
+      assert BufferSupervisor.whereis(Path.join(dir, "b.txt")) == :error
+    end
+
+    # mod-verify's review: outside git `search-all` lists a nested repository's insides too;
+    # replace-all never rewrites a file under a `.git` directory.
+    test "a result under a .git directory is skipped; the file beside it is replaced", %{dir: dir} do
+      File.mkdir_p!(Path.join(dir, "sub/.git"))
+      File.write!(Path.join(dir, "sub/.git/config"), "url = origin\n")
+      File.write!(Path.join(dir, "sub/notes.txt"), "push to origin\n")
+      {state, _a} = open(dir, "a.txt", "x\n")
+
+      state =
+        results(state, "origin", [
+          "sub/.git/config:1:url = origin",
+          "sub/notes.txt:1:push to origin"
+        ])
+        |> run("replace-all upstream")
+        |> answer()
+
+      assert Minibuffer.prompt(state.minibuffer) =~ "replace 1 match in 1 file?"
+      state = state |> key({:char, "y"}) |> answer()
+      assert state.notice =~ "replaced 1 match in 1 file"
+
+      {:ok, notes} = BufferSupervisor.whereis(Path.join(dir, "sub/notes.txt"))
+      assert text(notes) == "push to upstream\n"
+      assert BufferSupervisor.whereis(Path.join(dir, "sub/.git/config")) == :error
+      assert File.read!(Path.join(dir, "sub/.git/config")) == "url = origin\n"
     end
 
     test "with no project search, it says so; bare, it asks with the query", %{dir: dir} do

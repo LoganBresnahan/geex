@@ -259,7 +259,10 @@ restore throws away a file's other changes too). Which needs `save-all`. Filed a
    smart case, a line's leftmost non-overlapping occurrences, never across a line end, a CRLF
    line's `\r` no part of one, a byte that isn't UTF-8 one grapheme. For `replace-all` the
    results only say which files; each file's matches are worked out again this way, so they are
-   what `Alt+Q` would find there, not grep's locale-dependent `-i`.
+   what `Alt+Q` would find there, not grep's locale-dependent `-i`. **Never a file under a
+   `.git` directory:** outside git, `search-all` greps everything, a nested repository's insides
+   too (§9), and a replace there would rewrite its `config`, refs and logs (mod-verify's review).
+   Whether `search-all` itself should leave `.git` out is a separate question for the maintainer.
 3. **One command per file:** a `Replace` from the start of the first line with a match to the
    end of the last, its text those lines with every match replaced. One undo step per file, one
    history entry, the human's provenance; the line count never changes, so the blame marks only
@@ -270,13 +273,18 @@ restore throws away a file's other changes too). Which needs `save-all`. Filed a
    applies them in a process too, each through `Dispatch.run_on/3` (`run/1` on a named buffer)
    with `expect_seq:`, so a buffer that changed since its plan refuses it; a closed file is
    opened in the background (`Session.open_in_background/1`: listed among the buffers, the view
-   left alone) and changed only if it still holds the text its plan came from. The notice counts
-   what was replaced and names any file changed since, not replaced.
+   left alone) and changed only if it still holds the text its plan came from; one opened only to
+   be refused is closed again. The notice counts what was replaced and names any file changed
+   since, not replaced.
 5. **Left unsaved.** The changed files show `[+]` where they are open; nothing touches the disk
    until a save. **`save-all`** saves every buffer with unsaved edits as `Ctrl-O` saves the one
    you're in (`Reconcile.save/2`: one behind merges first; a conflict or a leftover conflict block
    isn't written), and says how many, naming any not saved. It runs on the key loop, as `Ctrl-O`
    does; saving off the loop is roadmap item 9's, not decided yet.
+6. **Quitting doesn't ask.** A file replace-all changed in the background and `save-all` didn't
+   write keeps its edits in its ledger (ADR-0033) and comes back unsaved the next time it is
+   opened, but the next session doesn't list it. replace-all is the first feature that leaves
+   files you never opened unsaved; whether quit should warn is the maintainer's call.
 
 Not built: one undo across files (the issue sketches it: a step id shared across buffers, which
 would also let one undo take back an agent's whole turn); replacing with an empty text by typing

@@ -954,7 +954,6 @@ defmodule Geex.Loop do
   def handle_info({:geex_search, pid, msg}, %{search: %{task: %{pid: pid}}} = state),
     do: {:noreply, schedule_repaint(search_answered(msg, state))}
 
-  # The search died before answering: say so, and stop waiting on it.
   # A replace's plan or its result (2026-11-13), from the process `start_replace/3` started.
   def handle_info({:geex_replace, pid, answer}, %{replace: %{pid: pid, ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
@@ -964,6 +963,7 @@ defmodule Geex.Loop do
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{replace: %{ref: ref}} = state),
     do: {:noreply, schedule_repaint(%{state | replace: nil, notice: "the replace failed"})}
 
+  # The search died before answering: say so, and stop waiting on it.
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{search: %{task: %{ref: ref}}} = state) do
     Logger.warning("geex search: the search failed: #{inspect(reason)}")
     search = %{state.search | task: nil, goal: nil}
@@ -5629,8 +5629,11 @@ defmodule Geex.Loop do
 
   # Each file a project search's results name, once, in their order: an open buffer's plan from
   # the buffer, a closed file's from the disk (it is opened only on a yes, and only if the disk
-  # still holds what the plan was worked out from).
+  # still holds what the plan was worked out from). Never a file under a `.git` directory: outside
+  # git, `search-all` greps everything, nested repositories' insides too (mod-verify's review).
   defp plan_results(lines, query, text) do
+    root = file_root()
+
     lines
     |> Enum.flat_map(fn line ->
       case result_target(line) do
@@ -5639,6 +5642,7 @@ defmodule Geex.Loop do
       end
     end)
     |> Enum.uniq()
+    |> Enum.reject(&in_git_dir?(&1, root))
     |> Enum.flat_map(fn full ->
       case Geex.BufferSupervisor.whereis(full) do
         {:ok, pid} -> plan_buffer(pid, full, query, text)
@@ -5646,6 +5650,8 @@ defmodule Geex.Loop do
       end
     end)
   end
+
+  defp in_git_dir?(full, root), do: ".git" in Path.split(Path.relative_to(full, root))
 
   defp plan_disk(full, query, text) do
     with {:ok, disk} <- File.read(full),
@@ -5711,14 +5717,24 @@ defmodule Geex.Loop do
     do: replace_task(state, :apply, scope, fn -> Enum.map(plans, &apply_plan/1) end)
 
   # An open buffer: only at the change clock the plan was worked out at. A closed file: opened in
-  # the background, only if it still holds the text the plan was worked out from.
+  # the background, only if it still holds the text the plan was worked out from; one this call
+  # opened and then refused is closed again.
   defp apply_plan(%{pid: nil} = plan) do
-    with {:ok, pid} <- Session.open_in_background(plan.path),
-         snap = Buffer.snapshot(pid),
-         true <- :crypto.hash(:sha256, snap.text) == plan.sha do
-      apply_plan(%{plan | pid: pid, seq: snap.seq})
-    else
-      _ -> {:changed, plan}
+    opened_here? = Geex.BufferSupervisor.whereis(plan.path) == :error
+
+    case Session.open_in_background(plan.path) do
+      {:ok, pid} ->
+        snap = Buffer.snapshot(pid)
+
+        if :crypto.hash(:sha256, snap.text) == plan.sha do
+          apply_plan(%{plan | pid: pid, seq: snap.seq})
+        else
+          if opened_here?, do: Session.close_buffer(pid)
+          {:changed, plan}
+        end
+
+      {:error, _reason} ->
+        {:changed, plan}
     end
   catch
     :exit, _ -> {:changed, plan}

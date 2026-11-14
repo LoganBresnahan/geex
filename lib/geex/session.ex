@@ -11,9 +11,11 @@ defmodule Geex.Session do
                       subsystem with its own ring history (ADR-0015).
     * `:minibuffer` — `%{mode, input, cursor}` for command-line entry.
     * `:layout`     — placeholder; meaningful in v0.3 when panes split.
-    * `:recent`     — the buffers that have been active, most recent first (ADR-0034:
-                      the `buffers` picker, and where `close_active/0` goes next). Each is
-                      monitored, and dropped when it ends.
+    * `:recent`     — the buffers that have been active, most recent first, and those opened
+                      in the background (`open_in_background/1`, after the one at the front)
+                      (ADR-0034: the `buffers` picker, and where `close_active/0` goes next).
+                      The front one is the active one, except when a background buffer was the
+                      first opened. Each is monitored, and dropped when it ends.
     * `:cursors`    — each inactive buffer's last cursor, restored when it is switched back
                       to (a buffer seen for the first time starts at the top).
     * `:dir` / `:root` — the directory geex was started in (the one named, or the first
@@ -163,7 +165,8 @@ defmodule Geex.Session do
     do: GenServer.call(__MODULE__, {:close_file, path})
 
   @doc """
-  The open buffers that have been active, most recent first (the active one leads):
+  The open buffers that have been active, most recent first (the active one leads), and those
+  opened in the background (`open_in_background/1`) after it:
   `[%{pid, path, dirty, behind}]`, `path` `nil` for a scratch buffer (ADR-0034). A buffer that
   died is left out.
   """
