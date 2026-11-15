@@ -10,6 +10,9 @@ defmodule Geex.Text do
   segments the valid stretches as `String` does and gives each invalid byte its own grapheme,
   the rule Elixir follows everywhere else. So commands still address graphemes (ADR-0027), and
   a line of valid text is addressed exactly as before.
+
+  Also a save's trim, `trim_trailing_blanks/1`, which takes off trailing space and tab graphemes
+  while segmenting only where one could be something else (BUG-18).
   """
 
   @doc """
@@ -145,6 +148,70 @@ defmodule Geex.Text do
     case next_grapheme(binary_part(text, off, byte_size(text) - off)) do
       nil -> {text, ""}
       {g, _rest} -> walk_split(text, n - 1, off + byte_size(g))
+    end
+  end
+
+  @doc """
+  `line` without its trailing space and tab graphemes, a CRLF line's `"\\r"` kept: a save's trim
+  (ADR-0054 §4). Each space or tab byte ending a line is a grapheme of its own but one: the run's
+  first space, when a Prepend character just before it joins it (GB9b; a tab is a control and
+  never joined), and that space stays. So the run is found by bytes and only its edge is
+  segmented: a line costs its trailing run, not its length in graphemes (BUG-18). A line that
+  doesn't end in a space or a tab comes back as it is.
+
+      iex> Geex.Text.trim_trailing_blanks("a \\t \\r")
+      "a\\r"
+      iex> Geex.Text.trim_trailing_blanks("\\u0600  ")
+      "\\u0600 "
+      iex> Geex.Text.trim_trailing_blanks(<<"x", 0xFF, " \\t">>)
+      <<"x", 0xFF>>
+  """
+  @spec trim_trailing_blanks(binary()) :: binary()
+  def trim_trailing_blanks(line) do
+    {body, cr} =
+      if String.ends_with?(line, "\r"),
+        do: {binary_part(line, 0, byte_size(line) - 1), "\r"},
+        else: {line, ""}
+
+    case blank_run(body, byte_size(body), 0) do
+      0 ->
+        line
+
+      run ->
+        keep = byte_size(body) - run
+        head = binary_part(body, 0, keep)
+        first = binary_part(body, keep, 1)
+        if joined?(head, first), do: head <> first <> cr, else: head <> cr
+    end
+  end
+
+  # How many space and tab bytes end `body`, counted back from byte `at`.
+  defp blank_run(_body, 0, n), do: n
+
+  defp blank_run(body, at, n) do
+    case :binary.at(body, at - 1) do
+      byte when byte in [?\s, ?\t] -> blank_run(body, at - 1, n + 1)
+      _ -> n
+    end
+  end
+
+  # Whether `blank` is part of the grapheme before it rather than one of its own. Only the
+  # character just before it can join it, and only a space: a tab is a control. An ASCII
+  # character never joins a space (none is a Prepend), so most lines stop at a byte compare.
+  # Otherwise, since a character is at most 4 bytes, the segmenter is asked about those 4 bytes
+  # and `blank` alone (a cut character's leftover bytes are each a grapheme of their own and join
+  # nothing): its own answer, whatever its Unicode version.
+  defp joined?(<<>>, _blank), do: false
+  defp joined?(_head, "\t"), do: false
+
+  defp joined?(head, blank) do
+    size = byte_size(head)
+
+    if :binary.at(head, size - 1) < 0x80 do
+      false
+    else
+      tail = min(size, 4)
+      last(binary_part(head, size - tail, tail) <> blank) != blank
     end
   end
 

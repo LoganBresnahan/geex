@@ -563,7 +563,8 @@ defmodule Geex.Buffer do
   end
 
   # The trim (ADR-0054 §2, §4): one replace from the first line with trailing spaces or tabs to
-  # the last, each line's taken off by grapheme, before a CRLF line's `\r`, so a line of only
+  # the last, each line's taken off by grapheme before a CRLF line's `\r`
+  # (`Geex.Text.trim_trailing_blanks/1`, which finds them by bytes, BUG-18), so a line of only
   # whitespace becomes empty, a form feed or a no-break space stays, and a space a Prepend
   # character joins to stays (one grapheme, not whitespace). One command, so a save costs the
   # document once however many lines it trims (mod-verify's review: one per line was quadratic);
@@ -577,7 +578,7 @@ defmodule Geex.Buffer do
       lines
       |> Enum.with_index()
       |> Enum.flat_map(fn {line, i} ->
-        case trim_line(line) do
+        case Geex.Text.trim_trailing_blanks(line) do
           ^line -> []
           trimmed -> [{i, trimmed}]
         end
@@ -607,29 +608,6 @@ defmodule Geex.Buffer do
           })
 
         [Geex.Command.put_meta(cmd, Geex.Command.Meta.human())]
-    end
-  end
-
-  # A line without its trailing space and tab graphemes, its CRLF `\r` kept. A line that
-  # doesn't end in a space or tab byte is returned as it is, unsplit.
-  defp trim_line(line) do
-    {body, cr} =
-      if String.ends_with?(line, "\r"),
-        do: {binary_part(line, 0, byte_size(line) - 1), "\r"},
-        else: {line, ""}
-
-    if String.ends_with?(body, [" ", "\t"]) do
-      kept =
-        body
-        |> Geex.Text.graphemes()
-        |> Enum.reverse()
-        |> Enum.drop_while(&(&1 in [" ", "\t"]))
-        |> Enum.reverse()
-        |> Enum.join()
-
-      kept <> cr
-    else
-      line
     end
   end
 

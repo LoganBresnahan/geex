@@ -6965,3 +6965,34 @@ segment under the root, and a background file opened only to be refused is close
 a result naming `sub/.git/config` skipped while `sub/notes.txt` is replaced; the refused closed
 file left closed (both fail on the first version). 1717 tests + 207 doctests + 60 properties,
 green twice.
+
+### 2026-11-15 — BUG-18: a save's trim cuts each line's trailing blanks by bytes (ADR-0054)
+
+On `bug-18`. The per-line trim moved from `Geex.Buffer` to `Geex.Text.trim_trailing_blanks/1`
+with the same results: the trailing run of space and tab bytes is cut, and the segmenter is
+asked only about the run's edge (the last 4 bytes and the first space) when the byte before the
+run isn't ASCII, since only a Prepend character there joins the space.
+
+Measured with a script (`MIX_ENV=test`, `Buffer.save` on lines of 100 bytes, each ending in a
+space, the buffer with a ledger as a real one has): at 10 MB the trimming save took 300 ms,
+against 112 ms without the trim (3,248 ms before the fix, the same script); at 2 MB 55 ms
+against 30 (235 ms before). The trim itself is 16 ms for the 100,000 lines; the rest is the one
+replace, its history entry and the write, all still in the buffer (roadmap item 9).
+
+Live in a tmux pty (the worktree's build, scratch `XDG_*`): `small.txt` holding `a  `, `x` +
+U+0600 + a space, `b` + a tab, `c ` with a CRLF, and `keep`; `Ctrl-O` wrote `a`, `x` + U+0600 +
+the space (kept: one grapheme), `b`, `c` with its `\r\n`, `keep`. A 10 MB file of 100,000 lines
+with trailing spaces: 285 ms from sending `Ctrl-O` to the file on disk at its trimmed size
+(tmux's latency included), the cursor moving on the next key. `Ctrl-X` quit clean, no
+`terminating` in the log.
+
+Tests: `test/geex/text_trim_test.exs` (a property against the old grapheme walk over generated
+lines, with Prepend characters of 2, 3 and 4 bytes, a 4-byte character, a combining mark, ZWJ, a
+no-break space and bytes that aren't UTF-8 at the run's edge; Prepend examples, including a tab
+after one; stray bytes before the run; lines of only blanks; and a time guard: 10,000 lines of
+1,000 bytes trimmed within three times 10,000 short lines with the same end (a space, or é and a
+space), plus 20 ms, the fastest of three, which the old walk fails at 583 ms against 25 ms), the
+doctests, and the existing `trim_on_save_test.exs`. 1721 tests + 208 doctests + 61 properties,
+green twice; `mix compile --warnings-as-errors --force` clean; the new property also at
+`GEEX_PROPERTY_RUNS=10000` and 100000. Not checked: a live save before the fix (the 3.5 s is the
+script's); the frame during the 285 ms (item 9's, unchanged).

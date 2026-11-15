@@ -501,12 +501,13 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      took 418 ms: the fast-forward check 141 ms and the conflict-block scan 71 ms in the caller,
      `Buffer.save` about 200 ms inside the buffer (the trim scan and the write); a behind save that
      merges 801 ms; a first save whose trim takes every line's trailing space 3,561 ms, all inside
-     the buffer. Running the save in a process of its own isn't enough: every frame reads the
-     buffer (`Session.snapshot/0` calls `Buffer.snapshot/1`), so the screen stalls while the buffer
-     is in its save. The real fix moves the write out of the buffer process: the buffer holds a
-     "pending write" text so reconcile takes the watcher's sight of that text as geex's own write
-     (never `:external`), and its in-sync baseline becomes that text, not the current one, when
-     edits land during the write. That touches the shared path's neighbourhood and reconcile, so
+     the buffer (BUG-18, *fixed 2026-11-15*: 300 ms now, against 112 ms with no trim). Running the
+     save in a process of its own isn't enough: every frame reads the buffer (`Session.snapshot/0`
+     calls `Buffer.snapshot/1`), so the screen stalls while the buffer is in its save. The real fix
+     moves the write out of the buffer process: the buffer holds a "pending write" text so
+     reconcile takes the watcher's sight of that text as geex's own write (never `:external`), and
+     its in-sync baseline becomes that text, not the current one, when edits land during the
+     write. That touches the shared path's neighbourhood and reconcile, so
      it waits for the maintainer's decision and its own ADR amendment (ADR-0035).
    - **Opening a file** replays its ledger in `Buffer.init/1`: 9 ms at 1,000 entries, 137 ms at
      10,000. `geex a b c` could also start its buffers in parallel.
@@ -892,7 +893,8 @@ paint), both older than that branch and found by mod-verify's review of it, are 
 a byte that isn't UTF-8; it says "render failed", gracefully) is **open**. BUG-17 (a long line with
 an emoji or © before an invalid byte froze every key on it; in 0.6.0) is **FIXED** (2026-11-13,
 on the `search` branch), released in 0.7.0. BUG-18 (a first save trimming every line's trailing
-whitespace stalls for seconds on a big file; found measuring item 9) is **open**.
+whitespace stalled for seconds on a big file; found measuring item 9) is **FIXED** (2026-11-15, on
+the `bug-18` branch).
 
 ---
 

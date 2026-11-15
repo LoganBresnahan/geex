@@ -63,4 +63,4 @@ newline with nothing to trim is dispatched alone, as before. The extension check
 ## See
 
 - `lib/geex/buffer.ex` (`save/2`), `lib/geex/reconcile.ex` (`save/2`), `lib/geex/loop/settings.ex`,
-  `lib/geex/loop.ex`
+  `lib/geex/loop.ex`; `lib/geex/text.ex` (`trim_trailing_blanks/1`, each line's trim, BUG-18)

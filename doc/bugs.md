@@ -7,28 +7,35 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-18 — A first save that trims every line's trailing whitespace stalls for seconds
+## BUG-18 — A first save that trims every line's trailing whitespace stalled for seconds  ✅ FIXED (2026-11-15)
 
-- **Status:** open. Found 2026-11-13 measuring roadmap item 9 (saving off the key loop) for the
-  maintainer; not fixed (the evening's run left item 9 to the maintainer).
+- **Status:** **FIXED** 2026-11-15 on the branch `bug-18`. Found 2026-11-13 measuring roadmap
+  item 9 (saving off the key loop) for the maintainer. In **0.6.0** and **0.7.0** (the trim on
+  save, ADR-0054).
 - **Symptom:** a 10 MB file of 100,000 lines, each ending in a space, saved with "Trim trailing
   whitespace" on (the default, ADR-0054): `Buffer.save` took 3,561 ms, against 78 ms for the
   same save without the trim and about 200 ms for a later one with nothing left to trim. It runs
   inside the buffer process, so the key loop and every frame wait for it (ADR-0035). A 2 MB file of
   20,000 such lines took 1.8 s under eprof (not timed without it).
 - **Verified cause:** `Geex.Buffer`'s `trim_line/1`. For each line whose body ends in a space or
-  a tab it splits the whole line into graphemes (`Geex.Text.graphemes/1`), reverses, drops the
-  trailing ones and joins. eprof on the 2 MB file: 2,000,000 `String.do_graphemes` and
+  a tab it split the whole line into graphemes (`Geex.Text.graphemes/1`), reversed, dropped the
+  trailing ones and joined. eprof on the 2 MB file: 2,000,000 `String.do_graphemes` and
   `unicode_util:gc` calls take about half the save's time, `Enum.map`, `reverse` and
   `entry_to_string` most of the rest; the `Replace` itself and the blame are small beside it.
-  The cost is the line's length, paid on every line that has trailing whitespace, not on the
+  The cost was the line's length, paid on every line that has trailing whitespace, not on the
   whitespace.
-- **Recommended fix:** find the trailing run of space and tab *bytes* and cut it, and segment
-  graphemes only across its edge: the run is all whitespace graphemes unless the character just
-  before it is a Prepend character joining the first space (ADR-0054 §4 keeps that space). So
-  look at the last code point before the run and, only when it is a Prepend, keep one space;
-  every other line costs a byte scan. Pin it with the existing trim properties, plus an example
-  of the 10 MB case under a time bound like BUG-17's guard.
+- **Fix:** `Geex.Text.trim_trailing_blanks/1` (the per-line trim, moved from `Geex.Buffer`, same
+  results) finds the trailing run of space and tab *bytes* and cuts it. Only the run's edge can be a
+  grapheme that isn't whitespace: a space a Prepend character just before it joins (a tab is a
+  control and never joined), so when the byte before the run isn't ASCII the segmenter is asked
+  about the last 4 bytes and the first space alone. At 10 MB the trimming save now takes 300 ms
+  against 112 ms without the trim (3,248 ms before; the same machine and script, a buffer with a
+  ledger as a real one has); the trim itself is 16 ms for the 100,000 lines. The rest is the one
+  replace, its history entry and ledger line, and the write, all inside the buffer; item 9 would
+  move the write out. Guards: a property against the old grapheme walk (with a 4-byte Prepend,
+  which fills the whole tail: mod-verify's review), and 10,000 lines of 1,000 bytes trimmed
+  within three times 10,000 short lines with the same end, plus 20 ms, the fastest of three (the
+  old walk: 583 ms against a 25 ms bound).
 - **Ruled out:** the write (78 ms) and the conflict-block scan (71 ms, in the caller).
 
 ---
