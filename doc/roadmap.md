@@ -493,22 +493,26 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      (323 ms a frame on loop.ex). Paint now walks only the visible rows, and the reactor sends
      only their spans, so a frame is about 10 ms. `test/geex/loop/frame_cost_test.exs` guards
      it.
-   - **Save and fast-forward** (they read the file; a two-sided save runs `git merge-file`): a
-     clean merge and save 93 ms at 1 MB, 759 ms at 10 MB; a fast-forward 29 ms and 445 ms. Needs a
-     "saving…" status, with edits to that buffer queued meanwhile.
-     *2026-11-13, measured again and deferred to the maintainer* (asked for that evening, not built):
-     at 10 MB (100,000 lines, `MIX_ENV=test`) the loop's save (`Reconcile.save/2`, nothing to trim)
-     took 418 ms: the fast-forward check 141 ms and the conflict-block scan 71 ms in the caller,
-     `Buffer.save` about 200 ms inside the buffer (the trim scan and the write); a behind save that
-     merges 801 ms; a first save whose trim takes every line's trailing space 3,561 ms, all inside
-     the buffer (BUG-18, *fixed 2026-11-15*: 300 ms now, against 112 ms with no trim). Running the
-     save in a process of its own isn't enough: every frame reads the buffer (`Session.snapshot/0`
-     calls `Buffer.snapshot/1`), so the screen stalls while the buffer is in its save. The real fix
-     moves the write out of the buffer process: the buffer holds a "pending write" text so
-     reconcile takes the watcher's sight of that text as geex's own write (never `:external`), and
-     its in-sync baseline becomes that text, not the current one, when edits land during the
-     write. That touches the shared path's neighbourhood and reconcile, so
-     it waits for the maintainer's decision and its own ADR amendment (ADR-0035).
+   - **Save** — **built 2026-11-15** on the branch `save-off-loop` (ADR-0035's 2026-11-15
+     amendment, the maintainer's answers): Ctrl-O and `save-all` run in a process of their own, and
+     the write runs outside the buffer (`Buffer.begin_write/2` … `end_write/2`, a pending write
+     reconcile takes as geex's own, ADR-0017's amendment); edits typed meanwhile land and stay
+     unsaved; Ctrl-O again says "still saving"; "saving a.ts…" after 150 ms; `cancel-save` stops a
+     save before its write begins and never cuts one short (`Geex.Loop.SaveFlag`); a rename, delete
+     or close is refused while a save writes (`Buffer.hold/1`); a quit waits for a save (quit
+     again: leave now; Esc: stay) and names unsaved edits first ("kept for next time"; quit again to
+     leave). Written in place, as before. Open for the maintainer: a SIGTERM during a write can cut
+     it, and a hung write leaves quit waiting (ADR-0035's amendment). At 10 MB a save's reads of the buffer wait
+     at most ~27 ms with nothing to trim; a first save that trims every line still holds the buffer
+     ~150 ms twice (applying and recording the trim, as any edit). Measured before: a clean merge
+     and save 93 ms at 1 MB, 759 ms at 10 MB; on 2026-11-13 the loop's save 418 ms at 10 MB, a
+     behind save that merges 801 ms; a first trimming save 3,561 ms (BUG-18, *fixed 2026-11-15*:
+     300 ms).
+   - **Fast-forward** (`Alt+D`) still runs in the loop: 29 ms at 1 MB, 445 ms at 10 MB. It takes
+     one snapshot now, not three.
+   - **A key on a 100,000-line file** shows ~230 ms after it is typed with no save at all (live,
+     2026-11-15, main and `save-off-loop` alike). `Session.snapshot/0` is 21 ms of it; the rest
+     isn't traced yet. It is most of what a key typed during a big save waits for.
    - **Opening a file** replays its ledger in `Buffer.init/1`: 9 ms at 1,000 entries, 137 ms at
      10,000. `geex a b c` could also start its buffers in parallel.
    - **Reconcile, one file at a time.** It never blocks typing; parallel would only land a big
@@ -894,7 +898,8 @@ a byte that isn't UTF-8; it says "render failed", gracefully) is **open**. BUG-1
 an emoji or © before an invalid byte froze every key on it; in 0.6.0) is **FIXED** (2026-11-13,
 on the `search` branch), released in 0.7.0. BUG-18 (a first save trimming every line's trailing
 whitespace stalled for seconds on a big file; found measuring item 9) is **FIXED** (2026-11-15, on
-the `bug-18` branch).
+the `bug-18` branch). BUG-19 (a rename into a directory that isn't there reports success and
+leaves the file; found writing a test on `save-off-loop`) is **open**.
 
 ---
 

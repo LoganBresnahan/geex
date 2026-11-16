@@ -198,6 +198,11 @@ defmodule Geex.Command.Catalog do
       invoke: {:action, :save_all}
     },
     %Entry{
+      name: "cancel-save",
+      description: "Stop the save in progress, before its write begins.",
+      invoke: {:action, :cancel_save}
+    },
+    %Entry{
       name: "no",
       description: "Clear the selection; in the command line, close it.",
       invoke: {:action, :select_clear}

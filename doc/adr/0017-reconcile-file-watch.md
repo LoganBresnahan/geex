@@ -1,6 +1,7 @@
 # ADR-0017: Reconcile — file-watch + `:external` provenance (the honest floor)
 
-- **Status:** Accepted
+- **Status:** Accepted; amended 2026-10-14 (ADR-0032: the primary agent path); amended 2026-11-15
+  (geex's own save writing from another process)
 - **Date:** 2026-06-04
 - **Refines:** [ADR-0012](0012-trust-and-enforcement.md)
 
@@ -140,3 +141,15 @@ correlation if a concrete need (debugging / audit) appears.
 ## Amendment — 2026-10-14 ([ADR-0032](0032-listener-first-agent-integration.md))
 
 Reconcile is now the **primary agent path**, not only the floor. The open question above (attribution beyond `:external`) is **answered yes, by attestation, not inference**: a captAInHook `post-tool-use` payload sends `(path, sha256, harness, session, …)` and `Buffer.attest/2` upgrades the matching command's actor from `:external` to `{:agent, …}` on an exact post-state hash match. On no match it stays `:external`; never a guess. The deferred work (line-level diffs, conflict UX) moves onto the v0.5 critical path.
+
+## Amendment — 2026-11-15 ([ADR-0035](0035-the-loop-never-waits.md)'s amendment of the same date): geex's own save, written from another process
+
+A save no longer writes from inside the buffer, so the rule above (the disk equal to the buffer's
+`synced` text is geex's own write) has a window: the watcher can read the file after the write lands
+and before the buffer hears it went well. While a save writes (`Buffer.begin_write/2` to
+`end_write/2`), the buffer also takes the **pending write's text** as geex's own: not behind, no
+edits-pane row. Anything else read meanwhile (a half-written file, an outside write racing geex's)
+isn't marked then: once the write is done the buffer has reconcile read the file again
+(`{:recheck, path}`), against the synced text the write left. A writer that dies mid-write gets the
+same re-read, and so does a write that reports an error. A fast-forward is refused until the
+write is done (`{:error, :saving}`): it would read a file being written.

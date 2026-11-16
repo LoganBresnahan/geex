@@ -7,6 +7,24 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-19 — A rename into a directory that isn't there reports success and leaves the file
+
+- **Status:** open, found 2026-11-15 writing a test for `save-off-loop` (mod-verify's review of it).
+  Older than that branch: main behaves the same.
+- **Symptom:** with `a.txt` open, `Session.rename_file("a.txt", "no/such/b.txt")` (the `rename`
+  command, the tree's `r`, MCP's `rename_file`) answers `{:ok, …}`: the buffer is re-keyed to
+  `no/such/b.txt` in memory while the file stays at `a.txt`. The next save tries to write into the
+  missing directory and fails.
+- **Verified cause:** `File.rename/2` answers `:enoent` for a missing destination directory as it
+  does for a missing source, and `Session.rename_file/2` (`rename_held/4` on the branch) reads every
+  `:enoent` as "a never-saved buffer has no file yet" (ADR-0019), re-keying an open buffer.
+- **Recommended fix:** take that branch only when the source is missing (`not File.exists?(from)`);
+  otherwise answer the error (or create the directory, if the maintainer wants a rename to make
+  one). A test: renaming an open, saved file into a missing directory is refused, nothing moved.
+- **Ruled out:** nothing else re-keys on a failed rename.
+
+---
+
 ## BUG-18 — A first save that trims every line's trailing whitespace stalled for seconds  ✅ FIXED (2026-11-15)
 
 - **Status:** **FIXED** 2026-11-15 on the branch `bug-18`. Found 2026-11-13 measuring roadmap

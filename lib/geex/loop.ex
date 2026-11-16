@@ -78,6 +78,7 @@ defmodule Geex.Loop do
     Mouse,
     Output,
     Panes,
+    SaveFlag,
     ScrollBar,
     Settings,
     TabBar,
@@ -92,6 +93,9 @@ defmodule Geex.Loop do
   # (vim's `scrolloff`). A fixed default for now; a future per-user config knob
   # (ADR-0025). Clamped to half the window so the bands never cross.
   @scrolloff 3
+
+  # A tab, pane or buffer closing while a save has it (ADR-0035's 2026-11-15 amendment).
+  @being_saved "not closed: it's being saved (cancel-save stops it)"
 
   # Columns of context kept between the cursor and the left/right of the text area
   # (vim's `sidescrolloff`) — the horizontal analogue, applied via the same
@@ -455,6 +459,16 @@ defmodule Geex.Loop do
       # Ctrl-O was just refused over a leftover conflict block: the next key, if it is
       # Ctrl-O again, saves anyway (ADR-0034 §3).
       save_armed: false,
+      # The save under way in a process of its own (Ctrl-O or `save-all`, ADR-0035's 2026-11-15
+      # amendment), or nil: `%{pid, ref, flag, kind: :one | :all, paths, results, slow, quit,
+      # cancel}`.
+      # `flag` is the atomics cell the save and a cancel agree through (`@save_idle`…);
+      # `results` each file's `{path, result}` as it is done, newest first; `slow` once it has
+      # run past `@save_slow_ms`; `quit` nil, `:waiting` (quit once it is done) or `:now` (leave
+      # once its write is done); `cancel` once a cancel came while a write was under way.
+      saving: nil,
+      # A quit was just stopped by unsaved edits: the next quit leaves (2026-11-15).
+      quit_armed: false,
       # The file operations under way (`new`, `delete`, `rename`, the tree's a/d/r; ADR-0019's
       # 2026-10-19 amendment), each in a process of its own: `%{pid => monitor}`. `asking` is the
       # step to run when the minibuffer's `:confirm` gets a yes, or `{:rename, from}` while its
@@ -680,8 +694,9 @@ defmodule Geex.Loop do
 
   # End of input (terminal closed / Ctrl-D) → quit the editor. Stopping the loop
   # alone would just restart it (a permanent child), so stop the VM — the app's
-  # shutdown restores the terminal.
-  def handle_info({:geex_io, :eof}, state), do: {:noreply, quit(state)}
+  # shutdown restores the terminal. There is no screen left to ask on: no unsaved-edits warning
+  # (the ledger keeps them, ADR-0033), and a save that is writing finishes first.
+  def handle_info({:geex_io, :eof}, state), do: {:noreply, leave_now(state)}
 
   # The settings view (`Alt+Y`) takes the mouse while it is open (ADR-0040 §7, ADR-0039).
   def handle_info({:geex_io, {:mouse, m}}, %{settings: %Settings{} = view} = state) do
@@ -954,6 +969,25 @@ defmodule Geex.Loop do
   def handle_info({:geex_search, pid, msg}, %{search: %{task: %{pid: pid}}} = state),
     do: {:noreply, schedule_repaint(search_answered(msg, state))}
 
+  # The save under way (ADR-0035's 2026-11-15 amendment): a file done, all of them done, past
+  # the time a save starts showing, or its process died. One from a save since cancelled falls
+  # to the catch-all.
+  def handle_info({:geex_saved_file, pid, path, result}, %{saving: %{pid: pid}} = state),
+    do: {:noreply, saved_file(path, result, state)}
+
+  def handle_info({:geex_saved, pid}, %{saving: %{pid: pid, ref: ref} = saving} = state) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, after_save(saving.quit, finish_save(:done, state))}
+  end
+
+  def handle_info({:geex_save_slow, pid}, %{saving: %{pid: pid}} = state),
+    do: {:noreply, schedule_repaint(put_in(state.saving.slow, true))}
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{saving: %{ref: ref} = saving} = state) do
+    Logger.warning("geex save: the save failed: #{inspect(reason)}")
+    {:noreply, after_save(saving.quit, finish_save(:failed, state))}
+  end
+
   # A replace's plan or its result (2026-11-13), from the process `start_replace/3` started.
   def handle_info({:geex_replace, pid, answer}, %{replace: %{pid: pid, ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
@@ -1055,7 +1089,26 @@ defmodule Geex.Loop do
     state = if state.notice, do: schedule_repaint(%{state | notice: nil}), else: state
     state = stop_drag(state)
     state = %{state | save_armed: state.save_armed and event == {:cmd, :save}}
-    {:noreply, dispatch_key(event, state)}
+    # Armed by unsaved edits, the next quit leaves: through the command line too, so its keys
+    # keep it armed; any other key disarms it.
+    keep_quit? =
+      event in [{:cmd, :quit}, {:cmd, :minibuffer}, {:cmd, :palette}] or
+        Minibuffer.active?(state.minibuffer)
+
+    state = %{state | quit_armed: state.quit_armed and keep_quit?}
+
+    case state do
+      # A quit waiting on a save: Esc stays, and the save goes on.
+      %{saving: %{quit: wait} = saving, minibuffer: %Minibuffer{mode: :inactive}, settings: nil}
+      when wait != nil and event in [{:key, :esc}, {:cmd, :select_clear}] ->
+        # A second quit's cancel stands: a save-all stops after the file it is writing.
+        said = if saving.cancel, do: "the save stops after this file", else: "the save goes on"
+        stay = %{state | saving: %{saving | quit: nil}, notice: "staying; " <> said}
+        {:noreply, schedule_repaint(stay)}
+
+      _ ->
+        {:noreply, dispatch_key(event, state)}
+    end
   end
 
   # Where a key goes: the settings view while it's open,
@@ -1338,8 +1391,68 @@ defmodule Geex.Loop do
 
   defp path_of(pid), do: safe_status(pid)[:path]
 
-  # Leave the editor: the last session kept first, then the VM stops (`Geex.stop/0`).
+  # Quit: Ctrl-X / Ctrl-Q / Ctrl-C, `quit` / `exit`, the settings view's (2026-11-15). A save
+  # under way is waited for (quit again: leave now; Esc: stay). Unsaved edits are named first,
+  # and the next quit leaves; the ledger keeps them either way (ADR-0033).
+  defp quit(%{saving: %{quit: wait}} = state) when wait in [:waiting, :now], do: leave_now(state)
+
+  defp quit(%{saving: %{} = saving} = state),
+    do: schedule_repaint(%{to_status_line(state) | saving: %{saving | quit: :waiting}})
+
+  defp quit(%{quit_armed: true} = state), do: exit_editor(state)
+
   defp quit(state) do
+    case for(%{dirty: true} = buf <- safe_buffers(), do: buf) do
+      [] ->
+        exit_editor(state)
+
+      unsaved ->
+        notice = unsaved_notice(unsaved)
+        schedule_repaint(%{to_status_line(state) | quit_armed: true, notice: notice})
+    end
+  end
+
+  # A quit's warning, or its wait on a save, is said on the status line: the command line and the
+  # settings view, which draw over it, close first (mod-verify's review).
+  defp to_status_line(state) do
+    state = if Minibuffer.active?(state.minibuffer), do: close_minibuffer(state), else: state
+    if state.settings, do: settings_action(:close, state), else: state
+  end
+
+  # "unsaved: a.ts, b.ts (kept for next time); quit again to leave". Kept means the buffer has a
+  # ledger (ADR-0033); one without (a scratch buffer, the ledger off) is named as not kept.
+  defp unsaved_notice(unsaved) do
+    names = Enum.map(unsaved, &name_of(&1[:path]))
+    lost = for buf <- unsaved, not Map.get(buf, :kept, false), do: name_of(buf[:path])
+
+    kept =
+      case lost do
+        [] -> " (kept for next time)"
+        lost -> " (not kept: " <> few(lost) <> ")"
+      end
+
+    "unsaved: " <> few(names) <> kept <> "; quit again to leave"
+  end
+
+  # Up to three names, then how many more.
+  defp few(names) when length(names) <= 3, do: Enum.join(names, ", ")
+
+  defp few(names),
+    do: Enum.join(Enum.take(names, 3), ", ") <> " and #{length(names) - 3} more"
+
+  # Leave now, as a second quit during a save asks (and the terminal closing): a save whose write
+  # hasn't begun is cancelled; one writing is let finish first, so a file is never half-written.
+  defp leave_now(%{saving: %{}} = state) do
+    case cancel_save(state) do
+      {:cancelled, state} -> exit_editor(state)
+      {:writing, state} -> schedule_repaint(put_in(state.saving.quit, :now))
+    end
+  end
+
+  defp leave_now(state), do: exit_editor(state)
+
+  # Leave the editor: the last session kept first, then the VM stops (`Geex.stop/0`).
+  defp exit_editor(state) do
     state = keep_session(state, :now)
     Geex.stop()
     state
@@ -1898,7 +2011,8 @@ defmodule Geex.Loop do
 
   defp apply_mouse(%{action: :press, button: :left} = m, state) do
     # A press, like a key, dismisses a notice and disarms a refused save.
-    state = schedule_repaint(%{stop_drag(state) | notice: nil, save_armed: false})
+    state =
+      schedule_repaint(%{stop_drag(state) | notice: nil, save_armed: false, quit_armed: false})
 
     case handle_at(state, m.x, m.y) do
       nil -> region_press(state, m)
@@ -2400,18 +2514,24 @@ defmodule Geex.Loop do
       {:close_tab, i} ->
         %{buffer: buf} = tab = Enum.at(pane.tabs, i)
 
-        # Refused without switching to it: the tab holds the only copy of unsaved edits. A
-        # preview's × is never refused (ADR-0043 §1).
-        if not Panes.preview?(tab) and match?(%{dirty: true}, safe_status(buf)) and
-             not Panes.in_other_pane?(state.panes, buf, id) do
-          name = status_label(safe_status(buf)[:path])
+        # Refused without switching to it: the tab holds the only copy of unsaved edits, or of a
+        # buffer being saved. A preview's × is never refused (ADR-0043 §1).
+        only? = not Panes.preview?(tab) and not Panes.in_other_pane?(state.panes, buf, id)
 
-          %{
-            state
-            | notice: "not closed: #{name} has unsaved changes (save them, or undo them, first)"
-          }
-        else
-          state |> enter_pane({:file, id}) |> switch(&Panes.select(&1, i)) |> do_close()
+        cond do
+          only? and match?(%{dirty: true}, safe_status(buf)) ->
+            name = status_label(safe_status(buf)[:path])
+
+            %{
+              state
+              | notice: "not closed: #{name} has unsaved changes (save them, or undo them, first)"
+            }
+
+          only? and being_saved?(state, buf) ->
+            %{state | notice: @being_saved}
+
+          true ->
+            state |> enter_pane({:file, id}) |> switch(&Panes.select(&1, i)) |> do_close()
         end
 
       _nothing_or_handle ->
@@ -2445,6 +2565,9 @@ defmodule Geex.Loop do
           | notice:
               "pane not closed: #{name} has unsaved changes (save them, or undo them, first)"
         }
+
+      Enum.any?(own, &being_saved?(state, &1)) ->
+        %{state | notice: "pane not closed: a file in it is being saved (cancel-save stops it)"}
 
       true ->
         state = switch(state, &Panes.close_pane(&1, id))
@@ -4645,6 +4768,7 @@ defmodule Geex.Loop do
         status_label(snap.path) <>
           if(snap.dirty, do: " [+]", else: "") <>
           if(snap[:behind], do: "  " <> @behind, else: "") <>
+          saving_label(state) <>
           "  preview" <>
           if(state.notice, do: "  " <> state.notice, else: "")
 
@@ -4659,6 +4783,7 @@ defmodule Geex.Loop do
       status_label(snap.path) <>
         if(snap.dirty, do: " [+]", else: "") <>
         if(snap[:behind], do: "  " <> @behind, else: "") <>
+        saving_label(state) <>
         if(state.notice, do: "  " <> state.notice, else: "")
 
     {line, _col} = snap.cursor
@@ -5504,6 +5629,8 @@ defmodule Geex.Loop do
   # that is behind merges first (ADR-0034 §3); a merge with conflicts doesn't write, and the
   # buffer's own notice says so. A failure (`{:error, :no_path}` on a scratch buffer, a posix
   # error) leaves the marker set — a real echo/message area is a deferred minibuffer slice.
+  defp do_save(%{saving: %{}} = state), do: schedule_repaint(%{state | notice: "still saving"})
+
   defp do_save(state) do
     opts = [
       force: state.save_armed,
@@ -5512,26 +5639,180 @@ defmodule Geex.Loop do
         state.trim_whitespace and Keymap.trims_on_save?(current_path(state))
     ]
 
-    state =
-      case on_active_buffer(&Reconcile.save(&1, opts)) do
-        {:ok, path} ->
-          Edits.saved(path)
-          %{state | save_armed: false}
+    case on_active_buffer(&{:ok, &1}) do
+      {:ok, pid} ->
+        files = [{pid, current_path(state), opts}]
+        schedule_repaint(start_save(:one, files, %{state | save_armed: false}))
 
-        {:markers, line} ->
-          %{
-            state
-            | notice:
-                "not saved: a conflict block is left at line #{line + 1} (Ctrl-O again saves anyway)",
-              save_armed: true
-          }
+      _none ->
+        state
+    end
+  end
 
-        _saved_or_reported ->
-          %{state | save_armed: false}
+  ## Saving off the key loop (ADR-0035's 2026-11-15 amendment)
+  #
+  # Ctrl-O and `save-all` run `Reconcile.save/2` in a process of its own, file by file: the
+  # catch-up, the conflict-block scan and the write all leave the loop, and the write leaves the
+  # buffer too (`Buffer.save/2`), so typing and frames go on; edits made meanwhile stay unsaved.
+  # "saving…" shows once it runs past `@save_slow_ms`. A cancel (`cancel-save`, a second quit)
+  # agrees with the save through `Geex.Loop.SaveFlag`: before a file's write has begun the
+  # process is stopped there; once a write has begun it finishes, and the files after it aren't
+  # saved. So a file is never half-written.
+
+  @save_slow_ms 150
+
+  defp start_save(kind, files, state) do
+    flag = SaveFlag.new()
+    loop = self()
+    {pid, ref} = spawn_monitor(fn -> save_files(files, flag, loop) end)
+    Process.send_after(loop, {:geex_save_slow, pid}, @save_slow_ms)
+
+    saving = %{
+      pid: pid,
+      ref: ref,
+      flag: flag,
+      kind: kind,
+      paths: Enum.map(files, &elem(&1, 1)),
+      results: [],
+      slow: false,
+      quit: nil,
+      cancel: false
+    }
+
+    %{state | saving: saving}
+  end
+
+  # In the save's process: each file in turn, its result sent before `SaveFlag.done/1` (so a
+  # cancel that takes the idle cell finds every finished file's result already sent). A cancelled
+  # save starts no more files.
+  defp save_files(files, flag, loop) do
+    Enum.reduce_while(files, nil, fn {pid, path, opts}, nil ->
+      if SaveFlag.cancelled?(flag) do
+        {:halt, nil}
+      else
+        result = safe_save(pid, [{:gate, fn -> SaveFlag.write?(flag) end} | opts])
+        send(loop, {:geex_saved_file, self(), path, result})
+
+        case SaveFlag.done(flag) do
+          :go -> {:cont, nil}
+          :stop -> {:halt, nil}
+        end
+      end
+    end)
+
+    send(loop, {:geex_saved, self()})
+  end
+
+  # Cancel the save under way. With no write under way it is over now: what it finished is
+  # reported, and its process, which can begin no write from here, ends on its own (it isn't
+  # killed: a kill mid `git merge-file` would leave its temporary directory, mod-verify's review).
+  # While a write is under way, it finishes that write and stops after it.
+  defp cancel_save(%{saving: %{flag: flag, pid: pid, ref: ref}} = state) do
+    case SaveFlag.cancel(flag) do
+      :cancelled ->
+        Process.demonitor(ref, [:flush])
+        {:cancelled, finish_save(:cancelled, drain_saved(pid, state))}
+
+      :writing ->
+        {:writing, put_in(state.saving.cancel, true)}
+    end
+  end
+
+  # The results a stopped save sent before it stopped.
+  defp drain_saved(pid, state) do
+    receive do
+      {:geex_saved_file, ^pid, path, result} -> drain_saved(pid, saved_file(path, result, state))
+      {:geex_saved, ^pid} -> drain_saved(pid, state)
+      {:geex_save_slow, ^pid} -> drain_saved(pid, state)
+    after
+      0 -> state
+    end
+  end
+
+  defp saved_file(path, result, %{saving: saving} = state) do
+    with {:ok, written} <- result, do: Edits.saved(written)
+    %{state | saving: %{saving | results: [{path, result} | saving.results]}}
+  end
+
+  # The save is over (`how`: :done, :cancelled, :failed): say how it went.
+  defp finish_save(how, %{saving: saving} = state) do
+    results = Enum.reverse(saving.results)
+    how = if how == :done and saving.cancel, do: :cancelled, else: how
+    schedule_repaint(save_said(saving.kind, results, saving.paths, how, %{state | saving: nil}))
+  end
+
+  @save_failed "the save failed (see the log)"
+
+  # Ctrl-O's one file, as before (a conflict, a leftover conflict block, `ADR-0034 §3`).
+  # A cancel that came while its write was under way: the write finished.
+  defp save_said(:one, [{_path, {:ok, _}}], _paths, :cancelled, state),
+    do: %{state | notice: "saved (it was already writing)"}
+
+  defp save_said(:one, [{_path, result}], _paths, _how, state), do: one_saved(result, state)
+  defp save_said(:one, [], _paths, :cancelled, state), do: %{state | notice: "save cancelled"}
+  defp save_said(:one, [], _paths, _how, state), do: %{state | notice: @save_failed}
+
+  # `save-all`: how many were written, and which weren't (refused, failed, or never reached).
+  defp save_said(:all, results, paths, how, state) do
+    saved = Enum.count(results, &match?({_, {:ok, _}}, &1))
+    done = Map.new(results)
+
+    not_saved =
+      for path <- paths, not match?({:ok, _}, done[path]), do: name_of(path)
+
+    counted = "saved #{plural(saved, "file", "files")}"
+    unsaved = if not_saved == [], do: "", else: "; not saved: " <> Enum.join(not_saved, ", ")
+
+    lead =
+      cond do
+        how == :failed -> "save-all failed (see the log): "
+        how == :cancelled and not_saved != [] -> "save-all cancelled: "
+        true -> ""
       end
 
-    schedule_repaint(state)
+    %{state | notice: lead <> counted <> unsaved}
   end
+
+  defp one_saved({:ok, _path}, state), do: state
+
+  defp one_saved({:markers, line}, state) do
+    %{
+      state
+      | notice:
+          "not saved: a conflict block is left at line #{line + 1} (Ctrl-O again saves anyway)",
+        save_armed: true
+    }
+  end
+
+  defp one_saved({:error, :cancelled}, state), do: %{state | notice: "save cancelled"}
+
+  defp one_saved({:error, :saving}, state),
+    do: %{state | notice: "not saved: another save is writing it"}
+
+  defp one_saved({:error, :held}, state),
+    do: %{state | notice: "not saved: it is being renamed, deleted or closed"}
+
+  # A conflict says so through the buffer's own notice; a failed write leaves the [+] marker.
+  defp one_saved(_reported, state), do: state
+
+  # After a save: leave, as a quit asked; or quit now it is done (the unsaved check again).
+  defp after_save(:now, state), do: exit_editor(state)
+  defp after_save(:waiting, state), do: quit(state)
+  defp after_save(nil, state), do: state
+
+  # The save under way on the status line once it has run past `@save_slow_ms`, and what a quit
+  # waiting on it can do.
+  defp saving_label(%{saving: %{quit: :waiting} = saving}),
+    do: "  saving #{saving_names(saving)}… quits when done (quit again: leave now; Esc: stay)"
+
+  defp saving_label(%{saving: %{quit: :now} = saving}),
+    do: "  saving #{saving_names(saving)}… then leaving"
+
+  defp saving_label(%{saving: %{slow: true} = saving}), do: "  saving #{saving_names(saving)}…"
+  defp saving_label(_state), do: ""
+
+  defp saving_names(%{paths: [path]}), do: name_of(path)
+  defp saving_names(%{paths: paths}), do: plural(length(paths), "file", "files")
 
   ## replace / replace-all / save-all (2026-11-13, ADR-0053's amendment)
   #
@@ -5751,29 +6032,22 @@ defmodule Geex.Loop do
 
   # `save-all`: every buffer with unsaved edits, saved as Ctrl-O saves the one you're in
   # (`Reconcile.save/2`: one behind merges first; a conflict or a leftover conflict block isn't
-  # written). The notice counts them and names the ones not saved.
+  # written), off the key loop like it. The notice counts them and names the ones not saved.
+  defp save_all(%{saving: %{}} = state), do: schedule_repaint(%{state | notice: "still saving"})
+
   defp save_all(state) do
     opts = [final_newline: state.final_newline]
 
-    results =
+    files =
       for %{pid: pid, dirty: true} = buf <- safe_buffers(), is_binary(buf[:path]) do
         trim = state.trim_whitespace and Keymap.trims_on_save?(buf.path)
-        result = safe_save(pid, [{:trim_trailing_whitespace, trim} | opts])
-        if match?({:ok, _}, result), do: Edits.saved(buf.path)
-        {buf.path, result}
+        {pid, buf.path, [{:trim_trailing_whitespace, trim} | opts]}
       end
 
-    saved = Enum.count(results, &match?({_, {:ok, _}}, &1))
-    failed = for {path, result} <- results, not match?({:ok, _}, result), do: name_of(path)
-
-    notice =
-      cond do
-        results == [] -> "nothing to save"
-        failed == [] -> "saved #{plural(saved, "file", "files")}"
-        true -> "saved #{plural(saved, "file", "files")}; not saved: " <> Enum.join(failed, ", ")
-      end
-
-    schedule_repaint(%{state | notice: notice})
+    case files do
+      [] -> schedule_repaint(%{state | notice: "nothing to save"})
+      files -> schedule_repaint(start_save(:all, files, state))
+    end
   end
 
   defp safe_save(pid, opts) do
@@ -5811,6 +6085,13 @@ defmodule Geex.Loop do
   # buffer before (Session's `close_active/0`, a new scratch buffer when none is left).
   @dirty "not closed: unsaved changes (save them, or undo them, first)"
 
+  # The buffer is in the loop's save, or another save is writing it (ADR-0035's 2026-11-15
+  # amendment): a tab or pane closing it would end it mid-save.
+  defp being_saved?(state, pid) do
+    status = safe_status(pid) || %{}
+    status[:saving] == true or (state.saving != nil and status[:path] in state.saving.paths)
+  end
+
   defp do_close(state) do
     case Panes.current(state.panes) do
       nil ->
@@ -5835,6 +6116,9 @@ defmodule Geex.Loop do
           match?(%{dirty: true}, safe_status(pid)) ->
             %{state | notice: @dirty}
 
+          being_saved?(state, pid) ->
+            %{state | notice: @being_saved}
+
           # The only pane's last tab: Session closes it and picks what to show next, which
           # `adopt_active/2` then shows. Only while Session agrees what that tab is.
           Panes.current(gone) == nil ->
@@ -5848,6 +6132,7 @@ defmodule Geex.Loop do
             case safe_close_buffer(pid) do
               {:ok, label} -> %{state | notice: "closed " <> Path.basename(label)}
               {:error, :dirty} -> %{state | notice: @dirty}
+              {:error, :saving} -> %{state | notice: @being_saved}
               {:error, _} -> state
             end
         end
@@ -5859,6 +6144,7 @@ defmodule Geex.Loop do
       case Session.close_active() do
         {:ok, label} -> "closed " <> Path.basename(label)
         {:error, :dirty} -> @dirty
+        {:error, :saving} -> @being_saved
         {:error, :no_active_buffer} -> nil
       end
 
@@ -5873,6 +6159,7 @@ defmodule Geex.Loop do
         {:fast_forwarded, snapshot, 0} -> "caught up with the disk" <> credited(snapshot)
         {:fast_forwarded, _snapshot, _conflicts} -> nil
         :up_to_date -> "already up to date with the disk"
+        {:error, :saving} -> "a save is writing the file; try again when it's done"
         {:error, _reason} -> "couldn't read the file from disk"
       end
 
@@ -6920,7 +7207,19 @@ defmodule Geex.Loop do
   # old in-loop go-to-line hack is retired), and plain verbs (`copy`, `undo`, `save`,
   # …) apply through the same apply_action/4 the chords use. Unknown input is a no-op.
   # Grid commands (ADR-0027) and the palette (ADR-0028 §3); search and the finder are next.
-  defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :grid}} = state) do
+  # Anything submitted but a quit disarms a quit that unsaved edits stopped (mod-verify's review).
+  defp submit_minibuffer(state),
+    do: submit_now(%{state | quit_armed: state.quit_armed and submits_quit?(state)})
+
+  defp submits_quit?(%{minibuffer: %Minibuffer{mode: :command} = mb}),
+    do: Verbs.parse(Minibuffer.value(mb)) == {:action, :quit}
+
+  defp submits_quit?(%{minibuffer: %Minibuffer{mode: :palette} = mb} = state),
+    do: match?(%{invoke: {:action, :quit}}, Enum.at(candidates(state), mb.sel))
+
+  defp submits_quit?(_state), do: false
+
+  defp submit_now(%{minibuffer: %Minibuffer{mode: :grid}} = state) do
     state = remember(state)
 
     # A preview can have become current while grid mode was open (the tab before closed): its
@@ -6931,7 +7230,7 @@ defmodule Geex.Loop do
   end
 
   # A project search: Enter runs it; an empty prompt the last one again (Q4).
-  defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: mode} = mb} = state)
+  defp submit_now(%{minibuffer: %Minibuffer{mode: mode} = mb} = state)
        when mode in @project_modes do
     query = Minibuffer.value(mb)
 
@@ -6948,23 +7247,23 @@ defmodule Geex.Loop do
   # the current input (the same `candidates/1` the popup renders, so what Enter runs is
   # exactly what is highlighted), pick the `sel`-th, and dispatch it (`dispatch_palette/2`).
   # No match under the cursor (empty list) just closes.
-  defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :palette} = mb} = state) do
+  defp submit_now(%{minibuffer: %Minibuffer{mode: :palette} = mb} = state) do
     pick(Enum.at(candidates(state), mb.sel), state)
   end
 
   # The buffer picker: Enter shows the highlighted buffer.
-  defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :buffers} = mb} = state) do
+  defp submit_now(%{minibuffer: %Minibuffer{mode: :buffers} = mb} = state) do
     pick(Enum.at(candidates(state), mb.sel), state)
   end
 
   # The finder: Enter opens the highlighted file. While the files are still being read, or the
   # search for what was typed is still running, wait for it: its answer opens the top match
   # (`submit`).
-  defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :files}} = state)
+  defp submit_now(%{minibuffer: %Minibuffer{mode: :files}} = state)
        when state.tree.files == nil or state.finder.matching != nil,
        do: put_in(state.finder.submit, true)
 
-  defp submit_minibuffer(%{minibuffer: %Minibuffer{mode: :files} = mb} = state) do
+  defp submit_now(%{minibuffer: %Minibuffer{mode: :files} = mb} = state) do
     query = String.trim(Minibuffer.value(mb))
 
     case Enum.at(candidates(state), if(state.finder.submit, do: 0, else: mb.sel)) do
@@ -6980,9 +7279,7 @@ defmodule Geex.Loop do
   end
 
   # The new path for a rename (`rename` alone, the tree's `r`); an empty one changes nothing.
-  defp submit_minibuffer(
-         %{minibuffer: %Minibuffer{mode: :ask} = mb, asking: {:rename, from}} = state
-       ) do
+  defp submit_now(%{minibuffer: %Minibuffer{mode: :ask} = mb, asking: {:rename, from}} = state) do
     state = close_minibuffer(state)
 
     case String.trim(Minibuffer.value(mb)) do
@@ -6992,7 +7289,7 @@ defmodule Geex.Loop do
   end
 
   # Close first, then act: an action may open the minibuffer again (`buffers` opens its picker).
-  defp submit_minibuffer(state) do
+  defp submit_now(state) do
     input = Minibuffer.value(state.minibuffer)
     state = state |> remember() |> close_minibuffer()
 
@@ -7208,6 +7505,7 @@ defmodule Geex.Loop do
         :toggle_mouse,
         :save,
         :save_all,
+        :cancel_save,
         :fast_forward,
         :select_clear,
         :delete_file,
@@ -7216,6 +7514,20 @@ defmodule Geex.Loop do
       ]
 
   defp verb(:save_all, state), do: save_all(state)
+
+  # `cancel-save` (2026-11-15): stop the save under way before its write begins.
+  defp verb(:cancel_save, %{saving: nil} = state),
+    do: schedule_repaint(%{state | notice: "nothing is being saved"})
+
+  defp verb(:cancel_save, %{saving: %{quit: quit}} = state) do
+    case cancel_save(state) do
+      {:cancelled, state} ->
+        after_save(quit, state)
+
+      {:writing, state} ->
+        schedule_repaint(%{state | notice: "already writing: it finishes that file, then stops"})
+    end
+  end
 
   # `delete` checks what's there and asks y/n (`Geex.Loop.FileOps`); `rename` alone asks for
   # the path.
