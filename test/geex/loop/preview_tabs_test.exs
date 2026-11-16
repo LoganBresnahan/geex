@@ -31,9 +31,10 @@ defmodule Geex.Loop.PreviewTabsTest do
     %{dir: dir}
   end
 
+  # A key, and the save it starts run to its end (ADR-0035's 2026-11-15 amendment).
   defp key(state, event) do
     {:noreply, state} = Loop.handle_info({:geex_io, event}, state)
-    state
+    Geex.LoopSave.finish(state)
   end
 
   defp type(state, text) do

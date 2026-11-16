@@ -6996,3 +6996,73 @@ doctests, and the existing `trim_on_save_test.exs`. 1721 tests + 208 doctests + 
 green twice; `mix compile --warnings-as-errors --force` clean; the new property also at
 `GEEX_PROPERTY_RUNS=10000` and 100000. Not checked: a live save before the fix (the 3.5 s is the
 script's); the frame during the 285 ms (item 9's, unchanged).
+
+### 2026-11-15 — Saving off the key loop and the buffer; a quit waits for a save and names unsaved edits (ADR-0035)
+
+On `save-off-loop`, to the maintainer's answers (roadmap item 9). Ctrl-O and `save-all` run in a
+process of their own; the write runs outside the buffer (`Buffer.begin_write/2` … `end_write/2`,
+the pending write reconcile takes as geex's own, ADR-0017's amendment); "still saving", "saving
+a.ts…" after 150 ms, `cancel-save` (`Geex.Loop.SaveFlag`), a quit that waits for a save, and a quit
+that names unsaved edits first.
+
+Measured with scripts (`MIX_ENV=test`, 10 MB of 100,000 lines, a buffer with a ledger, a reader
+polling `Buffer.status/1` every millisecond while `Reconcile.save/2` ran in a task): nothing to
+trim, the save 146–150 ms, the longest read 26–27 ms; every line trimmed, the save 353–397 ms, the
+longest read 172–186 ms (`begin_write/2` 149 ms and `end_write/2` 159 ms, applying and keeping the
+trim; 19 and 22 ms with nothing to trim). `Buffer.snapshot/1` 11–13 ms, `Session.snapshot/0` 21 ms.
+
+Live in a tmux pty (the worktree's build, scratch `XDG_*`, the ledger on), on 10 MB files of
+100,000 lines:
+- Ctrl-O, then `abc` typed 80 ms later: the file written trimmed, `abc` in the buffer, the status
+  `[+]` (typed during the save, so unsaved).
+- Ctrl-X with that unsaved: "unsaved: big.txt (kept for next time); quit again to leave"; Ctrl-X
+  again quit. Reopened: "restored unsaved changes from your last session", `abcline 1…`, `[+]`.
+- A first trimming save: "saving big3.txt…" on the status line from about 550 ms until the save
+  ended at about 650 ms; Ctrl-O again during it: "still saving".
+- Ctrl-O then Ctrl-X: "saving big4.txt… quits when done (quit again: leave now; Esc: stay)", and
+  geex quit by itself once the file was written (trimmed).
+- Ctrl-O then `cancel-save`: "save cancelled", the file untouched (10,000,000 bytes), the buffer
+  clean; `cancel-save` again: "nothing is being saved"; Ctrl-X quit at once. No `terminating` or
+  "the save failed" in the log.
+- Key latency (a key typed 50 ms into a first trimming save, until it showed): 471–537 ms here,
+  582–609 ms on main. With nothing to trim the runs were too noisy to tell apart (534 and 841 ms
+  here, 563 and 700 on main), because a key on such a file shows ~230 ms after it is typed with no
+  save at all, on main too (roadmap item 9: `Session.snapshot/0` is 21 ms of it, the rest not
+  traced).
+
+Tests: `test/geex/buffer/pending_write_test.exs` (9: the buffer answering between begin and end,
+an edit during the write with the ledger reopening its synced text, a failed write, one write at a
+time, the watcher seeing the pending text, anything else read again after, a dying writer, the
+gate, a file changed on disk), `test/geex/loop/save_flag_test.exs` (5 + 3 doctests + a property
+over where a cancel lands), `test/geex/loop/save_loop_test.exs` (21: Ctrl-O off the loop, still
+saving, saving…, a key typed during a save, cancel-save before and during a write, save-all
+stopped between files and during one, a real save cancelled never half-written, quit while saving
+waiting, Esc, quit again before and during a write, the terminal closing, quit with unsaved edits
+and disarming, `exit` typed, kept for next time with the ledger on); the loop tests that save let
+it finish (`Geex.LoopSave.finish/1`); the catalog's `cancel-save` reworded off "under" (a search
+test). 1756 tests + 211 doctests + 62 properties, green twice; `mix compile --warnings-as-errors
+--force` clean; the new property also at `GEEX_PROPERTY_RUNS=10000`. Not checked: a save on a slow
+or network disk; a save racing an outside write live (the re-read is tested); `save-all` over many
+big files live; Alt+D during a save live (a test covers the refusal).
+
+mod-verify's review found three more, each with a failing repro, all fixed: an attestation credited
+during the write was lost when `end_write/2` put back the history it began on (an attestation
+doesn't move the change clock; the save's edits are now made again on the current history); a
+rename or delete during a write brought the old file back, and a close ended the buffer mid-save
+(Session now holds the buffer first, `Buffer.hold/1`, refusing while a save writes; the loop refuses
+to close a tab or pane its save has); and the quit warning and wait were drawn under the command
+line and the settings view (a quit now closes them first). And nits taken: a command run from the
+command line disarms the quit; Esc after a second quit says the cancel stands; a failed write
+always has the file read again; the fast-forward's one snapshot is taken after its read again; a
+cancel no longer kills the save's process (a kill during `git merge-file` left its temporary
+directory); the Ctrl-O test in `assist_test.exs` lets its save finish; Alt+D for fast-forward in the
+docs. Tests: in `pending_write_test.exs` the attestation (fails on the first version), a failed
+write read again, the hold; in `save_loop_test.exs` the warning from the command line and the
+settings view, a command disarming, a palette quit, Esc after a second quit, the wait from the
+command line, a rename, delete and close refused mid-write with a rename going once it is done, a
+rename the disk refuses releasing the hold, a tab close refused (each R test fails on its
+mutant). 1766 tests + 212 doctests + 62 properties, green twice; `mix compile --warnings-as-errors
+--force` clean.
+Found, older than this branch and not fixed: renaming into a directory that isn't there re-keys
+the buffer in memory and reports success, the file left where it was (`Session.rename_file`
+reads `:enoent` as a never-saved buffer).

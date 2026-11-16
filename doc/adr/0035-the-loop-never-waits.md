@@ -2,7 +2,9 @@
 
 - **Status:** Accepted 2026-10-16 (proposed by the coordinator session; the maintainer took
   "adopt the rule, park the rest"); amended 2026-10-18 (a frame costs the screen, not the
-  file); amended 2026-11-12 (a long line costs its screen, not the line: BUG-12, BUG-13). First instance built: the file tree's reader (`6a6e3df`,
+  file); amended 2026-11-12 (a long line costs its screen, not the line: BUG-12, BUG-13); amended
+  2026-11-15 (a save leaves the key loop and the buffer; a quit waits for it and names unsaved
+  edits). First instance built: the file tree's reader (`6a6e3df`,
   [ADR-0034](0034-panes-tree-edits-hold.md)'s 2026-10-16 amendment).
 - **Date:** 2026-10-16
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell and its loop),
@@ -187,3 +189,105 @@ character, Enter or Backspace 0.5–1.4 s → 10–12 ms.
 of strings too) and the repaint after each on the 2 MB line: a key under 50 ms, a repaint under
 100 ms. A non-ASCII long line still costs a walk up to the cursor or the scroll, several times
 cheaper than before (doc/bugs.md, BUG-12's remainder).
+
+## Amendment (2026-11-15): a save leaves the key loop and the buffer; a quit waits for it and names unsaved edits
+
+The maintainer's answers of 2026-11-15 (roadmap item 9, "saving off the key loop"), built on the
+branch `save-off-loop`. §4 parked saves: at 10 MB (100,000 lines) Ctrl-O held the loop 418 ms with
+nothing to trim (the fast-forward check 141 ms and the conflict-block scan 71 ms in the loop, about
+200 ms in the buffer) and 801 ms when a merge came first. Moving the save into a process wasn't
+enough on its own: every frame reads the buffer (`Session.snapshot/0` calls `Buffer.snapshot/1`), so
+the screen would still have waited while the buffer saved.
+
+**Decision.**
+
+- **A save runs in a process of its own.** Ctrl-O and `save-all` start one, which runs
+  `Reconcile.save/2` for each file in turn, sending each file's result and then a last word; the
+  loop draws them as they come. The catch-up, the conflict-block scan and the write leave the loop.
+- **The write leaves the buffer.** `Buffer.save/2` runs in its caller around two short calls:
+  `begin_write/2` works out the save's own edits (the final newline, the trim) and keeps the text to
+  write as the buffer's **pending write**, without keeping those edits yet; the caller checks the
+  file still holds the synced text (else `{:error, :behind}`, as before), writes it in place, and
+  answers `end_write/2`. With nothing changed meanwhile the save's edits are kept, one step, and the
+  buffer is clean, as before. **Edits made during the write land** and stay unsaved: the written
+  text becomes the synced one (an empty group records it, as reconcile's do, ADR-0033), and the
+  save's own edits, worked out against the text before them, are left to the file; the next save
+  makes them again. A history that changed without its text (an attestation credited during the
+  write) gets the save's edits made again on it, so the credit stays (mod-verify's review). A failed
+  write leaves the buffer as it was, and the file is read again (it may hold part of the write). A
+  writer that dies before `end_write/2` is a failed save (the buffer monitors it). One write at a
+  time per buffer (`{:error, :saving}`).
+- **A rename, delete or close waits for no write: it is refused while one is under way**
+  (`{:error, :saving}`, "not renamed: a.ts to b.ts: it's being saved", "not closed: it's being saved
+  (cancel-save stops it)"), so a write that had read its path can't bring the old file back
+  (mod-verify's review). `Geex.Session` holds each buffer first (`Buffer.hold/1`): refused while it
+  writes, else no save begins until the rename re-keys it, the buffer ends, or `Buffer.release/1`
+  (a rename the disk refused). The loop also refuses to close a tab or pane whose buffer its own
+  save has. `Buffer.status/1` gains `saving`.
+- **Reconcile knows geex's own write** ([ADR-0017](0017-reconcile-file-watch.md)'s amendment of the
+  same date): while a save writes, the watcher's sight of the pending text isn't behind; anything
+  else is read again once the write is done; a fast-forward is refused (`{:error, :saving}`; the
+  loop says "a save is writing the file; try again when it's done").
+- **Ctrl-O or `save-all` again while a save runs: "still saving".** "saving a.ts…" shows on the
+  status line once a save has run 150 ms.
+- **`cancel-save`** stops a save whose write hasn't begun ("save cancelled"). One whose write has
+  begun finishes ("already writing: it finishes that file, then stops", then "saved (it was already
+  writing)"), and a `save-all` stops after it, naming the files not saved. The loop and the save
+  agree through one atomics cell (`Geex.Loop.SaveFlag`): the save takes it just before each write
+  begins; a cancel takes it only while no write is under way, and from then the save begins no
+  write and starts no more files. So a cancel never cuts a write short: written in place, a cut
+  write would leave half a file. The save's process isn't killed (a kill during `git merge-file`
+  would leave its temporary directory, mod-verify's review): what it was doing before the write
+  finishes, and it ends. So a catch-up already under way still lands after "save cancelled" (for a
+  buffer that was behind, maybe a merge with conflict blocks): a recorded step Alt+Z takes back, as
+  after Alt+D.
+- **A quit waits for a save:** "saving a.ts… quits when done (quit again: leave now; Esc: stay)". A
+  second quit leaves now: a save whose write hasn't begun is cancelled, one that is writing finishes
+  first. Esc stays, and the save goes on; after a second quit its cancel stands ("staying; the save
+  stops after this file"). The terminal closing is a quit that leaves now. A quit's warning or wait
+  closes the command line and the settings view first, which would draw over the status line.
+- **A quit names unsaved edits first:** "unsaved: a.ts, b.ts (kept for next time); quit again to
+  leave". The next quit leaves: any quit key, or `quit` / `exit` typed (the command line's keys keep
+  it armed); any other key, or any other command run from the command line or the palette, disarms
+  it. Every way out runs the one `quit` command (Ctrl-X, Ctrl-Q,
+  Ctrl-C, `quit`, `exit`, the settings view's), so this covers them all; Ctrl-Z isn't bound, and
+  closing a tab already refuses unsaved edits. The ledger keeps unsaved edits across a quit
+  (ADR-0033), which is why quit never asked; a buffer without one (a scratch buffer, the ledger off)
+  is named "not kept" (`Buffer.status/1` gains `kept`).
+- **Written in place**, as before, not to a temporary file renamed over the original (the
+  maintainer's answer: a rename changes the inode, breaks hard links and needs the permissions
+  copied).
+
+**Measured** at 10 MB (100,000 lines, `MIX_ENV=test`, a buffer with a ledger), a save in another
+process while a reader polls the buffer: with nothing to trim the save takes 146–150 ms and a read
+of the buffer waits at most 26–27 ms; a first save that trims every line takes 353–397 ms and a
+read waits at most 172–186 ms (applying the trim in `begin_write/2`, 149 ms, and keeping it, its
+history entry and ledger line, in `end_write/2`, 159 ms). The key loop waits on none of it. A
+fast-forward takes one snapshot now, not three (each builds the whole text in the buffer). A save
+with a key typed during its write spends ~60 ms in `end_write/2` at 10 MB and appends the whole
+written text to the ledger, as the empty group's synced text (the shape of reconcile's).
+
+**What still waits.** The save's own edits are applied and recorded in the buffer, as every edit
+is: on a big file's first trimming save the frames wait up to ~150 ms twice, and a key typed then
+waits for the buffer too. `Alt+D`'s fast-forward still runs in the loop. And on a 100,000-line file
+a key takes ~230 ms to show with no save at all, on main as here; `Session.snapshot/0` is 21 ms of
+it, and the rest isn't traced yet (roadmap item 9). That cost, not the save's, is most of what a
+key typed during a save on such a file waits for (live, a key typed 50 ms into a first trimming save
+showed after 471–537 ms here, 582–609 ms on main).
+
+**Open, for the maintainer** (mod-verify's review). A signal that stops geex (SIGTERM) during a
+write can cut it: the save's process isn't supervised and doesn't trap exits, where the old save
+ran inside the buffer, which a shutdown let finish. And by the answers above a quit waits for a
+write under way, so a write that hangs (a stalled network disk) leaves only a kill.
+
+**Tests.** `test/geex/buffer/pending_write_test.exs` (the buffer answering mid-write, an edit
+during the write and the ledger keeping its synced text, a failed or dead writer, the watcher, the
+gate), `test/geex/loop/save_flag_test.exs` (every order of a cancel against a write; a property),
+`test/geex/loop/save_loop_test.exs` (still saving, saving…, cancel-save, quit while saving, quit
+with unsaved edits, the warning from the command line and the settings view, a rename, delete or
+close refused mid-write). The loop tests that save let it finish (`Geex.LoopSave.finish/1`).
+
+**See** `lib/geex/buffer.ex` (`save/2`, `begin_write/2`, `end_write/2`, `hold/1`),
+`lib/geex/session.ex` (`held_buffers/1`), `lib/geex/reconcile.ex`
+(`save/2`'s `gate:`, `{:recheck, path}`), `lib/geex/loop.ex` (`start_save/3`, `cancel_save/1`,
+`quit/1`), `lib/geex/loop/save_flag.ex`.

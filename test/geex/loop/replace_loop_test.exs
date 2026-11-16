@@ -34,9 +34,10 @@ defmodule Geex.Loop.ReplaceLoopTest do
     {state, pid}
   end
 
+  # A key, and the save it starts run to its end (ADR-0035's 2026-11-15 amendment).
   defp key(state, event) do
     {:noreply, state} = Loop.handle_info({:geex_io, event}, state)
-    state
+    Geex.LoopSave.finish(state)
   end
 
   defp keys(state, events), do: Enum.reduce(events, state, &key(&2, &1))

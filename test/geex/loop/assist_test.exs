@@ -397,7 +397,14 @@ defmodule Geex.Loop.AssistTest do
 
     test "#5: saving, Esc or copying between keeps the pair", %{state: state, dir: dir} do
       {state, buf} = open(state, dir, "v8.ex", "", {0, 0})
-      state = type(state, "f(a") |> key({:ctrl, ?o}) |> key({:key, :esc}) |> key({:alt, ?c})
+
+      state =
+        type(state, "f(a")
+        |> key({:ctrl, ?o})
+        |> Geex.LoopSave.finish()
+        |> key({:key, :esc})
+        |> key({:alt, ?c})
+
       type(state, ")")
       assert text(buf) == "f(a)"
     end

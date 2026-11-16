@@ -335,20 +335,28 @@ defmodule Geex.Session do
   def handle_call({:delete_file, path}, _from, state) do
     full = Path.expand(path)
 
-    case File.rm(full) do
-      :ok ->
-        # The watcher sees this deletion, but on_disk_change skips a `:enoent` read, so
-        # the eviction below — not a bogus reconcile-to-empty — is what closes the buffer.
-        {discarded?, state} =
-          case BufferSupervisor.whereis(full) do
-            {:ok, pid} -> {dirty?(pid), drop_buffer(pid, state)}
-            :error -> {false, state}
-          end
+    case held_buffers([full]) do
+      # Its save is writing: nothing touched (ADR-0035's 2026-11-15 amendment).
+      :saving ->
+        {:reply, {:error, :saving}, state}
 
-        {:reply, {:ok, {full, discarded?}}, state}
+      held ->
+        case File.rm(full) do
+          :ok ->
+            # The watcher sees this deletion, but on_disk_change skips a `:enoent` read, so
+            # the eviction below — not a bogus reconcile-to-empty — is what closes the buffer.
+            {discarded?, state} =
+              case BufferSupervisor.whereis(full) do
+                {:ok, pid} -> {dirty?(pid), drop_buffer(pid, state)}
+                :error -> {false, state}
+              end
 
-      {:error, _posix} = error ->
-        {:reply, error, state}
+            {:reply, {:ok, {full, discarded?}}, state}
+
+          {:error, _posix} = error ->
+            release(held)
+            {:reply, error, state}
+        end
     end
   end
 
@@ -365,29 +373,7 @@ defmodule Geex.Session do
           {{:error, :destination_exists}, state}
 
         true ->
-          case File.rename(f, t) do
-            :ok ->
-              state =
-                Enum.reduce(buffers_under(f), rekey_buffer(f, t, state), fn path, state ->
-                  rekey_buffer(path, String.replace_prefix(path, f, t), state)
-                end)
-
-              {{:ok, {f, t}}, state}
-
-            # A never-saved buffer has no file on disk yet (`open_file` on a missing path is
-            # a valid empty buffer, created on first save — ADR-0019), so `File.rename` fails
-            # `:enoent` — but the *buffer* is real and renamable: re-key it in-memory so a
-            # later `save_file` writes to the new path. With no open buffer there is genuinely
-            # nothing at `from`, so the posix error stands (matching the buffer-less case).
-            {:error, :enoent} ->
-              case BufferSupervisor.whereis(f) do
-                {:ok, _pid} -> {{:ok, {f, t}}, rekey_buffer(f, t, state)}
-                :error -> {{:error, :enoent}, state}
-              end
-
-            {:error, _posix} = error ->
-              {error, state}
-          end
+          rename_held(f, t, held_buffers([f | buffers_under(f)]), state)
       end
 
     {:reply, reply, state}
@@ -412,9 +398,16 @@ defmodule Geex.Session do
   def handle_call({:close_file, path}, _from, state) do
     case resolve_to_close(path, state) do
       {:ok, pid, label} ->
-        {discarded?, label} = buffer_status(pid, label)
-        state = drop_buffer(pid, state)
-        {:reply, {:ok, {label, discarded?}}, state}
+        case safe_hold(pid) do
+          :ok ->
+            {discarded?, label} = buffer_status(pid, label)
+            state = drop_buffer(pid, state)
+            {:reply, {:ok, {label, discarded?}}, state}
+
+          # Its save is writing (ADR-0035's 2026-11-15 amendment).
+          {:error, :saving} ->
+            {:reply, {:error, :saving}, state}
+        end
 
       :error ->
         {:reply, {:error, :no_such_buffer}, state}
@@ -439,11 +432,8 @@ defmodule Geex.Session do
         {:reply, {:error, :no_active_buffer}, state}
 
       pid ->
-        case safe_status(pid) do
-          %{dirty: true} ->
-            {:reply, {:error, :dirty}, state}
-
-          status ->
+        case close_ok(pid) do
+          {:ok, status} ->
             label = (status && status.path) || "[scratch]"
             state = drop_buffer(pid, state)
 
@@ -454,15 +444,23 @@ defmodule Geex.Session do
               end
 
             {:reply, {:ok, label}, put_active(state, next)}
+
+          {:error, _} = error ->
+            {:reply, error, state}
         end
     end
   end
 
   def handle_call({:close_buffer, pid}, _from, state) do
     case safe_status(pid) do
-      nil -> {:reply, {:error, :no_such_buffer}, state}
-      %{dirty: true} -> {:reply, {:error, :dirty}, state}
-      status -> {:reply, {:ok, status.path || "[scratch]"}, drop_buffer(pid, state)}
+      nil ->
+        {:reply, {:error, :no_such_buffer}, state}
+
+      _status ->
+        case close_ok(pid) do
+          {:ok, status} -> {:reply, {:ok, status.path || "[scratch]"}, drop_buffer(pid, state)}
+          {:error, _} = error -> {:reply, error, state}
+        end
     end
   end
 
@@ -554,6 +552,89 @@ defmodule Geex.Session do
   # and start watching the destination. The active-buffer pid is unchanged (same process),
   # so the pointer needs no update. A re-key failure is logged, not fatal: the disk file
   # already moved, and the buffer's stale path is recoverable by a re-open.
+  # The rename's disk step, with the buffers it re-keys held first (`Buffer.hold/1`): refused,
+  # nothing touched, while one of them is being saved (ADR-0035's 2026-11-15 amendment); each
+  # re-key releases its buffer, and a failed rename releases them all.
+  defp rename_held(_f, _t, :saving, state), do: {{:error, :saving}, state}
+
+  defp rename_held(f, t, held, state) do
+    case File.rename(f, t) do
+      :ok ->
+        state =
+          Enum.reduce(buffers_under(f), rekey_buffer(f, t, state), fn path, state ->
+            rekey_buffer(path, String.replace_prefix(path, f, t), state)
+          end)
+
+        {{:ok, {f, t}}, state}
+
+      # A never-saved buffer has no file on disk yet (`open_file` on a missing path is
+      # a valid empty buffer, created on first save — ADR-0019), so `File.rename` fails
+      # `:enoent` — but the *buffer* is real and renamable: re-key it in-memory so a
+      # later `save_file` writes to the new path. With no open buffer there is genuinely
+      # nothing at `from`, so the posix error stands (matching the buffer-less case).
+      {:error, :enoent} ->
+        case BufferSupervisor.whereis(f) do
+          {:ok, _pid} ->
+            {{:ok, {f, t}}, rekey_buffer(f, t, state)}
+
+          :error ->
+            release(held)
+            {{:error, :enoent}, state}
+        end
+
+      {:error, _posix} = error ->
+        release(held)
+        {error, state}
+    end
+  end
+
+  # Hold the open buffers of `paths` before their files are taken away: `:saving` (none left
+  # held) when one of them is being saved, else the held ones. A buffer that has ended is nothing
+  # to hold.
+  defp held_buffers(paths) do
+    pids = for path <- paths, {:ok, pid} <- [BufferSupervisor.whereis(path)], do: pid
+
+    Enum.reduce_while(pids, [], fn pid, held ->
+      case safe_hold(pid) do
+        :ok ->
+          {:cont, [pid | held]}
+
+        {:error, :saving} ->
+          release(held)
+          {:halt, :saving}
+      end
+    end)
+  end
+
+  defp release(held), do: Enum.each(held, &safe_release/1)
+
+  # A buffer to close: refused while it has unsaved edits, or while its save is writing (held
+  # otherwise, so no save begins before it ends). The status it had, or the reason.
+  defp close_ok(pid) do
+    case safe_status(pid) do
+      %{dirty: true} ->
+        {:error, :dirty}
+
+      status ->
+        case safe_hold(pid) do
+          :ok -> {:ok, status}
+          {:error, :saving} -> {:error, :saving}
+        end
+    end
+  end
+
+  defp safe_hold(pid) do
+    Buffer.hold(pid)
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp safe_release(pid) do
+    Buffer.release(pid)
+  catch
+    :exit, _ -> :ok
+  end
+
   defp rekey_buffer(from, to, state) do
     with {:ok, pid} <- BufferSupervisor.whereis(from) do
       case safe_rename(pid, to) do

@@ -153,27 +153,30 @@ defmodule Geex.Reconcile do
   @spec fast_forward(pid()) ::
           {:fast_forwarded, map(), non_neg_integer()} | :up_to_date | {:error, term()}
   def fast_forward(pid) when is_pid(pid) do
-    with %{path: path} when is_binary(path) <- Buffer.snapshot(pid),
-         {:ok, disk_text} <- File.read(path),
-         {:reconciled, snapshot, conflicts} <- run(pid, disk_text, @stale_retries) do
-      {:fast_forwarded, snapshot, conflicts}
+    with %{path: path} when is_binary(path) <- Buffer.status(pid),
+         {:ok, disk_text} <- File.read(path) do
+      case run(pid, disk_text, @stale_retries) do
+        {:reconciled, snapshot, conflicts} ->
+          {:fast_forwarded, snapshot, conflicts}
+
+        # The disk matches `synced` again; tell the buffer, which clears a stale mark. With the
+        # text just read, and the path from the cheap status: a snapshot builds the whole text in
+        # the buffer, and frames wait on it (ADR-0035's 2026-11-15 amendment). The one snapshot is
+        # `run/3`'s, taken after the read (mod-verify's review).
+        :ignored ->
+          Buffer.disk_changed(pid, disk_text)
+          :up_to_date
+
+        {:error, _reason} = error ->
+          error
+      end
     else
-      :ignored -> up_to_date(pid)
       %{path: nil} -> :up_to_date
       {:error, :enoent} -> :up_to_date
       {:error, _reason} = error -> error
     end
   catch
     :exit, reason -> {:error, {:buffer_down, reason}}
-  end
-
-  # The disk matches `synced` again; tell the buffer, which clears a stale mark.
-  defp up_to_date(pid) do
-    with %{path: path} when is_binary(path) <- Buffer.snapshot(pid),
-         {:ok, disk_text} <- File.read(path),
-         do: Buffer.disk_changed(pid, disk_text)
-
-    :up_to_date
   end
 
   @doc """
@@ -187,6 +190,11 @@ defmodule Geex.Reconcile do
 
   Returns `{:ok, path}`, `{:conflicts, n}`, `{:markers, line}` (0-based), or `{:error, reason}`
   (`Geex.Buffer.save/1`'s).
+
+  It runs in the caller, file reads, merge and write included (ADR-0035's 2026-11-15 amendment):
+  the loop calls it from a process of its own. `gate:` goes to `Geex.Buffer.save/2`, called just
+  before the write begins (and again if the file changed in between): `:cancelled` stops there,
+  `{:error, :cancelled}`, so a cancel never cuts a write short.
   """
   @spec save(pid(), keyword()) ::
           {:ok, String.t()}
@@ -208,7 +216,10 @@ defmodule Geex.Reconcile do
 
     case marker && {:markers, marker} do
       nil ->
-        case Buffer.save(pid, Keyword.take(opts, [:final_newline, :trim_trailing_whitespace])) do
+        case Buffer.save(
+               pid,
+               Keyword.take(opts, [:final_newline, :trim_trailing_whitespace, :gate])
+             ) do
           # The disk changed again between the fast-forward and the write.
           {:error, :behind} when retries > 0 -> save(pid, opts, retries - 1)
           result -> result
@@ -244,6 +255,11 @@ defmodule Geex.Reconcile do
 
         {:error, :stale} when retries > 0 ->
           run(pid, disk_text, retries - 1)
+
+        # A save is writing the file (ADR-0035's 2026-11-15 amendment): nothing to take in until
+        # it is done.
+        {:error, :saving} = error ->
+          error
 
         {:error, reason} = error ->
           Logger.warning("geex reconcile: failed to apply external change: #{inspect(reason)}")
@@ -426,6 +442,13 @@ defmodule Geex.Reconcile do
     ref = make_ref()
     Process.send_after(self(), {:settled, path, ref}, state.settle_ms)
     {:noreply, %{state | settling: Map.put(state.settling, path, ref)}}
+  end
+
+  # A buffer asks for its file to be read again: the watcher saw something else in it while a
+  # save was writing it, or the writer died (ADR-0035's 2026-11-15 amendment).
+  def handle_info({:recheck, path}, state) do
+    on_disk_change(path)
+    {:noreply, state}
   end
 
   def handle_info({:settled, path, ref}, state) do

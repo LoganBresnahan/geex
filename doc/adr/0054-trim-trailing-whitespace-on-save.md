@@ -1,7 +1,7 @@
 # ADR-0054: Trim trailing whitespace on save
 
 - **Status:** Accepted 2026-11-12 (the maintainer's ask, accepted at their word); built the same
-  day on the branch `save-undo`
+  day on the branch `save-undo`; amended 2026-11-15 (edits made while the save writes)
 - **Date:** 2026-11-12
 - **Amends:** [ADR-0019](0019-file-lifecycle-and-operation-tools.md) (its 2026-11-09 amendment, a
   final newline on save: a save makes one more edit), [ADR-0040](0040-bare-geex-and-the-catalog.md)
@@ -64,3 +64,13 @@ newline with nothing to trim is dispatched alone, as before. The extension check
 
 - `lib/geex/buffer.ex` (`save/2`), `lib/geex/reconcile.ex` (`save/2`), `lib/geex/loop/settings.ex`,
   `lib/geex/loop.ex`; `lib/geex/text.ex` (`trim_trailing_blanks/1`, each line's trim, BUG-18)
+
+## Amendment — 2026-11-15: edits made while the save writes
+
+The save now writes from a process of its own ([ADR-0035](0035-the-loop-never-waits.md)'s
+amendment of the same date), so edits can land while it writes. The trim and the final newline are
+worked out when the write begins (`Buffer.begin_write/2`) and kept, one step, when it succeeds with
+nothing changed meanwhile, as before. When edits landed meanwhile they aren't made in the buffer:
+they were worked out against the text before those edits. The file has them, the buffer stays
+modified, and the next save makes them again; nothing moves under the cursor while you type. A
+failed save still leaves no edit.

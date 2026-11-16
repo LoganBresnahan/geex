@@ -17,6 +17,8 @@ defmodule Geex.SessionTest.RenameExiter do
     do:
       {:reply, %{path: nil, text: "", lines: [""], version: 0, dirty: false, history: []}, state}
 
+  # A rename holds the buffer first (ADR-0035's 2026-11-15 amendment): not saving.
+  def handle_call(:hold, _from, state), do: {:reply, :ok, state}
   def handle_call({:rename, _to}, _from, state), do: {:stop, :normal, state}
 end
 

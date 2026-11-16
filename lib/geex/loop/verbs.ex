@@ -218,6 +218,7 @@ defmodule Geex.Loop.Verbs do
   defp do_parse("select-all"), do: {:action, :select_all}
   defp do_parse("save"), do: {:action, :save}
   defp do_parse("save-all"), do: {:action, :save_all}
+  defp do_parse("cancel-save"), do: {:action, :cancel_save}
   # Bare, a replace asks for its text: the command line again, the query in it to edit.
   defp do_parse("replace"), do: {:replace, :file, ""}
   defp do_parse("replace-all"), do: {:replace, :all, ""}

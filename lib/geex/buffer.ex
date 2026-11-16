@@ -81,16 +81,79 @@ defmodule Geex.Buffer do
   Write the buffer's current text to its `:path` and clear `dirty`. Returns
   `{:ok, path}`, `{:error, :no_path}` (buffer has no backing file), `{:error, :behind}` (the
   file on disk is no longer the `synced` text, so writing would discard someone else's change:
-  fast-forward first, ADR-0034), or `{:error, posix}`. Not an edit — a save does not touch
+  fast-forward first, ADR-0034), `{:error, :saving}` (another save of this buffer is writing),
+  or `{:error, posix}`. Not an edit — a save does not touch
   the undo history, with one exception: `final_newline: true` adds the final line break a
   non-empty text lacks, on every save (roadmap item 18.4, ADR-0019's 2026-11-09 amendment). It
   is a recorded `:human` insert, in the file's own line ending, made in the same step as the write
   and kept only if the write succeeds: a failed save leaves the buffer as it was. And
   `trim_trailing_whitespace: true` takes every line's trailing spaces and tabs off the same way
   (ADR-0054), one replace per line, with the final newline one group, one undo step.
+
+  The file is read and written **in the caller**, between `begin_write/2` and `end_write/2`, not
+  in the buffer (ADR-0035's 2026-11-15 amendment): the frames that read the buffer don't wait on
+  a big file's write, and edits made meanwhile land (they stay unsaved). `gate:` is a function
+  called first: `:ok` goes on, `:cancelled` stops before anything is begun
+  (`{:error, :cancelled}`); the loop's save uses it so a cancel never cuts a write short.
   """
   @spec save(GenServer.server(), keyword()) :: {:ok, String.t()} | {:error, term()}
-  def save(server, opts \\ []), do: GenServer.call(server, {:save, opts})
+  def save(server, opts \\ []) do
+    {gate, opts} = Keyword.pop(opts, :gate, fn -> :ok end)
+
+    with :ok <- gate_open(gate.()),
+         {:ok, %{path: path, text: text, synced: synced}} <- begin_write(server, opts) do
+      written =
+        case File.read(path) do
+          {:ok, disk} when disk != synced -> {:error, :behind}
+          _ -> File.write(path, text)
+        end
+
+      end_write(server, written)
+    end
+  end
+
+  defp gate_open(:ok), do: :ok
+  defp gate_open(:cancelled), do: {:error, :cancelled}
+
+  @doc """
+  Begin a save whose write runs in the caller (`save/2`, ADR-0035's 2026-11-15 amendment). The
+  save's own edits (`final_newline:`, `trim_trailing_whitespace:`) are worked out now but not
+  kept yet, and the text to write becomes the buffer's **pending write**: the watcher's sight of
+  it on disk is geex's own write, never an outside one, and a fast-forward waits until it is
+  done. Returns `{:ok, %{path, text, synced}}` (the file, the text to write, and the synced disk
+  text the file should still hold, or it is behind), or `{:error, :no_path | :saving | :held}`
+  (`:held`: a rename, delete or close is taking the file away, `hold/1`). The caller answers with
+  `end_write/2`; if it dies first, the write counts as failed.
+  """
+  @spec begin_write(GenServer.server(), keyword()) ::
+          {:ok, %{path: String.t(), text: String.t(), synced: String.t()}} | {:error, atom()}
+  def begin_write(server, opts \\ []), do: GenServer.call(server, {:begin_write, opts})
+
+  @doc """
+  Finish the save `begin_write/2` began, with how the write went: `:ok` or `{:error, reason}`.
+  After a write that succeeded the written text is the synced one. When nothing changed meanwhile
+  the save's own edits are kept (one step) and the buffer is clean; when edits landed during the
+  write they stay, unsaved, and the save's own edits are not made in the buffer (the file has
+  them; the next save makes them again). A failed write leaves the buffer as it was. Returns
+  `{:ok, path}` or the error; `{:error, :not_writing}` from a process that didn't begin it.
+  """
+  @spec end_write(GenServer.server(), :ok | {:error, term()}) ::
+          {:ok, String.t()} | {:error, term()}
+  def end_write(server, result), do: GenServer.call(server, {:end_write, result})
+
+  @doc """
+  About to take this buffer's file away (a rename, a delete, a close: `Geex.Session`): `:ok`,
+  and no save begins from here until `rename/2` re-keys the buffer, `release/1` lets saves begin
+  again, or the buffer ends; or `{:error, :saving}` while a save is writing, so nothing is
+  touched (a write that had already read its path would bring the old file back). ADR-0035's
+  2026-11-15 amendment.
+  """
+  @spec hold(GenServer.server()) :: :ok | {:error, :saving}
+  def hold(server), do: GenServer.call(server, :hold)
+
+  @doc "Let saves begin again after `hold/1`, the file not taken away after all."
+  @spec release(GenServer.server()) :: :ok
+  def release(server), do: GenServer.call(server, :release)
 
   @doc """
   Mark the buffer as **in sync with its backing file** — clears `dirty` and sets the
@@ -238,16 +301,20 @@ defmodule Geex.Buffer do
   def snapshot(server), do: GenServer.call(server, :snapshot)
 
   @doc """
-  The cheap status: `%{path, dirty, behind, synced}`, without the text or history `snapshot/1`
-  builds. For lists drawn on every repaint (the buffer picker, the edits pane, ADR-0034).
-  `synced` is the sha256 of the synced disk text, what the markdown preview checks a read
-  against (ADR-0043 §2); it is hashed once per baseline, not per call.
+  The cheap status: `%{path, dirty, behind, synced, kept, saving}`, without the text or history
+  `snapshot/1` builds. For lists drawn on every repaint (the buffer picker, the edits pane,
+  ADR-0034). `synced` is the sha256 of the synced disk text, what the markdown preview checks a
+  read against (ADR-0043 §2); it is hashed once per baseline, not per call. `kept` is whether
+  the buffer has a ledger, which keeps unsaved edits across a quit (ADR-0033); `saving`, whether
+  a save is writing it (`begin_write/2`).
   """
   @spec status(GenServer.server()) :: %{
           path: String.t() | nil,
           dirty: boolean(),
           behind: map() | nil,
-          synced: String.t()
+          synced: String.t(),
+          kept: boolean(),
+          saving: boolean()
         }
   def status(server), do: GenServer.call(server, :status)
 
@@ -333,7 +400,15 @@ defmodule Geex.Buffer do
           # `{synced text, its sha256}`, computed when first asked for after the baseline moves.
           synced_sha256: nil,
           # `nil`, or `%{sha256, at}`: the disk differs from `synced` (ADR-0034 §1).
-          behind: nil
+          behind: nil,
+          # A save writing in another process (`begin_write/2` to `end_write/2`, ADR-0035's
+          # 2026-11-15 amendment), or `nil`: the writer (monitored), the text being written, the
+          # history with the save's own edits and those edits (kept if nothing changes before the
+          # write is done), the change clock when it began, and whether the watcher saw the file
+          # hold something else meanwhile (read again once the write is done).
+          pending: nil,
+          # A rename, delete or close is taking the file away (`hold/1`): no save begins.
+          file_held: false
         }
 
         # What opening itself records (a verification after a crash, a gap) is not a first
@@ -378,6 +453,10 @@ defmodule Geex.Buffer do
 
   def handle_call({:dispatch, command, _seq}, from, state),
     do: handle_call({:dispatch, command}, from, state)
+
+  # A fast-forward reads the file: not while a save is writing it (ADR-0035's 2026-11-15 amendment).
+  def handle_call({:dispatch_group, _commands, _opts}, _from, %{pending: %{}} = state),
+    do: {:reply, {:error, :saving}, state}
 
   def handle_call({:dispatch_group, commands, opts}, _from, state) do
     case Keyword.fetch(opts, :expect_seq) do
@@ -440,6 +519,16 @@ defmodule Geex.Buffer do
     end
   end
 
+  # During a save's write (ADR-0035's 2026-11-15 amendment) the file holding the text being written
+  # is geex's own write, not behind. Anything else (the file half-written, or an outside write
+  # racing geex's) is read again when the write is done (`end_write/2`) instead of marked now.
+  def handle_call({:disk_changed, disk_text}, _from, %{pending: %{} = pending} = state)
+      when disk_text != state.history.synced do
+    if disk_text == pending.text,
+      do: {:reply, :in_sync, set_behind(state, nil)},
+      else: {:reply, :in_sync, %{state | pending: %{pending | disk_seen: true}}}
+  end
+
   def handle_call({:disk_changed, disk_text}, _from, state) do
     behind =
       cond do
@@ -463,8 +552,17 @@ defmodule Geex.Buffer do
   def handle_call(:status, _from, state) do
     {sha, state} = synced_sha256(state)
 
-    {:reply, %{path: state.path, dirty: state.history.dirty, behind: state.behind, synced: sha},
-     state}
+    kept = state.ledger != nil and not Ledger.off?(state.ledger)
+
+    {:reply,
+     %{
+       path: state.path,
+       dirty: state.history.dirty,
+       behind: state.behind,
+       synced: sha,
+       kept: kept,
+       saving: state.pending != nil
+     }, state}
   end
 
   def handle_call(:get_text, _from, state), do: {:reply, History.text(state.history), state}
@@ -484,10 +582,10 @@ defmodule Geex.Buffer do
       {:ok, _owner} ->
         if is_binary(state.path), do: Registry.unregister(Geex.Registry, state.path)
         ledger = state.ledger && Ledger.rename(state.ledger, new_path, state.history)
-        {:reply, :ok, %{state | path: new_path, ledger: ledger}}
+        {:reply, :ok, %{state | path: new_path, ledger: ledger, file_held: false}}
 
       {:error, {:already_registered, _pid}} ->
-        {:reply, {:error, :destination_registered}, state}
+        {:reply, {:error, :destination_registered}, %{state | file_held: false}}
     end
   end
 
@@ -496,25 +594,60 @@ defmodule Geex.Buffer do
     {:reply, :ok, state}
   end
 
-  def handle_call({:save, _opts}, _from, %{path: nil} = state),
+  def handle_call({:begin_write, _opts}, _from, %{path: nil} = state),
     do: {:reply, {:error, :no_path}, state}
 
-  def handle_call({:save, opts}, _from, state) do
-    {history, edits} = save_edits(state.history, opts)
+  def handle_call({:begin_write, _opts}, _from, %{pending: %{}} = state),
+    do: {:reply, {:error, :saving}, state}
 
-    with :ok <- not_behind(state),
-         :ok <- File.write(state.path, History.text(history)) do
-      # The save's own edits are kept now the write they went out with succeeded.
-      state = keep_save_edits(state, history, edits)
-      # disk now equals the written text — that is the new in-sync baseline.
-      state = %{state | history: History.sync(state.history)} |> record_sync()
-      state = state |> set_behind(nil) |> notify_synced()
-      # A save is a natural durability point: don't wait for the timer.
-      {:reply, {:ok, state.path}, %{state | ledger: state.ledger && Ledger.sync(state.ledger)}}
-    else
-      {:error, _reason} = error -> {:reply, error, state}
+  def handle_call({:begin_write, _opts}, _from, %{file_held: true} = state),
+    do: {:reply, {:error, :held}, state}
+
+  def handle_call({:begin_write, opts}, {writer, _tag}, state) do
+    {history, edits} = save_edits(state.history, opts)
+    text = History.text(history)
+
+    pending = %{
+      writer: writer,
+      ref: Process.monitor(writer),
+      text: text,
+      # The history it began on, and that history with the save's own edits.
+      base: state.history,
+      history: history,
+      edits: edits,
+      seq: state.history.seq,
+      disk_seen: false
+    }
+
+    {:reply, {:ok, %{path: state.path, text: text, synced: state.history.synced}},
+     %{state | pending: pending}}
+  end
+
+  def handle_call({:end_write, result}, {writer, _tag}, %{pending: %{writer: writer}} = state) do
+    pending = state.pending
+    Process.demonitor(pending.ref, [:flush])
+    state = %{state | pending: nil}
+
+    case result do
+      :ok ->
+        state = written(state, pending)
+        if pending.disk_seen, do: recheck(state)
+        # A save is a natural durability point: don't wait for the timer.
+        {:reply, {:ok, state.path}, %{state | ledger: state.ledger && Ledger.sync(state.ledger)}}
+
+      # The file may hold part or all of the write (an error on close): read it again.
+      {:error, _reason} = error ->
+        recheck(state)
+        {:reply, error, state}
     end
   end
+
+  def handle_call(:hold, _from, %{pending: %{}} = state), do: {:reply, {:error, :saving}, state}
+  def handle_call(:hold, _from, state), do: {:reply, :ok, %{state | file_held: true}}
+  def handle_call(:release, _from, state), do: {:reply, :ok, %{state | file_held: false}}
+
+  def handle_call({:end_write, _result}, _from, state),
+    do: {:reply, {:error, :not_writing}, state}
 
   # A dispatched command took effect (`history` is `state.history` with it applied): record it
   # and tell the subscribers. The edit's byte footprint against the *pre-edit* doc lets a
@@ -658,22 +791,73 @@ defmodule Geex.Buffer do
 
   # The file is still what the buffer last synced (or gone, or unreadable: nothing to lose).
   # Read at the write, so a change the watcher hasn't reported yet is caught too (ADR-0034 §3).
-  defp not_behind(state) do
-    case File.read(state.path) do
-      {:ok, disk} when disk != state.history.synced -> {:error, :behind}
-      _ -> :ok
-    end
+  # The pending write is on disk: it is the synced text now. With nothing changed since the save
+  # began, the save's own edits are kept, as one step, and the buffer is clean. Edits made during
+  # the write stay, unsaved; the save's own edits were made against the text before them, so they
+  # are left out of the buffer (the file has them, and the next save makes them again), and an
+  # empty group records the new synced text, as reconcile's does (ADR-0033).
+  defp written(%{history: base} = state, %{base: base} = pending),
+    do: keep_written(state, pending.history, pending.edits)
+
+  # The history changed without a change to the text (an attestation credited during the write):
+  # the save's own edits are made again on it, so the credit isn't lost (mod-verify's review).
+  defp written(%{history: %{seq: seq}} = state, %{seq: seq} = pending) do
+    {history, edits} = remake(state.history, pending.edits)
+    keep_written(state, history, edits)
   end
+
+  defp written(state, pending) do
+    {:ok, history} = History.group(state.history, [], pending.text)
+    state = record(%{state | history: history}, group_entry(:group, history, 0, pending.text))
+    state |> set_behind(nil) |> notify_synced()
+  end
+
+  defp keep_written(state, history, edits) do
+    state = keep_save_edits(state, history, edits)
+    state = %{state | history: History.sync(state.history)} |> record_sync()
+    state |> set_behind(nil) |> notify_synced()
+  end
+
+  # `save_edits/2`'s edits made again on `history` (the same text they were worked out on).
+  defp remake(history, []), do: {history, []}
+
+  defp remake(history, {:cmd, cmd}) do
+    {:ok, history} = History.dispatch(history, cmd)
+    {history, {:cmd, cmd}}
+  end
+
+  defp remake(history, {:group, commands}) do
+    {:ok, history} = History.group(history, commands, nil)
+    {history, {:group, commands}}
+  end
+
+  # The watcher saw the file hold something other than geex's write while it was being written,
+  # or the writer died mid-write: have reconcile read it again now (ADR-0035's 2026-11-15
+  # amendment). A no-op when reconcile isn't running.
+  defp recheck(%{path: path}) when is_binary(path) do
+    if pid = Process.whereis(Geex.Reconcile), do: send(pid, {:recheck, path})
+    :ok
+  end
+
+  defp recheck(_state), do: :ok
 
   @impl true
   def handle_cast({:unsubscribe, pid}, state) do
     {:noreply, %{state | subscribers: drop_subscriber(state.subscribers, pid)}}
   end
 
+  # The writer died before `end_write/2`: a failed save. The file may hold part of the write, so
+  # reconcile reads it again.
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{pending: %{ref: ref}} = state) do
+    state = %{state | pending: nil}
+    recheck(state)
+    {:noreply, state}
+  end
+
   # A monitored subscriber died — drop it. Keeps the subscriber set free of stale
   # pids (a crashed reactor leaves no residue). Guarded to *subscriber* refs only,
   # so a future monitor added to the buffer can't be silently swallowed here.
-  @impl true
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{subscribers: subscribers} = state)
       when is_map_key(subscribers, ref) do
     {:noreply, %{state | subscribers: Map.delete(subscribers, ref)}}

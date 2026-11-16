@@ -189,6 +189,8 @@ defmodule Geex.Loop.FileOps do
   end
 
   # A posix reason in words ("permission denied"); anything else as it is.
+  defp why(:saving), do: "it's being saved"
+
   defp why(reason) when is_atom(reason) do
     case to_string(:file.format_error(reason)) do
       "unknown POSIX error" <> _ -> inspect(reason)
