@@ -4,7 +4,9 @@
   "adopt the rule, park the rest"); amended 2026-10-18 (a frame costs the screen, not the
   file); amended 2026-11-12 (a long line costs its screen, not the line: BUG-12, BUG-13); amended
   2026-11-15 (a save leaves the key loop and the buffer; a quit waits for it and names unsaved
-  edits). First instance built: the file tree's reader (`6a6e3df`,
+  edits); amended 2026-11-16 (shutdown during a save: a second quit leaves within 1 s, cutting a
+  write that hangs; SIGTERM, SIGHUP and the terminal closing let a save finish for up to 30 s).
+  First instance built: the file tree's reader (`6a6e3df`,
   [ADR-0034](0034-panes-tree-edits-hold.md)'s 2026-10-16 amendment).
 - **Date:** 2026-10-16
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the shell and its loop),
@@ -275,10 +277,11 @@ it, and the rest isn't traced yet (roadmap item 9). That cost, not the save's, i
 key typed during a save on such a file waits for (live, a key typed 50 ms into a first trimming save
 showed after 471–537 ms here, 582–609 ms on main).
 
-**Open, for the maintainer** (mod-verify's review). A signal that stops geex (SIGTERM) during a
-write can cut it: the save's process isn't supervised and doesn't trap exits, where the old save
-ran inside the buffer, which a shutdown let finish. And by the answers above a quit waits for a
-write under way, so a write that hangs (a stalled network disk) leaves only a kill.
+**Open, for the maintainer** (mod-verify's review; answered 2026-11-16, below). A signal that
+stops geex (SIGTERM) during a write can cut it: the save's process isn't supervised and doesn't
+trap exits, where the old save ran inside the buffer, which a shutdown let finish. And by the
+answers above a quit waits for a write under way, so a write that hangs (a stalled network disk)
+leaves only a kill.
 
 **Tests.** `test/geex/buffer/pending_write_test.exs` (the buffer answering mid-write, an edit
 during the write and the ledger keeping its synced text, a failed or dead writer, the watcher, the
@@ -291,3 +294,88 @@ close refused mid-write). The loop tests that save let it finish (`Geex.LoopSave
 `lib/geex/session.ex` (`held_buffers/1`), `lib/geex/reconcile.ex`
 (`save/2`'s `gate:`, `{:recheck, path}`), `lib/geex/loop.ex` (`start_save/3`, `cancel_save/1`,
 `quit/1`), `lib/geex/loop/save_flag.ex`.
+
+## Amendment (2026-11-16): shutdown during a save
+
+The maintainer's answers of 2026-11-16 to the open question above: a quit may cut a write short
+once geex has said that it will ("if we appropriately alerted them before the second ctrl kill
+key that's fine"), and two quits are the whole of it: "if they try to exit we warn and then if
+they exit again it forces the exit".
+
+- **The first quit warns; the second leaves.** The first quit during a save waits for it, and the
+  status line says what the next does: "quits once saved (quit again cuts the save short; Esc:
+  stay): saving a.ts…". A second quit leaves, closing the command line and the settings view
+  first as the first quit does: a save whose write hasn't begun is cancelled and geex leaves at
+  once (as on 2026-11-15); a write under way gets 1 s (`@cut_after_ms`) to finish, the status line
+  saying "leaving once written (cut short after 1 s): writing a.ts…", and is cut short then, the
+  file maybe left part-written. Esc no longer stays after the second quit. The 1 s covers every
+  local write measured, from the gate to the save's return: ~10 ms at 1 MB, 54–129 ms at 10 MB,
+  187–212 ms at 30 MB, 257–281 ms for a first trimming save of 10 MB (mod-verify's measure, the
+  ledger on); a quick double quit fits inside those, which is why a write under way isn't cut
+  at the key. Quits after the second don't leave sooner than its 1 s: a burst of keys from one
+  read is handled before any frame is painted, and a key held down repeats.
+- **The warning comes first, the file last.** The status line is clipped at its edge, so each
+  label puts what a quit does before the file's name (its basename), and while a quit waits the
+  label leads the line: the name, `[+]` and behind give way (the label ends with the name). On 80
+  columns each warning shows whole with a 28-character name, `[+]` and behind (mod-verify's
+  reviews found the earlier wording, the relative path first, clipped there and at 100, and the
+  two-quit warning, after the name, clipped for ordinary names).
+- **SIGTERM and SIGHUP leave as the terminal closing does** (`Geex.Loop.shutdown/0`, from
+  `Geex.CLI.Signals`): there is nobody to warn, so no save is cancelled. A save under way runs on,
+  whether or not its write has begun, a save-all to its last file (the maintainer, 2026-11-17: a
+  save cancelled by closing the window, with no warning to see, would leave the user believing
+  the file saved), for up to 30 s (`@shutdown_wait_ms`; the maintainer chose 30 over 5, so a slow
+  network disk isn't cut), then the orderly stop (`Geex.stop/0`), the last session kept. A
+  `cancel-save` already made stands. This wait is its own (`:shutdown`): Esc doesn't call it off,
+  and the status line says "leaving once saved (quit again cuts it short): saving a.ts…"; a quit
+  once that has been up 1 s cuts the save short as a second quit does. Cut short, by that quit or
+  by the deadline, a save whose write hasn't begun is cancelled first, so no write begins while
+  the VM stops. Each deadline carries a token, so a word from an earlier one is nothing; a second
+  signal keeps the first deadline, and a signal after a second quit, which already cut the save
+  short, changes nothing (its 1 s stands). Should the loop not get as far as stopping, geex stops
+  anyway after 35 s (`Geex.CLI` told under the binary, `System.stop/0` under `mix run`), past the
+  wait so it never cuts a save the loop would let finish.
+- **A disk that hangs still holds the stop** ([bugs.md](../bugs.md) BUG-21, open). The second
+  quit and the shutdown's deadline leave the loop on time, but a file read that never returns
+  holds OTP's one file server, every `File` call behind it, so the stop itself waits: 22 s from
+  the installed binary (its tree's children killed at their shutdown timeouts, then the halt),
+  and forever under `mix run` (Mix's own stop lists files through the stuck file server, and
+  nothing on `init:stop/0`'s way has a time limit). Checked live with a FIFO in place of the open
+  file.
+- **A cut write can be recovered.** With the ledger on, reopening the file shows the cut text as
+  one change from outside, and one undo brings back the buffer's text from before the save
+  (checked with a script: the write cut halfway, the buffer stopped, reopened).
+- **SIGHUP is handled** (BUG-20). Its OS default ended the VM at once: closing the terminal window
+  left the ledger lock and the discovery file (swept at the next start), the last session up to
+  2 s old, and could cut a write under way. [ADR-0036](0036-installed-binary.md)'s 2026-11-16
+  amendment.
+- **The terminal process stays after the end of input.** `Geex.TerminalIO` stopped `:normal`
+  there; a permanent child, it was restarted into the same end of input until its supervisor gave
+  up and took the tree down, the loop and the save it waited for with it. It now says `:eof` to
+  each subscriber, and to any that subscribes later (a restarted loop), and stays until the loop
+  stops the VM.
+
+Checked live in tmux, under `mix run` and from a release installed in a scratch directory: the
+terminal closed 0–0.6 s into a first trimming save of a 9.5 MB file left the file whole (written)
+every time, geex gone within 1.5 s, no lock or discovery file left; SIGTERM the same, exit 0.
+With SIGHUP handled but before the `TerminalIO` change, five of five such closes under `mix run`
+left the VM running with no application. After the second answer, under `mix run`: a 70 MB file of
+700 lines with one edit, Ctrl-O and a quit drew "quits once saved (quit again cuts the save short;
+Esc: stay): saving wide.txt…" whole on 120 columns, and the second quit left within 1.3 s, the
+file whole each time (written once, and once the save cancelled before its write, the file as it
+was).
+
+**Tests.** `test/geex/loop/save_loop_test.exs` (the second quit's 1 s timer read and its end;
+quits after it not leaving sooner; three quits back to back; Esc not calling a second quit off;
+the second quit closing the command line and the settings view; both warnings whole on 80 columns
+with a nested name and `[+]`; save-all's warning naming the file being written; the terminal
+closing and a signal letting a save run, before and during its write, a save-all to its last
+file, a `cancel-save` standing, the 30 s timer read; the wait ending, and a stale word; a quit or
+the deadline after a signal cancelling a save not yet writing; a signal after a second quit
+changing nothing; Esc not calling a shutdown off),
+`test/geex/cli_test.exs` (SIGTERM and SIGHUP through the loop, or `Geex.stop/0` with no loop),
+`test/geex/terminal_io_test.exs` (the end of input said, to a later subscriber too; the process
+stays).
+
+**See** `lib/geex/loop.ex` (`shutdown/0`, `shutdown/1`, `quit/1`, `saving_label/1`),
+`lib/geex/cli/signals.ex`, `lib/geex/terminal_io.ex`, [bugs.md](../bugs.md) BUG-20 and BUG-21.

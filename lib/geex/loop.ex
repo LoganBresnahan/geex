@@ -138,6 +138,20 @@ defmodule Geex.Loop do
 
   def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
+  @doc """
+  Leave as the terminal closing does (SIGTERM and SIGHUP, `Geex.CLI.Signals`): a save under way
+  is let finish, for up to 30 s. With no editor loop running, `Geex.stop/0`.
+  """
+  @spec shutdown() :: :ok
+  def shutdown do
+    case Process.whereis(__MODULE__) do
+      nil -> Geex.stop()
+      loop -> send(loop, :geex_shutdown)
+    end
+
+    :ok
+  end
+
   ## Pure render core (no terminal needed — unit-tested directly)
 
   @doc """
@@ -464,8 +478,12 @@ defmodule Geex.Loop do
       # cancel}`.
       # `flag` is the atomics cell the save and a cancel agree through (`@save_idle`…);
       # `results` each file's `{path, result}` as it is done, newest first; `slow` once it has
-      # run past `@save_slow_ms`; `quit` nil, `:waiting` (quit once it is done) or `:now` (leave
-      # once its write is done); `cancel` once a cancel came while a write was under way.
+      # run past `@save_slow_ms`; `quit` nil, `:waiting` (quit once it is done), `:now` (a second
+      # quit: leave once its write is done, or at `leave_by`) or `:shutdown` (the terminal
+      # closing or a signal: leave once the save is done, or at `leave_by`); Esc calls off only
+      # `:waiting`; `cut_after` the monotonic ms from which a quit may cut the save short
+      # (`@cut_after_ms` after the warning went up); `leave_by` the deadline (`%{token, timer}`)
+      # by which the save is cut short; `cancel` once a cancel came while a write was under way.
       saving: nil,
       # A quit was just stopped by unsaved edits: the next quit leaves (2026-11-15).
       quit_armed: false,
@@ -695,8 +713,16 @@ defmodule Geex.Loop do
   # End of input (terminal closed / Ctrl-D) → quit the editor. Stopping the loop
   # alone would just restart it (a permanent child), so stop the VM — the app's
   # shutdown restores the terminal. There is no screen left to ask on: no unsaved-edits warning
-  # (the ledger keeps them, ADR-0033), and a save that is writing finishes first.
-  def handle_info({:geex_io, :eof}, state), do: {:noreply, leave_now(state)}
+  # (the ledger keeps them, ADR-0033), and a save under way finishes first (`shutdown/1`).
+  def handle_info({:geex_io, :eof}, state), do: {:noreply, shutdown(state)}
+
+  # SIGTERM or SIGHUP (`shutdown/0`, from `Geex.CLI.Signals`): the same.
+  def handle_info(:geex_shutdown, state), do: {:noreply, shutdown(state)}
+
+  # The wait for a save (a second quit's, a shutdown's) is over and it hasn't finished: leave
+  # anyway. A word from an earlier one (its token not this save's) is nothing.
+  def handle_info({:geex_leave_anyway, token}, %{saving: %{leave_by: %{token: token}}} = state),
+    do: {:noreply, cut_short(state)}
 
   # The settings view (`Alt+Y`) takes the mouse while it is open (ADR-0040 §7, ADR-0039).
   def handle_info({:geex_io, {:mouse, m}}, %{settings: %Settings{} = view} = state) do
@@ -1098,10 +1124,15 @@ defmodule Geex.Loop do
     state = %{state | quit_armed: state.quit_armed and keep_quit?}
 
     case state do
-      # A quit waiting on a save: Esc stays, and the save goes on.
-      %{saving: %{quit: wait} = saving, minibuffer: %Minibuffer{mode: :inactive}, settings: nil}
-      when wait != nil and event in [{:key, :esc}, {:cmd, :select_clear}] ->
-        # A second quit's cancel stands: a save-all stops after the file it is writing.
+      # A quit waiting on a save: Esc stays, and the save goes on. Not after a second quit, which
+      # leaves whatever (2026-11-16, Logan).
+      %{
+        saving: %{quit: :waiting} = saving,
+        minibuffer: %Minibuffer{mode: :inactive},
+        settings: nil
+      }
+      when event in [{:key, :esc}, {:cmd, :select_clear}] ->
+        # A `cancel-save` while it writes stands: a save-all stops after the file it is writing.
         said = if saving.cancel, do: "the save stops after this file", else: "the save goes on"
         stay = %{state | saving: %{saving | quit: nil}, notice: "staying; " <> said}
         {:noreply, schedule_repaint(stay)}
@@ -1391,10 +1422,31 @@ defmodule Geex.Loop do
 
   defp path_of(pid), do: safe_status(pid)[:path]
 
+  # How long the warning that a quit would cut a write short is up before a quit may.
+  @cut_after_ms 1_000
+
+  # How long a shutdown waits for a save under way (Logan: a slow network disk isn't cut).
+  @shutdown_wait_ms 30_000
+
+  @doc false
+  # For the test that `Geex.CLI.Signals`'s backstop comes after this wait.
+  def shutdown_wait_ms, do: @shutdown_wait_ms
+
   # Quit: Ctrl-X / Ctrl-Q / Ctrl-C, `quit` / `exit`, the settings view's (2026-11-15). A save
-  # under way is waited for (quit again: leave now; Esc: stay). Unsaved edits are named first,
-  # and the next quit leaves; the ledger keeps them either way (ADR-0033).
-  defp quit(%{saving: %{quit: wait}} = state) when wait in [:waiting, :now], do: leave_now(state)
+  # under way is waited for, and the status line warns that quitting again cuts it short (Esc:
+  # stay). Quit again and geex leaves (2026-11-16, Logan: the first quit warns, the second
+  # forces the exit): a save whose write hasn't begun is cancelled; a write under way gets
+  # `@cut_after_ms` to finish, then is cut short. Further quits don't leave sooner: a burst of
+  # keys from one read, or a key held down, is handled before any frame shows the warning
+  # (mod-verify's review). After a signal, a quit cuts the save short the same way once that
+  # warning has been up `@cut_after_ms`. Unsaved edits are named first, and the next quit leaves; the ledger keeps
+  # them either way (ADR-0033). The second quit, like the first, closes the command line and the
+  # settings view, which would draw over the warning.
+  defp quit(%{saving: %{quit: q, cut_after: after_ms}} = state) when q in [:now, :shutdown] do
+    if now_ms() >= after_ms, do: cut_short(state), else: schedule_repaint(state)
+  end
+
+  defp quit(%{saving: %{quit: :waiting}} = state), do: leave_now(to_status_line(state))
 
   defp quit(%{saving: %{} = saving} = state),
     do: schedule_repaint(%{to_status_line(state) | saving: %{saving | quit: :waiting}})
@@ -1440,16 +1492,51 @@ defmodule Geex.Loop do
   defp few(names),
     do: Enum.join(Enum.take(names, 3), ", ") <> " and #{length(names) - 3} more"
 
-  # Leave now, as a second quit during a save asks (and the terminal closing): a save whose write
-  # hasn't begun is cancelled; one writing is let finish first, so a file is never half-written.
-  defp leave_now(%{saving: %{}} = state) do
+  # Leave now, as a second quit during a save asks: a save whose write hasn't begun is cancelled;
+  # one writing is let finish for up to `@cut_after_ms` (the loop doesn't wait on a write that
+  # hangs; a disk that hangs still holds the VM's stop, BUG-21), then cut short.
+  defp leave_now(state) do
     case cancel_save(state) do
-      {:cancelled, state} -> exit_editor(state)
-      {:writing, state} -> schedule_repaint(put_in(state.saving.quit, :now))
+      {:cancelled, state} ->
+        exit_editor(state)
+
+      {:writing, %{saving: saving} = state} ->
+        cut_after = now_ms() + @cut_after_ms
+        leave_by = deadline(@cut_after_ms)
+        saving = %{saving | quit: :now, cut_after: cut_after, leave_by: leave_by}
+        schedule_repaint(%{state | saving: saving})
     end
   end
 
-  defp leave_now(state), do: exit_editor(state)
+  # Leave before the save is done: it begins no write from here (`cancel_save/1`), so none starts
+  # while the VM stops, and one under way is cut short.
+  defp cut_short(state) do
+    {_, state} = cancel_save(state)
+    exit_editor(state)
+  end
+
+  defp deadline(ms) do
+    token = make_ref()
+    %{token: token, timer: Process.send_after(self(), {:geex_leave_anyway, token}, ms)}
+  end
+
+  # The terminal closing, SIGTERM or SIGHUP: leave, with nobody to ask. A save under way runs on,
+  # a save-all to its last file, for up to `@shutdown_wait_ms`, then is cut short: there is no
+  # warning to see, so a save the user asked for isn't cancelled (2026-11-17, Logan). A
+  # `cancel-save` already made stands. A shutdown while one waits keeps the first deadline; after
+  # a second quit, which cut the save short, it changes nothing. Its warning is said on the
+  # status line too, the command line and the settings view closed (SIGTERM with the terminal
+  # still there; mod-verify's review).
+  defp shutdown(%{saving: %{quit: :now}} = state), do: state
+
+  defp shutdown(%{saving: %{}} = state) do
+    %{saving: saving} = state = to_status_line(state)
+    leave_by = saving.leave_by || deadline(@shutdown_wait_ms)
+    saving = %{saving | quit: :shutdown, cut_after: now_ms() + @cut_after_ms, leave_by: leave_by}
+    schedule_repaint(%{state | saving: saving})
+  end
+
+  defp shutdown(state), do: exit_editor(state)
 
   # Leave the editor: the last session kept first, then the VM stops (`Geex.stop/0`).
   defp exit_editor(state) do
@@ -2626,7 +2713,11 @@ defmodule Geex.Loop do
     %{state | focus: :output, output: out}
   end
 
-  # A press on the status line's "behind disk (Alt+D)": fast-forward.
+  # A press on the status line's "behind disk (Alt+D)": fast-forward. Not while a quit waits on a
+  # save: the warning leads the line then and the mark isn't drawn (`status_head/2`; mod-verify's
+  # review: a press on the warning fast-forwarded).
+  defp status_press(%{saving: %{quit: quit}} = state, _x) when quit != nil, do: state
+
   defp status_press(state, x) do
     with {:ok, %{behind: behind} = snap} when behind not in [nil, false] <-
            safe_session_snapshot(),
@@ -4765,10 +4856,7 @@ defmodule Geex.Loop do
   defp draw_status(screen, %{w: w, h: h, theme: theme} = state, snap) do
     if preview_current?(state) do
       left =
-        status_label(snap.path) <>
-          if(snap.dirty, do: " [+]", else: "") <>
-          if(snap[:behind], do: "  " <> @behind, else: "") <>
-          saving_label(state) <>
+        status_head(state, snap) <>
           "  preview" <>
           if(state.notice, do: "  " <> state.notice, else: "")
 
@@ -4779,12 +4867,7 @@ defmodule Geex.Loop do
   end
 
   defp draw_source_status(screen, %{w: w, h: h, theme: theme} = state, snap) do
-    left =
-      status_label(snap.path) <>
-        if(snap.dirty, do: " [+]", else: "") <>
-        if(snap[:behind], do: "  " <> @behind, else: "") <>
-        saving_label(state) <>
-        if(state.notice, do: "  " <> state.notice, else: "")
+    left = status_head(state, snap) <> if(state.notice, do: "  " <> state.notice, else: "")
 
     {line, _col} = snap.cursor
 
@@ -4861,6 +4944,20 @@ defmodule Geex.Loop do
 
   defp draw_empty_status(screen, %{w: w, h: h, theme: theme}) do
     Screen.draw_text(screen, 0, h - 1, status_text("[no buffer]", "", w), status_style(theme))
+  end
+
+  # The status line's start: the file, `[+]`, behind, and the save under way. While a quit waits
+  # on a save, its warning comes first: the line is clipped at its edge, and the warning is all
+  # that stands before a forced exit, so the name, `[+]` and behind give way (the label ends with
+  # the file's name; mod-verify's review: on 80 columns an ordinary name clipped it).
+  defp status_head(%{saving: %{quit: quit}} = state, _snap) when quit != nil,
+    do: String.trim_leading(saving_label(state))
+
+  defp status_head(state, snap) do
+    status_label(snap.path) <>
+      if(snap.dirty, do: " [+]", else: "") <>
+      if(snap[:behind], do: "  " <> @behind, else: "") <>
+      saving_label(state)
   end
 
   defp status_label(nil), do: "[scratch]"
@@ -5676,6 +5773,8 @@ defmodule Geex.Loop do
       results: [],
       slow: false,
       quit: nil,
+      cut_after: nil,
+      leave_by: nil,
       cancel: false
     }
 
@@ -5796,23 +5895,38 @@ defmodule Geex.Loop do
   defp one_saved(_reported, state), do: state
 
   # After a save: leave, as a quit asked; or quit now it is done (the unsaved check again).
-  defp after_save(:now, state), do: exit_editor(state)
+  defp after_save(quit, state) when quit in [:now, :shutdown], do: exit_editor(state)
   defp after_save(:waiting, state), do: quit(state)
   defp after_save(nil, state), do: state
 
   # The save under way on the status line once it has run past `@save_slow_ms`, and what a quit
   # waiting on it can do.
-  defp saving_label(%{saving: %{quit: :waiting} = saving}),
-    do: "  saving #{saving_names(saving)}… quits when done (quit again: leave now; Esc: stay)"
+  # What a quit can do comes first and the file last, short, so a narrow status line clips the
+  # name, not the warning (mod-verify's review).
+  defp saving_label(%{saving: %{quit: :waiting} = saving}) do
+    "  quits once saved (quit again cuts the save short; Esc: stay): saving " <>
+      saving_names(saving) <> "…"
+  end
 
-  defp saving_label(%{saving: %{quit: :now} = saving}),
-    do: "  saving #{saving_names(saving)}… then leaving"
+  defp saving_label(%{saving: %{quit: :now} = saving}) do
+    "  leaving once written (cut short after #{div(@cut_after_ms, 1000)} s): writing " <>
+      writing_name(saving) <> "…"
+  end
+
+  defp saving_label(%{saving: %{quit: :shutdown} = saving}),
+    do: "  leaving once saved (quit again cuts it short): saving #{writing_name(saving)}…"
 
   defp saving_label(%{saving: %{slow: true} = saving}), do: "  saving #{saving_names(saving)}…"
   defp saving_label(_state), do: ""
 
-  defp saving_names(%{paths: [path]}), do: name_of(path)
+  defp saving_names(%{paths: [path]}), do: Path.basename(path)
   defp saving_names(%{paths: paths}), do: plural(length(paths), "file", "files")
+
+  # The file being saved: the first one not answered yet.
+  defp writing_name(%{paths: paths, results: results}) do
+    done = Map.new(results)
+    paths |> Enum.find(List.last(paths), &(not Map.has_key?(done, &1))) |> Path.basename()
+  end
 
   ## replace / replace-all / save-all (2026-11-13, ADR-0053's amendment)
   #

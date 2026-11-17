@@ -1,9 +1,11 @@
 defmodule Geex.Loop.SaveLoopTest do
   # Saving off the key loop and quitting (ADR-0035's 2026-11-15 amendment, Logan's answers):
   # Ctrl-O and `save-all` run in a process of their own; Ctrl-O again says "still saving"; a quit
-  # waits for the save (quit again: leave now; Esc: stay); `cancel-save` stops a save before its
-  # write begins and never cuts one short; a quit with unsaved edits names them first and the
-  # next quit leaves. The test process is the loop: it stands in for `Geex.CLI` to see a quit.
+  # waits for the save (quit again cuts the save short; Esc: stay), and the second quit leaves, a
+  # write under way given 1 s (2026-11-16); the terminal closing lets the save finish, up to 30 s
+  # (2026-11-17); `cancel-save` stops a save before its write begins and never cuts one short; a
+  # quit with unsaved edits names them first and the next quit leaves. The test process is the
+  # loop: it stands in for `Geex.CLI` to see a quit.
   # Uses the global Session, so not async.
   use ExUnit.Case, async: false
 
@@ -48,6 +50,18 @@ defmodule Geex.Loop.SaveLoopTest do
   defp type(state, text), do: keys(state, Enum.map(String.graphemes(text), &{:char, &1}))
   defp run(state, command), do: state |> key({:alt, ?m}) |> type(command) |> key({:key, :enter})
 
+  defp insert_z(buf) do
+    {:ok, cmd} = Geex.Commands.Insert.parse(%{line: 0, col: 0, text: "z"})
+    {:ok, _} = Buffer.dispatch(buf, Geex.Command.put_meta(cmd, Geex.Command.Meta.human()))
+  end
+
+  # The status line as the loop paints it.
+  defp status_row(state) do
+    {:noreply, _} = Loop.handle_info(:repaint, state)
+    screen = Geex.Renderer.current()
+    Enum.map_join(0..(screen.w - 1), &Geex.Screen.get_cell(screen, &1, screen.h - 1).char)
+  end
+
   defp handle(state, msg) do
     {:noreply, state} = Loop.handle_info(msg, state)
     state
@@ -69,6 +83,8 @@ defmodule Geex.Loop.SaveLoopTest do
       results: [],
       slow: false,
       quit: nil,
+      cut_after: nil,
+      leave_by: nil,
       cancel: false
     }
 
@@ -242,6 +258,7 @@ defmodule Geex.Loop.SaveLoopTest do
       :ok = SaveFlag.write?(flag)
 
       state = state |> key({:ctrl, ?x}) |> key({:ctrl, ?x})
+      Process.cancel_timer(state.saving.leave_by.timer)
       assert state.saving.quit == :now
       refute_received :geex_quit
 
@@ -251,14 +268,15 @@ defmodule Geex.Loop.SaveLoopTest do
       assert_received :geex_quit
     end
 
-    test "Esc after quit again: it stays, and the cancel stands", %{dir: dir} do
+    # 2026-11-16, Logan: the first quit warns; the second forces the exit.
+    test "Esc after quit again doesn't call it off; save-all stops after this file", %{dir: dir} do
       {state, _buf, path} = open(dir, "a.txt", "a\n")
       {state, _pid, flag} = fake_save(state, :all, [path, Path.join(dir, "b.txt")])
       :ok = SaveFlag.write?(flag)
 
       state = state |> key({:ctrl, ?x}) |> key({:ctrl, ?x}) |> key({:key, :esc})
-      assert state.saving.quit == nil
-      assert state.notice == "staying; the save stops after this file"
+      Process.cancel_timer(state.saving.leave_by.timer)
+      assert state.saving.quit == :now
       assert SaveFlag.done(flag) == :stop
     end
 
@@ -270,13 +288,318 @@ defmodule Geex.Loop.SaveLoopTest do
       assert state.saving.quit == :waiting
     end
 
-    test "the terminal closing is a quit that leaves now", %{dir: dir} do
+    # 2026-11-16, Logan: the first quit warns; the second forces the exit.
+    test "quit again while it writes: it leaves within 1 s, the write cut short if not done",
+         %{dir: dir} do
+      {state, _buf, path} = open(dir, "a.txt", "a\n")
+      {state, pid, flag} = fake_save(state, :one, [path])
+      :ok = SaveFlag.write?(flag)
+
+      # The warning before the key that cuts it.
+      state = key(state, {:ctrl, ?x})
+      assert status_row(state) =~ "quits once saved (quit again cuts the save short; Esc: stay)"
+
+      state = key(state, {:ctrl, ?q})
+      %{token: token, timer: timer} = state.saving.leave_by
+      assert_in_delta Process.read_timer(timer), 1_000, 200
+      assert state.saving.quit == :now
+      assert status_row(state) =~ "leaving once written (cut short after 1 s): writing a.txt…"
+      refute_received :geex_quit
+
+      # The second is over and the write isn't: it leaves, the write going till the VM stops. The
+      # real timer's word, not one made here (mod-verify's mutant: a timer carrying another token
+      # would never leave).
+      assert_receive {:geex_leave_anyway, ^token} = word, 1_500
+      _ = handle(state, word)
+      assert_received :geex_quit
+      assert Process.alive?(pid)
+    end
+
+    # mod-verify's review: a burst of keys from one read, or a key held down, is handled before
+    # any frame shows the warning.
+    test "quits after the second don't leave sooner than its 1 s", %{dir: dir} do
       {state, _buf, path} = open(dir, "a.txt", "a\n")
       {state, _pid, flag} = fake_save(state, :one, [path])
       :ok = SaveFlag.write?(flag)
-      state = handle(state, {:geex_io, :eof})
+
+      state = state |> key({:ctrl, ?x}) |> key({:ctrl, ?q})
+      Process.cancel_timer(state.saving.leave_by.timer)
+      state = key(state, {:ctrl, ?c})
       assert state.saving.quit == :now
       refute_received :geex_quit
+
+      _ =
+        state
+        |> put_in([:saving, :cut_after], System.monotonic_time(:millisecond))
+        |> key({:ctrl, ?c})
+
+      assert_received :geex_quit
+    end
+
+    # mod-verify's review: three quits handled back to back, before any :repaint.
+    test "three quits from one read leave the write going, and the warning to be seen",
+         %{dir: dir} do
+      {state, _buf, path} = open(dir, "a.txt", "a\n")
+      {state, _pid, flag} = fake_save(state, :one, [path])
+      :ok = SaveFlag.write?(flag)
+
+      state = state |> key({:ctrl, ?x}) |> key({:ctrl, ?x}) |> key({:ctrl, ?x})
+      Process.cancel_timer(state.saving.leave_by.timer)
+      assert state.saving.quit == :now
+      refute_received :geex_quit
+    end
+
+    # mod-verify's review: a quit from the command line or the settings view, which draw over the
+    # status line, while the first quit waits.
+    test "the second quit closes the command line or the settings view: the warning shows",
+         %{dir: dir} do
+      {state, _buf, path} = open(dir, "a.txt", "a\n")
+
+      for open_it <- [{:alt, ?m}, {:alt, ?y}] do
+        {state, _pid, flag} = fake_save(state, :one, [path])
+        :ok = SaveFlag.write?(flag)
+        state = state |> key({:ctrl, ?x}) |> key(open_it) |> key({:ctrl, ?x})
+        Process.cancel_timer(state.saving.leave_by.timer)
+        assert state.saving.quit == :now
+        assert state.minibuffer.mode == :inactive
+        assert state.settings == nil
+        assert status_row(state) =~ "leaving once written (cut short after 1 s)"
+      end
+    end
+
+    # mod-verify's reviews: the status line is clipped at its edge, a real save is dirty, and a
+    # long name, `[+]` and behind left the first warning cut on 80 columns. While a quit waits,
+    # the warning leads the line.
+    test "on 80 columns, a long nested name with [+] and behind: each warning shows whole",
+         %{dir: dir} do
+      name = "a_rather_long_file_name_x.ex"
+      assert String.length(name) == 28
+      File.mkdir_p!(Path.join(dir, "lib/geex/loop"))
+      {state, buf, path} = open(dir, "lib/geex/loop/" <> name, "a\n")
+      insert_z(buf)
+      :behind = Buffer.disk_changed(buf, "new\n")
+      {state, _pid, flag} = fake_save(%{state | w: 80}, :one, [path])
+      :ok = SaveFlag.write?(flag)
+      assert status_row(state) =~ " #{name} [+]  behind disk (Alt+D)"
+
+      waiting = key(state, {:ctrl, ?x})
+
+      assert status_row(waiting) =~
+               ~r/^ quits once saved \(quit again cuts the save short; Esc: stay\): saving a_r/
+
+      now = key(waiting, {:ctrl, ?x})
+      Process.cancel_timer(now.saving.leave_by.timer)
+      assert status_row(now) =~ ~r/^ leaving once written \(cut short after 1 s\): writing a_r/
+
+      signalled = handle(waiting, :geex_shutdown)
+      Process.cancel_timer(signalled.saving.leave_by.timer)
+
+      assert status_row(signalled) =~
+               ~r/^ leaving once saved \(quit again cuts it short\): saving/
+    end
+
+    # mod-verify's review: while a quit waits the warning leads the line and "behind disk" isn't
+    # drawn, so a press where it would be is on the warning, and does nothing.
+    test "a press on the warning, where behind disk would be, doesn't fast-forward", %{dir: dir} do
+      {state, buf, path} = open(dir, "a.txt", "a\n")
+      File.write!(path, "new\n")
+      :behind = Buffer.disk_changed(buf, "new\n")
+      {state, _pid, flag} = fake_save(state, :one, [path])
+      :ok = SaveFlag.write?(flag)
+
+      state = key(state, {:ctrl, ?x})
+      refute status_row(state) =~ "behind disk"
+      press = %{action: :press, button: :left, x: 9, y: state.h - 1, mods: []}
+      state = key(%{state | click: nil}, {:mouse, press})
+      assert Buffer.status(buf).behind
+      assert state.saving.quit == :waiting
+    end
+
+    test "save-all's warning names the file being written", %{dir: dir} do
+      {state, _buf, a} = open(dir, "a.txt", "a\n")
+      b = Path.join(dir, "b.txt")
+      {state, pid, flag} = fake_save(state, :all, [a, b])
+      :ok = SaveFlag.write?(flag)
+      state = state |> key({:ctrl, ?x}) |> key({:ctrl, ?x})
+      Process.cancel_timer(state.saving.leave_by.timer)
+      assert status_row(state) =~ "writing a.txt…"
+
+      state = handle(state, {:geex_saved_file, pid, a, {:ok, a}})
+      assert status_row(state) =~ "writing b.txt…"
+    end
+
+    # 2026-11-17, Logan: closing the window shows no warning, so a save it would cut isn't cancelled.
+    test "the terminal closing, SIGTERM or SIGHUP leaves once the save is done, up to 30 s",
+         %{dir: dir} do
+      {state, _buf, path} = open(dir, "a.txt", "a\n")
+
+      for msg <- [{:geex_io, :eof}, :geex_shutdown], writing? <- [false, true] do
+        # Whether or not its write has begun, the save runs on.
+        {state, pid, flag} = fake_save(state, :one, [path])
+        if writing?, do: :ok = SaveFlag.write?(flag)
+        waiting = handle(state, msg)
+        Process.cancel_timer(waiting.saving.leave_by.timer)
+        assert waiting.saving.quit == :shutdown
+        refute SaveFlag.cancelled?(flag)
+        refute waiting.saving.cancel
+
+        assert status_row(waiting) =~
+                 "leaving once saved (quit again cuts it short): saving a.txt…"
+
+        refute_received :geex_quit
+
+        _ =
+          waiting
+          |> handle({:geex_saved_file, pid, path, {:ok, path}})
+          |> handle({:geex_saved, pid})
+
+        assert_received :geex_quit
+      end
+    end
+
+    test "its wait is 30 s; nothing saving, it leaves at once", %{dir: dir} do
+      {state, _buf, path} = open(dir, "a.txt", "a\n")
+      _ = handle(state, :geex_shutdown)
+      assert_received :geex_quit
+
+      {state, _pid, _flag} = fake_save(state, :one, [path])
+      waiting = handle(state, :geex_shutdown)
+      assert_in_delta Process.read_timer(waiting.saving.leave_by.timer), 30_000, 200
+      Process.cancel_timer(waiting.saving.leave_by.timer)
+    end
+
+    test "a save-all goes on to its last file", %{dir: dir} do
+      {state, _buf, a} = open(dir, "a.txt", "a\n")
+      b = Path.join(dir, "b.txt")
+      {state, pid, flag} = fake_save(state, :all, [a, b])
+      :ok = SaveFlag.write?(flag)
+      waiting = handle(state, :geex_shutdown)
+      Process.cancel_timer(waiting.saving.leave_by.timer)
+      assert SaveFlag.done(flag) == :go
+
+      waiting = handle(waiting, {:geex_saved_file, pid, a, {:ok, a}})
+      assert status_row(waiting) =~ "saving b.txt…"
+      refute_received :geex_quit
+
+      _ = waiting |> handle({:geex_saved_file, pid, b, {:ok, b}}) |> handle({:geex_saved, pid})
+      assert_received :geex_quit
+    end
+
+    test "a cancel-save made while it writes stands: save-all stops after this file", %{dir: dir} do
+      {state, _buf, a} = open(dir, "a.txt", "a\n")
+      {state, _pid, flag} = fake_save(state, :all, [a, Path.join(dir, "b.txt")])
+      :ok = SaveFlag.write?(flag)
+      waiting = state |> run("cancel-save") |> handle(:geex_shutdown)
+      Process.cancel_timer(waiting.saving.leave_by.timer)
+      assert waiting.saving.cancel
+      assert SaveFlag.done(flag) == :stop
+    end
+
+    test "a shutdown's wait for a write that hangs ends: it leaves anyway", %{dir: dir} do
+      {state, _buf, path} = open(dir, "a.txt", "a\n")
+      {state, _pid, flag} = fake_save(state, :one, [path])
+      :ok = SaveFlag.write?(flag)
+      waiting = handle(state, :geex_shutdown)
+      %{token: token, timer: timer} = waiting.saving.leave_by
+      Process.cancel_timer(timer)
+      refute_received :geex_quit
+
+      # A second signal keeps the first deadline. A signal after a second quit, which cut the save
+      # short, changes nothing: its 1 s stands.
+      assert handle(waiting, :geex_shutdown).saving.leave_by == waiting.saving.leave_by
+      quit_twice = state |> key({:ctrl, ?x}) |> key({:ctrl, ?x})
+      Process.cancel_timer(quit_twice.saving.leave_by.timer)
+      assert handle(quit_twice, :geex_shutdown) == quit_twice
+
+      _ = handle(waiting, {:geex_leave_anyway, token})
+      assert_received :geex_quit
+
+      # Once the save is over, or from an earlier save, the late word is nothing.
+      _ = handle(%{waiting | saving: nil}, {:geex_leave_anyway, token})
+      _ = handle(waiting, {:geex_leave_anyway, make_ref()})
+      refute_received :geex_quit
+    end
+
+    # mod-verify's review: SIGTERM with the terminal still there, the command line or the settings
+    # view open.
+    test "a signal closes the command line or the settings view: its warning shows", %{dir: dir} do
+      {state, _buf, path} = open(dir, "a.txt", "a\n")
+
+      for open_it <- [{:alt, ?m}, {:alt, ?y}] do
+        {state, _pid, flag} = fake_save(state, :one, [path])
+        :ok = SaveFlag.write?(flag)
+        waiting = state |> key(open_it) |> handle(:geex_shutdown)
+        Process.cancel_timer(waiting.saving.leave_by.timer)
+        assert waiting.minibuffer.mode == :inactive
+        assert waiting.settings == nil
+        assert status_row(waiting) =~ "leaving once saved (quit again cuts it short)"
+      end
+    end
+
+    test "after a signal, a quit within 1 s doesn't cut; one after does", %{dir: dir} do
+      {state, _buf, path} = open(dir, "a.txt", "a\n")
+      {state, _pid, flag} = fake_save(state, :one, [path])
+      :ok = SaveFlag.write?(flag)
+      waiting = handle(state, :geex_shutdown)
+      Process.cancel_timer(waiting.saving.leave_by.timer)
+
+      waiting = key(waiting, {:ctrl, ?x})
+      assert waiting.saving.quit == :shutdown
+      refute_received :geex_quit
+
+      _ =
+        waiting
+        |> put_in([:saving, :cut_after], System.monotonic_time(:millisecond))
+        |> key({:ctrl, ?x})
+
+      assert_received :geex_quit
+    end
+
+    # A save whose write hasn't begun, cut short by a quit or by the deadline, begins no write
+    # while the VM stops.
+    test "after a signal, a quit or the deadline cancels a save not yet writing", %{dir: dir} do
+      {state, _buf, path} = open(dir, "a.txt", "a\n")
+
+      for cut <- [:quit, :deadline] do
+        {state, pid, flag} = fake_save(state, :one, [path])
+        waiting = handle(state, :geex_shutdown)
+        %{token: token, timer: timer} = waiting.saving.leave_by
+        Process.cancel_timer(timer)
+        refute SaveFlag.cancelled?(flag)
+
+        _ =
+          case cut do
+            :quit ->
+              waiting
+              |> put_in([:saving, :cut_after], System.monotonic_time(:millisecond))
+              |> key({:ctrl, ?x})
+
+            :deadline ->
+              handle(waiting, {:geex_leave_anyway, token})
+          end
+
+        assert_received :geex_quit
+        assert SaveFlag.cancelled?(flag)
+        assert SaveFlag.write?(flag) == :cancelled
+        assert Process.alive?(pid)
+      end
+    end
+
+    # mod-verify's review: Esc called a signal off, and its timer then cut a later wait short.
+    test "Esc doesn't call a shutdown off", %{dir: dir} do
+      {state, _buf, path} = open(dir, "a.txt", "a\n")
+      {state, pid, flag} = fake_save(state, :one, [path])
+      :ok = SaveFlag.write?(flag)
+      waiting = handle(state, :geex_shutdown)
+      Process.cancel_timer(waiting.saving.leave_by.timer)
+
+      still = key(waiting, {:key, :esc})
+      assert still.saving.quit == :shutdown
+
+      _ =
+        still |> handle({:geex_saved_file, pid, path, {:ok, path}}) |> handle({:geex_saved, pid})
+
+      assert_received :geex_quit
     end
 
     test "a real save, quit twice: it leaves, and the file is never half-written", %{dir: dir} do

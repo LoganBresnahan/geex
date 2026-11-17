@@ -22,8 +22,9 @@ defmodule Geex do
       Ctrl-C doesn't quit and `sigint` is absent from `os:set_signal/2`). Ctrl-C itself
       never sends SIGINT here: `Geex.TerminalIO` turns the tty's signal keys off, so it
       arrives as a key ([BUG-3](../doc/bugs.md)). With the menu off, a SIGINT from outside
-      ends the VM instead of the menu taking the terminal. (`SIGTERM` triggers a graceful
-      shutdown that restores the terminal, so `kill` is safe.)
+      ends the VM instead of the menu taking the terminal. (`SIGTERM` and `SIGHUP` leave in
+      order through `Geex.CLI.Signals`, the terminal restored and a write under way let finish,
+      so `kill` is safe.)
 
   Use `--no-start` so logging is redirected to a file *before* the app (and its
   terminal) come up — otherwise startup logs (e.g. the file-watcher's warnings)
@@ -41,6 +42,8 @@ defmodule Geex do
   def run(path \\ nil) do
     redirect_logs_to_file()
     {:ok, _} = Application.ensure_all_started(:geex)
+    # SIGTERM and SIGHUP leave as the installed binary's do, a write under way let finish.
+    _ = Geex.CLI.Signals.install()
     open_paths(path)
     Process.sleep(:infinity)
   end
