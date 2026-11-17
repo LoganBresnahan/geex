@@ -500,12 +500,15 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      unsaved; Ctrl-O again says "still saving"; "saving a.ts…" after 150 ms; `cancel-save` stops a
      save before its write begins and never cuts one short (`Geex.Loop.SaveFlag`); a rename, delete
      or close is refused while a save writes (`Buffer.hold/1`); a quit waits for a save (quit
-     again: leave now; Esc: stay) and names unsaved edits first ("kept for next time"; quit again to
-     leave). Written in place, as before. Open for the maintainer: a SIGTERM during a write can cut
-     it, and a hung write leaves quit waiting (ADR-0035's amendment). At 10 MB a save's reads of the buffer wait
-     at most ~27 ms with nothing to trim; a first save that trims every line still holds the buffer
-     ~150 ms twice (applying and recording the trim, as any edit). Measured before: a clean merge
-     and save 93 ms at 1 MB, 759 ms at 10 MB; on 2026-11-13 the loop's save 418 ms at 10 MB, a
+     again cuts the save short; Esc: stay) and names unsaved edits first ("kept for next time";
+     quit again to leave). Written in place, as before. Shutdown during a save (2026-11-16, the
+     maintainer's answers, ADR-0035's 2026-11-16 amendment): the first quit warns and the second
+     leaves, a write under way given 1 s to finish and then cut short; SIGTERM, SIGHUP (now
+     handled, BUG-20) and the terminal closing let a save finish for up to 30 s, then leave in
+     order. At 10 MB a save's reads of the buffer wait at most
+     ~27 ms with nothing to trim; a first save that trims every line still holds the buffer ~150 ms
+     twice (applying and recording the trim, as any edit). Measured before: a clean merge and save
+     93 ms at 1 MB, 759 ms at 10 MB; on 2026-11-13 the loop's save 418 ms at 10 MB, a
      behind save that merges 801 ms; a first trimming save 3,561 ms (BUG-18, *fixed 2026-11-15*:
      300 ms).
    - **Fast-forward** (`Alt+D`) still runs in the loop: 29 ms at 1 MB, 445 ms at 10 MB. It takes
@@ -894,12 +897,16 @@ of a long line, found measuring BUG-12) are **FIXED** (2026-11-12, on the `long-
 an MCP `edit` command crashed the loop) and BUG-15 (an invalid UTF-8 byte on screen could crash a
 paint), both older than that branch and found by mod-verify's review of it, are **FIXED**
 (2026-11-12, on the `crash-fixes` branch). BUG-16 (the markdown preview can't render a file with
-a byte that isn't UTF-8; it says "render failed", gracefully) is **open**. BUG-17 (a long line with
+a byte that isn't UTF-8; it says "render failed", gracefully) is **FIXED** (2026-11-16, on the
+`save-followups` branch). BUG-17 (a long line with
 an emoji or © before an invalid byte froze every key on it; in 0.6.0) is **FIXED** (2026-11-13,
 on the `search` branch), released in 0.7.0. BUG-18 (a first save trimming every line's trailing
 whitespace stalled for seconds on a big file; found measuring item 9) is **FIXED** (2026-11-15, on
 the `bug-18` branch). BUG-19 (a rename into a directory that isn't there reports success and
-leaves the file; found writing a test on `save-off-loop`) is **open**.
+leaves the file; found writing a test on `save-off-loop`) and BUG-20 (closing the terminal ended
+geex at once, and could cut a save's write) are **FIXED** (2026-11-16, on the `save-followups`
+branch). BUG-21 (a disk that hangs holds geex's stop: 22 s from the installed binary, forever under
+`mix run`; found checking a hung write live, 2026-11-16) is **OPEN**.
 
 ---
 

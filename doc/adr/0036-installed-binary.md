@@ -2,7 +2,8 @@
 
 - **Status:** Accepted 2026-10-16. The maintainer asked for it ("go ahead and implement the
   deploy with burrito so we can start building locally"). Built by the coordinator session.
-  Amended 2026-10-18: the release is trimmed (§5). **Superseded in part by
+  Amended 2026-10-18: the release is trimmed (§5). Amended 2026-11-16: SIGHUP takes the orderly
+  stop, and a signal lets a write under way finish (below). **Superseded in part by
   [ADR-0041](0041-release-without-burrito.md) (2026-10-19):** Burrito is gone; §1's wrap, §4's
   deploy and §6's fork are replaced by a tarball, a launcher and install.sh. §2, §3 and §5 stand.
 - **Date:** 2026-10-16
@@ -286,3 +287,17 @@ patches. It is fork-only, never sent upstream. Its `FORK.md` is the contract.
 - Burrito 1.5.0: `lib/builder/builder.ex` (phases), `src/erlang_launcher.zig` (the launch
   line), `lib/steps/patch/copy_erts.ex` (why `custom_erts` isn't used).
 - [testing.md](../testing.md), 2026-10-16 (the live checks of the binary).
+
+## Amendment (2026-11-16): SIGHUP, and a write under way at a signal
+
+- **SIGHUP takes §3's path too.** Closing the terminal window sends it, and its OS default ended
+  the VM at once, every `terminate/2` skipped (BUG-20). `Geex.CLI.Signals.install/0` asks for it
+  (`:os.set_signal(:sighup, :handle)`) once its own handler is in, since OTP's would ignore it.
+- **A signal goes through the loop first.** SIGTERM and SIGHUP call `Geex.Loop.shutdown/0`, so a
+  save under way finishes (for up to 30 s) before `Geex.stop/0`; with no loop running it
+  is `Geex.stop/0` at once. Should the loop not get that far, geex stops anyway after 35 s:
+  `Geex.CLI` is sent `:geex_quit`, or under `mix run` `System.stop/0` is called, as OTP's handler
+  would have.
+  [ADR-0035](0035-the-loop-never-waits.md)'s 2026-11-16 amendment.
+- **`Geex.run/1` installs the handler too**, so `mix run` behaves as the binary does. OTP's
+  `init:stop/0` for SIGTERM worked there; it is the same orderly stop either way.

@@ -166,7 +166,9 @@ defmodule Geex.TerminalIO do
       bg_asked_until: if(ask_bg?, do: now_ms() + @bg_wait_ms),
       bg_answer: nil,
       subscribers: MapSet.new(),
-      monitors: %{}
+      monitors: %{},
+      # The terminal is gone (end of input): each new subscriber is told.
+      eof: false
     }
 
     {:ok, state}
@@ -185,8 +187,9 @@ defmodule Geex.TerminalIO do
           monitors: Map.put(state.monitors, ref, pid)
       }
 
-      # The background may have answered before this subscriber came.
+      # The background may have answered before this subscriber came, or the terminal gone.
       if state.bg_answer, do: send(pid, {:geex_io, state.bg_answer})
+      if state.eof, do: send(pid, {:geex_io, :eof})
       {:noreply, state}
     end
   end
@@ -269,9 +272,13 @@ defmodule Geex.TerminalIO do
 
   def handle_info({:flush_esc, _stale}, state), do: {:noreply, state}
 
+  # End of input: the terminal is gone. Said to each subscriber, and to any that comes later (a
+  # restarted loop), and this process stays until the loop stops the VM. Stopping here, as a
+  # permanent child, it was restarted into the same end of input until its supervisor gave up and
+  # took the tree down, the loop and the save it was waiting for with it (2026-11-16).
   def handle_info({ref, :eof}, %{reader_ref: ref} = state) do
     publish({:geex_io, :eof}, state)
-    {:stop, :normal, state}
+    {:noreply, %{state | eof: true}}
   end
 
   # `:prim_tty`'s reader process forwards terminal signals to us as

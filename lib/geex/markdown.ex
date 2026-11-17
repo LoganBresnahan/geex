@@ -98,10 +98,11 @@ defmodule Geex.Markdown do
 
   @typedoc """
   One read of a document, what the preview keeps between layouts (ADR-0043 §2, §3): the text
-  (each `\r\n` turned to `\n`), its tree, each fenced block's highlight spans by `{code, info
-  word}` (capture names, not colours, §5) and, built from them once, the captures covering each
-  byte (`Geex.Markdown.Layout.captures/1`), the grammars its code blocks name (whether installed
-  or not: installing one re-renders), and the parse's stats.
+  (each `\r\n` turned to `\n`, each byte that isn't UTF-8 to U+FFFD), its tree, each fenced
+  block's highlight spans by `{code, info word}` (capture names, not colours, §5) and, built from
+  them once, the captures covering each byte (`Geex.Markdown.Layout.captures/1`), the grammars
+  its code blocks name (whether installed or not: installing one re-renders), and the parse's
+  stats.
   """
   @type parsed :: %{
           text: String.t(),
@@ -113,12 +114,14 @@ defmodule Geex.Markdown do
         }
 
   @doc """
-  Parse `text` with the render handles: line endings normalised, the tree built, and each
-  fenced block highlighted once by the installed grammar for its language.
+  Parse `text` with the render handles: line endings normalised, each byte that isn't UTF-8
+  turned to U+FFFD (the grammars take only UTF-8, BUG-16; no newline moves, so rows still name
+  their source lines), the tree built, and each fenced block highlighted once by the installed
+  grammar for its language.
   """
   @spec parse(String.t(), Parse.grammars()) :: {:ok, parsed()} | {:error, term()}
   def parse(text, grammars) when is_binary(text) do
-    text = String.replace(text, "\r\n", "\n")
+    text = text |> String.replace("\r\n", "\n") |> String.replace_invalid()
 
     with {:ok, tree, stats} <- Parse.parse(text, grammars) do
       blocks = Geex.Markdown.Layout.code_blocks(tree, text)

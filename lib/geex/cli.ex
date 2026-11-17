@@ -10,10 +10,10 @@ defmodule Geex.CLI do
   arguments.
 
   Because the application never finishes starting, `System.stop/0` can't stop it in order: the
-  terminal would be left on the alternate screen. So quitting (`Geex.stop/0`, and SIGTERM through
-  `Geex.CLI.Signals`) sends this process `:geex_quit`. It stops the supervision tree, which runs
-  each child's `terminate/2`, and then halts. `--version`, `--help`, `install`, `highlight`,
-  `self` and bad options halt directly.
+  terminal would be left on the alternate screen. So quitting (`Geex.stop/0`, and SIGTERM and
+  SIGHUP through `Geex.CLI.Signals`) sends this process `:geex_quit`. It stops the supervision
+  tree, which runs each child's `terminate/2`, and then halts. `--version`, `--help`, `install`,
+  `highlight`, `self` and bad options halt directly.
 
       geex                 the current directory: its tree and a scratch buffer
       geex a.txt sub/b.ex  open both, show the first

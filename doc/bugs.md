@@ -7,20 +7,95 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-19 — A rename into a directory that isn't there reports success and leaves the file
+## BUG-21 — A disk that hangs holds geex's stop: 22 s from the installed binary, forever under `mix run`  🔴 OPEN
 
-- **Status:** open, found 2026-11-15 writing a test for `save-off-loop` (mod-verify's review of it).
-  Older than that branch: main behaves the same.
+- **Status:** **OPEN**, found 2026-11-16 on the branch `save-followups`, checking live a write that
+  hangs (the maintainer's "if they exit again it forces the exit"). Any stop while a file read
+  hangs, in **0.7.0** and before; `save-followups` doesn't cause it (the earlier build of the
+  branch in the scratch install behaves the same).
+- **Symptom:** a file whose read never returns, a FIFO put in place of the open file standing in
+  for a stalled network disk; an edit, Ctrl-O, then two quits. The save, stuck in its first read,
+  is cancelled and the loop leaves at once, as designed, but the VM doesn't stop. From a release
+  installed in a scratch directory: the last session's keep times out at 2 s, the tree's stop runs
+  until 17 s (the terminal restored there), the VM halts at 22 s, and the ledger lock and the
+  discovery file are left (both swept at the next start). Under `mix run`: the terminal restored
+  at 17 s, and the VM still running a minute later (SIGUSR1 ended it).
+- **Verified cause:** Elixir's `File.read/1`, `File.write/2`, `File.ls/1` and the like (not
+  `:raw`) go through OTP's one file server, `file_server_2` (`file:read_file/1` →
+  `check_and_call/2`), which does the read itself, in a dirty I/O NIF. One read that never returns
+  (here `Reconcile.fast_forward/1`'s, the first thing a save does, and the watcher's after the
+  file changed) holds that process, and every other such call in the VM queues behind it, with no
+  time limit: the last session's write, the ledger's close and lock, the discovery file's removal,
+  so each child of geex's tree that makes one is killed at its 5 s shutdown timeout. The crash dump
+  shows the geex application gone and `file_server_2` `DIRTY_RUNNING` in `prim_file:read_file/1`,
+  called from `file_server:handle_call/3`. Under `mix run`, `System.stop/0` (`init:stop/0`) then
+  stops Mix's application, whose stop callback queues behind the read too (`Mix.stop/1` →
+  `Mix.Local.remove_archives/0` → `File.ls/1`); neither its application master nor the
+  application controller has a time limit (kernel's `shutdown_timeout` defaults to infinity), so
+  init never gets as far as kernel (mod-verify's re-review, with a probe and no geex at all). In a
+  plain `elixir` VM the same stuck read lets `System.stop/0` finish in 3.9 s: kernel's supervisor
+  gives `file_server_2` its 2 s shutdown, then kills it. The binary's `Geex.CLI` stops geex's
+  tree and then calls `System.halt/0`, so it does get out, after its children's timeouts.
+- **Recommended fix:** bound the stop. `Geex.stop/0` arms a watchdog, never under test, that
+  restores the terminal (`Geex.TerminalIO` makes no `File` call) and halts if the VM is still up
+  some seconds after the stop was asked (5?). It needs a group leader other than geex's: an
+  application's master kills every process whose group leader it is when the application stops.
+  For `mix run` alone, `-shutdown_time 10000` in the launch flags also bounds `init:stop/0` (init
+  kills what is left and halts). And maybe the save's own read and write `:raw`: those don't go
+  through the file server, so one file that hangs wouldn't stall every other `File` call in geex.
+- **Ruled out:** the save's write: the read before it hung first, the gate never reached, so the
+  second quit cancelled the save and left at once. The loop: it painted and took keys throughout.
+  A process that can't be killed (my first reading): `file_server_2` killed mid-read goes down at
+  once, only its native call running on (mod-verify's probe; not a fix: kernel's supervisor is
+  one_for_all with no restarts, so it would take kernel down).
+
+---
+
+## BUG-20 — Closing the terminal ended geex at once, and could cut a save's write  ✅ FIXED (2026-11-16)
+
+- **Status:** **FIXED** 2026-11-16 on the branch `save-followups`, found answering the
+  maintainer's question about shutdown during a save. The SIGHUP part is in **0.7.0** and every
+  release before it; the tree coming down mid-wait was in `save-off-loop` (c397a70, local main,
+  unreleased) once SIGHUP was handled.
+- **Symptom:** closing the terminal window running geex (SIGHUP) ended the VM on the spot: the
+  ledger lock and the attestation discovery file stayed (both swept at the next start), the last
+  session was as the loop last kept it (at most 2 s old), and a write under way could be cut,
+  leaving the file part-written. Checked with the installed 0.7.0 in tmux: `kill-server` left
+  both files and no stop lines in the log.
+- **Verified causes:** (1) SIGHUP's OS default terminates the process, and nothing asked for it
+  (`elixir -e` with a `kill -HUP` of itself exits 129). (2) With SIGHUP handled, `Geex.TerminalIO`
+  stopped `:normal` at the end of input; a permanent child, it was restarted into the same end of
+  input until its supervisor gave up ("Application geex exited: shutdown"), taking the loop and the
+  save it was waiting for with it. Under `mix run` five of five closes during a 10 MB save left the
+  VM running with no application: `init` was never asked to stop (checked over distribution).
+- **Fix:** `Geex.CLI.Signals.install/0` handles SIGHUP (`:os.set_signal/2`, once its handler is
+  in) and `Geex.run/1` installs it too; SIGTERM and SIGHUP go to `Geex.Loop.shutdown/0`, the same
+  leaving as the end of input: a save under way finishes, for up to 30 s, then the orderly stop.
+  `Geex.TerminalIO` says `:eof` and stays (a later subscriber is told too). ADR-0035's and
+  ADR-0036's 2026-11-16 amendments. Checked live: the terminal closed 0–0.6 s into a first
+  trimming save of a 9.5 MB file left it whole every time, geex gone within 1.5 s, no lock or
+  discovery file, under `mix run` and from a release installed in a scratch directory.
+
+---
+
+## BUG-19 — A rename into a directory that isn't there reported success and left the file  ✅ FIXED (2026-11-16)
+
+- **Status:** **FIXED** 2026-11-16 on the branch `save-followups`. Found 2026-11-15 writing a test
+  for `save-off-loop` (mod-verify's review of it). In **0.7.0** and before.
 - **Symptom:** with `a.txt` open, `Session.rename_file("a.txt", "no/such/b.txt")` (the `rename`
-  command, the tree's `r`, MCP's `rename_file`) answers `{:ok, …}`: the buffer is re-keyed to
-  `no/such/b.txt` in memory while the file stays at `a.txt`. The next save tries to write into the
-  missing directory and fails.
+  command, the tree's `r`, MCP's `rename_file`) answered `{:ok, …}`: the buffer was re-keyed to
+  `no/such/b.txt` in memory while the file stayed at `a.txt`. The next save tried to write into the
+  missing directory and failed.
 - **Verified cause:** `File.rename/2` answers `:enoent` for a missing destination directory as it
-  does for a missing source, and `Session.rename_file/2` (`rename_held/4` on the branch) reads every
-  `:enoent` as "a never-saved buffer has no file yet" (ADR-0019), re-keying an open buffer.
-- **Recommended fix:** take that branch only when the source is missing (`not File.exists?(from)`);
-  otherwise answer the error (or create the directory, if the maintainer wants a rename to make
-  one). A test: renaming an open, saved file into a missing directory is refused, nothing moved.
+  does for a missing source, and `Session.rename_file/2` read every `:enoent` as "a never-saved
+  buffer has no file yet" (ADR-0019), re-keying an open buffer.
+- **Fix:** `Session.rename_file/2` refuses a destination whose directory isn't there, before
+  touching anything: `{:error, :no_directory}` (a rename makes no directory; `new` still offers to
+  make its parents). The TUI says "not renamed: src/ doesn't exist" (or "lib/a.ex/ isn't a
+  directory"); MCP's `rename_file` answers the error as it answers any other. The never-saved
+  branch now also checks that the source really is missing (`File.lstat/1`), so a directory that
+  vanishes between the check and the rename is an error too. Tests: `session_test.exs` (an open
+  file, a never-saved buffer, a file as the directory), `file_ops_test.exs` (the words).
 - **Ruled out:** nothing else re-keys on a failed rename.
 
 ---
@@ -76,20 +151,21 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-16 — The markdown preview can't render a file holding a byte that isn't UTF-8
+## BUG-16 — The markdown preview couldn't render a file holding a byte that isn't UTF-8  ✅ FIXED (2026-11-16)
 
-- **Status:** open, found 2026-11-12 by mod-verify's review of `crash-fixes` (216e97b). Older than
-  that branch: main behaves the same.
+- **Status:** **FIXED** 2026-11-16 on the branch `save-followups`. Found 2026-11-12 by mod-verify's
+  review of `crash-fixes` (216e97b). In **0.6.0** and **0.7.0** (the preview, ADR-0043).
 - **Symptom:** opening the preview (`Alt+P`) of a Markdown file with a Latin-1 byte or any other
-  byte that isn't UTF-8 shows "render failed (see the log)" instead of the rendered file. The
-  editor itself draws and edits the file (BUG-15); only the preview gives up, gracefully.
+  byte that isn't UTF-8 showed "render failed (see the log)" instead of the rendered file. The
+  editor itself draws and edits the file (BUG-15); only the preview gave up, gracefully.
 - **Verified cause:** `Geex.Markdown.Parse` hands the file's text to `TreeSitterWasm.highlight/2`
-  (`lib/geex/markdown/parse.ex`), which raises on text that isn't UTF-8 before any of geex's own
-  layout runs; the preview process catches it and reports the render failed.
-- **Recommended fix:** give the parser the text with each invalid byte replaced by U+FFFD
-  (`String.replace_invalid/1`), mapping byte offsets back where they matter (the preview is
-  read-only and lays out its own rows, so a replacement char per bad byte only shifts offsets
-  after it by two bytes each). Or leave it: a Markdown file that isn't UTF-8 is rare.
+  (`lib/geex/markdown/parse.ex`), which raises (`ArgumentError`) on text that isn't UTF-8 before
+  any of geex's own layout runs; the preview process catches it and reports the render failed.
+- **Fix:** `Geex.Markdown.parse/2` turns each invalid byte into U+FFFD
+  (`String.replace_invalid/1`) where it already turns `\r\n` into `\n`, so the tree and the layout
+  both index the same text. No newline moves, so each row still names its source line (`Place`).
+  Test: `layout_test.exs`, a heading, bold text, a list item and a code block each holding the
+  byte render as the same file with `?` in its place, U+FFFD shown, the same source lines.
 
 ---
 

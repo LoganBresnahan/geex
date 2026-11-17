@@ -97,14 +97,47 @@ defmodule Geex.CLITest do
       assert_receive :geex_quit
     end
 
-    test "SIGTERM takes the same quit" do
-      assert {:ok, nil} = CLI.Signals.handle_event(:sigterm, nil)
-      assert_receive :geex_quit
+    test "SIGTERM and SIGHUP take the same quit, with no editor loop running" do
+      refute Process.whereis(Geex.Loop)
+
+      for signal <- [:sigterm, :sighup] do
+        assert {:ok, nil} = CLI.Signals.handle_event(signal, nil)
+        assert_receive :geex_quit
+      end
+    end
+
+    # 2026-11-16: so a write under way finishes (`Geex.Loop.shutdown/0`); SIGHUP, the terminal
+    # closing, ended the VM at once.
+    test "with the editor loop running, SIGTERM and SIGHUP go through it" do
+      # This process stands in for Geex.CLI; one beside it for the loop.
+      me = self()
+      loop = spawn_link(fn -> forward(me) end)
+      Process.register(loop, Geex.Loop)
+      on_exit(fn -> Process.exit(loop, :kill) end)
+
+      for signal <- [:sigterm, :sighup] do
+        assert {:ok, nil} = CLI.Signals.handle_event(signal, nil)
+        assert_receive {:loop, :geex_shutdown}
+        refute_received :geex_quit
+      end
     end
 
     test "other signals OTP's handler ignores are ignored" do
-      assert {:ok, nil} = CLI.Signals.handle_event(:sighup, nil)
+      assert {:ok, nil} = CLI.Signals.handle_event(:sigusr2, nil)
       refute_receive :geex_quit, 50
     end
+
+    # mod-verify's mutant: a backstop sooner than the loop's wait cuts a write it would let finish.
+    test "the backstop comes after the loop's wait for a write and the last session's keep" do
+      assert CLI.Signals.stop_anyway_ms() > Geex.Loop.shutdown_wait_ms() + 2_000
+    end
+  end
+
+  defp forward(to) do
+    receive do
+      msg -> send(to, {:loop, msg})
+    end
+
+    forward(to)
   end
 end

@@ -7066,3 +7066,149 @@ mutant). 1766 tests + 212 doctests + 62 properties, green twice; `mix compile --
 Found, older than this branch and not fixed: renaming into a directory that isn't there re-keys
 the buffer in memory and reports success, the file left where it was (`Session.rename_file`
 reads `:enoent` as a never-saved buffer).
+
+### 2026-11-16 — BUG-19 (a rename into a missing directory) and BUG-16 (the preview of a file that isn't UTF-8) fixed
+
+On `save-followups`, after `save-off-loop` was merged to local main. BUG-19:
+`Session.rename_file/2` refuses a destination whose directory isn't there
+(`{:error, :no_directory}`), before touching anything; the TUI says "not renamed: src/ doesn't
+exist" (or "lib/a.ex/ isn't a directory"). BUG-16: `Geex.Markdown.parse/2` turns each byte that
+isn't UTF-8 into U+FFFD before the grammars see the text, so the preview renders it.
+
+Tests: `session_test.exs` and `file_ops_test.exs` (BUG-19: an open file, a never-saved buffer, a
+file as the directory, the words), `layout_test.exs` (BUG-16: a Latin-1 byte in a heading, bold, a
+list item and a code block, rendered as the file with `?` in its place; fails on the old parse with
+`ArgumentError`); the save-loop rename test that needed a disk failure now renames into a read-only
+directory. Not checked: the preview of a non-UTF-8 file live (the layout test renders it). Reviewed
+by mod-verify with the shutdown work on the same branch (the next entry).
+1769 tests + 212 doctests + 62 properties, green twice; `mix compile --warnings-as-errors --force`
+clean.
+
+### 2026-11-16 — Shutdown during a save; BUG-20 (closing the terminal) fixed, BUG-21 logged (ADR-0035, ADR-0036)
+
+On `save-followups`, after `save-off-loop` was merged to local main. The maintainer's answers on
+shutdown during a save: a quit may cut a write short once geex has said it will, and two quits are
+the whole of it ("if they try to exit we warn and then if they exit again it forces the exit"). So
+the first quit during a save says "quits once saved (quit again cuts the save short; Esc: stay):
+saving a.ts…"; the second leaves, cancelling a save whose write hasn't begun, or giving a write
+under way 1 s ("leaving once written (cut short after 1 s): writing a.ts…") and then cutting it.
+SIGTERM, SIGHUP and the terminal closing (`Geex.Loop.shutdown/0`) let a save finish for up to
+30 s, whether or not its write has begun (2026-11-17), then leave in order. (Built first with a third quit to cut a write, the second only letting
+it finish, and a 5 s shutdown wait; the review below is of that, and the last paragraph says what
+changed.)
+
+Found on the way (BUG-20): closing the terminal window (SIGHUP) ended the installed 0.7.0 on the
+spot, its ledger lock and discovery file left (tmux `kill-server`, scratch `XDG_*`); `kill -HUP`
+of a bare `elixir -e` exits 129. With SIGHUP handled, `Geex.TerminalIO`'s stop at the end of input
+brought the tree down while the loop waited for a save: five of five closes during a 10 MB save
+under `mix run` left the VM up with no application and `init` never asked to stop (inspected over
+distribution: the geex application gone, `init:get_status/0` answering `{:starting, :started}`,
+not stopping, the main process asleep in `Geex.run/1`). `TerminalIO` now stays after the end of
+input and tells later subscribers.
+
+Live in a tmux pty (scratch `XDG_*`, the ledger on), a 9.5 MB file of 100,000 lines each ending in
+two spaces, Ctrl-O then the terminal closed (`kill-server`) or SIGTERM after a delay:
+- Under `mix run` (the worktree's build): closed at 0, 0.15, 0.25, 0.3, 0.35 and 0.6 s, the file
+  whole and trimmed every time, geex gone 1.2–1.5 s after, no lock, no discovery file, no
+  "exited: shutdown" in the log. SIGTERM alone: exit 0, the shell's screen back. SIGHUP alone
+  (`kill -HUP`, terminal open): exit 0, nothing left. A plain close with no save: gone, nothing
+  left.
+- From a release installed in a scratch directory (`GEEX_INSTALL_DIR`, `GEEX_BIN_DIR`; the real
+  install untouched, still 0.7.0): closed at 0, 0.2 and 0.35 s and SIGTERM at 0.1 and 0.3 s, the
+  file whole and trimmed every time, geex gone 0.15–0.55 s after, no lock, no discovery file, no
+  `terminating` in the log.
+
+Tests: `save_loop_test.exs` (the second quit's 1 s timer read and its end; quits after it not
+leaving sooner; three quits back to back; Esc not calling a second quit off; the second quit and a
+signal each closing the command line and the settings view; both warnings whole on 80 columns with
+`lib/geex/loop/settings.ex [+]`; save-all's warning naming the file being written; the terminal
+closing and `:geex_shutdown`, before and during a write, the 30 s timer read; after a signal, no cut
+within 1 s; the wait ending, a stale word, a second signal keeping the first deadline, and a signal
+after a second quit keeping its 1 s; Esc not calling a shutdown off), `cli_test.exs` (SIGTERM and
+SIGHUP through a stand-in loop, or `Geex.stop/0` with none; SIGUSR2 ignored), `terminal_io_test.exs`
+(new: the end of input said, to a later subscriber too, the process staying; fails on the old
+stop). Not checked: SIGHUP on macOS; and, from the last paragraphs, a quit landing while a write
+is under way live.
+
+mod-verify's review found one required fix, with failing repros: the warning before the quit that
+cuts wasn't reliably on screen. On 80 and 100 columns, a nested file with `[+]`, the status line
+clipped it ("…then leaving (quit again: l"), and the first quit's "Esc: stay" too; a second quit
+from the command line or the settings view, which draw over the status line, armed the cut with
+the warning hidden; and three quits from one read (TerminalIO publishes a read's keys back to back,
+ahead of the `:repaint`) cut the write before any frame showed it. And a write is not
+milliseconds: ~10 ms at 1 MB, 54–129 ms at 10 MB, 187–212 ms at 30 MB, 257–281 ms for a first
+trimming save of 10 MB (its measure, the ledger on). Fixed: the warning first and the basename
+last; the second quit closes the command line and the settings view; a cut only once the warning
+has been up 1 s. Nits taken: a shutdown is its own wait, which Esc doesn't call off (Esc after a
+signal had left geex running under `mix run`, and its timer could cut a later wait short), its
+deadline carrying a token and the test reading the timer (≈5,000 ms), its warning said on the
+status line too and a cut held 1 s after it as after a second quit (the re-review's nits); the
+10 s backstop under `mix run` too (`System.stop/0`), as OTP's handler stopped a wedged loop
+there; `signals.ex` formatted and the long prose lines rewrapped; save-all's warning tested. Its
+recovery check, run here too: a write cut halfway, the buffer stopped and reopened shows the cut
+file, not dirty, and one undo brings back the text from before the save. Its repros (R1–R5) fail
+on this code, and its re-review passed (10 of 13 mutants caught; the three it left are the cut
+held 1 s after a signal, since tested, the first label's relative path, harmless with the warning
+first, and the `mix run` backstop, which a test would risk ending the run through
+`System.stop/0`). A terminal closed at 0.1 and 0.3 s into the
+9.5 MB save under `mix run` after the fix: the file whole, geex gone within 2 s, nothing left.
+
+Then the maintainer's answers to the two questions left open: the shutdown wait is 30 s, not 5 (a
+slow network disk isn't cut), and the second quit forces the exit. So the third quit is gone: the
+second leaves, a write under way given 1 s (`@cut_after_ms`, now also the deadline's timer, the
+shutdown's `leave_by` reused) and then cut short; Esc no longer calls it off; quits after it
+don't leave sooner (the burst and the held key, as before); a signal after it keeps its 1 s. A save
+not yet writing at a shutdown is still cancelled: with nobody to warn, a shutdown is the second
+quit, and the edits are in the ledger. The backstop in `Geex.CLI.Signals` is 35 s, past the wait.
+Live under `mix run` (scratch `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`; the data
+dir is mise's too, so a scratch `XDG_DATA_HOME` breaks the launch): a 70 MB file of 700 lines, one
+edit, Ctrl-O and a quit drew "quits once saved (quit again cuts the save short; Esc: stay): saving
+wide.txt…" whole on 120 columns; the second quit left within 1.3 s, the file whole both times
+(once written, once the save cancelled before its write, the file as it was). A 19.8 MB file of
+300,000 lines each ending in two spaces: the first save's trim holds the buffer, so the quits
+queued until the save was done and geex left 2.7 s after the second, the file whole and trimmed
+(the per-key cost of a big file, not this change). A million-line file: one key took over 1.5 s
+to paint, so the quits were handled before the save's write began, and it was cancelled. A FIFO in
+place of the open file, to make a read hang (a stalled network disk): the save, stuck in its first
+read, was cancelled at the second quit and the loop left at once, but the VM didn't stop: 22 s
+from the scratch release, never under `mix run`. Logged as BUG-21, open: OTP's one file server
+stuck in the read (the crash dump), every `File` call that isn't `:raw` queued behind it; under
+`mix run` Mix's own stop is one of them, and nothing on `init:stop/0`'s way has a time limit
+(mod-verify's re-review corrected my first reading, that the file server couldn't be killed). Not
+checked live: a quit landing while a write is under way (the fast-forward's read comes first and
+hangs the same way; the 1 s path is checked by tests).
+
+mod-verify's re-review of the two quits: passed, 17 of 19 mutants caught. The two it left are
+pinned now: a test waits for the real 1 s timer (a timer carrying another token passed, since
+every test sent the word itself), and `cli_test.exs` asserts the backstop comes after the wait and
+the last session's 2 s keep. The first warning, 9 columns longer and after the file's name, was
+clipped on 80 columns for ordinary names (only up to 4 characters with behind on the line), so
+while a quit waits the warning leads the status line, the name, `[+]` and behind giving way; the
+80-column test has a 28-character name, `[+]` and behind, and reads all three warnings from the
+start of the row; and a press where "behind disk" would be, on the warning then, no longer
+fast-forwards (its verify of that found it; a test). The `:now` label's "1 s" comes from
+`@cut_after_ms`; the Esc clause's comment
+names `cancel-save`, the only way left to its "stops after this file". Its view of my reading of a
+shutdown as the second quit: safe (nothing on disk touched, the edits in the ledger), but it loses
+Ctrl-O then the window closed at once, before the save's gate; its lean is to let that save run
+under the 30 s deadline. Asked of the maintainer.
+
+2026-11-17, the maintainer's answer: the warning covers a quit, but closing the window shows none,
+so a save the user asked for isn't cancelled there. A shutdown now lets the save run, whether or not
+its write has begun, a save-all to its last file, under the same 30 s deadline ("leaving once saved
+(quit again cuts it short): saving a.ts…"); a `cancel-save` already made stands; a signal after a
+second quit changes nothing (its 1 s stands). Cut short, by a quit once the warning has been up 1 s
+or by the deadline, a save not yet writing is cancelled first, so no write begins while the VM
+stops. Tests: the terminal closing and a signal letting the save run before and during its write, a
+save-all to its last file, a `cancel-save` standing, the 30 s timer read, a quit or the deadline
+after a signal cancelling a save not yet writing; four mutants (the quit and the deadline leaving
+without that cancel, a signal after a second quit taking it over, a shutdown cancelling as before)
+each fail one. Live under `mix run` (scratch state, config and runtime dirs): a 70 MB file of 700
+lines, an edit on its first line and its last line changed on disk, so the save merges first; Ctrl-O
+and the terminal closed (`kill-server`) 0.05 and 0.2 s later, the test suite running alongside: the
+file written 1.4 s after the close with both changes, geex gone 2.8–3.0 s after it, no lock or
+discovery file left; a close with no save, gone in 1.2 s. Not reviewed by mod-verify: the maintainer
+okayed the commit with the change.
+1788 tests + 212 doctests + 62 properties, green twice; `mix compile --warnings-as-errors --force`
+clean.
+

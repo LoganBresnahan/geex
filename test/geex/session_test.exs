@@ -337,6 +337,31 @@ defmodule Geex.SessionTest do
       assert {:error, :enoent} = Session.rename_file(from, to)
     end
 
+    # BUG-19: File.rename answers :enoent for a missing directory as for a missing source, and
+    # the open buffer was re-keyed while the file stayed.
+    test "refuses a rename into a directory that isn't there: nothing moved or re-keyed" do
+      from = tmp_path()
+      File.write!(from, "orig\n")
+      pid = open(from)
+      to = Path.join([System.tmp_dir!(), "geex_no_dir_#{Geex.Fixtures.uniq()}", "b.txt"])
+
+      assert Session.rename_file(from, to) == {:error, :no_directory}
+      assert File.read!(from) == "orig\n"
+      assert Geex.BufferSupervisor.whereis(Path.expand(from)) == {:ok, pid}
+      assert Geex.BufferSupervisor.whereis(Path.expand(to)) == :error
+      # Let go: a save still writes the old path.
+      assert {:ok, _} = Buffer.save(pid)
+
+      # A never-saved buffer too: no save could write the new path.
+      draft = tmp_path()
+      draft_pid = open(draft)
+      assert Session.rename_file(draft, to) == {:error, :no_directory}
+      assert Geex.BufferSupervisor.whereis(Path.expand(draft)) == {:ok, draft_pid}
+
+      # Nor into a file, as if it were a directory.
+      assert Session.rename_file(from, Path.join(from, "b.txt")) == {:error, :no_directory}
+    end
+
     test "renames a buffer opened on a not-yet-saved path (in-memory re-key, no disk file)" do
       from = tmp_path()
       to = tmp_path()

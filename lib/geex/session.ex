@@ -121,10 +121,11 @@ defmodule Geex.Session do
   sees the moved file as unchanged from that baseline and never adopts the moved-but-stale
   on-disk bytes back over those unsaved edits — no rename-specific suppression needed. Refuses
   if `from` and `to` are the same path, or if `to` already exists (on disk or as an open
-  buffer) — geex does not clobber or merge. A `from` with neither a file on disk nor an open
-  buffer surfaces `{:error, :enoent}`; but a buffer opened on a not-yet-saved path is re-keyed
-  in memory (a later `save_file` writes it to `to`). Not a recorded edit. Returns
-  `{:ok, {from_expanded, to_expanded}}`.
+  buffer) — geex does not clobber or merge — and if `to`'s directory isn't there
+  (`{:error, :no_directory}`: a rename makes no directory, BUG-19). A `from` with neither a
+  file on disk nor an open buffer surfaces `{:error, :enoent}`; but a buffer opened on a
+  not-yet-saved path is re-keyed in memory (a later `save_file` writes it to `to`). Not a
+  recorded edit. Returns `{:ok, {from_expanded, to_expanded}}`.
 
   `from` can be a directory: every buffer open under it is re-keyed to the same place under
   `to`, the same way (the TUI's tree `r`, ADR-0019's 2026-10-19 amendment).
@@ -372,6 +373,11 @@ defmodule Geex.Session do
         File.exists?(t) or match?({:ok, _}, BufferSupervisor.whereis(t)) ->
           {{:error, :destination_exists}, state}
 
+        # Into a directory that isn't there (BUG-19): `File.rename` would answer `:enoent`, as
+        # for a missing source, and an open buffer would be re-keyed to a path no save can write.
+        not File.dir?(Path.dirname(t)) ->
+          {{:error, :no_directory}, state}
+
         true ->
           rename_held(f, t, held_buffers([f | buffers_under(f)]), state)
       end
@@ -571,13 +577,14 @@ defmodule Geex.Session do
       # a valid empty buffer, created on first save — ADR-0019), so `File.rename` fails
       # `:enoent` — but the *buffer* is real and renamable: re-key it in-memory so a
       # later `save_file` writes to the new path. With no open buffer there is genuinely
-      # nothing at `from`, so the posix error stands (matching the buffer-less case).
+      # nothing at `from`, so the posix error stands (matching the buffer-less case). A `from`
+      # that is there makes the `:enoent` the destination's (its directory went away just now).
       {:error, :enoent} ->
-        case BufferSupervisor.whereis(f) do
-          {:ok, _pid} ->
+        case {File.lstat(f), BufferSupervisor.whereis(f)} do
+          {{:error, :enoent}, {:ok, _pid}} ->
             {{:ok, {f, t}}, rekey_buffer(f, t, state)}
 
-          :error ->
+          _ ->
             release(held)
             {{:error, :enoent}, state}
         end
