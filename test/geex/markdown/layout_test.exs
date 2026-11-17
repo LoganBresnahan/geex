@@ -111,6 +111,27 @@ defmodule Geex.Markdown.LayoutTest do
     end
   end
 
+  # BUG-16: the grammars raised on text that isn't UTF-8, so the preview said "render failed".
+  describe "a byte that isn't UTF-8" do
+    test "renders as U+FFFD, the rows otherwise those of the file with ? in its place" do
+      bad = fn byte ->
+        "# Caf#{byte}\n\nA **bold** word and #{byte} here.\n\n- item #{byte}\n\n" <>
+          "```\ncode #{byte}\n```\n"
+      end
+
+      {parsed, rows} = render(bad.(<<0xE9>>))
+      {twin_parsed, twin_rows} = render(bad.("?"))
+      replacement = <<0xFFFD::utf8>>
+
+      assert Enum.map(rows, &String.replace(text(&1), replacement, "?")) ==
+               Enum.map(twin_rows, &text/1)
+
+      assert Enum.any?(rows, &(text(&1) =~ replacement))
+      assert :strong in roles(rows)
+      assert Place.lines(rows, parsed.text) == Place.lines(twin_rows, twin_parsed.text)
+    end
+  end
+
   describe "F36: code reads as code with no tint" do
     test "with the terminal theme and no OSC 11 answer, each code row starts with a ▏ bar" do
       theme = Geex.Theme.Terminal.theme(nil)

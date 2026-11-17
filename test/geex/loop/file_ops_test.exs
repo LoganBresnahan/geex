@@ -117,6 +117,19 @@ defmodule Geex.Loop.FileOpsTest do
       assert File.read!(at(root, "b.ex")) == "b\n"
       assert File.read!(at(root, "lib/a.ex")) == "a\n"
     end
+
+    # BUG-19.
+    test "rename: into a directory that isn't there, or a file, is refused", %{root: root} do
+      a = at(root, "lib/a.ex")
+
+      assert FileOps.step({:rename, a, at(root, "src/a.ex")}, root) ==
+               {:done, "not renamed: src/ doesn't exist"}
+
+      assert FileOps.step({:rename, a, at(root, "lib/a.ex/b.ex")}, root) ==
+               {:done, "not renamed: lib/a.ex/ isn't a directory"}
+
+      assert File.read!(a) == "a\n"
+    end
   end
 
   describe "through the loop" do

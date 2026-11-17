@@ -7066,3 +7066,20 @@ mutant). 1766 tests + 212 doctests + 62 properties, green twice; `mix compile --
 Found, older than this branch and not fixed: renaming into a directory that isn't there re-keys
 the buffer in memory and reports success, the file left where it was (`Session.rename_file`
 reads `:enoent` as a never-saved buffer).
+
+### 2026-11-16 — BUG-19 (a rename into a missing directory) and BUG-16 (the preview of a file that isn't UTF-8) fixed
+
+On `save-followups`, after `save-off-loop` was merged to local main. BUG-19:
+`Session.rename_file/2` refuses a destination whose directory isn't there
+(`{:error, :no_directory}`), before touching anything; the TUI says "not renamed: src/ doesn't
+exist" (or "lib/a.ex/ isn't a directory"). BUG-16: `Geex.Markdown.parse/2` turns each byte that
+isn't UTF-8 into U+FFFD before the grammars see the text, so the preview renders it.
+
+Tests: `session_test.exs` and `file_ops_test.exs` (BUG-19: an open file, a never-saved buffer, a
+file as the directory, the words), `layout_test.exs` (BUG-16: a Latin-1 byte in a heading, bold, a
+list item and a code block, rendered as the file with `?` in its place; fails on the old parse with
+`ArgumentError`); the save-loop rename test that needed a disk failure now renames into a read-only
+directory. Not checked: the preview of a non-UTF-8 file live (the layout test renders it). Reviewed
+by mod-verify with the shutdown work on the same branch (the next entry).
+1769 tests + 212 doctests + 62 properties, green twice; `mix compile --warnings-as-errors --force`
+clean.

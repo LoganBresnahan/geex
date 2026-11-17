@@ -401,9 +401,12 @@ defmodule Geex.Loop.SaveLoopTest do
 
     test "a rename that fails on disk lets saves begin again", %{dir: dir} do
       {_state, buf, path} = open(dir, "a.txt", "a\n")
-      # Under a file, not a directory: the disk refuses.
-      File.write!(Path.join(dir, "c.txt"), "")
-      assert {:error, :enotdir} = Session.rename_file(path, Path.join(dir, "c.txt/b.txt"))
+      # Into a directory it may not write: the disk refuses.
+      ro = Path.join(dir, "ro")
+      File.mkdir_p!(ro)
+      File.chmod!(ro, 0o500)
+      on_exit(fn -> File.chmod(ro, 0o700) end)
+      assert {:error, :eacces} = Session.rename_file(path, Path.join(ro, "b.txt"))
       assert {:ok, _} = Buffer.begin_write(buf)
       {:ok, _} = Buffer.end_write(buf, :ok)
     end

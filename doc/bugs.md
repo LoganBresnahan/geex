@@ -7,20 +7,24 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-19 — A rename into a directory that isn't there reports success and leaves the file
+## BUG-19 — A rename into a directory that isn't there reported success and left the file  ✅ FIXED (2026-11-16)
 
-- **Status:** open, found 2026-11-15 writing a test for `save-off-loop` (mod-verify's review of it).
-  Older than that branch: main behaves the same.
+- **Status:** **FIXED** 2026-11-16 on the branch `save-followups`. Found 2026-11-15 writing a test
+  for `save-off-loop` (mod-verify's review of it). In **0.7.0** and before.
 - **Symptom:** with `a.txt` open, `Session.rename_file("a.txt", "no/such/b.txt")` (the `rename`
-  command, the tree's `r`, MCP's `rename_file`) answers `{:ok, …}`: the buffer is re-keyed to
-  `no/such/b.txt` in memory while the file stays at `a.txt`. The next save tries to write into the
-  missing directory and fails.
+  command, the tree's `r`, MCP's `rename_file`) answered `{:ok, …}`: the buffer was re-keyed to
+  `no/such/b.txt` in memory while the file stayed at `a.txt`. The next save tried to write into the
+  missing directory and failed.
 - **Verified cause:** `File.rename/2` answers `:enoent` for a missing destination directory as it
-  does for a missing source, and `Session.rename_file/2` (`rename_held/4` on the branch) reads every
-  `:enoent` as "a never-saved buffer has no file yet" (ADR-0019), re-keying an open buffer.
-- **Recommended fix:** take that branch only when the source is missing (`not File.exists?(from)`);
-  otherwise answer the error (or create the directory, if the maintainer wants a rename to make
-  one). A test: renaming an open, saved file into a missing directory is refused, nothing moved.
+  does for a missing source, and `Session.rename_file/2` read every `:enoent` as "a never-saved
+  buffer has no file yet" (ADR-0019), re-keying an open buffer.
+- **Fix:** `Session.rename_file/2` refuses a destination whose directory isn't there, before
+  touching anything: `{:error, :no_directory}` (a rename makes no directory; `new` still offers to
+  make its parents). The TUI says "not renamed: src/ doesn't exist" (or "lib/a.ex/ isn't a
+  directory"); MCP's `rename_file` answers the error as it answers any other. The never-saved
+  branch now also checks that the source really is missing (`File.lstat/1`), so a directory that
+  vanishes between the check and the rename is an error too. Tests: `session_test.exs` (an open
+  file, a never-saved buffer, a file as the directory), `file_ops_test.exs` (the words).
 - **Ruled out:** nothing else re-keys on a failed rename.
 
 ---
@@ -76,20 +80,21 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-16 — The markdown preview can't render a file holding a byte that isn't UTF-8
+## BUG-16 — The markdown preview couldn't render a file holding a byte that isn't UTF-8  ✅ FIXED (2026-11-16)
 
-- **Status:** open, found 2026-11-12 by mod-verify's review of `crash-fixes` (216e97b). Older than
-  that branch: main behaves the same.
+- **Status:** **FIXED** 2026-11-16 on the branch `save-followups`. Found 2026-11-12 by mod-verify's
+  review of `crash-fixes` (216e97b). In **0.6.0** and **0.7.0** (the preview, ADR-0043).
 - **Symptom:** opening the preview (`Alt+P`) of a Markdown file with a Latin-1 byte or any other
-  byte that isn't UTF-8 shows "render failed (see the log)" instead of the rendered file. The
-  editor itself draws and edits the file (BUG-15); only the preview gives up, gracefully.
+  byte that isn't UTF-8 showed "render failed (see the log)" instead of the rendered file. The
+  editor itself draws and edits the file (BUG-15); only the preview gave up, gracefully.
 - **Verified cause:** `Geex.Markdown.Parse` hands the file's text to `TreeSitterWasm.highlight/2`
-  (`lib/geex/markdown/parse.ex`), which raises on text that isn't UTF-8 before any of geex's own
-  layout runs; the preview process catches it and reports the render failed.
-- **Recommended fix:** give the parser the text with each invalid byte replaced by U+FFFD
-  (`String.replace_invalid/1`), mapping byte offsets back where they matter (the preview is
-  read-only and lays out its own rows, so a replacement char per bad byte only shifts offsets
-  after it by two bytes each). Or leave it: a Markdown file that isn't UTF-8 is rare.
+  (`lib/geex/markdown/parse.ex`), which raises (`ArgumentError`) on text that isn't UTF-8 before
+  any of geex's own layout runs; the preview process catches it and reports the render failed.
+- **Fix:** `Geex.Markdown.parse/2` turns each invalid byte into U+FFFD
+  (`String.replace_invalid/1`) where it already turns `\r\n` into `\n`, so the tree and the layout
+  both index the same text. No newline moves, so each row still names its source line (`Place`).
+  Test: `layout_test.exs`, a heading, bold text, a list item and a code block each holding the
+  byte render as the same file with `?` in its place, U+FFFD shown, the same source lines.
 
 ---
 

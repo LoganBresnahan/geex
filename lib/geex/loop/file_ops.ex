@@ -175,6 +175,11 @@ defmodule Geex.Loop.FileOps do
       {:error, :same_path} ->
         {:done, "not renamed: that's its name already"}
 
+      {:error, :no_directory} ->
+        dir = Path.dirname(to)
+        said = if File.exists?(dir), do: "isn't a directory", else: "doesn't exist"
+        {:done, "not renamed: #{name(dir, root)}/ #{said}"}
+
       {:error, reason} ->
         {:done, "not renamed: #{name(from, root)} to #{name(to, root)}: #{why(reason)}"}
     end

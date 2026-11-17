@@ -894,12 +894,14 @@ of a long line, found measuring BUG-12) are **FIXED** (2026-11-12, on the `long-
 an MCP `edit` command crashed the loop) and BUG-15 (an invalid UTF-8 byte on screen could crash a
 paint), both older than that branch and found by mod-verify's review of it, are **FIXED**
 (2026-11-12, on the `crash-fixes` branch). BUG-16 (the markdown preview can't render a file with
-a byte that isn't UTF-8; it says "render failed", gracefully) is **open**. BUG-17 (a long line with
+a byte that isn't UTF-8; it says "render failed", gracefully) is **FIXED** (2026-11-16, on the
+`save-followups` branch). BUG-17 (a long line with
 an emoji or © before an invalid byte froze every key on it; in 0.6.0) is **FIXED** (2026-11-13,
 on the `search` branch), released in 0.7.0. BUG-18 (a first save trimming every line's trailing
 whitespace stalled for seconds on a big file; found measuring item 9) is **FIXED** (2026-11-15, on
 the `bug-18` branch). BUG-19 (a rename into a directory that isn't there reports success and
-leaves the file; found writing a test on `save-off-loop`) is **open**.
+leaves the file; found writing a test on `save-off-loop`) is **FIXED** (2026-11-16, on the
+`save-followups` branch).
 
 ---
 
