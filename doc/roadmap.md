@@ -896,6 +896,26 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    - **The pharos-dependent work** ([geex#1](https://github.com/LoganBresnahan/geex/issues/1),
      [geex#2](https://github.com/LoganBresnahan/geex/issues/2)) is parked until the pharos trial's
      verdict ([stack.md](stack.md#the-pharos-trial)).
+22. **Autocomplete** — a future item (the maintainer, 2026-11-18); not started, needs its ADR
+   first. Two sources, the first on its own or both:
+   - **Words already in the file:** candidates from the buffer's own text (later perhaps the
+     other open buffers), matched against the word before the cursor; all of the logic is geex's,
+     pure over the text, needing no grammar and no server. The usual shape: a candidate list
+     under the cursor while typing or on a key, a key to accept. Open for the ADR: when it
+     appears, the key that accepts (Tab already indents, ADR-0045 and ADR-0050), the
+     ranking (nearby or frequent words), and keeping a big file's scan off the key loop
+     (ADR-0035). Accepting is the human's edit through the shared path, like any typing.
+   - **From a language server.** This doesn't depend on pharos or the trial: completion as you
+     type is not one of the pharos MCP consumers sketched in
+     [adr/0021](adr/0021-capability-connections.md)'s amendment, which (like stack.md's "Decided
+     against, or not yet") names a direct-LSP adapter in geex behind ADR-0021 as the road for it,
+     "decided then". It also asks about unsaved text, which
+     [adr/0010](adr/0010-disk-truth-lsp-v05.md)'s disk-truth rule leaves out. It waits on an ADR
+     deciding how geex reaches language servers for completion (a direct adapter per ADR-0021's
+     amendment, or pharos with a bridge for unsaved text) and on the maintainer's go. It touches
+     that stack.md entry, so it goes through stack.md's owner first.
+   - The minibuffer's path tab-completion (item 4's remaining `Completion` abstraction) is a
+     separate list; the ADR can decide whether the two share one.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the
