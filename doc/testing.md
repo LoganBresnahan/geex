@@ -7325,3 +7325,21 @@ tree's checks noted, not taken; the look-then-open gap in `Geex.Disk`'s doc; CLA
 geex's config and data directories too; the test releasing its second FIFO.
 1808 tests + 212 doctests + 62 properties, green twice; `mix compile --warnings-as-errors --force`
 clean.
+
+### 2026-11-18 — Deployed `0.7.0+ff1f2607.89a87236` (main ff1f260: everything since 0.7.0)
+
+`mix geex.deploy` at the maintainer's word, after the ship bar on ff1f260 (1808 tests + 62
+properties + 212 doctests green twice, `--warnings-as-errors --force` clean; `tree_sitter_wasm`
+clean at 89a87236). install.sh kept 0.7.0 as the previous version and removed
+`0.6.0+b78ceb97.89a87236`. Checked live with a scratch `XDG_STATE_HOME` in a tmux pty, in a
+scratch git repo: `geex --version` prints the version and exits 0, `geex --frob` exits 2;
+`geex highlight some.json` prints it in colour; `geex a.txt`, typing `Zz ` and Ctrl-O wrote
+`Zz hello` to disk, and one Ctrl-X left (status 0, nothing unsaved); the attestation discovery
+file named the installed `beam.smp` while it ran and was gone after; `geex notes.txt` holding
+`IO.puts("x")` opens it and prints no `x`; `geex .` shows the tree with a `[scratch]` buffer;
+after each Ctrl-X tmux reported the alternate screen off and the cursor visible, read before
+anything was typed at the prompt; the log reads "loading code in embedded mode" for this version
+with no `terminating` lines, and there's no crash dump. Not checked: a bare `geex` in a repo, the
+last session coming back, the first quit's warning with unsaved edits, a save off the key loop on
+a big file, closing the terminal during a save, a macOS build; no release was cut, so not the
+release CI.
