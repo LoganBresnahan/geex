@@ -96,13 +96,13 @@ defmodule Geex do
     dir =
       case paths do
         [] -> File.cwd!()
-        [one] -> if File.dir?(one), do: one
+        [one] -> if Geex.Disk.dir?(one), do: one
         _ -> nil
       end
 
     with true <- dir != nil and Geex.LastSession.enabled?(),
          {:ok, saved} <- Geex.LastSession.read(Geex.Session.root_of(dir)),
-         [_ | _] <- Enum.filter(Geex.LastSession.paths(saved), &File.regular?/1) do
+         [_ | _] <- Enum.filter(Geex.LastSession.paths(saved), &Geex.Disk.regular?/1) do
       {:ok, dir, saved}
     else
       _ -> :none
@@ -114,7 +114,7 @@ defmodule Geex do
   defp restore(saved) do
     pids =
       for path <- saved |> Geex.LastSession.paths() |> Enum.reverse(),
-          File.regular?(path),
+          Geex.Disk.regular?(path),
           {:ok, pid} <- [Geex.Session.open_file(path)],
           into: %{},
           do: {path, pid}
@@ -139,7 +139,7 @@ defmodule Geex do
   defp remember(paths) do
     if Geex.LastSession.enabled?() do
       case paths do
-        [one] -> sizes(if File.dir?(one), do: :project, else: :sizes)
+        [one] -> sizes(if Geex.Disk.dir?(one), do: :project, else: :sizes)
         [_ | _] -> sizes(:sizes)
         [] -> :ok
       end
@@ -167,7 +167,7 @@ defmodule Geex do
   end
 
   defp open(path) when is_binary(path) do
-    if File.dir?(path), do: open(nil), else: Geex.Session.open_file(path)
+    if Geex.Disk.dir?(path), do: open(nil), else: Geex.Session.open_file(path)
   end
 
   # No file given: start a pathless scratch buffer and make it active, so the editor

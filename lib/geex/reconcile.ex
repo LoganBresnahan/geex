@@ -154,7 +154,7 @@ defmodule Geex.Reconcile do
           {:fast_forwarded, map(), non_neg_integer()} | :up_to_date | {:error, term()}
   def fast_forward(pid) when is_pid(pid) do
     with %{path: path} when is_binary(path) <- Buffer.status(pid),
-         {:ok, disk_text} <- File.read(path) do
+         {:ok, disk_text} <- Geex.Disk.read(path) do
       case run(pid, disk_text, @stale_retries) do
         {:reconciled, snapshot, conflicts} ->
           {:fast_forwarded, snapshot, conflicts}
@@ -496,11 +496,12 @@ defmodule Geex.Reconcile do
   # Read the changed file and tell its buffer — but only if that path is an open buffer (the
   # Registry is the source of truth). The buffer holds (ADR-0034): it compares the disk with its
   # `synced` baseline and marks itself behind, or clears the mark, without changing. A transient
-  # read error or a deletion (`:enoent`) is skipped. geex's own save/rename (or a spurious
-  # event) compares equal, so the watcher needs no per-event bookkeeping.
+  # read error or a deletion (`:enoent`) is skipped, and so is a FIFO put in its place, never
+  # opened (`Geex.Disk`, BUG-22). geex's own save/rename (or a spurious event) compares equal, so
+  # the watcher needs no per-event bookkeeping.
   defp on_disk_change(path) do
     with {:ok, pid} <- BufferSupervisor.whereis(path),
-         {:ok, disk_text} <- File.read(path) do
+         {:ok, disk_text} <- Geex.Disk.read(path) do
       result = Buffer.disk_changed(pid, disk_text)
       # A row in the edits pane, joined to its attestation by the hash (ADR-0034 §6).
       if result == :behind, do: Geex.Edits.disk_changed(path, sha256(disk_text))

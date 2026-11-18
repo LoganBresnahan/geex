@@ -129,7 +129,7 @@ defmodule Geex.Tree do
         |> String.split(<<0>>, trim: true)
         |> Enum.chunk_every(500)
         |> Task.async_stream(
-          &Enum.filter(&1, fn path -> File.regular?(Path.join(root, path)) end),
+          &Enum.filter(&1, fn path -> Geex.Disk.regular?(Path.join(root, path)) end),
           ordered: false,
           timeout: :infinity
         )
@@ -161,12 +161,12 @@ defmodule Geex.Tree do
 
   # One directory's files and subdirectories.
   defp entries(root, rel) do
-    case File.ls(Path.join(root, rel)) do
+    case Geex.Disk.ls(Path.join(root, rel)) do
       {:ok, names} ->
         Enum.reduce(names, {[], []}, fn name, {files, dirs} ->
           path = if rel == "", do: name, else: Path.join(rel, name)
 
-          case File.lstat(Path.join(root, path)) do
+          case Geex.Disk.lstat(Path.join(root, path)) do
             {:ok, %{type: :directory}} ->
               if String.starts_with?(name, "."), do: {files, dirs}, else: {files, [path | dirs]}
 

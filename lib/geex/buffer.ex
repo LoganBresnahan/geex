@@ -103,9 +103,10 @@ defmodule Geex.Buffer do
     with :ok <- gate_open(gate.()),
          {:ok, %{path: path, text: text, synced: synced}} <- begin_write(server, opts) do
       written =
-        case File.read(path) do
+        case Geex.Disk.read(path) do
           {:ok, disk} when disk != synced -> {:error, :behind}
-          _ -> File.write(path, text)
+          {:error, :not_regular} = error -> error
+          _ -> Geex.Disk.write(path, text)
         end
 
       end_write(server, written)
@@ -417,7 +418,7 @@ defmodule Geex.Buffer do
         {:ok, %{state | opened_notice: notice}}
 
       # A genuinely unreadable existing file (`:eacces`, a TOCTOU `:enoent`/`:eisdir`)
-      # fails the start cleanly — non-bang `File.read/1` keeps the I/O error out of a
+      # fails the start cleanly — non-bang `Geex.Disk.read/1` keeps the I/O error out of a
       # raised `File.Error`+stacktrace, so `open_file` surfaces a tidy posix reason
       # rather than dumping internals into the model's tool result.
       {:error, posix} ->
@@ -430,7 +431,7 @@ defmodule Geex.Buffer do
   defp load_text(opts, path) do
     cond do
       Keyword.has_key?(opts, :text) -> {:ok, Keyword.get(opts, :text)}
-      is_binary(path) and File.regular?(path) -> File.read(path)
+      is_binary(path) and Geex.Disk.regular?(path) -> Geex.Disk.read(path)
       true -> {:ok, ""}
     end
   end

@@ -137,6 +137,8 @@ defmodule Geex.Markdown.Preview do
       "not on disk"
       iex> Geex.Markdown.Preview.describe({:read, :eacces})
       "permission denied"
+      iex> Geex.Markdown.Preview.describe({:read, :not_regular})
+      "not a regular file (a FIFO, a device or a socket)"
       iex> Geex.Markdown.Preview.describe(:ok)
       nil
   """
@@ -145,6 +147,7 @@ defmodule Geex.Markdown.Preview do
   def describe(:changing), do: "changing"
   def describe(:stopped), do: "stopped"
   def describe({:read, :enoent}), do: "not on disk"
+  def describe({:read, :not_regular}), do: "not a regular file (a FIFO, a device or a socket)"
   def describe({:read, posix}), do: posix |> :file.format_error() |> List.to_string()
   def describe({:unavailable, why}), do: Markdown.describe(why)
   def describe({:failed, _reason}), do: "render failed (see the log)"
@@ -157,7 +160,7 @@ defmodule Geex.Markdown.Preview do
 
     state = %{
       buffer: buffer,
-      read: Keyword.get(opts, :read, &File.read/1),
+      read: Keyword.get(opts, :read, &Geex.Disk.read/1),
       settle_ms: Keyword.get(opts, :settle_ms, @settle_ms),
       subs: %{},
       wanted: [],

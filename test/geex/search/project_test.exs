@@ -95,6 +95,21 @@ defmodule Geex.Search.ProjectTest do
     end
   end
 
+  # BUG-23: a link's target came back as characters, and `list_to_binary/1` raised on one above
+  # U+00FF, crashing the loop on `search-project` (mod-verify's review); an `é` became a byte.
+  test "real_path/1 follows a link to a name with characters past Latin-1, as UTF-8" do
+    dir = Path.join(System.tmp_dir!(), "geex_real_#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    for name <- ["projł", "日本", "café"] do
+      File.mkdir_p!(Path.join(dir, name))
+      File.ln_s!(Path.join(dir, name), Path.join(dir, "link-" <> name))
+      real = Path.join(Project.real_path(dir), name)
+      assert Project.real_path(Path.join(dir, "link-" <> name)) == real
+      assert Project.real_path(Path.join(dir, "link-" <> name <> "/sub")) == real <> "/sub"
+    end
+  end
+
   test "a query that isn't UTF-8 has no -i (git refuses it), and grep runs in the C locale" do
     q = "caf" <> <<0xE9>>
     refute Project.command(q, :project, true) =~ " -i "

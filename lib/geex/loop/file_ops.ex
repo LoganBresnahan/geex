@@ -82,11 +82,11 @@ defmodule Geex.Loop.FileOps do
       taken?(full) ->
         {:done, "not created: #{name(full, root)} already exists"}
 
-      not File.exists?(parent) ->
+      not Geex.Disk.exists?(parent) ->
         {:confirm, "#{name(parent, root)}/ doesn't exist; create it? (y/n) ",
          {:new_parents, full}}
 
-      not File.dir?(parent) ->
+      not Geex.Disk.dir?(parent) ->
         {:done, "not created: #{name(parent, root)} isn't a directory"}
 
       true ->
@@ -119,9 +119,9 @@ defmodule Geex.Loop.FileOps do
   def step({:delete, full}, root) do
     shown = name(full, root)
 
-    case File.lstat(full) do
+    case Geex.Disk.lstat(full) do
       {:ok, %{type: :directory}} ->
-        case File.ls(full) do
+        case Geex.Disk.ls(full) do
           {:ok, []} -> {:confirm, "delete #{shown}/? (y/n) ", {:rmdir, full}}
           {:ok, _} -> {:done, "not deleted: #{shown}/ isn't empty"}
           {:error, reason} -> {:done, "not deleted: #{shown}/: #{why(reason)}"}
@@ -177,7 +177,7 @@ defmodule Geex.Loop.FileOps do
 
       {:error, :no_directory} ->
         dir = Path.dirname(to)
-        said = if File.exists?(dir), do: "isn't a directory", else: "doesn't exist"
+        said = if Geex.Disk.exists?(dir), do: "isn't a directory", else: "doesn't exist"
         {:done, "not renamed: #{name(dir, root)}/ #{said}"}
 
       {:error, reason} ->
@@ -206,7 +206,7 @@ defmodule Geex.Loop.FileOps do
   defp why(reason), do: inspect(reason)
 
   # On disk, or open in a buffer not saved yet.
-  defp taken?(full), do: File.exists?(full) or Geex.BufferSupervisor.whereis(full) != :error
+  defp taken?(full), do: Geex.Disk.exists?(full) or Geex.BufferSupervisor.whereis(full) != :error
 
   defp dirty?(full) do
     case Geex.BufferSupervisor.whereis(full) do

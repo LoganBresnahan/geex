@@ -454,6 +454,41 @@ defmodule Geex.ReconcileTest do
       assert sync(recon)
       assert Process.alive?(recon)
     end
+
+    # BUG-22: the stand-in for a disk that hung. Read, it held OTP's file server, and the loop's
+    # next call through it (an `open`) waited too: no key worked (mod-verify's recipe).
+    test "a file swapped for a FIFO is skipped at once, never opened", %{recon: recon} do
+      path = tmp_path()
+      File.write!(path, "v1\n")
+      buf = open_registered(path)
+      Geex.Fifo.make!(path)
+
+      send(recon, {:file_event, self(), {path, [:modified]}})
+      refute Geex.Fifo.within(path, 1_000, fn -> sync(recon) end) == :waited
+
+      assert Buffer.get_text(buf) == "v1\n"
+      assert Buffer.snapshot(buf).behind == nil
+    end
+  end
+
+  describe "a FIFO in the file's place (BUG-22)" do
+    test "the catch-up and the save answer :not_regular at once; the edit stays unsaved" do
+      path = tmp_path()
+      File.write!(path, "base\n")
+      buf = open_registered(path)
+      dirty_edit(buf, "EDIT-")
+      Geex.Fifo.make!(path)
+
+      within = &Geex.Fifo.within(path, 1_000, &1)
+      assert within.(fn -> Reconcile.fast_forward(buf) end) == {:error, :not_regular}
+      assert within.(fn -> Reconcile.save(buf) end) == {:error, :not_regular}
+      # The buffer's own save, past the catch-up: the write never opens it either.
+      assert within.(fn -> Buffer.save(buf) end) == {:error, :not_regular}
+
+      assert Buffer.get_text(buf) == "EDIT-base\n"
+      assert Buffer.snapshot(buf).dirty
+      assert {:ok, %File.Stat{type: :other}} = File.lstat(path)
+    end
   end
 
   describe "watcher cleanup (a stopped/dead watcher frees its directory)" do

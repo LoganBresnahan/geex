@@ -152,11 +152,14 @@ defmodule Geex.Search.Project do
 
     # The name goes to Erlang as the binary it is: a path holding a byte that isn't UTF-8 (a
     # Latin-1 directory name) can't become a charlist, and raised in the loop (mod-verify's
-    # review). Given a binary, Erlang answers with the target's raw bytes as a binary too.
-    case :file.read_link_all(here) do
+    # review). Erlang answers with a charlist of characters for a target it can decode in the
+    # file name encoding, and the raw bytes as a binary only for one it can't; the characters go
+    # back to that encoding's bytes (BUG-23: `list_to_binary/1` raised on a `ł` and crashed the
+    # loop, and turned an `é` into a Latin-1 byte).
+    case Geex.Disk.read_link_all(here) do
       {:ok, target} ->
         base = Path.join(Enum.reverse(acc))
-        target = if is_binary(target), do: target, else: :erlang.list_to_binary(target)
+        target = if is_binary(target), do: target, else: name_bytes(target)
         to = Path.expand(target, base)
         follow(Path.split(to) ++ rest, [], n + 1)
 
@@ -164,6 +167,9 @@ defmodule Geex.Search.Project do
         follow(rest, [part | acc], n)
     end
   end
+
+  defp name_bytes(chars),
+    do: :unicode.characters_to_binary(chars, :unicode, :file.native_name_encoding())
 
   @doc """
   Where a result line points: every `{path, line}` it could name, leftmost first. A result reads

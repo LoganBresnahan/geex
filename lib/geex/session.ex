@@ -100,7 +100,7 @@ defmodule Geex.Session do
   @doc """
   Delete `path` from disk and evict any open buffer for it (ADR-0019).
 
-  Removes the file (`File.rm`), then — if a buffer is open for that path — terminates it
+  Removes the file (`Geex.Disk.rm/1`), then — if a buffer is open for that path — terminates it
   and clears the active pointer if it was active. Discarding a buffer with unsaved
   in-memory edits is reported (the `discarded?` flag), never silent. Refuses with
   `{:error, :enoent}` if the file does not exist on disk (to drop a never-saved buffer
@@ -114,7 +114,7 @@ defmodule Geex.Session do
   @doc """
   Rename / move the file at `from` to `to` on disk, re-keying any open buffer (ADR-0019).
 
-  Renames on disk (`File.rename`), then — if a buffer is open for `from` — re-keys it to
+  Renames on disk (`Geex.Disk.rename/2`), then — if a buffer is open for `from` — re-keys it to
   `to` (`Geex.Buffer.rename/2`): its unsaved edits and undo history are preserved and now
   target the new path, and the active-buffer pid is unchanged (it is the same process). The
   re-keyed buffer carries its `synced` disk baseline along, so the reconcile floor (ADR-0017)
@@ -216,7 +216,7 @@ defmodule Geex.Session do
 
   defp dir_and_root(path) do
     full = Path.expand(path)
-    dir = if File.dir?(full), do: full, else: Path.dirname(full)
+    dir = if Geex.Disk.dir?(full), do: full, else: Path.dirname(full)
     {dir, git_root(dir) || dir}
   end
 
@@ -325,9 +325,9 @@ defmodule Geex.Session do
       cond do
         # "create" means *new*: refuse if it already exists on disk or as an open buffer
         # (don't clobber a file or shadow a buffer's in-memory content).
-        File.exists?(full) -> {:error, :eexist}
+        Geex.Disk.exists?(full) -> {:error, :eexist}
         match?({:ok, _}, BufferSupervisor.whereis(full)) -> {:error, :eexist}
-        true -> with(:ok <- File.write(full, content), do: {:ok, full})
+        true -> with(:ok <- Geex.Disk.write(full, content), do: {:ok, full})
       end
 
     {:reply, reply, state}
@@ -342,7 +342,7 @@ defmodule Geex.Session do
         {:reply, {:error, :saving}, state}
 
       held ->
-        case File.rm(full) do
+        case Geex.Disk.rm(full) do
           :ok ->
             # The watcher sees this deletion, but on_disk_change skips a `:enoent` read, so
             # the eviction below — not a bogus reconcile-to-empty — is what closes the buffer.
@@ -370,12 +370,12 @@ defmodule Geex.Session do
         f == t ->
           {{:error, :same_path}, state}
 
-        File.exists?(t) or match?({:ok, _}, BufferSupervisor.whereis(t)) ->
+        Geex.Disk.exists?(t) or match?({:ok, _}, BufferSupervisor.whereis(t)) ->
           {{:error, :destination_exists}, state}
 
-        # Into a directory that isn't there (BUG-19): `File.rename` would answer `:enoent`, as
+        # Into a directory that isn't there (BUG-19): a rename would answer `:enoent`, as
         # for a missing source, and an open buffer would be re-keyed to a path no save can write.
-        not File.dir?(Path.dirname(t)) ->
+        not Geex.Disk.dir?(Path.dirname(t)) ->
           {{:error, :no_directory}, state}
 
         true ->
@@ -389,16 +389,16 @@ defmodule Geex.Session do
     full = Path.expand(path)
 
     reply =
-      if File.exists?(full),
+      if Geex.Disk.exists?(full),
         do: {:error, :eexist},
-        else: with(:ok <- File.mkdir_p(full), do: {:ok, full})
+        else: with(:ok <- Geex.Disk.mkdir_p(full), do: {:ok, full})
 
     {:reply, reply, state}
   end
 
   def handle_call({:remove_dir, path}, _from, state) do
     full = Path.expand(path)
-    {:reply, with(:ok <- File.rmdir(full), do: {:ok, full}), state}
+    {:reply, with(:ok <- Geex.Disk.rmdir(full), do: {:ok, full}), state}
   end
 
   def handle_call({:close_file, path}, _from, state) do
@@ -564,7 +564,7 @@ defmodule Geex.Session do
   defp rename_held(_f, _t, :saving, state), do: {{:error, :saving}, state}
 
   defp rename_held(f, t, held, state) do
-    case File.rename(f, t) do
+    case Geex.Disk.rename(f, t) do
       :ok ->
         state =
           Enum.reduce(buffers_under(f), rekey_buffer(f, t, state), fn path, state ->
@@ -574,13 +574,13 @@ defmodule Geex.Session do
         {{:ok, {f, t}}, state}
 
       # A never-saved buffer has no file on disk yet (`open_file` on a missing path is
-      # a valid empty buffer, created on first save — ADR-0019), so `File.rename` fails
+      # a valid empty buffer, created on first save — ADR-0019), so the rename fails
       # `:enoent` — but the *buffer* is real and renamable: re-key it in-memory so a
       # later `save_file` writes to the new path. With no open buffer there is genuinely
       # nothing at `from`, so the posix error stands (matching the buffer-less case). A `from`
       # that is there makes the `:enoent` the destination's (its directory went away just now).
       {:error, :enoent} ->
-        case {File.lstat(f), BufferSupervisor.whereis(f)} do
+        case {Geex.Disk.lstat(f), BufferSupervisor.whereis(f)} do
           {{:error, :enoent}, {:ok, _pid}} ->
             {{:ok, {f, t}}, rekey_buffer(f, t, state)}
 
