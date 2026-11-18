@@ -55,9 +55,14 @@ defmodule Geex do
   `Geex.TerminalIO` restores the terminal on the way down. The installed binary's application
   never finishes starting (`Geex.CLI`), and a `System.stop/0` there skips that orderly stop.
   So when `Geex.CLI` is running, it is told instead, and it stops the tree itself.
+
+  Either way the stop is bounded (`Geex.StopWatchdog`, BUG-21): a disk that hangs can hold it
+  forever, so after `Geex.StopWatchdog.limit_ms/0` the terminal is put back and the VM halts.
   """
   @spec stop() :: :ok
   def stop do
+    :ok = Geex.StopWatchdog.arm()
+
     case Process.whereis(Geex.CLI) do
       nil -> System.stop()
       cli -> send(cli, :geex_quit)

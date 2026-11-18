@@ -905,8 +905,9 @@ whitespace stalled for seconds on a big file; found measuring item 9) is **FIXED
 the `bug-18` branch). BUG-19 (a rename into a directory that isn't there reports success and
 leaves the file; found writing a test on `save-off-loop`) and BUG-20 (closing the terminal ended
 geex at once, and could cut a save's write) are **FIXED** (2026-11-16, on the `save-followups`
-branch). BUG-21 (a disk that hangs holds geex's stop: 22 s from the installed binary, forever under
-`mix run`; found checking a hung write live, 2026-11-16) is **OPEN**.
+branch). BUG-21 (a disk that hung held geex's stop: 22 s from the installed binary, forever under
+`mix run`; found checking a hung write live, 2026-11-16) is **FIXED** (2026-11-17, on the `bug-21`
+branch: the stop is bounded at 10 s).
 
 ---
 

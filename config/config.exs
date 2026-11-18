@@ -33,6 +33,9 @@ config :geex,
   # The last session kept across restarts (roadmap item 18.9, ADR-0046), in
   # ~/.local/state/geex/sessions/ (`sessions_dir` overrides). Tests pass a directory of their own.
   session_memory: config_env() != :test,
+  # The stop's watchdog (BUG-21): a stop still running after 10 s puts the terminal back and
+  # halts the VM. Off under `mix test`, where a halt would end the run; tests arm their own.
+  stop_watchdog: config_env() != :test,
   # Compiled grammars kept in $XDG_CACHE_HOME/geex/wasm (ADR-0040 §8). Tests leave the user's
   # cache alone.
   wasm_cache: config_env() != :test,

@@ -226,7 +226,9 @@ defmodule Geex.CLI do
 
         # The orderly stop `System.stop/0` would skip here: each child's `terminate/2` runs, so
         # the terminal is restored, the buffers' ledgers are closed and the attestation
-        # discovery file is removed.
+        # discovery file is removed. Bounded: a disk that hangs holds it (BUG-21), so its
+        # watchdog is armed first, whoever sent the quit (`Geex.stop/0` arms it too).
+        :ok = Geex.StopWatchdog.arm()
         Supervisor.stop(sup)
         flush_log()
         System.halt(0)

@@ -341,7 +341,8 @@ they exit again it forces the exit".
   the installed binary (its tree's children killed at their shutdown timeouts, then the halt),
   and forever under `mix run` (Mix's own stop lists files through the stuck file server, and
   nothing on `init:stop/0`'s way has a time limit). Checked live with a FIFO in place of the open
-  file.
+  file. *Bounded 2026-11-17:* the stop's watchdog halts 10 s after the quit
+  ([ADR-0036](0036-installed-binary.md)'s 2026-11-17 amendment).
 - **A cut write can be recovered.** With the ledger on, reopening the file shows the cut text as
   one change from outside, and one undo brings back the buffer's text from before the save
   (checked with a script: the write cut halfway, the buffer stopped, reopened).

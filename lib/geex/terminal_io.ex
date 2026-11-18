@@ -115,6 +115,14 @@ defmodule Geex.TerminalIO do
     GenServer.call(__MODULE__, :window_size)
   end
 
+  @doc """
+  Put the terminal back now, as the process's stop would (the screen, the tty's modes), waiting
+  up to `timeout` ms: the stop watchdog's (`Geex.StopWatchdog`, BUG-21), for a stop that hasn't
+  got this far. Its stop then leaves it.
+  """
+  @spec restore(timeout()) :: :ok
+  def restore(timeout), do: GenServer.call(__MODULE__, :restore, timeout)
+
   ## gen_server callbacks
 
   @impl true
@@ -128,7 +136,11 @@ defmodule Geex.TerminalIO do
 
     tty = :prim_tty.init(%{input: :raw, output: :raw})
     %{read: reader_ref} = :prim_tty.handles(tty)
-    {tty_dev, tty_modes} = take_keys()
+    # `sh` found once, while the file server answers: `System.cmd("sh", …)` looks it up through
+    # the file server, and a file read that never returns holds that, so the tty's modes put
+    # back on the way out would wait behind it (BUG-21).
+    sh = System.find_executable("sh")
+    {tty_dev, tty_modes} = take_keys(sh)
 
     # Ask the terminal for its background (OSC 11) for the built-in terminal theme's tints
     # (ADR-0040 §1), only when both ends are a terminal. The answer arrives as input, maybe never.
@@ -151,9 +163,14 @@ defmodule Geex.TerminalIO do
     state = %{
       tty: tty,
       reader_ref: reader_ref,
-      # The tty's device and its `stty -g` settings from before `take_keys/0`, put back on exit.
+      # The tty's device and its `stty -g` settings from before `take_keys/1`, put back on exit,
+      # and the `sh` that runs `stty`, an absolute path.
       tty_dev: tty_dev,
       tty_modes: tty_modes,
+      sh: sh,
+      # The terminal is put back already (`restore/1`, the stop watchdog's): `terminate/2`
+      # leaves it.
+      restored: false,
       # Whether mouse reports are on (`set_mouse/1`), so SIGCONT turns them on only if they were.
       mouse: true,
       esc_buf: <<>>,
@@ -212,6 +229,11 @@ defmodule Geex.TerminalIO do
     end
   end
 
+  # Once the terminal is put back (`restore/1`, the stop watchdog's), nothing more is drawn: a
+  # frame from a loop still running would land on the shell's screen (mod-verify's review).
+  def handle_cast({op, _}, %{restored: true} = state) when op in [:mouse, :write],
+    do: {:noreply, state}
+
   def handle_cast({:mouse, on?}, state) do
     :prim_tty.write(state.tty, if(on?, do: @mouse_on, else: @mouse_off))
     {:noreply, %{state | mouse: on?}}
@@ -223,6 +245,9 @@ defmodule Geex.TerminalIO do
   end
 
   @impl true
+  def handle_call(:restore, _from, %{restored: true} = state), do: {:reply, :ok, state}
+  def handle_call(:restore, _from, state), do: {:reply, :ok, put_back(state)}
+
   def handle_call(:window_size, _from, state) do
     {:reply, :prim_tty.window_size(state.tty), state}
   end
@@ -288,7 +313,7 @@ defmodule Geex.TerminalIO do
     new_tty = :prim_tty.handle_signal(state.tty, signal)
     # On SIGCONT (after an outside `kill -STOP`), `prim_tty` sets its raw mode again, which turns
     # the signal and flow-control keys back on.
-    if signal == :sigcont and state.tty_dev, do: stty(state.tty_dev, ["-isig", "-ixon"])
+    if signal == :sigcont and state.tty_dev, do: stty(state.sh, state.tty_dev, ["-isig", "-ixon"])
     # A shell that took the terminal back while geex was stopped may have reset its modes.
     if signal == :sigcont and state.mouse, do: :prim_tty.write(new_tty, @mouse_on)
     if signal == :sigcont, do: :prim_tty.write(new_tty, @paste_on)
@@ -316,11 +341,19 @@ defmodule Geex.TerminalIO do
   def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
+  def terminate(_reason, %{restored: true}), do: :ok
+
   def terminate(_reason, state) do
+    _ = put_back(state)
+    :ok
+  end
+
+  # The screen, the reader and the tty's modes as they were before geex.
+  defp put_back(state) do
     restore_screen(state.tty)
     _ = :prim_tty.reader_stop(state.tty)
-    if state.tty_modes, do: stty(state.tty_dev, [state.tty_modes])
-    :ok
+    if state.tty_modes, do: stty(state.sh, state.tty_dev, [state.tty_modes])
+    %{state | restored: true}
   end
 
   # `:prim_tty`'s raw mode leaves the tty's signal keys on (ISIG: Ctrl-C, Ctrl-Z, Ctrl-\) and its
@@ -328,10 +361,10 @@ defmodule Geex.TerminalIO do
   # with no cleanup, Ctrl-Z suspended it, Ctrl-S froze the screen (BUG-3). Turn both off so they
   # arrive as keys. Returns the tty's device and its settings from before, or `{nil, nil}` when
   # that fails; geex runs on with the keys as they were.
-  defp take_keys do
+  defp take_keys(sh) do
     with {:ok, dev} <- File.read_link("/proc/#{System.pid()}/fd/0"),
-         {modes, 0} <- stty(dev, ["-g"]),
-         {_, 0} <- stty(dev, ["-isig", "-ixon"]) do
+         {modes, 0} <- stty(sh, dev, ["-g"]),
+         {_, 0} <- stty(sh, dev, ["-isig", "-ixon"]) do
       {dev, String.trim(modes)}
     else
       failed ->
@@ -346,8 +379,10 @@ defmodule Geex.TerminalIO do
 
   # `stty` on the VM's own stdin device: a port's child has no controlling terminal, so it can't
   # use `/dev/tty`. Its errors come back as a nonzero status, never raised.
-  defp stty(dev, args) do
-    System.cmd("sh", ["-c", ~s|exec stty "$@" < "$0"|, dev | args], stderr_to_stdout: true)
+  defp stty(nil, _dev, _args), do: {"no sh found", :no_sh}
+
+  defp stty(sh, dev, args) do
+    System.cmd(sh, ["-c", ~s|exec stty "$@" < "$0"|, dev | args], stderr_to_stdout: true)
   rescue
     e in ErlangError -> {Exception.message(e), :no_sh}
   end

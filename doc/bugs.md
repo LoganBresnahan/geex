@@ -7,12 +7,13 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-21 — A disk that hangs holds geex's stop: 22 s from the installed binary, forever under `mix run`  🔴 OPEN
+## BUG-21 — A disk that hung held geex's stop: 22 s from the installed binary, forever under `mix run`  ✅ FIXED (2026-11-17)
 
-- **Status:** **OPEN**, found 2026-11-16 on the branch `save-followups`, checking live a write that
-  hangs (the maintainer's "if they exit again it forces the exit"). Any stop while a file read
-  hangs, in **0.7.0** and before; `save-followups` doesn't cause it (the earlier build of the
-  branch in the scratch install behaves the same).
+- **Status:** **FIXED** 2026-11-17 on the branch `bug-21`: the stop is bounded at 10 s. Found
+  2026-11-16 on the branch `save-followups`, checking live a write that hangs (the maintainer's
+  "if they exit again it forces the exit"). Any stop while a file read hangs, in **0.7.0** and
+  before; `save-followups` didn't cause it (the earlier build of the branch in the scratch install
+  behaves the same).
 - **Symptom:** a file whose read never returns, a FIFO put in place of the open file standing in
   for a stalled network disk; an edit, Ctrl-O, then two quits. The save, stuck in its first read,
   is cancelled and the loop leaves at once, as designed, but the VM doesn't stop. From a release
@@ -36,13 +37,23 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
   plain `elixir` VM the same stuck read lets `System.stop/0` finish in 3.9 s: kernel's supervisor
   gives `file_server_2` its 2 s shutdown, then kills it. The binary's `Geex.CLI` stops geex's
   tree and then calls `System.halt/0`, so it does get out, after its children's timeouts.
-- **Recommended fix:** bound the stop. `Geex.stop/0` arms a watchdog, never under test, that
-  restores the terminal (`Geex.TerminalIO` makes no `File` call) and halts if the VM is still up
-  some seconds after the stop was asked (5?). It needs a group leader other than geex's: an
-  application's master kills every process whose group leader it is when the application stops.
-  For `mix run` alone, `-shutdown_time 10000` in the launch flags also bounds `init:stop/0` (init
-  kills what is left and halts). And maybe the save's own read and write `:raw`: those don't go
-  through the file server, so one file that hangs wouldn't stall every other `File` call in geex.
+- **Fix:** `Geex.StopWatchdog`. The loop arms it as it leaves, and so do `Geex.stop/0`, `Geex.CLI`
+  on its quit and the signals' backstop; off under `mix test` (`stop_watchdog`). If the VM is still
+  up 10 s after the quit, it asks `Geex.TerminalIO` to put the terminal back (`restore/1`), logs a
+  warning and syncs the log (given 1 s), and halts with status 0. Its group leader is the VM's
+  `user` process, not geex's application master, which kills every process it leads as the
+  application stops; it makes no `File` call. `Geex.TerminalIO` finds `sh` once at start, since
+  `System.cmd("sh", …)` looks it up through the file server and its `stty` waited behind the stuck
+  read; once restored it draws nothing more. [ADR-0036](adr/0036-installed-binary.md)'s 2026-11-17
+  amendment. Checked live, a FIFO in place of the open file, an edit, Ctrl-O and two quits: gone
+  10.1 s after the second quit under `mix run` and from a release installed in a scratch directory,
+  the terminal back; the loop itself wedged, SIGTERM: gone at 45 s (the backstop's 35, then 10). The
+  ledger lock and the discovery file are still left (swept at the next start). Not done: the save's
+  own read and write `:raw`, so one file that hangs wouldn't stall every other `File` call in geex
+  until the stop. That stall can wedge the loop itself: a clean buffer whose file becomes a FIFO is
+  read by the watcher, and the loop's next `File` call (an `open`) hangs, so no key works and only a
+  signal ends geex, at 45 s (mod-verify's review). And `-shutdown_time` for `mix run`, which the
+  watchdog makes needless.
 - **Ruled out:** the save's write: the read before it hung first, the gate never reached, so the
   second quit cancelled the save and left at once. The loop: it painted and took keys throughout.
   A process that can't be killed (my first reading): `file_server_2` killed mid-read goes down at

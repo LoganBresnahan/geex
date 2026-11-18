@@ -1432,16 +1432,16 @@ defmodule Geex.Loop do
   # For the test that `Geex.CLI.Signals`'s backstop comes after this wait.
   def shutdown_wait_ms, do: @shutdown_wait_ms
 
-  # Quit: Ctrl-X / Ctrl-Q / Ctrl-C, `quit` / `exit`, the settings view's (2026-11-15). A save
-  # under way is waited for, and the status line warns that quitting again cuts it short (Esc:
-  # stay). Quit again and geex leaves (2026-11-16, Logan: the first quit warns, the second
-  # forces the exit): a save whose write hasn't begun is cancelled; a write under way gets
-  # `@cut_after_ms` to finish, then is cut short. Further quits don't leave sooner: a burst of
-  # keys from one read, or a key held down, is handled before any frame shows the warning
-  # (mod-verify's review). After a signal, a quit cuts the save short the same way once that
-  # warning has been up `@cut_after_ms`. Unsaved edits are named first, and the next quit leaves; the ledger keeps
-  # them either way (ADR-0033). The second quit, like the first, closes the command line and the
-  # settings view, which would draw over the warning.
+  # Quit: Ctrl-X / Ctrl-Q / Ctrl-C, `quit` / `exit`, the settings view's (2026-11-15). A save under
+  # way is waited for, and the status line warns that quitting again cuts it short (Esc: stay). Quit
+  # again and geex leaves (2026-11-16, Logan: the first quit warns, the second forces the exit): a
+  # save whose write hasn't begun is cancelled; a write under way gets `@cut_after_ms` to finish,
+  # then is cut short. Further quits don't leave sooner: a burst of keys from one read, or a key
+  # held down, is handled before any frame shows the warning (mod-verify's review). After a signal,
+  # a quit cuts the save short the same way once that warning has been up `@cut_after_ms`. Unsaved
+  # edits are named first, and the next quit leaves; the ledger keeps them either way (ADR-0033).
+  # The second quit, like the first, closes the command line and the settings view, which would draw
+  # over the warning.
   defp quit(%{saving: %{quit: q, cut_after: after_ms}} = state) when q in [:now, :shutdown] do
     if now_ms() >= after_ms, do: cut_short(state), else: schedule_repaint(state)
   end
@@ -1538,8 +1538,11 @@ defmodule Geex.Loop do
 
   defp shutdown(state), do: exit_editor(state)
 
-  # Leave the editor: the last session kept first, then the VM stops (`Geex.stop/0`).
+  # Leave the editor: the last session kept first, then the VM stops (`Geex.stop/0`). The stop's
+  # watchdog is armed first, so its 10 s run from the quit: a disk that hangs holds the keep too
+  # (BUG-21, mod-verify's review).
   defp exit_editor(state) do
+    :ok = Geex.StopWatchdog.arm()
     state = keep_session(state, :now)
     Geex.stop()
     state
