@@ -9,8 +9,9 @@ defmodule Geex.CLI.Signals do
   `Geex.TerminalIO`'s `terminate/2` and leaves the terminal on the alternate screen (the application
   never finishes starting); and SIGHUP, the terminal closing, ended the VM at once, cutting short
   any write under way (2026-11-16). Should the loop not get as far as stopping, geex stops anyway
-  after 35 s (the binary's entry process is told to; under `mix run`, `System.stop/0`). SIGUSR1 and
-  SIGQUIT halt, as OTP's handler does.
+  after 35 s (the binary's entry process is told to; under `mix run`, `Geex.stop/0`), and the stop's
+  watchdog is armed then, so a stop that hangs too ends 10 s later, 45 s in all
+  (`Geex.StopWatchdog`, BUG-21). SIGUSR1 and SIGQUIT halt, as OTP's handler does.
   """
 
   @behaviour :gen_event
@@ -59,13 +60,22 @@ defmodule Geex.CLI.Signals do
 
   # Should the loop not get as far as stopping: the binary's entry process told to stop, or under
   # `mix run` the orderly stop OTP's handler made (mod-verify's review: before, a wedged loop was
-  # still stopped by SIGTERM there, and SIGHUP ended the VM). With neither an entry process nor a
-  # loop, `Geex.Loop.shutdown/0` has already stopped it.
+  # still stopped by SIGTERM there, and SIGHUP ended the VM), through `Geex.stop/0` so its
+  # watchdog is armed (BUG-21). Under the binary the watchdog is armed here too: the entry process
+  # arms it on its quit, but it may itself be stuck, opening a file on a disk that hangs before
+  # it ever waits for one (mod-verify's review). With neither an entry process nor a loop,
+  # `Geex.Loop.shutdown/0` has already stopped it.
   defp stop_anyway do
     case {Process.whereis(Geex.CLI), Process.whereis(Geex.Loop)} do
-      {cli, _} when is_pid(cli) -> Process.send_after(cli, :geex_quit, @stop_anyway_ms)
-      {nil, loop} when is_pid(loop) -> :timer.apply_after(@stop_anyway_ms, System, :stop, [])
-      {nil, nil} -> :ok
+      {cli, _} when is_pid(cli) ->
+        Process.send_after(cli, :geex_quit, @stop_anyway_ms)
+        :timer.apply_after(@stop_anyway_ms, Geex.StopWatchdog, :arm, [])
+
+      {nil, loop} when is_pid(loop) ->
+        :timer.apply_after(@stop_anyway_ms, Geex, :stop, [])
+
+      {nil, nil} ->
+        :ok
     end
   end
 

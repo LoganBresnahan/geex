@@ -7212,3 +7212,59 @@ okayed the commit with the change.
 1788 tests + 212 doctests + 62 properties, green twice; `mix compile --warnings-as-errors --force`
 clean.
 
+### 2026-11-17 — BUG-21 fixed: the stop is bounded at 10 s (ADR-0036)
+
+On `bug-21`, from local main 1cb860d (save-followups merged). `Geex.StopWatchdog`: the loop arms it
+as it leaves, and so do `Geex.stop/0`, `Geex.CLI` on its quit and the signals' backstop; 10 s after
+the quit it asks `Geex.TerminalIO` to put the terminal back (`restore/1`), logs a warning and syncs
+the log (given 1 s), and halts with status 0. Its group leader is the VM's `user` process, so geex's
+application master doesn't kill it as the application stops; off under `mix test` (`stop_watchdog`).
+`Geex.TerminalIO` finds `sh` once at start: a probe in a plain VM with a read hung on a FIFO found
+`File.exists?/1`, `:os.find_executable/1` and `System.cmd("sh", …)` all waiting behind the file
+server, while `System.cmd("/bin/sh", …)`, a `spawn_executable` port, `:raw` reads and `:prim_file`
+answered at once.
+
+Live in a tmux pty (scratch `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`), geex started
+from an interactive shell in the pane: a small file, an edit, the file replaced by a FIFO, Ctrl-O,
+two quits. The old build (the save-followups build in the scratch install): gone 22.0 s after the
+second quit, the lock and the discovery file left; the shell's tty modes read after it were `isig
+ixon icanon echo`, so the VM put them back as it exited, and the `sh` change only shortens the
+restore. The new build under `mix run`: gone 10.1 s after the second quit (it never was), the
+warning in the log, the modes back. From a release built from this branch and installed in a scratch
+directory (`GEEX_INSTALL_DIR`, `GEEX_BIN_DIR`; the real install untouched, still 0.7.0): gone 10.1 s
+after, the same. (Armed first at `Geex.stop/0`, it was 12.1 s: the last session's 2 s keep, which
+times out behind the stuck read, then the 10 s; the loop now arms it before the keep.) The loop
+itself wedged (mod-verify's recipe: a clean open file swapped for a FIFO, which the watcher reads,
+then `open b.txt`), SIGTERM: gone 45.1 s after it from the release and under `mix run`, the
+backstop's 35 s then the watchdog's 10 s, the modes back. The lock and the discovery file are still
+left (swept at the next start). A normal edit, Ctrl-O and quit: 0.1 s from the release, 1.1 s under
+`mix run`, nothing left, no warning, the file saved.
+
+Tests: `stop_watchdog_test.exs` (new: off under test, `Geex.stop/0` arming nothing, and with the
+gate on arming it; the restore first, then the halt, the warning logged; a second arm keeping the
+first deadline; its group leader the VM's `user` process when armed from a process led by another;
+halting with the terminal process gone; the limit's range), `terminal_io_test.exs` (a restored
+terminal left by a second restore and by the stop; nothing drawn after it). Eight mutants (no group
+leader, the gate ignored, no restore, the stop or a second restore redoing it, `Geex.stop/0` not
+arming, the halt before the restore, drawing after the restore) each fail one. Not checked: the
+binary's entry process stuck in its first opens (the backstop's own arm covers it; found by
+reading); the 1 s cap on the log's sync live; macOS; the save's own read and write `:raw` (not done:
+until the stop, one file that hangs still stalls every other `File` call).
+
+mod-verify's review: passed, with two test gaps and a hole taken. A `Geex.stop/0` that armed nothing
+passed the suite (a test with the gate on), and so did a halt before the restore (`assert_receive`
+doesn't see order). Under the binary the backstop reached the watchdog only through `Geex.CLI`'s
+`receive`, which comes after its startup opens: a path on a disk that hangs would leave it stuck
+there, so the backstop arms the watchdog itself. Nits taken: the warning and the log's sync in a
+process given 1 s (a log rotating behind the stuck file server made the sync wait 5 s and lose the
+line, its probe); `Geex.TerminalIO` drawing nothing once restored; the loop arming it before the
+last session's keep, so the 10 s run from the quit; the status worded as a normal stop's (exit 0
+kept: a nonzero one would make git abort a commit with geex as `$EDITOR`); the signals' and the
+watchdog's docs. Its probes: a `user`-led process outlives an application's stop, and fired with the
+application's stop callback hung; 50 arms at once, 20 rounds, one watchdog each time; a normal stop
+is at most about 5 s plus under 1 s (the buffers' shutdown cap; a ledger's close entry and fsync are
+`:raw`), so 10 s never cuts one. Its trace of the FIFO run under `mix run`: the watchdog's
+`restore/1` put the terminal back, `terminate/2` never ran. It also reviewed b7d89f0 (a shutdown
+letting a save run): passed, eight mutants caught.
+1797 tests + 212 doctests + 62 properties, green twice; `mix compile --warnings-as-errors --force`
+clean.

@@ -32,6 +32,21 @@ defmodule Geex.TerminalIOTest do
     assert_receive {:late, {:geex_io, :eof}}
   end
 
+  # BUG-21: the stop watchdog puts the terminal back when the stop hangs; the process's own stop,
+  # if it comes after, leaves it (a state with no tty: touching it would crash).
+  test "once restored, a restore or the stop leaves the terminal alone" do
+    restored = %{restored: true}
+    assert TerminalIO.handle_call(:restore, self(), restored) == {:reply, :ok, restored}
+    assert TerminalIO.terminate(:shutdown, restored) == :ok
+  end
+
+  # mod-verify's review: a frame from a loop still running would land on the restored screen.
+  test "once restored, nothing more is drawn" do
+    restored = %{restored: true}
+    assert TerminalIO.handle_cast({:write, "frame"}, restored) == {:noreply, restored}
+    assert TerminalIO.handle_cast({:mouse, true}, restored) == {:noreply, restored}
+  end
+
   test "before it, a new subscriber hears nothing of it" do
     me = self()
     other = spawn_link(fn -> receive(do: (msg -> send(me, {:other, msg}))) end)

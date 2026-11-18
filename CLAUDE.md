@@ -124,8 +124,8 @@ mix geex.catalog                   # build the grammar/theme packages from catal
 ```
 
 Feature gates live in `config/config.exs` (`start_terminal` / `start_reconcile`
-/ `start_highlight` / `ledger` are all **off under `mix test`** — tests start what they
-need explicitly) and `config/runtime.exs` (`GEEX_SERVE=1` flips the HTTP
+/ `start_highlight` / `ledger` / `stop_watchdog` are all **off under `mix test`** — tests
+start what they need explicitly) and `config/runtime.exs` (`GEEX_SERVE=1` flips the HTTP
 listener on and the terminal off; `GEEX_MCP_PORT`, `GEEX_MCP_PORT_FILE`).
 
 The reconcile watcher shells out to `inotifywait` (`inotify-tools`, installed

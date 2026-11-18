@@ -3,7 +3,8 @@
 - **Status:** Accepted 2026-10-16. The maintainer asked for it ("go ahead and implement the
   deploy with burrito so we can start building locally"). Built by the coordinator session.
   Amended 2026-10-18: the release is trimmed (§5). Amended 2026-11-16: SIGHUP takes the orderly
-  stop, and a signal lets a write under way finish (below). **Superseded in part by
+  stop, and a signal lets a write under way finish (below). Amended 2026-11-17: the stop is
+  bounded, a disk that hangs no longer holding it (BUG-21, below). **Superseded in part by
   [ADR-0041](0041-release-without-burrito.md) (2026-10-19):** Burrito is gone; §1's wrap, §4's
   deploy and §6's fork are replaced by a tarball, a launcher and install.sh. §2, §3 and §5 stand.
 - **Date:** 2026-10-16
@@ -301,3 +302,60 @@ patches. It is fork-only, never sent upstream. Its `FORK.md` is the contract.
   [ADR-0035](0035-the-loop-never-waits.md)'s 2026-11-16 amendment.
 - **`Geex.run/1` installs the handler too**, so `mix run` behaves as the binary does. OTP's
   `init:stop/0` for SIGTERM worked there; it is the same orderly stop either way.
+
+## Amendment (2026-11-17): the stop is bounded (BUG-21)
+
+- **A disk that hangs held the stop.** Elixir's `File` calls that aren't `:raw` go through OTP's
+  one file server, which makes each call itself; one read that never returns (a stalled network
+  disk; a FIFO in place of the open file) holds it, and every other such call queues behind it
+  with no time limit. The loop leaves on time (ADR-0035's 2026-11-16 amendment), but on the way
+  out the last session's keep, the ledgers' locks and the discovery file each make one: §3's
+  stop took 22 s from the binary (each such child killed at its shutdown timeout, then the halt),
+  and under `mix run` never ended (Mix's own stop callback lists files the same way, and nothing
+  on `init:stop/0`'s way has a time limit). [bugs.md](../bugs.md) BUG-21.
+- **`Geex.StopWatchdog`.** The loop arms it as it leaves (`exit_editor`, before the last session's
+  keep, so its 10 s run from the quit), and so do `Geex.stop/0`, `Geex.CLI` on its quit and, under
+  the binary, the signals' backstop (the entry process may itself be stuck opening a file before it
+  waits for its quit; mod-verify's review). Once armed, a later arm keeps the first deadline. If the
+  VM is still up 10 s later (`limit_ms/0`; a normal stop takes 0.1–1.5 s, and can't pass about 6 s:
+  each buffer's close is capped at 5 s by its supervisor, the rest takes under 1 s), it asks
+  `Geex.TerminalIO` to put the terminal back (`restore/1`, waiting 2 s; a stop that got as far as
+  the terminal's `terminate/2` already has, and `terminate/2` then leaves it), logs a warning and
+  syncs the log in a process given 1 s (a log rotating behind the stuck file server makes the sync
+  wait 5 s and lose the line), and halts: `:erlang.halt(0, flush: false)`, the status a normal stop
+  gives (a nonzero one would make git abort a commit when geex is `$EDITOR`), and a port stuck on a
+  terminal that's gone doesn't hold it. Once restored, `Geex.TerminalIO` draws nothing more, so a
+  frame from a loop still running doesn't land on the shell's screen. The watchdog runs outside
+  geex's application: its group leader is the VM's `user` process (not `init`, which answers no IO
+  request), since an application's master kills every process it leads as the application stops. It
+  makes no `File` call. Off under `mix test` (the `stop_watchdog` gate: a halt would end the run);
+  its tests arm it with their own restore and halt.
+- **`stty` through an absolute `sh`.** `System.cmd("sh", …)` looks `sh` up through the file
+  server (`:os.find_executable/1`), so putting the tty's modes back waited behind the stuck read
+  until `Geex.TerminalIO` was killed. It finds `sh` once at start. The shell's modes came back
+  either way when the VM exited (`isig ixon icanon echo` read in the same pane after the old
+  build's 22 s stop), so this shortens the restore rather than fixing what the user sees.
+- **Left as before.** After a halt the ledger lock and the discovery file stay (both swept at the
+  next start). The save's own read and write still go through the file server, so until the stop one
+  file that hangs stalls every other `File` call in geex, the loop's own among them (a clean buffer
+  whose file becomes a FIFO wedges it, and only a signal ends geex, at 45 s); `:raw` there would
+  confine it (not done, [bugs.md](../bugs.md) BUG-21). `-shutdown_time` for `mix run` would bound
+  `init:stop/0` too; the watchdog makes it needless.
+
+Checked live with a FIFO in place of the open file, an edit, Ctrl-O and two quits: geex gone 10.1 s
+after the second quit under `mix run` (it never was) and from a release installed in a scratch
+directory (22 s before), the terminal back (the watchdog's `restore/1` did it under `mix run`,
+mod-verify's trace), the warning in the log. With the loop itself wedged (a clean open file swapped
+for a FIFO, then `open b.txt`), SIGTERM: gone 45.1 s after it in both, the backstop's 35 s then the
+watchdog's 10 s. A normal save and quit: 0.1 s from the release, 1.1 s under `mix run`, nothing
+left, no warning.
+
+**Tests.** `test/geex/stop_watchdog_test.exs` (off under test; with the gate on, `Geex.stop/0`
+arming it; the restore first, then the halt, the warning logged; a second arm keeping the first
+deadline; its group leader the VM's `user` process when armed from a process led by another; still
+halting with the terminal process gone; the limit's range), `test/geex/terminal_io_test.exs` (a
+restored terminal left by a second restore and by the stop; nothing drawn after it).
+
+**See** `lib/geex/stop_watchdog.ex`, `Geex.stop/0`, `lib/geex/cli.ex`, `lib/geex/cli/signals.ex`,
+`lib/geex/loop.ex` (`exit_editor/1`), `Geex.TerminalIO.restore/1`, `config/config.exs`
+(`stop_watchdog`).
