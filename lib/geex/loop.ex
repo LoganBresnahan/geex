@@ -3163,7 +3163,7 @@ defmodule Geex.Loop do
         # Joined first, so a leading `~` names a directory beside the file, not $HOME.
         full = from |> Path.dirname() |> Path.join(path) |> Path.expand()
 
-        if File.regular?(full) do
+        if Geex.Disk.regular?(full) do
           target =
             if Map.has_key?(state.panes.panes, tab.from), do: tab.from, else: state.panes.pane
 
@@ -4031,7 +4031,7 @@ defmodule Geex.Loop do
   defp read_tree(root, made, loop) do
     files = Tree.list(root)
     Tree.Watcher.watch(root, Tree.Watcher.dirs_of(files), loop)
-    made = Enum.filter(made, &File.dir?(Path.join(root, &1)))
+    made = Enum.filter(made, &Geex.Disk.dir?(Path.join(root, &1)))
     {Finder.pack(files), Tree.put_dirs(Tree.index(files), made)}
   end
 
@@ -4549,7 +4549,7 @@ defmodule Geex.Loop do
 
       {path, line, col} ->
         with {:ok, full} <- FileOps.resolve(path, file_root()),
-             true <- File.regular?(full) do
+             true <- Geex.Disk.regular?(full) do
           # The cursor moves only once the file is shown: a failed open leaves the tab you were
           # on (perhaps a preview, whose buffer's cursor it must not move) as it was.
           case open_where_held(full, state) do
@@ -4669,7 +4669,7 @@ defmodule Geex.Loop do
   end
 
   defp open_entry(%{kind: :edit, path: path, row: row}, state) do
-    there? = File.exists?(path) or Geex.BufferSupervisor.whereis(path) != :error
+    there? = Geex.Disk.exists?(path) or Geex.BufferSupervisor.whereis(path) != :error
 
     case if(there?, do: open_tab(path, state), else: {:gone, state}) do
       {:gone, state} ->
@@ -5894,6 +5894,10 @@ defmodule Geex.Loop do
   defp one_saved({:error, :held}, state),
     do: %{state | notice: "not saved: it is being renamed, deleted or closed"}
 
+  # Never opened: one would wait for a reader that may never come (`Geex.Disk`, BUG-22).
+  defp one_saved({:error, :not_regular}, state),
+    do: %{state | notice: "not saved: the file is now a FIFO, a device or a socket"}
+
   # A conflict says so through the buffer's own notice; a failed write leaves the [+] marker.
   defp one_saved(_reported, state), do: state
 
@@ -6052,7 +6056,7 @@ defmodule Geex.Loop do
   defp in_git_dir?(full, root), do: ".git" in Path.split(Path.relative_to(full, root))
 
   defp plan_disk(full, query, text) do
-    with {:ok, disk} <- File.read(full),
+    with {:ok, disk} <- Geex.Disk.read(full),
          {:ok, cmd, n} <- Geex.Replace.plan(disk, query, text) do
       [%{path: full, pid: nil, seq: nil, sha: :crypto.hash(:sha256, disk), cmd: cmd, count: n}]
     else
@@ -6180,7 +6184,7 @@ defmodule Geex.Loop do
 
   defp open_full(path, full, state) do
     cond do
-      File.dir?(full) ->
+      Geex.Disk.dir?(full) ->
         %{state | notice: "#{path} is a directory"}
 
       true ->
@@ -6277,6 +6281,7 @@ defmodule Geex.Loop do
         {:fast_forwarded, _snapshot, _conflicts} -> nil
         :up_to_date -> "already up to date with the disk"
         {:error, :saving} -> "a save is writing the file; try again when it's done"
+        {:error, :not_regular} -> "not read: the file is now a FIFO, a device or a socket"
         {:error, _reason} -> "couldn't read the file from disk"
       end
 
@@ -7009,7 +7014,7 @@ defmodule Geex.Loop do
 
   defp run_project_search(state, query, mode) do
     root = file_root()
-    git? = File.exists?(Path.join(root, ".git"))
+    git? = Geex.Disk.exists?(Path.join(root, ".git"))
 
     home = System.get_env("HOME") || System.user_home()
     real = &Geex.Search.Project.real_path/1
@@ -7113,7 +7118,7 @@ defmodule Geex.Loop do
 
     Enum.find_value(Geex.Search.Project.locations(text), fn {path, line} ->
       with {:ok, full} <- FileOps.resolve(path, root),
-           true <- File.regular?(full),
+           true <- Geex.Disk.regular?(full),
            do: {full, path, line},
            else: (_ -> nil)
     end)

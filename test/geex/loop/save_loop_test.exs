@@ -134,6 +134,24 @@ defmodule Geex.Loop.SaveLoopTest do
       assert Buffer.status(buf).dirty == (on_disk == "a\n")
       assert state.saving == nil
     end
+
+    # BUG-22: the file swapped for a FIFO, the stand-in for a disk that hung, is never opened.
+    test "the file now a FIFO: not saved, said at once; a fast-forward says so too",
+         %{dir: dir} do
+      {state, buf, path} = open(dir, "a.txt", "a\n")
+      state = type(state, "x")
+      Geex.Fifo.make!(path)
+
+      state =
+        Geex.Fifo.within(path, 3_000, fn -> state |> key({:ctrl, ?o}) |> LoopSave.finish() end)
+
+      assert state.notice == "not saved: the file is now a FIFO, a device or a socket"
+      assert Buffer.status(buf).dirty
+
+      state = Geex.Fifo.within(path, 3_000, fn -> run(state, "fast-forward") end)
+      assert state.notice == "not read: the file is now a FIFO, a device or a socket"
+      assert Buffer.get_text(buf) == "xa\n"
+    end
   end
 
   describe "cancel-save" do

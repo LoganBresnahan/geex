@@ -151,6 +151,10 @@ inject a stub via `Geex.Reconcile`'s `:start_watcher` option.
 - **The key loop never waits on slow work** (ADR-0035): anything that grows with file size,
   file count, history length or an external program runs in a monitored process, and
   `Geex.Loop` draws its answer when it arrives (the tree's reader is the model).
+- **The user's files go through `Geex.Disk`**, never `File` (BUG-22, ADR-0035's 2026-11-18
+  amendment): `File`'s calls share one OTP file server, and one that hangs stalls them all.
+  geex's own files (its state, config and data directories) stay on `File`; `disk_test.exs`
+  reads the modules that touch the user's files and fails on a call through the server.
 - **Log lines** are prefixed by subsystem: `"geex reconcile: …"`,
   `"geex MCP: …"`. Lifecycle = `info`, degraded-but-running = `warning`,
   per-event chatter = `debug`.

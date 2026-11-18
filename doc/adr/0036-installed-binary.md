@@ -339,8 +339,9 @@ patches. It is fork-only, never sent upstream. Its `FORK.md` is the contract.
   next start). The save's own read and write still go through the file server, so until the stop one
   file that hangs stalls every other `File` call in geex, the loop's own among them (a clean buffer
   whose file becomes a FIFO wedges it, and only a signal ends geex, at 45 s); `:raw` there would
-  confine it (not done, [bugs.md](../bugs.md) BUG-21). `-shutdown_time` for `mix run` would bound
-  `init:stop/0` too; the watchdog makes it needless.
+  confine it (not done, [bugs.md](../bugs.md) BUG-21; done 2026-11-18, BUG-22,
+  [ADR-0035](0035-the-loop-never-waits.md)'s 2026-11-18 amendment). `-shutdown_time` for `mix
+  run` would bound `init:stop/0` too; the watchdog makes it needless.
 
 Checked live with a FIFO in place of the open file, an edit, Ctrl-O and two quits: geex gone 10.1 s
 after the second quit under `mix run` (it never was) and from a release installed in a scratch

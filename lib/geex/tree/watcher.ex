@@ -80,7 +80,7 @@ defmodule Geex.Tree.Watcher do
 
   @impl true
   def handle_cast({:watch, root, rel_dirs, notify}, state) do
-    made = if state.root == root, do: Enum.filter(state.made, &File.dir?/1), else: []
+    made = if state.root == root, do: Enum.filter(state.made, &Geex.Disk.dir?/1), else: []
     state = %{state | notify: notify, made: made}
 
     dirs =
@@ -172,7 +172,7 @@ defmodule Geex.Tree.Watcher do
     level =
       level
       |> Enum.reject(&String.starts_with?(Path.basename(&1), "."))
-      |> Enum.filter(&File.dir?/1)
+      |> Enum.filter(&Geex.Disk.dir?/1)
       |> not_ignored(root)
 
     acc = acc ++ level
@@ -237,7 +237,7 @@ defmodule Geex.Tree.Watcher do
     dirs =
       if length(held) > @max_dirs,
         do: held,
-        else: Enum.uniq(held ++ Enum.flat_map(held, &subdirs/1)) |> Enum.filter(&File.dir?/1)
+        else: Enum.uniq(held ++ Enum.flat_map(held, &subdirs/1)) |> Enum.filter(&Geex.Disk.dir?/1)
 
     if length(dirs) > @max_dirs,
       do: {:capped, length(dirs), Enum.sort([root | subdirs(root)])},
@@ -245,12 +245,12 @@ defmodule Geex.Tree.Watcher do
   end
 
   defp subdirs(dir) do
-    case File.ls(dir) do
+    case Geex.Disk.ls(dir) do
       {:ok, names} ->
         for name <- names,
             not String.starts_with?(name, "."),
             path = Path.join(dir, name),
-            File.dir?(path),
+            Geex.Disk.dir?(path),
             do: path
 
       {:error, _} ->

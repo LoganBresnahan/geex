@@ -295,7 +295,7 @@ defmodule Geex.Ledger do
       modified: File.stat!(file, time: :posix).mtime,
       open: lock_live?(lock_file(file)),
       spooled: file |> Spool.read() |> length(),
-      orphan: is_nil(path) or not File.exists?(path)
+      orphan: is_nil(path) or not Geex.Disk.exists?(path)
     }
   end
 

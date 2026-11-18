@@ -907,7 +907,11 @@ leaves the file; found writing a test on `save-off-loop`) and BUG-20 (closing th
 geex at once, and could cut a save's write) are **FIXED** (2026-11-16, on the `save-followups`
 branch). BUG-21 (a disk that hung held geex's stop: 22 s from the installed binary, forever under
 `mix run`; found checking a hung write live, 2026-11-16) is **FIXED** (2026-11-17, on the `bug-21`
-branch: the stop is bounded at 10 s).
+branch: the stop is bounded at 10 s). BUG-22 (one file that hung stalled every file call in geex,
+and could leave no key working; BUG-21's follow-up) is **FIXED** (2026-11-18, on the `raw-files`
+branch: the user's files go through `Geex.Disk`, without OTP's file server, and a FIFO is never
+opened). BUG-23 (`search-project` crashed the loop through a link to a name past Latin-1; found in
+BUG-22's review) is **FIXED** on the same branch.
 
 ---
 

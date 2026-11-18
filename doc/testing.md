@@ -7268,3 +7268,60 @@ is at most about 5 s plus under 1 s (the buffers' shutdown cap; a ledger's close
 letting a save run): passed, eight mutants caught.
 1797 tests + 212 doctests + 62 properties, green twice; `mix compile --warnings-as-errors --force`
 clean.
+
+### 2026-11-18 — BUG-22 fixed: the user's files without OTP's file server; a FIFO is never opened; BUG-23 fixed (ADR-0035)
+
+On `raw-files`, from main b6a10f2 (BUG-21 merged and pushed). `Geex.Disk`: geex's calls on the
+user's files run in the caller, `:raw` or through `:prim_file`, and `read/1` and `write/2` refuse
+a FIFO, a device or a socket at once (`{:error, :not_regular}`). The buffer's load and save,
+reconcile's reads, the session, the loop's and file ops' checks, the tree and its watcher, the
+preview, search's link following and `geex FILE`'s checks use it; geex's own files stay on `File`.
+Ctrl-O, `fast-forward` and the preview say a file is now a FIFO. A probe in a plain VM, the file
+server held by a read of a FIFO, sorted the calls that wait from those that don't (bugs.md BUG-22);
+among them `File.regular?(path, raw: true)` waits, `[:raw]` doesn't. A missing `:prim_file`
+function fails `mix compile --warnings-as-errors` (checked with a misspelled one).
+
+Live in a tmux pty (scratch `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR`), geex started
+from a shell in the pane, each case on a fresh scratch repo. A clean `a.txt` replaced by a FIFO,
+then `open b.txt`: the `bug-21` build (a release in the scratch install, 0.7.0+1cb860dc…dirty)
+wedged with the command line still showing, two Ctrl-X did nothing, and a SIGTERM ended it at 45.1 s
+(the watchdog's warning in the log). This branch under `mix run`: `b.txt` opened, typing landed,
+the tree dropped `a.txt`; gone 1.17 s after the second quit (the first named `b.txt` unsaved), exit
+0, the shell's modes `isig ixon icanon echo`, no lock or discovery file, no warning. From a release
+of this branch installed in a scratch directory (0.7.0+b6a10f28…dirty; the real install still
+0.7.0): the same, gone in 0.06 s. An edit, the FIFO, Ctrl-O, two quits: the old build showed
+"saving a.txt…" until the second quit, gone at 10.0 s (the watchdog); this branch said "not saved:
+the file is now a FIFO, a device or a socket" at once, the buffer kept `[+]`, gone in 1.19 s
+(`mix run`) and 0.06 s (release), the FIFO untouched. A normal edit and Ctrl-O from the release
+wrote the file; `open b.txt` after an outside append showed it.
+
+Tests: `disk_test.exs` (new: each call as `File`'s, a name with `é` and a space among them; a
+FIFO, a link to one and `/dev/null` refused at once, the FIFO left; the file server held by a read
+of a FIFO, `File.exists?/1` waiting and each of fourteen `Geex.Disk` calls answering; the modules
+that touch the user's files read for a `File`, `:file`, `:filelib` or `Path.wildcard` call),
+`reconcile_test.exs` (the watcher skipping a FIFO at once; `fast_forward/1`, `save/2` and
+`Buffer.save/2` answering `:not_regular`, the edit kept), `save_loop_test.exs` (Ctrl-O's and
+`fast-forward`'s notices), `test/support/fifo.ex`. Eight mutants (`Disk.read/1` or `Disk.ls/1`
+through `File`, no FIFO check, the save's read, the watcher's read, the preview's reader or the
+loop's `open` check back on `File`, no Ctrl-O notice) each fail a test. Not checked: a real network
+mount that stalls (the FIFO and the held server stand in); macOS (CI is Linux; `mkfifo` and the
+read-write open that ends a test's read are POSIX and Linux); the loop's own checks on a stalled
+mount, left as is.
+
+mod-verify's review: passed. It sorted every `File`, `:file`, `:filelib`, `Path.wildcard`,
+`Path.expand`, `System.cmd`, `find_executable` and `tmp_dir` call in `lib/` and traced every request
+`file_server_2` got through a broad live session under `mix run` (open, edits, Ctrl-O, an outside
+append and `fast-forward`, the preview, new, mkdir, rename, delete, `search-project`, replace-all,
+`!ls`, the tree, edits, Alt+F, a symlinked file, save-all, two quits): 2,073 calls, none naming a
+project path. It found `:prim_file` and `File` the same on names with a Latin-1 byte, a NUL, an
+empty name, a trailing slash, iodata, a 300-byte name, a link loop, a write through a dangling
+link, missing permissions and relative paths after `File.cd!/1`; ran the held-server test 40
+times, and 40 more under 12 busy loops, clean; and repeated both live cases (gone in 1.05 s and
+1.06 s). Taken: BUG-23 (a link to `projł` crashed the loop on `search-project`, older than this; a
+test follows links to `projł`, `日本` and `café`, and the old line fails it); "holds only the
+caller" said to last until ten calls hang (its probe: ten hung reads of FIFOs stop every other file
+call and the terminal's writes; the tree checks 8 files at a time), with a lower limit for the
+tree's checks noted, not taken; the look-then-open gap in `Geex.Disk`'s doc; CLAUDE.md naming
+geex's config and data directories too; the test releasing its second FIFO.
+1808 tests + 212 doctests + 62 properties, green twice; `mix compile --warnings-as-errors --force`
+clean.

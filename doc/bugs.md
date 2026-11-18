@@ -7,6 +7,73 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-23 — `search-project` crashed the loop through a link to a name past Latin-1  ✅ FIXED (2026-11-18)
+
+- **Status:** **FIXED** 2026-11-18 on the branch `raw-files`, found by mod-verify's review of
+  BUG-22. In **0.7.0** and before (since `search-project`'s link following, 2026-11-13).
+- **Symptom:** `search-project hello` from a project reached through a link to a directory named
+  with a character above U+00FF (`link -> projł`, `日本`), outside a git work tree (git's top level
+  resolves links) or with a link in the home directory's path: "GenServer Geex.Loop terminating
+  ** (ArgumentError) … :erlang.list_to_binary([112, 114, 111, 106, 322])" in the log. The loop was
+  restarted and keys worked after, but the search never ran and nothing said so. A link to `café`
+  came back as the Latin-1 byte 233, not UTF-8.
+- **Verified cause:** `Geex.Search.Project.real_path/1` turned a link's target into bytes with
+  `:erlang.list_to_binary/1`. `read_link_all/1` answers with a charlist of characters for any
+  target it can decode in the file name encoding, and a binary only for one it can't, so the
+  comment's "the target's raw bytes as a binary" held only for that case.
+- **Fix:** the characters go back to the file name encoding's bytes
+  (`:unicode.characters_to_binary(chars, :unicode, :file.native_name_encoding())`, mod-verify's).
+  A test follows links to `projł`, `日本` and `café`; the old line fails it with the
+  `ArgumentError`.
+
+---
+
+## BUG-22 — One file that hung stalled every file call in geex, and could leave no key working  ✅ FIXED (2026-11-18)
+
+- **Status:** **FIXED** 2026-11-18 on the branch `raw-files`. Found 2026-11-17 by mod-verify's
+  review of BUG-21's fix, which left it as "not done"; in **0.7.0** and before.
+- **Symptom:** a clean open file replaced by a FIFO, the stand-in for a network disk that stalls.
+  The watcher reads it, and the next `open b.txt` waits: no key works, Ctrl-X included, and only a
+  signal ends geex (45.1 s after a SIGTERM from the `bug-21` build: the backstop's 35 s, then the
+  watchdog's 10). With an edit first, Ctrl-O shows "saving a.txt…" for good, and the second quit
+  leaves through the watchdog, 10 s later.
+- **Verified cause:** BUG-21's. Elixir's `File` calls that aren't `:raw` go through OTP's one file
+  server, `file_server_2`, which makes each call itself; the watcher's read of the FIFO
+  (`Reconcile.on_disk_change/1`) held it, and the loop's `open` asks `File.exists?/1` through it.
+  A probe in a plain VM with the server held by a read of a FIFO: `File.read`, `File.exists?`,
+  `File.rm`, `File.ls`, `File.rename`, `File.mkdir_p`, `File.rmdir`, `File.cp`, `File.cwd`,
+  `Path.expand/1` of a relative path, `System.find_executable/1`, `:filelib` and `Path.wildcard`
+  wait, and so does `File.regular?(path, raw: true)` (the option is `[:raw]`, not a keyword);
+  `:file.read_file(path, [:raw])`, `File.write(path, data, [:raw])`, `:file.read_file_info/2` and
+  `:file.read_link_info/2` with `:raw`, `File.regular?/exists?/dir?(path, [:raw])`,
+  `:file.delete(path, [:raw])`, `File.open(path, [:read, :raw])`, `File.stream!/1`, `:prim_file`'s
+  `list_dir`, `rename`, `make_dir`, `del_dir` and `read_link_all`, and `System.cmd/3` of a full path
+  answer at once.
+- **Fix:** `Geex.Disk`. Geex's calls on the user's files (a buffer's load and save, reconcile's
+  reads, the session's create, rename, delete and directories, the loop's and file ops' checks, the
+  tree and its watcher, the preview's read, search's link following, `geex FILE`'s checks) run in
+  the caller, `:raw`, or through `:prim_file` where `:file` has no raw form: a call that hangs
+  holds only the process that made it. A FIFO, a device or a socket is never opened: `read/1` and
+  `write/2` say `{:error, :not_regular}` at once (opening a buffer already left one empty). The
+  watcher skips it; Ctrl-O says "not saved: the file is now a FIFO, a device or a socket",
+  `fast-forward` "not read: …", the preview "not a regular file …". Geex's own files (the ledger,
+  settings, the log, the last session) stay on `File`. A test fails if a module that touches the
+  user's files calls `File`, `:file`, `:filelib` or `Path.wildcard`.
+  [ADR-0035](adr/0035-the-loop-never-waits.md)'s 2026-11-18 amendment. Checked live: the `open`
+  works and the quit takes 1.2 s under `mix run`, 0.06 s from a release; Ctrl-O says so at once.
+- **Left as is:** a call on a disk that hangs still holds its own process. On a stalled network
+  mount the loop's own checks (an `open`'s, and Alt+D's read, which runs in the loop) still wedge
+  it, and the watcher's read holds the watcher, so no other file's change is seen until the disk
+  answers. And only until ten calls hang: each keeps one of the VM's dirty I/O schedulers (10)
+  until it returns, and with all ten held every other file call waits, the terminal's writes among
+  them (mod-verify's probe: nine hung reads of FIFOs left the rest answering, ten stopped a raw
+  stat, a raw write, `File.exists?/1` and `IO.puts/1` until released). The tree's read checks its
+  files `System.schedulers_online/0` at a time (8 here), so one tree read on a stalled project
+  disk takes most of them; a lower limit there is an option, not taken. Geex's own files on a
+  stalled disk still go through the file server.
+
+---
+
 ## BUG-21 — A disk that hung held geex's stop: 22 s from the installed binary, forever under `mix run`  ✅ FIXED (2026-11-17)
 
 - **Status:** **FIXED** 2026-11-17 on the branch `bug-21`: the stop is bounded at 10 s. Found
@@ -52,8 +119,8 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
   own read and write `:raw`, so one file that hangs wouldn't stall every other `File` call in geex
   until the stop. That stall can wedge the loop itself: a clean buffer whose file becomes a FIFO is
   read by the watcher, and the loop's next `File` call (an `open`) hangs, so no key works and only a
-  signal ends geex, at 45 s (mod-verify's review). And `-shutdown_time` for `mix run`, which the
-  watchdog makes needless.
+  signal ends geex, at 45 s (mod-verify's review; **fixed 2026-11-18 as BUG-22**, above). And
+  `-shutdown_time` for `mix run`, which the watchdog makes needless.
 - **Ruled out:** the save's write: the read before it hung first, the gate never reached, so the
   second quit cancelled the save and left at once. The loop: it painted and took keys throughout.
   A process that can't be killed (my first reading): `file_server_2` killed mid-read goes down at

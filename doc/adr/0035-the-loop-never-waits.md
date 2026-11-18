@@ -5,7 +5,8 @@
   file); amended 2026-11-12 (a long line costs its screen, not the line: BUG-12, BUG-13); amended
   2026-11-15 (a save leaves the key loop and the buffer; a quit waits for it and names unsaved
   edits); amended 2026-11-16 (shutdown during a save: a second quit leaves within 1 s, cutting a
-  write that hangs; SIGTERM, SIGHUP and the terminal closing let a save finish for up to 30 s).
+  write that hangs; SIGTERM, SIGHUP and the terminal closing let a save finish for up to 30 s);
+  amended 2026-11-18 (the user's files without OTP's file server; a FIFO is never opened: BUG-22).
   First instance built: the file tree's reader (`6a6e3df`,
   [ADR-0034](0034-panes-tree-edits-hold.md)'s 2026-10-16 amendment).
 - **Date:** 2026-10-16
@@ -342,7 +343,8 @@ they exit again it forces the exit".
   and forever under `mix run` (Mix's own stop lists files through the stuck file server, and
   nothing on `init:stop/0`'s way has a time limit). Checked live with a FIFO in place of the open
   file. *Bounded 2026-11-17:* the stop's watchdog halts 10 s after the quit
-  ([ADR-0036](0036-installed-binary.md)'s 2026-11-17 amendment).
+  ([ADR-0036](0036-installed-binary.md)'s 2026-11-17 amendment). *2026-11-18:* no file of the
+  user's goes through the file server now, and a FIFO is never opened (the amendment below).
 - **A cut write can be recovered.** With the ledger on, reopening the file shows the cut text as
   one change from outside, and one undo brings back the buffer's text from before the save
   (checked with a script: the write cut halfway, the buffer stopped, reopened).
@@ -380,3 +382,67 @@ stays).
 
 **See** `lib/geex/loop.ex` (`shutdown/0`, `shutdown/1`, `quit/1`, `saving_label/1`),
 `lib/geex/cli/signals.ex`, `lib/geex/terminal_io.ex`, [bugs.md](../bugs.md) BUG-20 and BUG-21.
+
+## Amendment (2026-11-18): the user's files without OTP's file server (BUG-22)
+
+The maintainer's yes (2026-11-18) to BUG-21's follow-up. One file that hung stalled every file
+call in geex, the loop's own among them: Elixir's `File` calls that aren't `:raw` all go through
+OTP's one file server, `file_server_2`, which makes each call itself, so one that never returns
+holds every other behind it, on any file. A clean open file replaced by a FIFO was enough: the
+watcher read it, the next `open` asked `File.exists?/1`, and no key worked until a signal
+([bugs.md](../bugs.md) BUG-22).
+
+- **The user's files go through `Geex.Disk`.** Each call runs in the caller: `:raw` (a read, a
+  write, a stat, a delete), or `:prim_file`, which the file server itself calls, where `:file` has
+  no raw form (listing a directory, a rename, making and removing a directory, reading a link). A
+  call that hangs holds only its own process (until ten do, below): a save stuck on a stalled disk
+  holds the save's process, which `cancel-save` and a second quit already deal with, and the rest
+  of geex goes on.
+  Every module that touches the user's files uses it: the buffer's load and save, reconcile's
+  reads, the session's create, rename and delete, the loop's and file ops' checks, the tree and
+  its watcher, the markdown preview, search's link following, and `geex FILE`'s checks. A test
+  reads those modules' code and fails on a `File`, `:file`, `:filelib` or `Path.wildcard` call.
+  `:prim_file` isn't a documented module; its functions are the ones `:file`'s raw calls and the
+  file server use, and a release that dropped one would warn at compile time, which the build
+  refuses.
+- **A FIFO, a device or a socket is never opened.** Opening a FIFO waits for the other end, and
+  raw or not that would hold whoever opened it, so `Geex.Disk.read/1` and `write/2` look first and
+  say `{:error, :not_regular}` at once (a link to one too). The watcher skips the file, as it
+  skips one deleted; Ctrl-O says "not saved: the file is now a FIFO, a device or a socket", and
+  the buffer keeps its edits; `fast-forward` says "not read: …"; the preview "not a regular file
+  (a FIFO, a device or a socket)". Opening a buffer already left such a file empty. `geex
+  highlight FILE` still reads one: it has no loop to hold, and reading a pipe there is the point.
+- **Geex's own files stay on `File`.** The ledger, settings, the log, the history and the last
+  session live under `$XDG_STATE_HOME` and `$XDG_CONFIG_HOME`; with no file of the user's going
+  through the file server, nothing a user can open holds it.
+- **Left as is.** A call on a disk that hangs still holds the process that made it. The loop
+  makes a few itself (an `open`'s check, and Alt+D's read, measured and parked in §4) and waits on
+  the session's (a rename, a delete), so on a stalled network mount those still wedge it; the
+  watcher's read holds the watcher, and no other file's change is seen until the disk answers.
+  Each hung call keeps one of the VM's dirty I/O schedulers (10 by default) until it returns, and
+  with all ten held every other file call waits, the terminal's writes among them (mod-verify's
+  probe); the tree's read checks its files 8 at a time here (`System.schedulers_online/0`), so one
+  tree read on a stalled project disk takes most of them. A lower limit there is an option, not
+  taken.
+- **`search-project` followed a link to a name past Latin-1** (BUG-23, found in the review, older
+  than this): `real_path/1` turned the link's target, characters, into bytes with
+  `list_to_binary/1`, which raised on a `ł` and crashed the loop (restarted; the search never ran)
+  and made an `é` a Latin-1 byte. The characters go back to the file name encoding's bytes now.
+
+Checked live in tmux, a clean `a.txt` replaced by a FIFO, then `open b.txt`: the `bug-21` build
+wedged (two Ctrl-X did nothing; a SIGTERM ended it at 45.1 s); this build opened `b.txt`, took
+keys, and left 1.2 s after the second quit under `mix run`, 0.06 s from a release installed in a
+scratch directory, nothing left behind. An edit, the FIFO, Ctrl-O: the old build's "saving a.txt…"
+never ended, and the second quit left at the watchdog's 10.0 s; this build said "not saved: the
+file is now a FIFO, a device or a socket" at once and left as quickly, the FIFO untouched.
+
+**Tests.** `test/geex/disk_test.exs` (each call as `File`'s; a FIFO, a link to one and a device
+refused at once, the FIFO left; with the file server held by a read of a FIFO, `File.exists?/1`
+waiting and every `Geex.Disk` call answering; the modules' code read for a call through the file
+server), `test/geex/reconcile_test.exs` (the watcher skipping a FIFO at once; the catch-up, the
+save and the buffer's own save answering `:not_regular`, the edit kept),
+`test/geex/loop/save_loop_test.exs` (Ctrl-O's and `fast-forward`'s notices),
+`test/geex/search/project_test.exs` (links to `projł`, `日本` and `café`, BUG-23), and
+`test/support/fifo.ex` (a FIFO, and the writer that ends a read left waiting on it).
+
+**See** `lib/geex/disk.ex`, [bugs.md](../bugs.md) BUG-22 and BUG-23.
