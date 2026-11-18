@@ -33,7 +33,9 @@ the repos. The other two repos link here.
    own writers; geex saves; pharos reads what is saved; geex's reconcile notices the rest
    (geex ADR-0010, ADR-0032, ADR-0034). So each tool must notice a write on disk: pharos
    must re-sync a changed file with its server
-   ([pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3)).
+   ([pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3)), and tell a server
+   that doesn't watch the disk about changes to files it never opened
+   ([pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10)).
 2. **Messages carry questions, answers and claims.** "Where is this defined" and its answer;
    "these diagnostics changed"; "agent X wrote this file, from hash A to hash B" (an
    attestation). Never file content as a side channel.
@@ -83,8 +85,12 @@ the repos. The other two repos link here.
 | everyone | everyone | the disk | content | built; pharos re-sync: [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3) |
 
 Which repo ships a payload: the tool that *consumes* the event. geex ships `geex-attest.sh`
-(it consumes attestations); pharos ships its diagnostics payload. captAInHook ships the
-engine and the seams, not the payloads.
+(it consumes attestations); pharos will ship its diagnostics payload
+([pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6)). captAInHook ships the
+engine and the seams, not the payloads. Apps stay generic, and the payload between two apps
+does the translating: captAInHook knows the harness's protocol, not what any tool means, so a
+payload that cares about a tool matches it by name (captAInHook ADR-0019 and its 2026-11-18
+addendum, [captAInHook#1](https://github.com/LoganBresnahan/captAInHook/issues/1)).
 
 ## The two paths
 
@@ -99,8 +105,9 @@ engine and the seams, not the payloads.
    the files it touched, quietly and as information, never orders (mid-refactor breakage is
    expected). A second check at Stop blocks the turn's end while touched files still have
    errors, so the agent can't hand back broken code
-   ([pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6); captAInHook can
-   already block at Stop, [captAInHook#2](https://github.com/LoganBresnahan/captAInHook/issues/2)).
+   ([pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6)). captAInHook can
+   already block at Stop (its ADR-0016). A payload that blocks must stop blocking on its own,
+   since the host never caps the loop, and must not register fail-closed.
 6. pharos sees the new file on the next question (once [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3) lands).
 
 ### The human path (no LLM)
@@ -147,6 +154,11 @@ TypeScript or Rust repo; pharos's existing benchmark is the place to build it):
 Measure: turns that end with the code broken; build and test runs the agent makes; tokens;
 wall time. Several runs per arm per task; the same model throughout.
 
+**The language:** TypeScript or Rust, picked when #7 starts. Rust needs
+[pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8) fixed first: until then
+rust-analyzer's own diagnostics never reach pharos, so a Rust arm 3 would relay only
+`cargo check` output, which is arm 2's checker plus latency. TypeScript isn't affected.
+
 **Decided up front:** pharos stays only if arm 3 clearly beats arm 2, not merely arm 1. If the
 compiler hook ties, the cheaper tool wins: keep the compiler hook (it can live with
 captAInHook's payloads), park pharos, and close or park the pharos-dependent issues below.
@@ -157,8 +169,8 @@ captAInHook's payloads), park pharos, and close or park the pharos-dependent iss
 |---|---|---|---|---|
 | 1 | [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3) | pharos | **bug:** a file opened once is never re-synced; later saves are invisible to the server (verified 2026-11-13, pharos 0.2.2, pyright). The trial means nothing until this is fixed | — |
 | 2 | [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6) | pharos | `pharos diagnostics` CLI + the captAInHook payload: arm 3 | pharos#3 |
-| 2 | [pharos#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7) | pharos | the trial: the compiler-hook arm and the three-arm run, written up with the verdict | pharos#3, pharos#6 |
-| — | [captAInHook#2](https://github.com/LoganBresnahan/captAInHook/issues/2) | captAInHook | docs: the README says Stop can't block; it can (ADR-0016). Independent, any time | — |
+| 2 | [pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8) | pharos | **bug:** rust-analyzer's own diagnostics never reach pharos (pull diagnostics advertised to servers it runs in push mode). Needed only if the trial runs on Rust | — |
+| 2 | [pharos#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7) | pharos | the trial: the compiler-hook arm and the three-arm run, written up with the verdict | pharos#3, pharos#6; pharos#8 if on Rust |
 
 **Parked until the verdict** (built only if pharos stays):
 
@@ -167,11 +179,11 @@ captAInHook's payloads), park pharos, and close or park the pharos-dependent iss
 | [geex#2](https://github.com/LoganBresnahan/geex/issues/2) | geex | geex as an MCP client of pharos: definition, references, hover, diagnostics after a save | pharos#3; an ADR or amendments to 0008/0010/0021 |
 | [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) | pharos | push diagnostics through MCP resource subscriptions | pharos#3; geex#2 reaching diagnostics |
 | [pharos#4](https://github.com/LoganBresnahan/pharos-mcp/issues/4) | pharos | `apply_workspace_edit` reports each written file's path + before/after sha256 | — |
-| [captAInHook#1](https://github.com/LoganBresnahan/captAInHook/issues/1) | captAInHook | how a hook sees a tool that writes several files (tool kind) | — |
-| [geex#1](https://github.com/LoganBresnahan/geex/issues/1) | geex | `geex-attest.sh` credits pharos's multi-file writes | pharos#4, captAInHook#1 |
+| [geex#1](https://github.com/LoganBresnahan/geex/issues/1) | geex | `geex-attest.sh` credits pharos's multi-file writes | pharos#4 |
+| [pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10) | pharos | servers that don't watch the disk (gopls, pyright) never see changes to files pharos hasn't opened; typescript-language-server watches on its own, so a TypeScript trial doesn't need it; rust-analyzer unverified | pharos#3 |
 
-pharos#4, captAInHook#1 and geex#1 are one feature (attributing pharos's writes): build them
-together or not at all.
+pharos#4 and geex#1 are one feature (attributing pharos's writes): build them together or not
+at all. captAInHook builds nothing for it (see "Decided against").
 
 ## Decided against, or not yet
 
@@ -186,6 +198,12 @@ together or not at all.
 - **pharos lifecycle hooks (pharos emitting its own events for captAInHook).** Every event so
   far has a better route: what geex needs comes over its MCP connection; agent writes are
   already seen at PostToolUse. Add one when a payload needs it (the named-consumer rule).
+- **A tool kind in captAInHook for multi-file writers**
+  ([captAInHook#1](https://github.com/LoganBresnahan/captAInHook/issues/1), decided
+  2026-11-18). Neither a new kind nor an engine-built list of touched paths: a list wouldn't
+  carry the before-hash an attestation needs, and each tool would need its own extractor.
+  `geex-attest.sh` will recognize pharos's writer by name (geex#1), and pharos will report each
+  file's hashes (pharos#4). Reopen on captAInHook ADR-0019's revisit triggers.
 - **An LLM-backed hub between the tools.** Every request would become a model call: slow,
   costly, nondeterministic, and it breaks geex's replayable history. The services would still
   need a protocol underneath. Where it holds up is an *agent-facing front*: composite tools
