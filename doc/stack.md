@@ -32,9 +32,9 @@ the repos. The other two repos link here.
 1. **Content meets on disk.** No tool pushes file text to another. An agent writes with its
    own writers; geex saves; pharos reads what is saved; geex's reconcile notices the rest
    (geex ADR-0010, ADR-0032, ADR-0034). So each tool must notice a write on disk: pharos
-   must re-sync a changed file with its server
-   ([pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3)), and tell a server
-   that doesn't watch the disk about changes to files it never opened
+   re-syncs every document it holds open with the disk on each question (pharos ADR-038,
+   [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3)), and must still tell a
+   server that doesn't watch the disk about changes to files it never opened
    ([pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10)).
 2. **Messages carry questions, answers and claims.** "Where is this defined" and its answer;
    "these diagnostics changed"; "agent X wrote this file, from hash A to hash B" (an
@@ -82,7 +82,7 @@ the repos. The other two repos link here.
 | captAInHook | geex | the `geex-attest.sh` payload → loopback `POST /attest` | who wrote a file, by hash | built for Write/Edit/MultiEdit/NotebookEdit; pharos writes: [geex#1](https://github.com/LoganBresnahan/geex/issues/1) |
 | captAInHook | pharos | a payload → `pharos diagnostics` CLI | the touched files' diagnostics, back to the agent | [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6) |
 | agent | geex | geex's MCP server | the frozen edit/view tools | built, frozen (ADR-0032); rarely the right door |
-| everyone | everyone | the disk | content | built; pharos re-sync: [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3) |
+| everyone | everyone | the disk | content | built (pharos re-syncs open documents, ADR-038); servers that don't watch the disk: [pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10) |
 
 Which repo ships a payload: the tool that *consumes* the event. geex ships `geex-attest.sh`
 (it consumes attestations); pharos will ship its diagnostics payload
@@ -108,7 +108,9 @@ addendum, [captAInHook#1](https://github.com/LoganBresnahan/captAInHook/issues/1
    ([pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6)). captAInHook can
    already block at Stop (its ADR-0016). A payload that blocks must stop blocking on its own,
    since the host never caps the loop, and must not register fail-closed.
-6. pharos sees the new file on the next question (once [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3) lands).
+6. pharos sees the new file on the next question: it re-syncs what it holds open (pharos
+   ADR-038). A server that doesn't watch the disk still misses changes to files pharos never
+   opened ([pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10)).
 
 ### The human path (no LLM)
 
@@ -120,7 +122,11 @@ This is the shape *if pharos stays*. Until then the human has geex's own search
 - **Diagnostics after a save:** geex saves; pharos's server sees the new file; geex shows
   gutter marks, a count and a list. First by asking after the save, later by subscription.
   Marks dim while the buffer has unsaved changes: answers are about the saved file
-  (geex ADR-0010).
+  (geex ADR-0010). pharos says when it isn't sure (ADR-038): `pharos.carried_over` marks an
+  answer that may describe older text, and `pharos.not_reported` names servers that didn't
+  answer. geex shows both as unsure, never as clean. Until
+  [pharos#13](https://github.com/LoganBresnahan/pharos-mcp/issues/13) lands, an unmarked
+  TypeScript answer can still describe the previous text.
 - **Rename / format:** pharos returns edits; geex applies them as the human's commands, so
   they go into the one undo history with `actor: :human`, not as anonymous file writes.
 - **Positions:** pharos speaks LSP positions (UTF-16 code units); geex addresses graphemes.
@@ -157,7 +163,9 @@ wall time. Several runs per arm per task; the same model throughout.
 **The language:** TypeScript or Rust, picked when #7 starts. Rust needs
 [pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8) fixed first: until then
 rust-analyzer's own diagnostics never reach pharos, so a Rust arm 3 would relay only
-`cargo check` output, which is arm 2's checker plus latency. TypeScript isn't affected.
+`cargo check` output, which is arm 2's checker plus latency. TypeScript isn't affected by
+#8, but needs [pharos#13](https://github.com/LoganBresnahan/pharos-mcp/issues/13): until
+it lands, a TypeScript answer right after an edit can describe the previous text.
 
 **Decided up front:** pharos stays only if arm 3 clearly beats arm 2, not merely arm 1. If the
 compiler hook ties, the cheaper tool wins: keep the compiler hook (it can live with
@@ -167,20 +175,23 @@ captAInHook's payloads), park pharos, and close or park the pharos-dependent iss
 
 | Step | Issue | Repo | What | Needs |
 |---|---|---|---|---|
-| 1 | [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3) | pharos | **bug:** a file opened once is never re-synced; later saves are invisible to the server (verified 2026-11-13, pharos 0.2.2, pyright). The trial means nothing until this is fixed | — |
-| 2 | [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6) | pharos | `pharos diagnostics` CLI + the captAInHook payload: arm 3 | pharos#3 |
+| 1 | [pharos#13](https://github.com/LoganBresnahan/pharos-mcp/issues/13) | pharos | **bug:** a TypeScript answer right after an edit can describe the previous text (ADR-038's known limit, F4); fix: ask tsserver directly instead of trusting unversioned publishes | — |
+| 2 | [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6) | pharos | `pharos diagnostics` CLI + the captAInHook payload: arm 3 | pharos#13 |
 | 2 | [pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8) | pharos | **bug:** rust-analyzer's own diagnostics never reach pharos (pull diagnostics advertised to servers it runs in push mode). Needed only if the trial runs on Rust | — |
-| 2 | [pharos#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7) | pharos | the trial: the compiler-hook arm and the three-arm run, written up with the verdict | pharos#3, pharos#6; pharos#8 if on Rust |
+| 3 | [pharos#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7) | pharos | the trial: the compiler-hook arm and the three-arm run, written up with the verdict | pharos#6; pharos#8 if on Rust |
+
+Done: [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3), documents re-synced
+from disk on every question (pharos ADR-038).
 
 **Parked until the verdict** (built only if pharos stays):
 
 | Issue | Repo | What | Needs |
 |---|---|---|---|
-| [geex#2](https://github.com/LoganBresnahan/geex/issues/2) | geex | geex as an MCP client of pharos: definition, references, hover, diagnostics after a save | pharos#3; an ADR or amendments to 0008/0010/0021 |
-| [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) | pharos | push diagnostics through MCP resource subscriptions | pharos#3; geex#2 reaching diagnostics |
+| [geex#2](https://github.com/LoganBresnahan/geex/issues/2) | geex | geex as an MCP client of pharos: definition, references, hover, diagnostics after a save | an ADR or amendments to 0008/0010/0021; pharos#13 for TypeScript diagnostics |
+| [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) | pharos | push diagnostics through MCP resource subscriptions | geex#2 reaching diagnostics |
 | [pharos#4](https://github.com/LoganBresnahan/pharos-mcp/issues/4) | pharos | `apply_workspace_edit` reports each written file's path + before/after sha256 | — |
 | [geex#1](https://github.com/LoganBresnahan/geex/issues/1) | geex | `geex-attest.sh` credits pharos's multi-file writes | pharos#4 |
-| [pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10) | pharos | servers that don't watch the disk (gopls, pyright) never see changes to files pharos hasn't opened; typescript-language-server watches on its own, so a TypeScript trial doesn't need it; rust-analyzer unverified | pharos#3 |
+| [pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10) | pharos | servers that don't watch the disk (gopls, pyright) never see changes to files pharos hasn't opened; typescript-language-server watches on its own, so a TypeScript trial doesn't need it; rust-analyzer unverified | — |
 
 pharos#4 and geex#1 are one feature (attributing pharos's writes): build them together or not
 at all. captAInHook builds nothing for it (see "Decided against").
