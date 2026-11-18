@@ -5,10 +5,12 @@ agent edits code, a human watches and steers, and the record says who did what. 
 working alone in the editor is the second case, and it has to work just as well without an
 LLM in the middle.
 
-**pharos is on trial.** geex and captAInHook are core; pharos stays only if language-server
-answers prove they beat what a capable model already gets from the compiler, the tests and
-grep (see [The pharos trial](#the-pharos-trial)). Nothing else in the stack depends on it:
-every rule below holds with pharos gone, and geex runs without it (rule 8).
+**pharos's diagnostics hook is on trial.** geex and captAInHook are core. The trial decides
+whether agents get pharos's post-edit diagnostics hook or a plain compiler hook (see
+[The pharos trial](#the-pharos-trial)). Whether pharos itself stays is the maintainer's call,
+weighing what it does for agents beyond the hook (its navigation tools) and what it would do
+for geex. Nothing else in the stack depends on it: every rule below holds with pharos gone,
+and geex runs without it (rule 8).
 
 This doc is the shared reference for how they connect. Each repo keeps its own decisions in
 its own ADRs; a change to a contract *between* the tools is agreed here first, then lands in
@@ -77,7 +79,7 @@ the repos. The other two repos link here.
 | From | To | Over | Carries | Status |
 |---|---|---|---|---|
 | agent (Claude Code) | pharos | MCP, stdio → shared daemon | code questions; previews; `apply_workspace_edit` | built |
-| geex | pharos | MCP, stdio → shared daemon | definition, references, hover, diagnostics | parked until the trial's verdict: [geex#2](https://github.com/LoganBresnahan/geex/issues/2) |
+| geex | pharos | MCP, stdio → shared daemon | definition, references, hover, diagnostics | parked until pharos's place is decided: [geex#2](https://github.com/LoganBresnahan/geex/issues/2) |
 | pharos | geex | MCP notifications (resource subscriptions) | "diagnostics for this file changed" | [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) |
 | captAInHook | geex | the `geex-attest.sh` payload → loopback `POST /attest` | who wrote a file, by hash | built for Write/Edit/MultiEdit/NotebookEdit; pharos writes: [geex#1](https://github.com/LoganBresnahan/geex/issues/1) |
 | captAInHook | pharos | a payload → `pharos diagnostics` CLI | the touched files' diagnostics, back to the agent | [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6) |
@@ -152,24 +154,36 @@ files.
 TypeScript or Rust repo; pharos's existing benchmark is the place to build it):
 
 1. no hook;
-2. a compiler hook: the project's own checker after edits, new errors only, at the same
-   cadence and with the same wording as arm 3;
+2. a compiler hook ([captAInHook#4](https://github.com/LoganBresnahan/captAInHook/issues/4)):
+   the project's own checker after edits;
 3. the pharos hook ([pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6)):
-   per-edit new errors, plus the end-of-turn check.
+   the language server's diagnostics after edits.
 
-Measure: turns that end with the code broken; build and test runs the agent makes; tokens;
-wall time. Several runs per arm per task; the same model throughout.
+Arms 2 and 3 follow one contract, [stack-trial-hooks.md](stack-trial-hooks.md), so the only
+difference is where the errors come from. All three arms share:
+- the same model and harness: DeepSeek's `deepseek-v4-pro` driven by Claude Code, decided
+  2026-11-18;
+- the same tools, without pharos's MCP tools;
+- runs isolated from the maintainer's own daemons and settings.
 
-**The language:** TypeScript or Rust, picked when #7 starts. Rust needs
-[pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8) fixed first: until then
-rust-analyzer's own diagnostics never reach pharos, so a Rust arm 3 would relay only
-`cargo check` output, which is arm 2's checker plus latency. TypeScript isn't affected by
-#8, but needs [pharos#13](https://github.com/LoganBresnahan/pharos-mcp/issues/13): until
-it lands, a TypeScript answer right after an edit can describe the previous text.
+Arms 2 and 3 also share the same events, baselines, wording and budget. The contract defines a
+broken turn and what "clearly beats" means. The measures are broken turns, the build and test
+runs the agent makes itself, tokens and wall time.
 
-**Decided up front:** pharos stays only if arm 3 clearly beats arm 2, not merely arm 1. If the
-compiler hook ties, the cheaper tool wins: keep the compiler hook (it can live with
-captAInHook's payloads), park pharos, and close or park the pharos-dependent issues below.
+**The language:** TypeScript; the contract is written for it. TypeScript needs
+[pharos#13](https://github.com/LoganBresnahan/pharos-mcp/issues/13): until it lands, a
+TypeScript answer right after an edit can describe the previous text. A Rust trial would
+need two things first:
+- [pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8) fixed. Until then
+  rust-analyzer's own diagnostics never reach pharos, so a Rust arm 3 would relay only
+  `cargo check` output, which is arm 2's checker plus latency.
+- A Rust version of the contract's checkers and line format.
+
+**What the verdict decides:** which hook agents get. If arm 3 clearly beats arm 2 (not merely
+arm 1), agents get the pharos hook. If the compiler hook ties or wins, the cheaper tool wins
+and agents get the compiler hook. pharos's own place in the stack is the maintainer's call,
+decided separately (revised 2026-11-18): the trial tests one feature, and it measures neither
+pharos's navigation tools for agents nor what pharos would do for geex.
 
 ## The work, in order
 
@@ -178,12 +192,13 @@ captAInHook's payloads), park pharos, and close or park the pharos-dependent iss
 | 1 | [pharos#13](https://github.com/LoganBresnahan/pharos-mcp/issues/13) | pharos | **bug:** a TypeScript answer right after an edit can describe the previous text (ADR-038's known limit, F4); fix: ask tsserver directly instead of trusting unversioned publishes | — |
 | 2 | [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6) | pharos | `pharos diagnostics` CLI + the captAInHook payload: arm 3 | pharos#13 |
 | 2 | [pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8) | pharos | **bug:** rust-analyzer's own diagnostics never reach pharos (pull diagnostics advertised to servers it runs in push mode). Needed only if the trial runs on Rust | — |
-| 3 | [pharos#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7) | pharos | the trial: the compiler-hook arm and the three-arm run, written up with the verdict | pharos#6; pharos#8 if on Rust |
+| 2 | [captAInHook#4](https://github.com/LoganBresnahan/captAInHook/issues/4) | captAInHook | arm 2: the compiler hook (the project's own checker after edits), on the same contract as #6 | — |
+| 3 | [pharos#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7) | pharos | the trial: the three-arm run on `deepseek-v4-pro`, written up with the verdict | pharos#6, captAInHook#4; pharos#8 if on Rust |
 
 Done: [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3), documents re-synced
 from disk on every question (pharos ADR-038).
 
-**Parked until the verdict** (built only if pharos stays):
+**Parked until pharos's place is decided** (built only if pharos stays):
 
 | Issue | Repo | What | Needs |
 |---|---|---|---|
