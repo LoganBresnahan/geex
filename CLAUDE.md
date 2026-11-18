@@ -104,7 +104,7 @@ One Mix app, `:geex`, under `lib/geex/`:
 
 ```sh
 mix compile --warnings-as-errors   # the bar locally; ci.yml runs it and the suite on every push
-mix test                           # ~1300 tests, ~13s; green TWICE is the ship bar
+mix test                           # ~1800 tests + ~60 properties + ~210 doctests, ~30s; green TWICE is the ship bar
 mix test test/geex/mcp/grid_test.exs
 GEEX_PROPERTY_RUNS=10000 mix test --only property   # a deep run of the properties (ADR-0044)
 mix geex.serve                     # headless + loopback MCP on a free port (logged)
