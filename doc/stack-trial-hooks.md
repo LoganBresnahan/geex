@@ -44,9 +44,16 @@ repos. Where an issue's own notes disagree with this file, this file wins.
 - **One TypeScript:** the project's own compiler, `node_modules/.bin/tsc` with
   `--pretty false`. typescript-language-server is pointed at the same `typescript` package,
   not its bundled copy. The write-up records the version.
-- **In scope:** the files in the tsconfig's program, listed at warm start with
-  `tsc -p <tsconfig> --listFilesOnly`, plus new files the tsconfig would include (by its
-  `include`, `exclude` and `files`).
+- **In scope:** the files in the tsconfig's program, including new files the tsconfig would
+  include (by its `include`, `exclude` and `files`).
+  - Arm 2 and the measuring check get that from tsc's own output, since tsc reports only its
+    program's files.
+  - Arm 3 asks tsserver which project each file belongs to; it's in scope when that's the
+    trial tsconfig's configured project.
+  - Precondition: tsserver puts each file in its nearest tsconfig's project, so a nested
+    tsconfig that owns program files (say, `tests/tsconfig.json`) would take those files out of
+    arm 3's scope but not arm 2's. The trial project has no such nested tsconfig, and the
+    warm start checks that every program file's tsserver project is the trial tsconfig.
   Both hooks skip everything else. That covers files outside the program (which tsserver
   would check in an inferred project) and errors with no file (TS5xxx, TS6053, TS2318).
 - **Warm start:** before the agent's first turn, the trial primes both checkers:
@@ -74,6 +81,37 @@ repos. Where an issue's own notes disagree with this file, this file wins.
   daemon.
 - **Errors only:** tsc's `error` category, or LSP severity 1. Warnings, hints and tsserver's
   suggestion diagnostics are out.
+- **Incomplete checks (arm 2 only):** the tsc command line stops reporting type errors
+  anywhere once any file has a syntactic, options or global error. So an arm 2 check is
+  incomplete when its output includes an error whose code is on the syntactic list below, or
+  an error that has no file or is in a file outside the program, such as `tsconfig.json`
+  errors (TS5xxx), TS6053 or TS2318.
+  - The syntactic list is pinned to the trial's TypeScript version, derived from its scanner,
+    parser and JavaScript-file checks. Many such codes are 2000 or above (TS2657 in JSX,
+    TS6189, TS8010 under `checkJs`), and some TS1xxx codes come from the type pass instead
+    (TS1484, TS1192, TS1259), so neither "TS1xxx" nor "below 2000" works as a rule. For
+    TypeScript 6.0.3 the list has 157 codes: 1002-1003, 1005, 1007, 1010-1012, 1034,
+    1068-1069, 1109-1110, 1121, 1124-1132, 1134-1140, 1142, 1144-1146, 1160-1161, 1177-1181,
+    1198-1199, 1206, 1209, 1223, 1228, 1260, 1351-1353, 1357, 1359, 1381-1382, 1385-1390,
+    1433-1443, 1472, 1477-1478, 1486-1490, 1499-1538, 2427, 2457, 2657, 2754, 2809, 2819,
+    6188-6189, 8002-8006, 8008-8013, 8016-8017, 8033-8034, 8037-8039, 17002, 17006-17008,
+    17014-17015, 17021, 18009, 18016, 18026, 18029-18030. Another TypeScript version needs its
+    own list before the trial runs.
+  - Other codes count by where the error is: many TS6xxx codes (an unused local, say) are
+    ordinary errors in a program file.
+  - Unless the output also has an error in a program file whose code isn't on the list. tsc
+    reports type errors only once there are no syntactic, options or global errors, so such an
+    error proves the type pass ran.
+  - Arm 3 isn't covered. tsserver's language service checks each file's types even while
+    another file has a syntax error, which is part of what the trial measures. pharos's own
+    markers govern arm 3.
+  - An incomplete check is never a baseline. A first-write baseline taken from one is unknown
+    for that file, and an incomplete turn-start check leaves every untouched file unknown.
+  - An incomplete check is never kept for reuse.
+  - After a write and at Stop, it still reports its new errors in files with known baselines,
+    and logs `trial.unsure reason=incomplete`.
+  - The rule over-covers: a few listed codes can also come from the type pass (15 in 6.0.3,
+    such as TS1005 and TS2427). That costs only silence.
 
 ## Seams
 
@@ -148,8 +186,9 @@ Turn state (baselines, what's been reported) lives on disk, keyed by session.
   ```
 
 - **At the turn's end** (Stop): every new occurrence still present in the files the hook checks,
-  whether reported before or not. If there are any, block with this reason. Block at most once
-  per turn: when `stop_hook_active` is set, let the turn end. Registered fail-open.
+  whether reported before or not. Stop checks even when no file was touched this turn; arm 3
+  then has nothing to check. If there are any, block with this reason. Block at most once per
+  turn: when `stop_hook_active` is set, let the turn end. Registered fail-open.
 
   ```
   These errors appeared during this turn and are still present:
@@ -161,7 +200,7 @@ Turn state (baselines, what's been reported) lives on disk, keyed by session.
 - A check or baseline that fails, can't be parsed, runs past the budget, or comes back unsure
   (`pharos.carried_over`, `pharos.not_reported`) says nothing.
 - Each hook writes one line to stderr for it:
-  `trial.unsure reason=<failed|unparsed|no-baseline|unsure> event=<baseline|PostToolUse|Stop>`.
+  `trial.unsure reason=<failed|unparsed|no-baseline|unsure|incomplete> event=<baseline|PostToolUse|Stop>`.
 - A budget kill shows in captAInHook's own trail.
 
 ## Measures and the verdict
@@ -169,6 +208,11 @@ Turn state (baselines, what's been reported) lives on disk, keyed by session.
 - **The measuring check:** after each turn has ended (after its final Stop), the trial runs
   arm 2's compiler on the whole project, whatever the arm. It uses its own build info file
   (`<run dir>/measure.tsbuildinfo`). Its time isn't counted in the run's wall time.
+- **A task starts syntax-clean:** the measuring check at the task's start must be complete (see
+  "Incomplete checks"), so the starting set holds every error. That includes the tsconfig:
+  TypeScript 6 reports a deprecated option as a `tsconfig.json` error (TS5101) that hides every
+  type error. So the trial project's tsconfig has no deprecated options, or it sets
+  `ignoreDeprecations`.
 - **A broken turn:** the measuring check finds a key that occurs more often than it did at the
   task's start, or a test that passed at the task's start now fails. The measuring check counts
   every error, including errors with no file, keyed with an empty path, even though the hooks
