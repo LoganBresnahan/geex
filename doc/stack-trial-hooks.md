@@ -49,12 +49,15 @@ repos. Where an issue's own notes disagree with this file, this file wins.
   - Arm 2 and the measuring check get that from tsc's own output, since tsc reports only its
     program's files.
   - Arm 3 asks tsserver which project each file belongs to; it's in scope when that's the
-    trial tsconfig's configured project.
+    trial tsconfig's configured project. That covers the program's TypeScript files. Other
+    program files, such as JSON files the program imports, go to other servers, so only arm 2
+    checks them.
   - Precondition: tsserver puts each file in its nearest tsconfig's project, so a nested
     tsconfig that owns program files (say, `tests/tsconfig.json`) would take those files out of
     arm 3's scope but not arm 2's. The trial project has no such nested tsconfig. Once per task
     start state (every run of a task starts from the same tree), the trial checks that each of
-    the project's own program files (not `node_modules` or the library `.d.ts` files) has the
+    the project's own TypeScript program files (not `node_modules`, the library `.d.ts` files
+    or the JSON files the program imports) has the
     trial tsconfig as its tsserver project. The check uses the same pharos,
     typescript-language-server and TypeScript as the runs, and is redone if any of them
     changes. After each run, the runner flags a run whose tree gained a `tsconfig*.json`,
@@ -163,8 +166,8 @@ Turn state (baselines, what's been reported) lives on disk, keyed by session.
   those errors become part of that file's baseline, and Stop lets them through. The measure
   below still counts such a turn as broken, so the result isn't fooled. The write-up explains
   those turns.
-- **Reach:** arm 2 checks the whole project, and arm 3 checks the files touched this turn. That
-  difference is part of what the trial measures.
+- **Reach:** arm 2 checks the whole project, and arm 3 checks the TypeScript files touched this
+  turn. That difference is part of what the trial measures.
 
 ## What the agent sees
 
