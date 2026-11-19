@@ -91,8 +91,10 @@ One Mix app, `:geex`, under `lib/geex/`:
    (ADR-0027.)
 6. **Agents edit natively; geex records, captAInHook attributes** (ADR-0032).
    Reconcile is the primary agent path. Attribution comes only from an
-   attestation that matches the exact content hash; with no match the command
-   stays `:external`. Never infer an actor from timing.
+   attestation that matches the exact content hash; a Bash call's attestation
+   is bracketed by its window and is shown as "while", never "by" (ADR-0032's
+   2026-11-18 amendment); with no match the command stays `:external`. Never
+   infer authorship from timing.
 7. **World, not brain.** geex owns buffers / the shared path / undo / replay /
    provenance; agent orchestration, planning, context and cost are
    bring-your-own. Apply this test before proposing any feature. (ADR-0007.)

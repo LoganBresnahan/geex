@@ -83,8 +83,9 @@ user's files.** A formatter is not a check (see Alternatives).
   `source`, `message`), and an optional `"positionEncoding"` (`"utf-16"`, the default, `"utf-8"`
   or `"utf-32"`, LSP 3.17's names). `status` is `ok`, `unsure` or `failed`. Fields geex
   doesn't know are ignored. This is `pharos diagnostics --json`'s shape as it stands (it also
-  prints `file`, `uri` and `project`; in 0.3.2 an `unsure` file's `reason` is `no_publish`,
-  `carried_over`, `not_reported` or `no_project`, comma-joined when there are several, and a
+  prints `file`, `uri` and `project`; an `unsure` file's `reason` is `no_publish`, `carried_over`,
+  `not_reported` or a project one (`no_project` in 0.3.2, `project_unknown` from 0.3.3),
+  comma-joined when there are several, and a
   `failed` file's is free text), so pharos needs no wrapper. **geex keys on `status` only**; a
   `reason` is shown, never interpreted.
 - **`tsc`**: `path(line,col): error TS1234: message`, 1-based, UTF-16 columns.

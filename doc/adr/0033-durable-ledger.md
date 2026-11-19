@@ -350,3 +350,25 @@ Choices made building it, within the decisions above:
 - **A fix found by the `list` test:** renaming a buffer that hadn't yet written to its ledger in
   this session moved the file without recording the rename, so the ledger kept naming the old
   path. `Ledger.rename/3` now records the rename whenever the ledger file exists.
+
+## Amendment — 2026-11-18: a credit "while" is kept; every revert shows what it takes back
+
+*Accepted 2026-11-19 with ADR-0032's amendment of the same date; not built.*
+
+**A credit "while".** With [ADR-0032](0032-listener-first-agent-integration.md)'s amendment of this
+date (an agent's Bash changes, credited "while"), an actor can carry `during` (the tool, `"Bash"`)
+and `program` (the name of the program the command ran, never the command line). The ledger's
+codec keeps both, so a reopened file still says "while". The spool keeps `during` only: it stays
+hashes and ids (decision F). A chain whose links include a `during` credit is credited "while".
+The codec reads only the actor fields it knows, so older ledgers read unchanged.
+
+**Every revert shows what it takes back first** (the maintainer, 2026-11-19: "seeing what we are
+reverting would probably be best as a default even for correctly attributed edits"). `Alt+R`
+(`revert`, one hunk) and `Alt+Shift+R` (`revert-call`, the whole group in the file) no longer
+apply at once: the lines the revert would change are marked in the editor (the selection's tint),
+scrolled into view, and the minibuffer asks, through the `:confirm` mode replace-all uses:
+"revert 3 hunks (claude-code/1a2b3c4d, while python3)? (y/n)". `y` applies it exactly as before
+(the same plan, `meta.reverts`, refused on overlap, one undo step); `n` or Esc leaves everything
+as it was. A refusal (an overlap, nothing to revert) is said at once, with no question. The plan
+is worked out when the key is pressed and applied with `expect_seq`, so a buffer that changed
+while the question was up refuses it and says so.

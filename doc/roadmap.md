@@ -479,7 +479,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
      it changed. *(2026-11-13: a hash-proved first step is now
      [geex#3](https://github.com/LoganBresnahan/geex/issues/3): a git snapshot before the call and
      a compare after it, sent as the existing attestation; the "while" label below becomes its
-     fallback.)* Proposed: a hook before each Bash call and the existing one after it bracket the
+     fallback.)* *(2026-11-18: drafted as [ADR-0032](adr/0032-listener-first-agent-integration.md)'s
+     amendment, accepted 2026-11-19, not built: hash-proved over the call's window, so it too
+     says "while", never "by"; reviewed by mod. Every revert now shows what it takes back first,
+     ADR-0033's amendment.)* Proposed: a hook before each Bash call and the existing one after it bracket the
      call in time, and changes to open files in between are labelled "changed **while** session X
      ran `cmd`", never "by", so attribution by timing never claims authorship (ADR-0032's rule).
      Needs a `pre-tool-use` registration in `~/.captainHook/handlers.json`, a new message to geex,
@@ -881,7 +884,9 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
       final newline. **Built 2026-11-12** on `save-undo`.
 21. **Asks from 2026-11-13, filed as issues** (the maintainer, while setting up the
    [stack](stack.md)); none started, each needs its ADR or amendment first:
-   - **Attest an agent's Bash changes** ([geex#3](https://github.com/LoganBresnahan/geex/issues/3)):
+   - **Attest an agent's Bash changes** ([geex#3](https://github.com/LoganBresnahan/geex/issues/3);
+     ADR-0032's amendment accepted 2026-11-19, the maintainer's next pick, before ADR-0055's
+     build: agents now change files through Bash more often than through Edit/Write):
      a git snapshot before the call and a compare after, sent as the existing attestation, so
      `sed -i`, formatters and scripts get credited like Edit and Write. Needs a PreToolUse
      registration the maintainer makes.

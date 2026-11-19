@@ -4,7 +4,8 @@
   created file is sent as `created`; 2026-11-09: an attestation credits the group's undone
   commands too, and can match the newest write's group when fully undone; 2026-11-12: a command
   that keeps the line count marks only the lines it changed; 2026-11-13: each agent session's
-  marks and edits rows in its own colour). For open
+  marks and edits rows in its own colour; 2026-11-18, accepted 2026-11-19: an agent's Bash
+  changes credited "while", not built). For open
   buffers, step b's disk-wins merge and the pending table are superseded by
   [ADR-0034](0034-panes-tree-edits-hold.md) (buffers hold; `git merge-file`; held attestations)
 - **Date:** 2026-10-14
@@ -557,3 +558,150 @@ edits list as well so entries are color coated".
 - **Two sessions can share a colour** (five colours under the terminal theme): the status line
   and the edits row still name the session. Blame stays pure; the colour is chosen at paint.
 
+
+## Amendment — 2026-11-18: an agent's Bash changes, credited "while"
+
+*Drafted at the maintainer's ask ([geex#3](https://github.com/LoganBresnahan/geex/issues/3), roadmap
+item 8's "Labelling shell writes"), reviewed by mod against stack.md and captAInHook's contract,
+accepted 2026-11-19 with the maintainer's answers below; not built.*
+
+**The gap.** A file an agent changes through its Bash tool (`sed -i`, a formatter, a generator,
+`git checkout`, a script) stays `:external`: a Bash response carries stdout and stderr, no file
+and no text from before, so the payload has nothing to hash. captAInHook's ADR-0019 addendum
+names the way: a before-hash from "a PreToolUse snapshot the payload takes itself".
+
+**What a hash can and can't prove here.** For Write and Edit the harness reports the text its own
+tool read and wrote, so a match proves the tool wrote the file. Around a Bash call the payload
+can only bracket the call in time: a match proves **the file went from X to Y while the call
+ran**, not that the command did it. A `--watch` build, another editor or a subagent writing in the
+same window would match too. Invariant 6 forbids inferring an actor from timing, so this credit
+**never claims authorship: it says "while"**. It is still hash-proved (both hashes, exactly, as
+every attestation), and a wrong, late or duplicate claim still leaves the change `:external`.
+
+1. **A PreToolUse step in the same payload.** `geex-attest.sh` gains a second registration, on
+   `PreToolUse`, and tells the two apart by the envelope's `type`. On a `claude-code` `Bash` call
+   it takes a **snapshot** of each git work tree the call may touch: the sha256 of every file
+   `git status --porcelain=v1 -z --untracked-files=normal` names there (modified, staged,
+   untracked; "absent" for a deleted one), with the session, the roots and the time, in
+   `<discovery dir>/bash/<tool_use_id>.snap` (`0600`, the directory `0700`). A subdirectory,
+   because the payload and geex read the discovery directory's `*.json` as live instances.
+   **The work trees** are the one holding the envelope's `cwd`, plus the one holding each
+   directory the command names with `cd DIR` or `git -C DIR`, and each absolute path in it. Agents
+   often work in another worktree (`cd ~/geex-tonight && python3 - <<'EOF' …` is a common shape
+   in the transcripts), and the envelope's `cwd` is the session's, not the command's. Reading the
+   command only chooses **where to look**, never who gets the credit: a change still has to match
+   both hashes, so looking in one more place can't make a wrong claim, only cost one more
+   `git status` (within the same time budget). At most a few work trees per call; past the
+   budget, the rest are skipped.
+   **It always exits 0 with empty stdout**: a PreToolUse answer can approve or deny the call,
+   and this one must never steer (captAInHook ADR-0010: empty stdout is a Noop, and its merge is
+   first-deny-wins, so a recording handler can neither approve nor deny). **It sits in the
+   call's critical path:** its time budget is latency added to every Bash call. captAInHook
+   registers a handler by event, not by tool, so the script runs on every tool call's
+   PreToolUse and exits at once for anything but a `claude-code` `Bash` call (a cheap check of
+   the envelope before `jq`). captAInHook's own `budgetMs` and `failMode` "open" are the outer
+   guard on the payload's budget. Snapshots older than an hour are removed (a denied call never
+   reaches PostToolUse).
+
+2. **The PostToolUse step compares.** On the same call's PostToolUse it runs `git status` again
+   and takes the union of the snapshot's paths and the new list. For each path:
+   - **before** is the snapshot's hash; for a file that was clean, git's index copy as a
+     checkout would write it (`git cat-file --filters`), so line-ending conversion and filters
+     don't make the hash miss; "absent" makes it `created`;
+   - **after** is the disk now; a path that no longer exists sends nothing (geex has no deletion
+     attestation);
+   - equal hashes send nothing; otherwise the **existing v1 attestation** goes out, POSTed and
+     spooled exactly as a Write's, with two new optional fields:
+     `"during": "Bash"` (the tool; present only on a credit by time) and `"program"` (the name
+     of the program the command runs: its first word past any `cd …`, `env`, `export` or
+     `VAR=value`, as a basename: `sed`, `python3`, `prettier`, `git`). Only the name, never the
+     command line: a command can carry a token, and the ledger and edits list are durable.
+   The snapshot is then removed. No snapshot (the PreToolUse step didn't run, timed out or isn't
+   registered): nothing is sent, as today.
+
+3. **geex shows it as "while".** `Geex.Attest.parse/1` keeps `during` and `program`; the
+   message stays `v: 1` (older geex versions aren't a concern, the maintainer, 2026-11-19). The
+   matching is unchanged. The actor carries them, so
+   the blame, `revert-call` and replay work as for any credit, and the display says what was
+   proved:
+   - the status line: `✎ claude-code/1a2b3c4d · turn … · while python3`;
+   - the edits pane's who column: the session, then `(while Bash)`;
+   - the gutter: a lighter `╎` in the session's colour in place of `▌`, so a weaker claim reads
+     as one at a glance (`▌` stays for a credit "by");
+   - `revert-call` takes back the call's changes in the file, which is what undoing a bad `sed`
+     wants; on a credit "while" that is everything that changed in the file during the window
+     (see Limits). Every revert now shows what it takes back first
+     ([ADR-0033](0033-durable-ledger.md)'s amendment of this date).
+   A spool chain that mixes a Bash link with a Write link of the same session is credited
+   "while" (the weaker claim wins). [ADR-0033](0033-durable-ledger.md)'s amendment of this date
+   keeps the fields in the ledger and the spool.
+
+4. **Limits, all misses rather than wrong claims:**
+   - The PreToolUse step runs **before the permission prompt**. In a mode that asks, anything
+     written while the human decides falls inside the window and is credited "while". The label
+     keeps that honest; geex's own saves never produce an `:external` change, so they are never
+     swallowed.
+   - **Background Bash** (`run_in_background`): its PostToolUse comes at launch, so the payload
+     sends nothing for it and removes the snapshot. Its changes still reach geex as reconcile
+     sees them: recorded `:external`, in the edits pane, undoable, just not credited.
+   - **Overlapping calls** (parallel tool calls; subagents run asynchronously but carry the
+     parent's session id, Claude Code 2.1.328): a change in the overlap is claimed by both, and
+     the first attestation to arrive takes it. Both labels are true.
+   - **A work tree the command reaches some other way** (a variable, `pushd`, a script that
+     changes directory itself) isn't snapshotted, so its changes are missed.
+   - **Outside a git work tree, ignored files, files inside an untracked directory that
+     `--untracked-files=normal` shows as one entry, files outside the repository:** no credit.
+     The softer, unproved "changed while" for any open file in the window (roadmap item 8) stays
+     a later step, if ever.
+   - **`revert-call` on a credit "while" reverts the window,** not just the command: a
+     `--watch` build's or another editor's change to the same file in the same window goes too.
+     The revert's preview (ADR-0033's amendment) shows it before anything changes.
+   - **Cost:** a `git status` (plus hashing the files it names) before and after every Bash call.
+     Measured on a large repository before it ships; past a time budget the step skips quietly
+     (fail-open, as the rest of the payload).
+
+5. **What the maintainer does:** adds `"pre-tool-use"` to the existing `geex-attest` entry's
+   `events` in `~/.captainHook/handlers.json` (same script, `failMode` "open", `passEnv` with
+   `XDG_RUNTIME_DIR`, and `XDG_STATE_HOME` if set); geex gives the exact entry and a `budgetMs`
+   from the measurement. Never edited by geex.
+
+6. **Tests:** the payload against the verbatim `test/fixtures/claude-code/bash.jsonl` (PreToolUse
+   and PostToolUse, Claude Code 2.1.299) in a scratch git repository: a `sed -i` on a clean file,
+   a modified file, a created file, a deleted file, a CRLF file under `core.autocrlf`, a denied
+   call's stale snapshot, a background call, no snapshot, no git, a `cd` into a second work tree,
+   a `git -C` and an absolute path; geex's parse, display, ledger
+   and spool with `during`; and a live run with a real Claude Code session.
+
+**Wording elsewhere** (both the maintainer's to decide; stack.md its owner's to change). The rule underneath: timing may only ever produce a credit "while", and a credit "while"
+is never shown as "by".
+- stack.md rule 3, replacing its last sentence (mod's wording): "A shell call that changes files
+  is bracketed instead: the payload hashes the work trees before and after the call and attests
+  each changed file as `during` that call, a weaker claim that it changed while the call ran. No
+  tool infers authorship from timing (geex invariant 6): a bracketed credit says "while", never
+  "by", and nothing is credited outside a call's own window."
+- CLAUDE.md invariant 6: "Attribution comes only from an attestation that matches the exact
+  content hash; a Bash call's attestation is bracketed by its window and is shown as "while",
+  never "by"."
+
+**Alternative, complementary:** the transcripts suggest Claude Code's bypass-mode prompt pushes
+agents toward shell edits. `presets/claude-code` could ask agents to prefer Edit and Write for
+file changes, which earns a full "by" credit at no cost. It doesn't replace this: other modes,
+harnesses, formatters and scripts still change files through the shell.
+
+**Decided 2026-11-19 (the maintainer):**
+1. **The words:** "while" on the status line, `(while Bash)` in the edits pane.
+2. **The gutter:** a lighter `╎` in the session's colour for a credit "while".
+3. **The command text:** only the program's name (`program`), never the command line (mod's
+   suggestion).
+4. **Background Bash:** skipped; its changes stay `:external` (Limits).
+5. **Older geex versions** aren't a concern: the message stays `v: 1` with optional fields,
+   the simplest form for the new work.
+6. **Every revert shows what it takes back first**, for any credit, not only "while"
+   ([ADR-0033](0033-durable-ledger.md)'s amendment of this date).
+
+The time budget isn't a question: the PreToolUse step runs before every tool call and holds
+the agent until it ends, so it gives up on a call (a missed credit) rather than slow the agent.
+The number comes from measuring `git status` on a large repository at build time.
+
+*Checked at build time, not a question:* whether the envelope's `cwd` follows a `cd` an earlier
+Bash call left in Claude Code's shell. The work-tree rule in step 1 covers both answers.
