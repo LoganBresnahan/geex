@@ -25,6 +25,11 @@ repos. Where an issue's own notes disagree with this file, this file wins.
 - **Same tools:** the harness's own tools only. Claude Code runs with its own configuration
   directory and `--strict-mcp-config` with no MCP servers, so none of the maintainer's MCP
   servers, memory or plugins reach the agent.
+- **No subagents, no web:** every arm runs with `--disallowedTools Agent WebSearch WebFetch`.
+  Claude Code 2.1.328 runs a subagent asynchronously: the parent's turn ends before the
+  subagent starts, and the subagent's result comes back as a new user message. So neither
+  hook would see delegated edits at a turn's end. The trial measures an agent without
+  subagents, and the write-up says so.
 - **Isolation:**
   - Each run gets its own `HOME` and its own `XDG_RUNTIME_DIR`, mode 0700 and 60 characters at
     most (`mktemp -d /tmp/rtXXXXXX` is 15). Past that, both daemons silently fall back to one
@@ -77,8 +82,8 @@ repos. Where an issue's own notes disagree with this file, this file wins.
 - **One check at a time:** each run takes a per-session lock around every check and every
   update of its turn state, except the generation bump (see "Fresh or reused"), which takes
   no lock. A check that finds another one running waits for it. That holds across
-  overlapping events and parallel subagents in the same session. The contract assumes a
-  subagent's hook events carry the parent's session id; #7's dry run confirms it.
+  overlapping events in the same session. A subagent's hook events carry the parent's session
+  id (confirmed by #7's probe), though the trial runs without subagents.
 
 ## The checkers
 
@@ -126,7 +131,8 @@ repos. Where an issue's own notes disagree with this file, this file wins.
 Both hooks register the same four captAInHook events:
 
 - UserPromptSubmit: the turn starts;
-- PreToolUse on the writer tools, Bash and Task. On Bash and Task it only bumps the
+- PreToolUse on the writer tools, Bash and the subagent tool (`Agent`; `Task` in older Claude
+  Code). On Bash and the subagent tool it only bumps the
   generation (see "Fresh or reused");
 - PostToolUse on the writer tools;
 - Stop.
@@ -145,7 +151,7 @@ Turn state (baselines, what's been reported) lives on disk, keyed by session.
 - **An untouched file's baseline**, arm 2 only: its errors when the turn started (the
   UserPromptSubmit run).
 - **Fresh or reused:**
-  - Each PreToolUse on a writer tool, Bash or Task call bumps a generation counter atomically,
+  - Each PreToolUse on a writer tool, Bash or subagent call bumps a generation counter atomically,
     without the lock (an append or a rename on disk). PreToolUse fires even when the call
     then fails. Reads and searches don't bump it.
   - Each check records the generation when it starts.
