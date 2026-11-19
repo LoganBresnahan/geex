@@ -116,3 +116,13 @@ named consumer — consistent with the named-consumer rule ([vision.md](../visio
 [ADR-0024](0024-tui-core-extractable.md) (the TUI loop that brings the keymap consumer),
 [pharos-mcp-study](../research/pharos-mcp-study.md) (the precedence-chain + persistent_term pattern),
 `lib/geex/theme.ex` (`load/1` — the path-ready loader awaiting this reader).
+
+## Amendment — 2026-11-18: checks are the first consumer (ADR-0055)
+
+[ADR-0055](0055-checks-on-save.md) (accepted 2026-11-18, not built) makes this layer's first build
+the `[[checks]]` section of `~/.config/geex/config.toml`, ahead of §5's theme selection: the
+config loader and the TOML dependency decided here, reading only what checks need. A check runs a
+command, so it is code in §4's sense: **checks come only from the global file.** The project file
+(`.geex.toml`, §3) never carries them, so opening a cloned repository runs nothing. Theme
+selection by name, grammar and extension paths and the `GEEX_*` projection stay for their own
+consumers (`Alt+Y` already selects themes, ADR-0040).

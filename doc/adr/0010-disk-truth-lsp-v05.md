@@ -46,3 +46,12 @@ bridge, the exact transport §8 exists to avoid, and pharos has no such ingest t
   buffer has unsaved changes ([geex#2](https://github.com/LoganBresnahan/geex/issues/2)). Parked
   with the rest of the pharos work until the trial's verdict
   ([pharos-mcp#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7)).
+
+## Amendment — 2026-11-18: checks after a save (ADR-0055)
+
+[ADR-0055](0055-checks-on-save.md) (accepted 2026-11-18, not built) keeps to this rule: a check runs on the
+text a save wrote, labelled with that text's sha256, and its marks dim while the buffer has
+unsaved edits. It starts when the save's write is done, never on the watcher's event for it: the
+save writes in place ([ADR-0035](0035-the-loop-never-waits.md)'s 2026-11-15 amendment), so a
+reader started early could see half a file. Nothing in it needs unsaved text; completion as you
+type would be the first feature that does (roadmap item 22), and it would amend this ADR then.

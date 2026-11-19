@@ -194,3 +194,21 @@ unsaved buffers; co-location is a later transport swap.
   ([pharos-mcp#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7)): pharos stays only if a
   language-server hook clearly beats a plain compiler hook. The rules between geex, pharos and
   captAInHook: [stack.md](../stack.md).
+
+## Amendment — 2026-11-18: diagnostics, one contract with more than one adapter (ADR-0055)
+
+[ADR-0055](0055-checks-on-save.md) (accepted 2026-11-18, not built) makes diagnostics the first contract
+built on this ADR's model, ahead of the pharos MCP client sketched above:
+
+- **The contract** is ADR-0055's overlay input: per file, a status (`ok`, `unsure`, `failed`), the
+  hash of the text checked, and diagnostics in LSP's shape with a declared position encoding,
+  converted to graphemes at the edge (invariant 5).
+- **The adapters** are checks: a command whose output is parsed (`tsc`, `path:line:col` lines),
+  and `pharos diagnostics --json` (pharos 0.3.2, pharos ADR-040), which needs no MCP client. So
+  the diagnostics half of [geex#2](https://github.com/LoganBresnahan/geex/issues/2) has a second
+  road; the MCP client stays the road for definitions, references and hover.
+- **A direct-LSP adapter** stays "decided then" (above); its diagnostics would feed the same
+  overlay, and completion (roadmap item 22) is what would bring it.
+
+The pharos adapter adds a geex → pharos connection to [stack.md](../stack.md), so it went through
+stack.md's owner, who reviewed it on 2026-11-18 and adds the row when it ships.

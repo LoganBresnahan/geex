@@ -48,3 +48,14 @@ The decision stands: geex reaches pharos as an MCP client over stdio. Two things
 
 How the three tools (geex, pharos, captAInHook) connect, the rules between them, and the work in
 order: [stack.md](../stack.md).
+
+## Amendment — 2026-11-18: a second road to pharos (ADR-0055)
+
+[ADR-0055](0055-checks-on-save.md) (accepted 2026-11-18, not built) lets a user configure
+`pharos diagnostics --json {files}` (pharos 0.3.2, pharos ADR-040) as a check: a one-shot command
+that joins the shared daemon, as this ADR's 2026-11-13 amendment describes, with no MCP client in
+geex. pharos is still not bundled: the user installs it and names it in their own config, and
+geex runs the same without it (a missing `pharos` is a failed check). The MCP client this ADR
+costs out stays the road for definitions, references and hover, parked with
+[geex#2](https://github.com/LoganBresnahan/geex/issues/2) until pharos's place is decided
+([stack.md](../stack.md)).
