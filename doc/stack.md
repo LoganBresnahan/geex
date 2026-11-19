@@ -43,8 +43,12 @@ the repos. The other two repos link here.
    attestation). Never file content as a side channel.
 3. **Every write can be credited.** A tool that writes files reports, per file, the path and
    the sha256 before and after, so the harness side can attest it to geex. geex credits a
-   change only when both hashes match; anything else stays `:external`. No tool infers an
-   actor from timing (geex invariant 6).
+   change only when both hashes match; anything else stays `:external`. A shell call that
+   changes files is bracketed instead: the payload hashes the work trees before and after the
+   call and attests each changed file as `during` that call, a weaker claim that it changed
+   while the call ran (geex ADR-0032, amendment of 2026-11-18). No tool infers authorship from
+   timing (geex invariant 6): a bracketed credit says "while", never "by", and nothing is
+   credited outside a call's own window.
 4. **Edits are data.** A tool that computes a change returns it as edits and lets the client
    apply them. pharos's `edit_at_symbol`, `rename_preview` and `format_document` already
    work this way, and `apply_workspace_edit` is its only writer. geex applies edits itself, as
@@ -82,7 +86,7 @@ the repos. The other two repos link here.
 | geex | pharos | MCP, stdio → shared daemon | definition, references, hover | parked until pharos's place is decided: [geex#2](https://github.com/LoganBresnahan/geex/issues/2) |
 | geex | pharos | the `pharos diagnostics --json` CLI → shared daemon | diagnostics after a save, as one of the user's own checks (geex ADR-0055 §9); runs only if the user's config names it | accepted, not built (geex ADR-0055) |
 | pharos | geex | MCP notifications (resource subscriptions) | "diagnostics for this file changed" | [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) |
-| captAInHook | geex | the `geex-attest.sh` payload → loopback `POST /attest` | who wrote a file, by hash | built for Write/Edit/MultiEdit/NotebookEdit; pharos writes: [geex#1](https://github.com/LoganBresnahan/geex/issues/1) |
+| captAInHook | geex | the `geex-attest.sh` payload → loopback `POST /attest` | who wrote a file, by hash | built for Write/Edit/MultiEdit/NotebookEdit; Bash changes credited "while": accepted, not built ([geex#3](https://github.com/LoganBresnahan/geex/issues/3), geex ADR-0032); pharos writes: [geex#1](https://github.com/LoganBresnahan/geex/issues/1) |
 | captAInHook | pharos | a payload → `pharos diagnostics` CLI | the touched files' diagnostics, back to the agent | built for the trial (pharos ADR-040, [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6)); in use only if the trial picks it |
 | agent | geex | geex's MCP server | the frozen edit/view tools | built, frozen (ADR-0032); rarely the right door |
 | everyone | everyone | the disk | content | built (pharos re-syncs open documents, ADR-038); servers that don't watch the disk: [pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10) |
@@ -104,7 +108,10 @@ ADR-0019 and its 2026-11-18 addendum,
 2. It writes with its harness's writers, or applies a pharos edit with `apply_workspace_edit`.
 3. The write lands on disk. geex's reconcile records it as `:external` and shows it.
 4. captAInHook's PostToolUse fires. The `geex-attest` payload sends the file's before/after
-   hashes; geex relabels the change with the agent's identity when both match.
+   hashes; geex relabels the change with the agent's identity when both match. A change made
+   through the agent's Bash tool is credited "while" that call instead, from a snapshot the
+   payload takes at PreToolUse (accepted, not built:
+   [geex#3](https://github.com/LoganBresnahan/geex/issues/3)).
 5. *Built for the trial, used only if it wins:* a pharos payload on the same PostToolUse tells
    the agent about *new* errors in the files it touched, quietly and as information, never
    orders (mid-refactor breakage is expected). A second check at Stop blocks the turn's end
@@ -194,7 +201,7 @@ pharos's navigation tools for agents nor what pharos would do for geex.
 
 | Step | Issue | Repo | What | Needs |
 |---|---|---|---|---|
-| 1 | [pharos#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7) | pharos | the trial: the three-arm run on `deepseek-v4-pro`, written up with the verdict | both hooks (done); pharos#8 if on Rust |
+| 1 | [pharos#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7) | pharos | the trial: the three-arm run on `deepseek-v4-pro`, written up with the verdict. The harness is verified and on pharos's `trial/007` branch; the 90 runs wait on the maintainer's go | both hooks (done); pharos#8 if on Rust |
 | — | [pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8) | pharos | **bug:** rust-analyzer's own diagnostics never reach pharos (pull diagnostics advertised to servers it runs in push mode). Needed only if the trial runs on Rust | — |
 
 Done:
