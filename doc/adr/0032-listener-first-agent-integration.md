@@ -4,8 +4,8 @@
   created file is sent as `created`; 2026-11-09: an attestation credits the group's undone
   commands too, and can match the newest write's group when fully undone; 2026-11-12: a command
   that keeps the line count marks only the lines it changed; 2026-11-13: each agent session's
-  marks and edits rows in its own colour; 2026-11-18, accepted 2026-11-19: an agent's Bash
-  changes credited "while", not built). For open
+  marks and edits rows in its own colour; 2026-11-18, accepted and built 2026-11-19: an agent's
+  Bash changes credited "while"). For open
   buffers, step b's disk-wins merge and the pending table are superseded by
   [ADR-0034](0034-panes-tree-edits-hold.md) (buffers hold; `git merge-file`; held attestations)
 - **Date:** 2026-10-14
@@ -563,7 +563,8 @@ edits list as well so entries are color coated".
 
 *Drafted at the maintainer's ask ([geex#3](https://github.com/LoganBresnahan/geex/issues/3), roadmap
 item 8's "Labelling shell writes"), reviewed by mod against stack.md and captAInHook's contract,
-accepted 2026-11-19 with the maintainer's answers below; not built.*
+accepted 2026-11-19 with the maintainer's answers below; built 2026-11-19 on the branch
+`bash-credit` (as built, at the end).*
 
 **The gap.** A file an agent changes through its Bash tool (`sed -i`, a formatter, a generator,
 `git checkout`, a script) stays `:external`: a Bash response carries stdout and stderr, no file
@@ -703,5 +704,30 @@ The time budget isn't a question: the PreToolUse step runs before every tool cal
 the agent until it ends, so it gives up on a call (a missed credit) rather than slow the agent.
 The number comes from measuring `git status` on a large repository at build time.
 
-*Checked at build time, not a question:* whether the envelope's `cwd` follows a `cd` an earlier
-Bash call left in Claude Code's shell. The work-tree rule in step 1 covers both answers.
+**As built (2026-11-19, `bash-credit`):**
+- `geex-attest.sh` runs both steps from one script: a PreToolUse for anything but a
+  `claude-code` Bash call leaves on a string check of the envelope's `"type":"PreToolUse"`
+  before `jq` (~1.3 ms). The snapshot covers at most 4 work trees per call (24 candidate
+  directories looked at), and skips a work tree listing more than 500 changed files, or one
+  that is `$HOME`. It is written to a temporary name and moved into place, so a run cut short
+  leaves no snapshot. A path git quotes in `--porcelain=v1` output is left out (a miss).
+- A path the snapshot names takes its hash from the snapshot. A path found only by the second
+  `git status` was clean: its before is `git cat-file --filters :path` when git tracks it, and
+  otherwise it didn't exist (an untracked file is always named), so it is `created`.
+- **The program** is the first word of the command's first line, split at `;`, `&` and `|`,
+  past parts that only move about or set the scene (`cd`, `pushd`, `popd`, `export`, `set`,
+  `unset`, `source`, `umask`, `true`, `.`), assignments (`VAR=value`) and wrappers (`env`,
+  `sudo`, `command`, `exec`, `time`, `nohup`, `nice`), as a basename, kept only when it is a
+  plain name (`[A-Za-z0-9._+-]{1,64}`). geex validates both fields again: a `during` that isn't
+  a plain tool name is refused (never read as absent), a bad `program` is dropped.
+- **Where "while" shows:** the status line (`· while sed`), the edits pane (`(while Bash)`), the
+  gutter (`╎`), the fast-forward notice for a spooled chain (`; changed while
+  claude-code/1a2b3c4d ran sed (1 edit)`), and every revert notice and question ("revert 2
+  hunks (changed while claude-code/1a2b3c4d ran sed)?", "reverted the change made while …").
+- **Measured** (Linux under WSL2, each over five runs): the PreToolUse snapshot takes ~16 ms in
+  geex's own repository (421 files), ~60 ms in a 60,000-file repository with nothing changed,
+  ~128 ms with 50 changed (~1.4 ms a hashed file). captAInHook's existing `budgetMs` of 1500
+  covers it; the 500-file cap keeps the worst case near 0.7 s.
+- **Not checked live:** a real Claude Code session through captAInHook (it needs the
+  PreToolUse registration), so whether the envelope's `cwd` follows a `cd` an earlier Bash call
+  left is still open; the work-tree rule in step 1 covers both answers.

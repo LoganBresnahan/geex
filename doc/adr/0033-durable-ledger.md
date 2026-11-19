@@ -353,7 +353,8 @@ Choices made building it, within the decisions above:
 
 ## Amendment — 2026-11-18: a credit "while" is kept; every revert shows what it takes back
 
-*Accepted 2026-11-19 with ADR-0032's amendment of the same date; not built.*
+*Accepted 2026-11-19 with ADR-0032's amendment of the same date; built 2026-11-19 on the branch
+`bash-credit`.*
 
 **A credit "while".** With [ADR-0032](0032-listener-first-agent-integration.md)'s amendment of this
 date (an agent's Bash changes, credited "while"), an actor can carry `during` (the tool, `"Bash"`)
@@ -365,10 +366,14 @@ The codec reads only the actor fields it knows, so older ledgers read unchanged.
 **Every revert shows what it takes back first** (the maintainer, 2026-11-19: "seeing what we are
 reverting would probably be best as a default even for correctly attributed edits"). `Alt+R`
 (`revert`, one hunk) and `Alt+Shift+R` (`revert-call`, the whole group in the file) no longer
-apply at once: the lines the revert would change are marked in the editor (the selection's tint),
-scrolled into view, and the minibuffer asks, through the `:confirm` mode replace-all uses:
-"revert 3 hunks (claude-code/1a2b3c4d, while python3)? (y/n)". `y` applies it exactly as before
+apply at once: the lines the revert would change are marked in the editor (the selection's tint;
+the cursor's line is always one of them, so the mark is on screen), and the minibuffer asks,
+through the `:confirm` mode replace-all uses: "revert 3 hunks (claude-code/1a2b3c4d)? (y/n)", or
+for a credit by time "revert 3 hunks (changed while claude-code/1a2b3c4d ran python3)? (y/n)". `y` applies it exactly as before
 (the same plan, `meta.reverts`, refused on overlap, one undo step); `n` or Esc leaves everything
 as it was. A refusal (an overlap, nothing to revert) is said at once, with no question. The plan
-is worked out when the key is pressed and applied with `expect_seq`, so a buffer that changed
-while the question was up refuses it and says so.
+is worked out when the key is pressed (`Buffer.plan_revert/3`, its lines from
+`Geex.Revert.lines/1`) and applied by `Buffer.apply_revert/2` against the change clock it was
+worked out at, so a buffer that changed while the question was up refuses it: "not reverted:
+the file changed while you were deciding". `Buffer.revert/3` (plan and apply in one call) stays
+for callers that don't ask.

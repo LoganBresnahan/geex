@@ -2978,6 +2978,14 @@ defmodule Geex.Loop do
     screen =
       screen
       |> agent_marks(snap.blame, scroll, h_text, state.theme)
+      |> revert_marks(
+        if(current?, do: revert_lines(state), else: []),
+        scroll,
+        h_text,
+        gw,
+        tw,
+        state.theme
+      )
       |> Screen.resize(est.w, est.h)
       |> maybe_vscrollbar(vbar?, est.w - 1, h_text, scroll, total, state.theme)
       # Shift the text + scroll bar down past the reserved ruler row, then paint the
@@ -4892,7 +4900,9 @@ defmodule Geex.Loop do
   The status-line author of `line`, from the buffer's blame (`Geex.Blame`): who last wrote
   it, when that was an agent. An attested write reads `✎ <harness>/<session>`, the session
   cut to 8 characters (the tag captAInHook writes into shell history), then the turn cut
-  to 4. An MCP edit reads `✎ llm/<model>`. `nil` for your own lines, lines as loaded, and
+  to 4. A credit by time adds ` · while <program>` (or the tool, with no program): the line
+  changed while that call ran, which isn't a claim the call wrote it (ADR-0032's 2026-11-18
+  amendment). An MCP edit reads `✎ llm/<model>`. `nil` for your own lines, lines as loaded, and
   unattested out-of-band writes (ADR-0032).
   """
   @spec author_label(Geex.Blame.t(), non_neg_integer()) :: String.t() | nil
@@ -4904,7 +4914,8 @@ defmodule Geex.Loop do
           "/" <>
           Geex.Text.slice(session, 0, 8) <>
           turn_label(who[:turn]) <>
-          edited_by_you(who)
+          edited_by_you(who) <>
+          while_label(who)
 
       {{:llm, model}, _group} ->
         "✎ llm/" <> to_string(model)
@@ -4921,9 +4932,55 @@ defmodule Geex.Loop do
   defp edited_by_you(%{user_modified: true}), do: " · edited by you"
   defp edited_by_you(_who), do: ""
 
+  # A credit by time: changed while the call ran, not shown as written by it.
+  defp while_label(%{during: during} = who) when is_binary(during),
+    do: " · while " <> (who[:program] || during)
+
+  defp while_label(_who), do: ""
+
+  @doc """
+  Tint the text of each visible row a revert's preview would change (`ranges`, 0-based inclusive
+  line ranges, `Geex.Revert.lines/1`) with the selection's colour while its question is up
+  (ADR-0033's 2026-11-18 amendment). Only cells on the editor's background or the current-line
+  tint take it (the cursor's line is always one the revert changes), so a search's matches keep
+  theirs. No ranges, no change.
+  """
+  @spec revert_marks(
+          Screen.t(),
+          [{non_neg_integer(), non_neg_integer()}],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Theme.t()
+        ) :: Screen.t()
+  def revert_marks(screen, [], _scroll, _h, _gw, _w, _theme), do: screen
+
+  def revert_marks(screen, ranges, scroll, h, gw, w, %Theme{palette: pal}) do
+    for row <- 0..(h - 1)//1,
+        line = scroll + row,
+        Enum.any?(ranges, fn {first, last} -> line >= first and line <= last end),
+        x <- gw..(w - 1)//1,
+        reduce: screen do
+      acc ->
+        case Screen.get_cell(acc, x, row) do
+          %{bg: bg} = cell when bg in [pal.bg, pal.active_line_bg] ->
+            Screen.set_cell(acc, x, row, %{cell | bg: pal.selection})
+
+          _ ->
+            acc
+        end
+    end
+  end
+
+  defp revert_lines(%{asking: {:revert, _pid, %{lines: lines}, _info}}), do: lines
+  defp revert_lines(_state), do: []
+
   @doc """
   Mark the gutter's left margin column with `▌` on each visible row whose line an agent last
-  wrote (an attested write or an MCP edit), in that agent session's colour
+  wrote (an attested write or an MCP edit), or a lighter `╎` when the credit is by time (the
+  line changed while the agent's Bash call ran, ADR-0032's 2026-11-18 amendment), in that agent
+  session's colour
   (`Geex.Theme.agent_colour/2`, 2026-11-13), so two sessions' lines tell apart at a glance and
   match their rows in the edits pane. The cell's background is kept, so the mark sits on the
   cursor-line tint too. Derived from the blame on every frame, so an edit, undo or late
@@ -4936,9 +4993,10 @@ defmodule Geex.Loop do
     |> Enum.slice(scroll, h)
     |> Enum.with_index()
     |> Enum.reduce(screen, fn
-      {{{kind, _} = actor, _group}, row}, acc when kind in [:agent, :llm] ->
+      {{{kind, who} = actor, _group}, row}, acc when kind in [:agent, :llm] ->
         fg = Theme.agent_colour(theme, actor) || pal.cursor
-        Screen.set_cell(acc, 0, row, %{Screen.get_cell(acc, 0, row) | char: "▌", fg: fg})
+        char = if kind == :agent and Geex.Attest.while?(who), do: "╎", else: "▌"
+        Screen.set_cell(acc, 0, row, %{Screen.get_cell(acc, 0, row) | char: char, fg: fg})
 
       _unmarked, acc ->
         acc
@@ -6515,28 +6573,88 @@ defmodule Geex.Loop do
     {line, col}
   end
 
-  # Take back the change under the cursor (ADR-0033 §7). The buffer's change notification
-  # repaints; what the loop adds is telling you what happened, or why nothing did.
+  # Take back the change under the cursor (ADR-0033 §7), after showing it: the lines it would
+  # change are marked and the minibuffer asks (ADR-0033's 2026-11-18 amendment). A refusal is
+  # said at once. The buffer's change notification repaints once it is applied.
   defp do_revert(state, {line, _col}, scope) do
+    planned =
+      on_active_buffer(fn pid ->
+        with {:ok, plan, info} <- Buffer.plan_revert(pid, line, scope), do: {:ok, pid, plan, info}
+      end)
+
+    case planned do
+      {:ok, pid, plan, %{actor: actor, hunks: n} = info} ->
+        question = "revert #{n} #{hunks(n)} (#{credit(actor)})? (y/n)"
+
+        %{
+          state
+          | minibuffer: Minibuffer.ask(:confirm, question),
+            asking: {:revert, pid, plan, info},
+            selection: nil
+        }
+
+      refused ->
+        %{state | notice: revert_notice(refused), selection: nil}
+    end
+  end
+
+  # A yes to the revert's question: made exactly as planned, unless the buffer changed meanwhile.
+  defp apply_revert(state, pid, plan, info) do
+    result =
+      try do
+        Buffer.apply_revert(pid, plan)
+      catch
+        :exit, _ -> {:error, :down}
+      end
+
     notice =
-      case on_active_buffer(&Buffer.revert(&1, line, scope)) do
-        {:ok, _snapshot, %{actor: actor, hunks: n}} ->
-          "reverted #{who(actor)}'s change (#{n} hunk#{if n == 1, do: "", else: "s"})"
-
-        {:error, {:overlap, actor, ranges}} ->
-          "can't revert: #{line_list(ranges)} changed after #{who(actor)}'s edit"
-
-        {:error, :not_a_change} ->
-          "nothing to revert: no agent or outside change last wrote this line"
-
-        {:error, :already_reverted} ->
-          "that change already reads as it did before"
-
-        {:error, _reason} ->
-          "couldn't find that change in the history"
+      case result do
+        {:ok, _snapshot} -> revert_notice({:ok, nil, info})
+        {:error, :stale} -> "not reverted: the file changed while you were deciding"
+        other -> revert_notice(other)
       end
 
     %{state | notice: notice, selection: nil}
+  end
+
+  # Who a change is credited to, and the change itself, in words. A credit by time says what was
+  # proved: the lines changed while the call ran (ADR-0032's 2026-11-18 amendment).
+  defp credit({:agent, who} = actor) do
+    if Geex.Attest.while?(who),
+      do: "changed while #{who(actor)} ran #{who[:program] || who.during}",
+      else: who(actor)
+  end
+
+  defp credit(actor), do: who(actor)
+
+  defp change_of({:agent, who} = actor) do
+    if Geex.Attest.while?(who),
+      do: "the change made while #{who(actor)} ran #{who[:program] || who.during}",
+      else: "#{who(actor)}'s change"
+  end
+
+  defp change_of(actor), do: "#{who(actor)}'s change"
+
+  defp hunks(1), do: "hunk"
+  defp hunks(_n), do: "hunks"
+
+  defp revert_notice(result) do
+    case result do
+      {:ok, _snapshot, %{actor: actor, hunks: n}} ->
+        "reverted #{change_of(actor)} (#{n} #{hunks(n)})"
+
+      {:error, {:overlap, actor, ranges}} ->
+        "can't revert: #{line_list(ranges)} changed after #{change_of(actor)}"
+
+      {:error, :not_a_change} ->
+        "nothing to revert: no agent or outside change last wrote this line"
+
+      {:error, :already_reverted} ->
+        "that change already reads as it did before"
+
+      {:error, _reason} ->
+        "couldn't find that change in the history"
+    end
   end
 
   defp who({:agent, %{harness: harness, session: session}}),
@@ -7220,6 +7338,7 @@ defmodule Geex.Loop do
       {:char, c} when c in ["y", "Y"] ->
         case state.asking do
           {:replace, scope, plans} -> apply_replace(close_minibuffer(state), scope, plans)
+          {:revert, pid, plan, info} -> apply_revert(close_minibuffer(state), pid, plan, info)
           op -> start_file_op(close_minibuffer(state), op)
         end
 

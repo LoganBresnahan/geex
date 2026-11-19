@@ -202,7 +202,9 @@ session's `Co-Authored-By` trailer.
   tested against `test/fixtures/claude-code/` (verbatim captAInHook captures). From 0.3.5 each
   release carries it (`versions/<v>/integrations/captainhook/`), and install.sh links the current
   version's at `$GEEX_INSTALL_DIR/integrations/geex-attest.sh`, the path to register; install.sh
-  never edits handlers.json
+  never edits handlers.json. Registered on `pre-tool-use` too, it credits an agent's Bash changes
+  "while" (ADR-0032's 2026-11-18 amendment), its snapshots in `<discovery dir>/bash/` (`0600`,
+  never `*.json` there)
 - settings the `Alt+Y` view keeps (ADR-0040 §7): `$XDG_CONFIG_HOME/geex/settings.json` (default
   `~/.config/geex/`), written by geex (`Geex.Settings`); tests get their own `settings_path`
 - installed grammars and themes (ADR-0040): `$XDG_DATA_HOME/geex/{grammars,themes}/<name>/`

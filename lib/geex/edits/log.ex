@@ -159,6 +159,12 @@ defmodule Geex.Edits.Log do
        when is_binary(harness) and is_binary(session) do
     who = %{harness: harness, session: session, turn: a["turn"], tool_use: a["tool_use"]}
     who = if a["user_modified"] == true, do: Map.put(who, :user_modified, true), else: who
+
+    who =
+      for key <- ["during", "program"], is_binary(a[key]), reduce: who do
+        who -> Map.put(who, String.to_existing_atom(key), a[key])
+      end
+
     {:ok, {:agent, who}}
   end
 

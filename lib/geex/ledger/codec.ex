@@ -38,7 +38,9 @@ defmodule Geex.Ledger.Codec do
     "session" => :session,
     "turn" => :turn,
     "tool_use" => :tool_use,
-    "user_modified" => :user_modified
+    "user_modified" => :user_modified,
+    "during" => :during,
+    "program" => :program
   }
   @stamp_keys %{
     "group" => :group,

@@ -7343,3 +7343,42 @@ with no `terminating` lines, and there's no crash dump. Not checked: a bare `gee
 last session coming back, the first quit's warning with unsaved edits, a save off the key loop on
 a big file, closing the terminal during a save, a macOS build; no release was cut, so not the
 release CI.
+
+### 2026-11-19 — An agent's Bash changes credited "while"; every revert shows what it takes back (ADR-0032, ADR-0033)
+
+On the branch `bash-credit`, ADR-0032's and ADR-0033's 2026-11-18 amendments (accepted
+2026-11-19). `geex-attest.sh` gains a PreToolUse step that snapshots the git work trees a Bash
+call may touch, and its PostToolUse step sends each changed file with `"during": "Bash"` and the
+program's name; geex reads both, keeps them through the actor, the spool's chain, the ledger and
+the edits log, and says "while" wherever it names the writer. `Alt+R` and `Alt+Shift+R` now
+plan, mark the lines and ask y/n before reverting (`Buffer.plan_revert/3`,
+`Buffer.apply_revert/2`, `Geex.Revert.lines/1`).
+
+Tests: the payload against `bash.jsonl` in scratch git repositories (a clean, a dirty, a created
+and a deleted file; a file written back unchanged; CRLF under `core.autocrlf`; a `cd`, a
+`git -C` and an absolute path into three work trees from a cwd outside git; the program past
+`cd`, assignments and wrappers, never the command line; a background call; no git; a silent,
+`0600` PreToolUse that writes no `*.json`; a PreToolUse for another tool writing nothing; a
+denied call's snapshot swept; spooled with `during` and without `program`); one end to end from
+the payload through `POST /attest` into a held buffer credited at the fast-forward; the intake's
+refusal of a garbled `during` and its dropping of a bad `program`; the actor, chain, ledger, edits
+log and reopen notice; the status line, edits pane and `╎`; the revert preview's question, `y`,
+`n`/Esc, one hunk, a buffer changed while asking, an immediate refusal, and the tint, the cursor's
+line included. 1836 tests + 62 properties + 213 doctests green twice; `mix compile
+--warnings-as-errors --force` clean.
+
+Live, in a tmux pty with scratch `XDG_STATE_HOME` and `XDG_RUNTIME_DIR`, geex from the branch on a
+scratch repository's file: the real payload run around `cd repo && sed -i …` (PreToolUse, the
+change, PostToolUse, with the session's cwd elsewhere); geex held the file behind disk; `Alt+D`
+showed `╎` on the two changed lines in the session's colour and `✎ claude-code/56544d6f · turn
+a333… · while sed` on the status line; the edits pane read `notes.txt  claude-code/56544d6f
+(while Bash)`; `Alt+Shift+R` asked "revert 2 hunks (changed while claude-code/56544d6f ran sed)?
+(y/n)" with both lines tinted; `y` reverted both ("reverted the change made while …"), and on a
+second run Esc said "nothing done" and left them. The live run found the cursor's line untinted
+(the current-line tint painted first); fixed, with a test, and seen fixed on the rerun. Measured:
+the PreToolUse step ~1.3 ms for a non-Bash call; for Bash ~16 ms in geex's repository, ~60 ms in
+a 60,000-file one, ~128 ms there with 50 changed files.
+
+Not tested: a real Claude Code session through captAInHook (it needs the maintainer's PreToolUse
+registration), so whether the envelope's `cwd` follows an earlier `cd` is unseen; macOS (`shasum`,
+BSD `find`); a git older than 2.43; the deep property run (no property changed).
