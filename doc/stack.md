@@ -79,7 +79,8 @@ the repos. The other two repos link here.
 | From | To | Over | Carries | Status |
 |---|---|---|---|---|
 | agent (Claude Code) | pharos | MCP, stdio → shared daemon | code questions; previews; `apply_workspace_edit` | built |
-| geex | pharos | MCP, stdio → shared daemon | definition, references, hover, diagnostics | parked until pharos's place is decided: [geex#2](https://github.com/LoganBresnahan/geex/issues/2) |
+| geex | pharos | MCP, stdio → shared daemon | definition, references, hover | parked until pharos's place is decided: [geex#2](https://github.com/LoganBresnahan/geex/issues/2) |
+| geex | pharos | the `pharos diagnostics --json` CLI → shared daemon | diagnostics after a save, as one of the user's own checks (geex ADR-0055 §9); runs only if the user's config names it | accepted, not built (geex ADR-0055) |
 | pharos | geex | MCP notifications (resource subscriptions) | "diagnostics for this file changed" | [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) |
 | captAInHook | geex | the `geex-attest.sh` payload → loopback `POST /attest` | who wrote a file, by hash | built for Write/Edit/MultiEdit/NotebookEdit; pharos writes: [geex#1](https://github.com/LoganBresnahan/geex/issues/1) |
 | captAInHook | pharos | a payload → `pharos diagnostics` CLI | the touched files' diagnostics, back to the agent | built for the trial (pharos ADR-040, [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6)); in use only if the trial picks it |
@@ -124,6 +125,8 @@ This is the shape *if pharos stays*. Until then the human has geex's own search
   lists the answers in the output pane, stepped with Alt+N.
 - **Diagnostics after a save:** geex saves; pharos's server sees the new file; geex shows
   gutter marks, a count and a list. First by asking after the save, later by subscription.
+  geex ADR-0055 decides the asking: `pharos diagnostics --json` runs as one of the user's own
+  checks on save, next to `tsc` or `mix compile`, into one diagnostics overlay.
   Marks dim while the buffer has unsaved changes: answers are about the saved file
   (geex ADR-0010). pharos says when it isn't sure (ADR-038): `pharos.carried_over` marks an
   answer that may describe older text, and `pharos.not_reported` names servers that didn't
@@ -133,7 +136,8 @@ This is the shape *if pharos stays*. Until then the human has geex's own search
 - **Rename / format:** pharos returns edits; geex applies them as the human's commands, so
   they go into the one undo history with `actor: :human`, not as anonymous file writes.
 - **Positions:** pharos speaks LSP positions (UTF-16 code units); geex addresses graphemes.
-  geex's pharos adapter converts both ways (geex invariant 5, ADR-0021). Note pharos's
+  geex's pharos adapter converts both ways (geex invariant 5, ADR-0021; for diagnostics, geex
+  ADR-0055 §4's edge). Note pharos's
   `apply_workspace_edit` approximates UTF-16 as codepoints (exact in the BMP), another reason
   geex applies edits itself.
 
@@ -206,8 +210,8 @@ Done:
 
 | Issue | Repo | What | Needs |
 |---|---|---|---|
-| [geex#2](https://github.com/LoganBresnahan/geex/issues/2) | geex | geex as an MCP client of pharos: definition, references, hover, diagnostics after a save | an ADR or amendments to 0008/0010/0021 |
-| [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) | pharos | push diagnostics through MCP resource subscriptions | geex#2 reaching diagnostics |
+| [geex#2](https://github.com/LoganBresnahan/geex/issues/2) | geex | geex as an MCP client of pharos: definition, references, hover (diagnostics come through geex ADR-0055's pharos check) | an ADR or amendments to 0008/0010/0021 |
+| [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) | pharos | push diagnostics through MCP resource subscriptions | an MCP client in geex (geex#2) that subscribes; until then geex ADR-0055 asks after each save |
 | [pharos#4](https://github.com/LoganBresnahan/pharos-mcp/issues/4) | pharos | `apply_workspace_edit` reports each written file's path + before/after sha256 | — |
 | [geex#1](https://github.com/LoganBresnahan/geex/issues/1) | geex | `geex-attest.sh` credits pharos's multi-file writes | pharos#4 |
 | [pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10) | pharos | servers that don't watch the disk (gopls, pyright) never see changes to files pharos hasn't opened; typescript-language-server watches on its own, so a TypeScript trial doesn't need it; rust-analyzer unverified | — |
