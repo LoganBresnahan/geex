@@ -52,8 +52,13 @@ repos. Where an issue's own notes disagree with this file, this file wins.
     trial tsconfig's configured project.
   - Precondition: tsserver puts each file in its nearest tsconfig's project, so a nested
     tsconfig that owns program files (say, `tests/tsconfig.json`) would take those files out of
-    arm 3's scope but not arm 2's. The trial project has no such nested tsconfig, and the
-    warm start checks that every program file's tsserver project is the trial tsconfig.
+    arm 3's scope but not arm 2's. The trial project has no such nested tsconfig. Once per task
+    start state (every run of a task starts from the same tree), the trial checks that each of
+    the project's own program files (not `node_modules` or the library `.d.ts` files) has the
+    trial tsconfig as its tsserver project. The check uses the same pharos,
+    typescript-language-server and TypeScript as the runs, and is redone if any of them
+    changes. After each run, the runner flags a run whose tree gained a `tsconfig*.json`,
+    since that run's arm 3 scope may have shifted.
   Both hooks skip everything else. That covers files outside the program (which tsserver
   would check in an inferred project) and errors with no file (TS5xxx, TS6053, TS2318).
 - **Warm start:** before the agent's first turn, the trial primes both checkers:
