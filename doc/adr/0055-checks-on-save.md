@@ -83,8 +83,10 @@ user's files.** A formatter is not a check (see Alternatives).
   `source`, `message`), and an optional `"positionEncoding"` (`"utf-16"`, the default, `"utf-8"`
   or `"utf-32"`, LSP 3.17's names). `status` is `ok`, `unsure` or `failed`. Fields geex
   doesn't know are ignored. This is `pharos diagnostics --json`'s shape as it stands (it also
-  prints `file`, `uri` and `project`, and its `unsure` reasons include `no_project` and
-  `project_unknown`), so pharos needs no wrapper.
+  prints `file`, `uri` and `project`; in 0.3.2 an `unsure` file's `reason` is `no_publish`,
+  `carried_over`, `not_reported` or `no_project`, comma-joined when there are several, and a
+  `failed` file's is free text), so pharos needs no wrapper. **geex keys on `status` only**; a
+  `reason` is shown, never interpreted.
 - **`tsc`**: `path(line,col): error TS1234: message`, 1-based, UTF-16 columns.
 - **`lines`**: `path:line[:col][:] [severity:] message`, 1-based, columns counted as the check
   says (`codepoint` by default), the severity word read when present (`error`, `warning`,
@@ -202,7 +204,7 @@ language server. Its `unsure` answers are drawn as unsure; the trial's dry run f
 would also cut spurious unsure marks here. geex runs the same without it (rule 8);
 a missing `pharos` is a failed check, said once. pharos-mcp#16 (paths with a space or escaped
 characters) applies until fixed. This adds a geex → pharos row to stack.md's connections table,
-so this section went through stack.md's owner (reviewed 2026-11-18; the row lands when this ships).
+so this section went through stack.md's owner (reviewed 2026-11-18; its row is added now, with status "built" when this ships).
 
 **10. Fail open.** A check that is slow, crashes, prints junk or isn't installed costs its marks,
 never an edit, a key or a save. Its process holds nothing the loop waits on.
