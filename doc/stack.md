@@ -86,7 +86,7 @@ the repos. The other two repos link here.
 | geex | pharos | MCP, stdio → shared daemon | definition, references, hover | parked until pharos's place is decided: [geex#2](https://github.com/LoganBresnahan/geex/issues/2) |
 | geex | pharos | the `pharos diagnostics --json` CLI → shared daemon | diagnostics after a save, as one of the user's own checks (geex ADR-0055 §9); runs only if the user's config names it | accepted, not built (geex ADR-0055) |
 | pharos | geex | MCP notifications (resource subscriptions) | "diagnostics for this file changed" | [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) |
-| captAInHook | geex | the `geex-attest.sh` payload → loopback `POST /attest` | who wrote a file, by hash | built for Write/Edit/MultiEdit/NotebookEdit; Bash changes credited "while": accepted, not built ([geex#3](https://github.com/LoganBresnahan/geex/issues/3), geex ADR-0032); pharos writes: [geex#1](https://github.com/LoganBresnahan/geex/issues/1) |
+| captAInHook | geex | the `geex-attest.sh` payload → loopback `POST /attest` | who wrote a file, by hash | built for Write/Edit/MultiEdit/NotebookEdit; Bash changes credited "while": built ([geex#3](https://github.com/LoganBresnahan/geex/issues/3), geex ADR-0032), live once the maintainer registers its `pre-tool-use` event; pharos writes: [geex#1](https://github.com/LoganBresnahan/geex/issues/1) |
 | captAInHook | pharos | a payload → `pharos diagnostics` CLI | the touched files' diagnostics, back to the agent | built for the trial (pharos ADR-040, [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6)); in use only if the trial picks it |
 | agent | geex | geex's MCP server | the frozen edit/view tools | built, frozen (ADR-0032); rarely the right door |
 | everyone | everyone | the disk | content | built (pharos re-syncs open documents, ADR-038); servers that don't watch the disk: [pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10) |
@@ -110,8 +110,8 @@ ADR-0019 and its 2026-11-18 addendum,
 4. captAInHook's PostToolUse fires. The `geex-attest` payload sends the file's before/after
    hashes; geex relabels the change with the agent's identity when both match. A change made
    through the agent's Bash tool is credited "while" that call instead, from a snapshot the
-   payload takes at PreToolUse (accepted, not built:
-   [geex#3](https://github.com/LoganBresnahan/geex/issues/3)).
+   payload takes at PreToolUse ([geex#3](https://github.com/LoganBresnahan/geex/issues/3),
+   geex ADR-0032). Nothing a repository configures runs in that snapshot.
 5. *Built for the trial, used only if it wins:* a pharos payload on the same PostToolUse tells
    the agent about *new* errors in the files it touched, quietly and as information, never
    orders (mid-refactor breakage is expected). A second check at Stop blocks the turn's end
