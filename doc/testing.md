@@ -7470,3 +7470,18 @@ runs, nothing sent); a fake `git version` of 2.30.9 (no snapshot, the stderr lin
 sent); a socket that accepts and never answers beside a live listener, 32 files in under 2.5 s,
 all 32 delivered to the live one. The version gate's and the hung-geex skip's tests fail with
 each removed.
+
+### 2026-11-19 — Merged `bash-credit` (b31d68f); deployed `0.7.0+b31d68f9.89a87236` (ADR-0041)
+
+At the maintainer's word: `bash-credit` merged into main and pushed, then `mix geex.deploy` after
+the ship bar on the merge (1861 tests + 62 properties + 215 doctests green twice,
+`--warnings-as-errors --force` clean; `tree_sitter_wasm` clean at 89a87236). install.sh kept 0.7.0
+as the previous version and removed `0.7.0+ff1f2607.89a87236`; the payload link now names the new
+version's `geex-attest.sh` (the verified script, sha256 b5bd9853…). Checked live with scratch
+`XDG_STATE_HOME` and `XDG_RUNTIME_DIR` in a tmux pty: `geex --version` names the build; the
+installed geex on a scratch repository's file, the installed payload run around `cd repo && sed
+-i …` from a cwd outside it; after `Alt+D` the line shows `╎` and `✎ claude-code/56544d6f · turn
+a333… · while sed`; geex.log says "credited while claude-code session … ran sed"; Ctrl-X left with
+status 0, the alternate screen off and the cursor shown; the discovery file gone; no
+`terminating` lines. Not checked: a real Claude Code session through captAInHook (it needs the
+maintainer's pre-tool-use registration, which this build makes useful), macOS.
