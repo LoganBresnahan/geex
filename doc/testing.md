@@ -7485,3 +7485,22 @@ a333… · while sed`; geex.log says "credited while claude-code session … ran
 status 0, the alternate screen off and the cursor shown; the discovery file gone; no
 `terminating` lines. Not checked: a real Claude Code session through captAInHook (it needs the
 maintainer's pre-tool-use registration, which this build makes useful), macOS.
+
+### 2026-11-19 — The Bash credit, live with a real Claude Code session through captAInHook (ADR-0032)
+
+The first live run. mod added `pre-tool-use` to the `geex-attest` entry in
+`~/.captainHook/handlers.json` at the maintainer's word (a backup kept; `handlers.json` is a link
+into dotfiles, and captAInHook reloaded it only after a `touch -h` on the link, filed with
+captAInHook); mod saw the PreToolUse step answer a Noop in 39 ms. This session's own Bash calls
+were the agent, against the installed `0.7.0+b31d68f9` geex (scratch `XDG_STATE_HOME`, the real
+`XDG_RUNTIME_DIR`) on a scratch repository's file:
+- `cd <repo> && sed -i s/beta/BETA/ notes.txt`: held, and after `Alt+D` the line showed `╎` and
+  `✎ claude-code/88820b29 · turn 9227… · while sed` (this session's id); geex.log "credited while
+  claude-code session 88820b29-… ran sed".
+- A `cd <repo>` left in Claude Code's shell by an earlier call, then `pwd; sed -i s/gamma/GAMMA/
+  notes.txt` with no `cd` and a relative name: credited too. So the envelope's `cwd` follows an
+  earlier `cd`, which answers ADR-0032's open question; the cwd's tree alone found the file.
+- PostToolUse under captAInHook delivered both; no errors; a clean quit; no `terminating` lines.
+
+Found: the second credit read "while pwd", the program rule taking the command's first part (the
+maintainer's yes to skipping parts that only read, next).
