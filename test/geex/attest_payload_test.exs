@@ -1072,6 +1072,40 @@ defmodule Geex.AttestPayloadTest do
       assert map_size(received(ctx.dir)) == 32
     end
 
+    # The first live run read "while pwd" for `pwd; sed …` (the maintainer: skip parts that only read).
+    test "the program skips parts that only read; a redirect into a file makes a writer", ctx do
+      listen(ctx, "/tap")
+      repo = repo(ctx, "repo", [{"a.txt", "0\n"}])
+
+      for {command, program} <- [
+            {"pwd; sed -i s/0/1/ a.txt", "sed"},
+            {"ls -la && cat a.txt | grep 0; python3 x.py", "python3"},
+            {"echo start; echo hi > a.txt", "echo"},
+            {"ls > /dev/null; perl -pi -e s/0/1/ a.txt", "perl"},
+            {"sed -i s/0/1/ a.txt 2>&1; echo done", "sed"},
+            {"cat a.txt", "cat"},
+            # verifier's check of the label fix: redirections, an assignment-only part, lookups.
+            {"cat a.txt 2>&1; sed -i s/0/1/ a.txt", "sed"},
+            {"echo hi >&2; sed -i s/0/1/ a.txt", "sed"},
+            {"grep -c x a.txt >/dev/null 2>&1 && sed -i s/0/1/ a.txt", "sed"},
+            {"ls 2>&1 | head; python3 x.py", "python3"},
+            {"echo x >| a.txt", "echo"},
+            {"echo x &>a.txt", "echo"},
+            {"echo x &>> a.txt", "echo"},
+            {"FOO=1; sed -i s/0/1/ a.txt", "sed"},
+            {~s|echo hi > "/dev/null"; perl -pi -e s/0/1/ a.txt|, "perl"},
+            {"echo oops >/dev/stderr; sed -i s/0/1/ a.txt", "sed"},
+            {"command -v sed && sed -i s/0/1/ a.txt", "sed"}
+          ] do
+        n = System.unique_integer([:positive])
+
+        got =
+          bracket(ctx, repo, command, fn -> File.write!(Path.join(repo, "a.txt"), "#{n}\n") end)
+
+        assert %{"program" => ^program} = got["repo/a.txt"], command
+      end
+    end
+
     test "a cut-short PreToolUse's .tmp is swept too", ctx do
       repo = repo(ctx, "repo", [{"a.txt", "0\n"}])
       File.mkdir_p!(snaps(ctx))

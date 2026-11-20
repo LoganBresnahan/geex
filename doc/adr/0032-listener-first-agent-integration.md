@@ -768,7 +768,11 @@ these supersede the step 2 text and the bullets above where they differ):**
   twice). A named path through a symlinked directory is resolved to where it lands, and one that
   leaves the tree is skipped. Delivery's own temporary directory goes on a signal too.
 - **The program** also past `time -p` (each wrapper's options that take a value are its own),
-  a subshell's parentheses, a `# comment` line and `\` continuations.
+  a subshell's parentheses, a `# comment` line and `\` continuations. After the first live run
+  read "while pwd" for `pwd; sed …` (the maintainer's yes, 2026-11-19): it is the first part that
+  does more than read. A part whose program only reads (`pwd`, `ls`, `cat`, `grep`, a plain
+  `echo` and the like) is passed over, unless it redirects into a file (`echo x > f.txt` is a
+  writer); when every part only reads, the first one names it.
 - **PostToolUse has a budget:** the after hashes in one `sha256sum` per work tree, the befores
   joined in one pass, the live geex instances found once, delivery eight at a time, and at most
   150 changed files per call (past it, nothing: a clean miss, said on stderr for captAInHook's

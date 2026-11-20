@@ -7504,3 +7504,20 @@ were the agent, against the installed `0.7.0+b31d68f9` geex (scratch `XDG_STATE_
 
 Found: the second credit read "while pwd", the program rule taking the command's first part (the
 maintainer's yes to skipping parts that only read, next).
+
+### 2026-11-19 — The Bash credit's program skips parts that only read (ADR-0032)
+
+On the branch `bash-label`, at the maintainer's yes after the live run's "while pwd": the payload
+names the first part of the command that does more than read; a read-only program (`pwd`, `ls`,
+`cat`, `grep`, `echo` …) is passed over unless that part redirects into a file other than
+`/dev/null`. Test: `pwd; sed …` → sed, `ls -la && cat a | grep 0; python3 x.py` → python3,
+`echo start; echo hi > a.txt` → echo, `ls > /dev/null; perl -pi …` → perl, `sed … 2>&1; echo
+done` → sed, `cat a.txt` alone → cat. Writing it found a jq trap: an argument is a closure re-run
+on the current `.`, so the word list built from the part broke `sudo -u root sed` (it read
+"root") until it was bound to a variable first; the existing wrapper test caught it.
+`verifier`'s check then found two label regressions, fixed with a test for each shape: a copied
+descriptor after a read-only part labelled "1" or "2" (`cat a 2>&1; sed …`, `echo hi >&2; sed …`:
+the `&` split `2>&1`), and `>|` or `&>` gave the file name or nothing. Redirections are now
+normalised before the split (a copied descriptor dropped; `&>`, `&>>`, `>&`, `>|` read as `>`);
+an assignment-only part (`FOO=1; sed …`) no longer wins; a quoted `"/dev/null"`, `/dev/stdout`,
+`/dev/stderr`, `/dev/tty` or `/dev/fd/N` isn't a write; `command -v x` is a lookup, not `x`.
