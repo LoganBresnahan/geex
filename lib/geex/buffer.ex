@@ -366,6 +366,46 @@ defmodule Geex.Buffer do
   def revert(server, line, scope) when scope in [:hunk, :call],
     do: GenServer.call(server, {:revert, line, scope})
 
+  @doc """
+  Work out the revert `revert/3` would make, without making it: every revert shows what it takes
+  back first ([ADR-0033](`e:doc/adr/0033-durable-ledger.md`)'s 2026-11-18 amendment). Returns
+  `{:ok, plan, info}` (the plan holds the commands, the change clock they were worked out
+  against and the lines they change, `Geex.Revert.lines/1`) or `{:error, reason}`.
+  """
+  @spec plan_revert(GenServer.server(), non_neg_integer(), Revert.scope()) ::
+          {:ok, map(), Revert.info()} | {:error, Revert.reason()}
+  def plan_revert(server, line, scope) when scope in [:hunk, :call],
+    do: GenServer.call(server, {:plan_revert, line, scope})
+
+  @doc """
+  Make a revert `plan_revert/3` worked out, exactly as `revert/3` would have. `{:error, :stale}`,
+  changing nothing, when the buffer changed since (its change clock moved).
+  """
+  @spec apply_revert(GenServer.server(), map()) :: {:ok, map()} | {:error, :stale}
+  def apply_revert(server, %{commands: _, seq: _} = plan),
+    do: GenServer.call(server, {:apply_revert, plan})
+
+  # The fast-forward notice's credit; a credit by time says what was proved (ADR-0032's
+  # 2026-11-18 amendment).
+  defp credited_to(who) do
+    name = "#{who.harness}/#{Geex.Text.slice(who.session, 0, 8)}"
+
+    if Geex.Attest.while?(who),
+      do: "; changed while #{name} ran #{who[:program] || who.during} ",
+      else: "; credited to #{name} "
+  end
+
+  # A revert's commands, recorded as one group of the human's commands (ADR-0033 §7).
+  defp revert_with(commands, state) do
+    with {:ok, history} <- History.group(state.history, commands, nil) do
+      footprint = Footprint.between(History.text(state.history), History.text(history))
+      entry = group_entry(:group, history, length(commands), nil)
+      new_state = record(%{state | history: history}, entry)
+      notify_change(new_state, footprint)
+      {:ok, new_state}
+    end
+  end
+
   # Held attestations per buffer (ADR-0034), as many as the payload keeps in a spool.
   @held_max 256
 
@@ -474,13 +514,31 @@ defmodule Geex.Buffer do
 
   def handle_call({:revert, line, scope}, _from, state) do
     with {:ok, commands, info} <- Revert.plan(state.history, line, scope),
-         {:ok, history} <- History.group(state.history, commands, nil) do
-      footprint = Footprint.between(History.text(state.history), History.text(history))
-      entry = group_entry(:group, history, length(commands), nil)
-      new_state = record(%{state | history: history}, entry)
-      notify_change(new_state, footprint)
+         {:ok, new_state} <- revert_with(commands, state) do
       {:reply, {:ok, build_snapshot(new_state), info}, new_state}
     else
+      {:error, _reason} = error -> {:reply, error, state}
+    end
+  end
+
+  def handle_call({:plan_revert, line, scope}, _from, state) do
+    case Revert.plan(state.history, line, scope) do
+      {:ok, commands, info} ->
+        plan = %{commands: commands, seq: state.history.seq, lines: Revert.lines(commands)}
+        {:reply, {:ok, plan, info}, state}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:apply_revert, %{seq: seq}}, _from, %{history: %{seq: now}} = state)
+      when seq != now,
+      do: {:reply, {:error, :stale}, state}
+
+  def handle_call({:apply_revert, %{commands: commands}}, _from, state) do
+    case revert_with(commands, state) do
+      {:ok, new_state} -> {:reply, {:ok, build_snapshot(new_state)}, new_state}
       {:error, _reason} = error -> {:reply, error, state}
     end
   end
@@ -1166,7 +1224,7 @@ defmodule Geex.Buffer do
       case Spool.chain(spool, h.synced, disk_text) do
         {:ok, {:agent, who} = actor, tool_uses} ->
           {Enum.map(commands, &credit(&1, actor, tool_uses)),
-           "; credited to #{who.harness}/#{Geex.Text.slice(who.session, 0, 8)} " <>
+           credited_to(who) <>
              "(#{length(tool_uses)} edit#{if length(tool_uses) == 1, do: "", else: "s"})"}
 
         :none ->

@@ -1,5 +1,6 @@
 defmodule Geex.RevertTest do
   use ExUnit.Case, async: true
+  doctest Geex.Revert
 
   alias Geex.{Buffer, Command, History, Reconcile, Revert}
   alias Geex.Command.Meta

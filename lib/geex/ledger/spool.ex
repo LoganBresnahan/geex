@@ -22,7 +22,9 @@ defmodule Geex.Ledger.Spool do
 
   The whole gap is credited to that session; the actor carries the last write's turn and tool
   call, and the chain's tool calls are listed. If you edited any of those writes in the
-  permission prompt, the actor says so (`user_modified: true`, ADR-0034 §8). Anything else (a missing link, two sessions)
+  permission prompt, the actor says so (`user_modified: true`, ADR-0034 §8). If any link is a
+  credit by time (`during`, ADR-0032's 2026-11-18 amendment), the whole chain is: the weaker
+  claim wins. Anything else (a missing link, two sessions)
   explains nothing, and the gap stays `:external`. A chain through a CRLF file breaks after its
   first link (the disk keeps `"\\r\\n"`, the next `before` doesn't) and stays `:external` too.
 
@@ -39,7 +41,8 @@ defmodule Geex.Ledger.Spool do
           session: String.t(),
           turn: String.t() | nil,
           tool_use: String.t() | nil,
-          user_modified: boolean()
+          user_modified: boolean(),
+          during: String.t() | nil
         }
 
   @doc "The spool file for a ledger file."
@@ -124,7 +127,8 @@ defmodule Geex.Ledger.Spool do
 
   defp credit([last | _] = links) do
     edited? = Enum.any?(links, &(Map.get(&1, :user_modified) == true))
-    who = Geex.Attest.who(Map.put(last, :user_modified, edited?))
+    during = Enum.find_value(links, &Map.get(&1, :during))
+    who = Geex.Attest.who(Map.merge(last, %{user_modified: edited?, during: during}))
     {:ok, {:agent, who}, links |> Enum.reverse() |> Enum.map(& &1.tool_use)}
   end
 
@@ -134,7 +138,10 @@ defmodule Geex.Ledger.Spool do
            JSON.decode(line),
          # A created file's entry has no `before`: it was the empty text (ADR-0032).
          before when is_binary(before) <-
-           if(m["created"] == true, do: Geex.Ledger.Restore.sha256(""), else: m["before"]) do
+           if(m["created"] == true, do: Geex.Ledger.Restore.sha256(""), else: m["before"]),
+         # A garbled `during` drops the entry, as the intake refuses it: read as absent, it
+         # would credit authorship (ADR-0032's 2026-11-18 amendment).
+         true <- is_nil(m["during"]) or Geex.Attest.tool?(m["during"]) do
       [
         %{
           before: before,
@@ -143,7 +150,8 @@ defmodule Geex.Ledger.Spool do
           session: session,
           turn: string_or_nil(m["turn"]),
           tool_use: string_or_nil(m["tool_use"]),
-          user_modified: m["user_modified"] == true
+          user_modified: m["user_modified"] == true,
+          during: m["during"]
         }
       ]
     else

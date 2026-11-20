@@ -74,7 +74,7 @@ file):
 {
   "name": "geex-attest",
   "command": "~/.local/share/geex/integrations/geex-attest.sh",
-  "events": ["post-tool-use"],
+  "events": ["pre-tool-use", "post-tool-use"],
   "mode": "oneshot",
   "failMode": "open",
   "budgetMs": 1500,
@@ -84,7 +84,9 @@ file):
 
 captAInHook expands a leading `~/` from 0.1.3; with an older one, write the absolute path. An
 update or a rollback moves the link to the new version's payload, so the entry stays as it is.
-What the payload sends, and what it needs (`jq`, `curl`):
+`pre-tool-use` lets it credit an agent's Bash changes as "changed while" (ADR-0032's
+2026-11-18 amendment); leave it out and those stay `:external`. What the payload sends, and what
+it needs (`jq`, `curl`, `git`):
 [integrations/captainhook/README.md](../integrations/captainhook/README.md).
 
 ## Managing an install: `geex self`

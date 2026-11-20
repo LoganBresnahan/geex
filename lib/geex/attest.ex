@@ -9,7 +9,8 @@ defmodule Geex.Attest do
       {"v": 1, "path": "/abs/file",
        "before": "<sha256>", "sha256": "<sha256>",
        "harness": "claude-code", "session": "…",
-       "turn": "…", "tool_use": "…", "user_modified": true}
+       "turn": "…", "tool_use": "…", "user_modified": true,
+       "during": "Bash", "program": "sed"}
 
   `before` and `sha256` are **exactly 64 lowercase hex characters** (what `sha256sum`
   prints). `before` is the file's contents before the call. A file the call created sends
@@ -19,7 +20,13 @@ defmodule Geex.Attest do
   `turn` and `tool_use` are optional. `user_modified` is
   optional too: `true` when you edited the agent's proposed change in the permission prompt
   before accepting it (Claude Code's `userModified`, ADR-0034 §8); geex then says "edited by
-  you". Anything else is rejected rather than accepted as a hash that could never match.
+  you". `during` names the tool a **credit by time** came from (`"Bash"`, ADR-0032's
+  2026-11-18 amendment): the payload bracketed the call with a snapshot, so a match proves the
+  file changed *while* the call ran, not that it changed it; geex shows "while", never
+  authorship. It must be a plain tool name when present: a garbled `during` is rejected, never
+  read as absent, which would show the weaker claim as the stronger. `program` (the program the
+  command ran) is display only: one that isn't a plain name is dropped. Anything else is
+  rejected rather than accepted as a hash that could never match.
 
   `parse/1`, `matches?/2` and `who/1` are pure; `submit/1` routes a parsed attestation to the buffer open on `path`
   (`Geex.Buffer.attest/2`). A path geex doesn't have open is not geex's to record.
@@ -38,9 +45,12 @@ defmodule Geex.Attest do
           turn: String.t() | nil,
           tool_use: String.t() | nil,
           user_modified: boolean(),
-          created: boolean()
+          created: boolean(),
+          during: String.t() | nil,
+          program: String.t() | nil
         }
 
+  @tool ~r/\A[A-Za-z][A-Za-z0-9_-]{0,31}\z/
   @hex ~r/\A[0-9a-f]{64}\z/
   @empty_sha256 :crypto.hash(:sha256, "") |> Base.encode16(case: :lower)
 
@@ -74,7 +84,8 @@ defmodule Geex.Attest do
          {:ok, session} <- required_string(msg, "session"),
          {:ok, turn} <- optional_string(msg, "turn"),
          {:ok, tool_use} <- optional_string(msg, "tool_use"),
-         {:ok, user_modified} <- optional_boolean(msg, "user_modified") do
+         {:ok, user_modified} <- optional_boolean(msg, "user_modified"),
+         {:ok, during} <- optional_tool(msg, "during") do
       {:ok,
        %{
          path: path,
@@ -85,7 +96,9 @@ defmodule Geex.Attest do
          session: session,
          turn: turn,
          tool_use: tool_use,
-         user_modified: user_modified
+         user_modified: user_modified,
+         during: during,
+         program: program(msg["program"])
        }}
     end
   end
@@ -120,18 +133,53 @@ defmodule Geex.Attest do
   @doc """
   Who an attestation (or a spooled one) names, for an `{:agent, who}` actor: its harness,
   session, turn and tool call, and `user_modified: true` when you edited the change in the
-  permission prompt (left out otherwise, so older records compare equal).
+  permission prompt; for a credit by time, `during` (the tool) and `program`. Each is left out
+  when absent, so older records compare equal.
 
       iex> Geex.Attest.who(%{harness: "h", session: "s", turn: nil, tool_use: "u", user_modified: true})
       %{harness: "h", session: "s", turn: nil, tool_use: "u", user_modified: true}
       iex> Geex.Attest.who(%{harness: "h", session: "s", turn: nil, tool_use: "u", user_modified: false})
       %{harness: "h", session: "s", turn: nil, tool_use: "u"}
+      iex> Geex.Attest.who(%{harness: "h", session: "s", turn: nil, tool_use: "u", during: "Bash", program: "sed"})
+      %{harness: "h", session: "s", turn: nil, tool_use: "u", during: "Bash", program: "sed"}
   """
   @spec who(map()) :: map()
   def who(attestation) do
     who = Map.take(attestation, [:harness, :session, :turn, :tool_use])
-    if attestation[:user_modified] == true, do: Map.put(who, :user_modified, true), else: who
+
+    who =
+      if attestation[:user_modified] == true, do: Map.put(who, :user_modified, true), else: who
+
+    for key <- [:during, :program], is_binary(attestation[key]), reduce: who do
+      who -> Map.put(who, key, attestation[key])
+    end
   end
+
+  @doc """
+  Whether `who` is a credit by time (`during`): the file changed while a call ran, which geex
+  shows as "while", never as authorship.
+
+      iex> Geex.Attest.while?(%{during: "Bash"})
+      true
+      iex> Geex.Attest.while?(%{harness: "h"})
+      false
+  """
+  @spec while?(map()) :: boolean()
+  def while?(who), do: is_binary(who[:during])
+
+  @doc """
+  Whether `value` is a tool name a credit by time may carry in `during`: a letter, then up to
+  31 letters, digits, `_` or `-`. Anything else in `during` is refused wherever it is read
+  (the intake, the spool), never read as absent: that would show the weaker claim as the
+  stronger.
+
+      iex> Geex.Attest.tool?("Bash")
+      true
+      iex> Enum.any?(["", "rm -rf /", 5, nil], &Geex.Attest.tool?/1)
+      false
+  """
+  @spec tool?(term()) :: boolean()
+  def tool?(value), do: is_binary(value) and value =~ @tool
 
   @doc """
   Hand a parsed attestation to the buffer open on its path. Returns the buffer's answer
@@ -153,7 +201,14 @@ defmodule Geex.Attest do
   end
 
   defp log(:attested = result, a) do
-    Logger.info("geex attest: #{a.path} attributed to #{a.harness} session #{a.session}")
+    Logger.info(
+      "geex attest: #{a.path} " <>
+        if(is_binary(a[:during]),
+          do: "credited while #{a.harness} session #{a.session} ran #{a[:program] || a.during}",
+          else: "attributed to #{a.harness} session #{a.session}"
+        )
+    )
+
     result
   end
 
@@ -176,6 +231,21 @@ defmodule Geex.Attest do
       _ -> {:error, "#{key} must be a non-empty string when present"}
     end
   end
+
+  defp optional_tool(msg, key) do
+    case msg[key] do
+      nil -> {:ok, nil}
+      value -> if tool?(value), do: {:ok, value}, else: tool_error(key)
+    end
+  end
+
+  defp tool_error(key), do: {:error, "#{key} must be a tool name when present"}
+
+  defp program(value) when is_binary(value) do
+    if value =~ ~r/\A[A-Za-z0-9._+-]{1,64}\z/, do: value
+  end
+
+  defp program(_value), do: nil
 
   defp optional_boolean(msg, key) do
     case msg[key] do

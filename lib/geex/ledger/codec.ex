@@ -38,7 +38,9 @@ defmodule Geex.Ledger.Codec do
     "session" => :session,
     "turn" => :turn,
     "tool_use" => :tool_use,
-    "user_modified" => :user_modified
+    "user_modified" => :user_modified,
+    "during" => :during,
+    "program" => :program
   }
   @stamp_keys %{
     "group" => :group,
@@ -285,10 +287,21 @@ defmodule Geex.Ledger.Codec do
   defp actor(%{"extension" => id}) when is_binary(id), do: {:ok, {:extension, id}}
 
   defp actor(%{"agent" => who}) when is_map(who) do
-    {:ok, {:agent, for({k, v} <- who, key = @agent_keys[k], into: %{}, do: {key, v})}}
+    agent = for({k, v} <- who, key = @agent_keys[k], into: %{}, do: {key, v})
+    {:ok, {:agent, while_kept(agent)}}
   end
 
   defp actor(other), do: {:error, "unknown actor #{inspect(other)}"}
+
+  # A credit by time stays one: a `during` that isn't a tool name (a damaged line) reads as
+  # "unknown", never as absent, which would show it as authorship (ADR-0032's 2026-11-18
+  # amendment). A `program` that isn't a string is dropped.
+  defp while_kept(%{during: during} = agent) do
+    agent = if Geex.Attest.tool?(during), do: agent, else: %{agent | during: "unknown"}
+    if is_binary(agent[:program]), do: agent, else: Map.delete(agent, :program)
+  end
+
+  defp while_kept(agent), do: Map.delete(agent, :program)
 
   defp datetime(nil), do: {:ok, nil}
 

@@ -148,7 +148,8 @@ defmodule Geex.Loop.EditsPane do
       harness <>
         "/" <>
         Geex.Text.slice(session, 0, 8) <>
-        if(who[:user_modified], do: ", edited by you", else: "")
+        if(who[:user_modified], do: ", edited by you", else: "") <>
+        if(Geex.Attest.while?(who), do: " (while #{who.during})", else: "")
 
   # Pad, or cut with an ellipsis, to exactly `w` graphemes.
   defp fit(text, w) do

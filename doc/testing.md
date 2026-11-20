@@ -7343,3 +7343,130 @@ with no `terminating` lines, and there's no crash dump. Not checked: a bare `gee
 last session coming back, the first quit's warning with unsaved edits, a save off the key loop on
 a big file, closing the terminal during a save, a macOS build; no release was cut, so not the
 release CI.
+
+### 2026-11-19 — An agent's Bash changes credited "while"; every revert shows what it takes back (ADR-0032, ADR-0033)
+
+On the branch `bash-credit`, ADR-0032's and ADR-0033's 2026-11-18 amendments (accepted
+2026-11-19). `geex-attest.sh` gains a PreToolUse step that snapshots the git work trees a Bash
+call may touch, and its PostToolUse step sends each changed file with `"during": "Bash"` and the
+program's name; geex reads both, keeps them through the actor, the spool's chain, the ledger and
+the edits log, and says "while" wherever it names the writer. `Alt+R` and `Alt+Shift+R` now
+plan, mark the lines and ask y/n before reverting (`Buffer.plan_revert/3`,
+`Buffer.apply_revert/2`, `Geex.Revert.lines/1`).
+
+Tests: the payload against `bash.jsonl` in scratch git repositories (a clean, a dirty, a created
+and a deleted file; a file written back unchanged; CRLF under `core.autocrlf`; a `cd`, a
+`git -C` and an absolute path into three work trees from a cwd outside git; the program past
+`cd`, assignments and wrappers, never the command line; a background call; no git; a silent,
+`0600` PreToolUse that writes no `*.json`; a PreToolUse for another tool writing nothing; a
+denied call's snapshot swept; spooled with `during` and without `program`); one end to end from
+the payload through `POST /attest` into a held buffer credited at the fast-forward; the intake's
+refusal of a garbled `during` and its dropping of a bad `program`; the actor, chain, ledger, edits
+log and reopen notice; the status line, edits pane and `╎`; the revert preview's question, `y`,
+`n`/Esc, one hunk, a buffer changed while asking, an immediate refusal, and the tint, the cursor's
+line included. 1836 tests + 62 properties + 213 doctests green twice; `mix compile
+--warnings-as-errors --force` clean.
+
+Live, in a tmux pty with scratch `XDG_STATE_HOME` and `XDG_RUNTIME_DIR`, geex from the branch on a
+scratch repository's file: the real payload run around `cd repo && sed -i …` (PreToolUse, the
+change, PostToolUse, with the session's cwd elsewhere); geex held the file behind disk; `Alt+D`
+showed `╎` on the two changed lines in the session's colour and `✎ claude-code/56544d6f · turn
+a333… · while sed` on the status line; the edits pane read `notes.txt  claude-code/56544d6f
+(while Bash)`; `Alt+Shift+R` asked "revert 2 hunks (changed while claude-code/56544d6f ran sed)?
+(y/n)" with both lines tinted; `y` reverted both ("reverted the change made while …"), and on a
+second run Esc said "nothing done" and left them. The live run found the cursor's line untinted
+(the current-line tint painted first); fixed, with a test, and seen fixed on the rerun. Measured:
+the PreToolUse step ~1.3 ms for a non-Bash call; for Bash ~16 ms in geex's repository, ~60 ms in
+a 60,000-file one, ~128 ms there with 50 changed files.
+
+Not tested: a real Claude Code session through captAInHook (it needs the maintainer's PreToolUse
+registration), so whether the envelope's `cwd` follows an earlier `cd` is unseen; macOS (`shasum`,
+BSD `find`); a git older than 2.43; the deep property run (no property changed).
+
+### 2026-11-19 — The verifiers' findings on the Bash credit, fixed (ADR-0032, ADR-0033)
+
+On `bash-credit`, after ba6883f: `verifier` checked the payload and `verifier-two` geex's side,
+each in a standalone clone. Fixed, each with a test: PreToolUse spinning on a `~` that isn't a
+home (`npm install lodash@~4.17.21`, `git show @~2`: under a second now); `created` claimed for
+files that existed (inside an untracked directory, ignored, `git rm --cached`): new only when the
+snapshot proved the path absent; an edit staged in the same call missed (before from HEAD); a
+call with no nameable program sending nothing; paths with a space dropped (`-z`); symlinks
+hashed; PostToolUse over budget (now ~600 ms at its 150-file cap with a live listener, was
+3,017 ms for 200) and leaving temp files when cut (none now, checked with a SIGTERM to its
+process group); `.snap.tmp.*` never swept; the snapshot carrying no session or time (another
+session's or an hour-old one is refused); the program past `sudo -u`, `nice -n`, `env -u`; the
+spool reading a garbled `during` as absent (dropped now); the `Alt+D` notice and the log lines
+without "while"; the tint invisible under the terminal theme (reverse video now); the tint
+spilling onto the line after a taken-back insertion; a damaged `during` in geex's own files read
+as absent ("unknown" now). The two mutants verifier-two found surviving (the frame wiring,
+`Revert.lines/1`'s merge) now die: a test reads the painted frame through the renderer, and
+`doctest Geex.Revert` runs.
+
+1850 tests + 62 properties + 215 doctests green twice; `mix compile --warnings-as-errors --force`
+clean.
+
+Held for the maintainer: git running repository-configured code (fsmonitor, smudge filters) in
+work trees a command merely names, before the permission prompt.
+
+Not tested: a real Claude Code session through captAInHook; macOS.
+
+### 2026-11-19 — The Bash credit's second review: the starting commit (ADR-0032)
+
+`verifier`'s re-check of the rev 2 payload confirmed every first-round fix and found one new
+wrong claim: a `git reset --soft HEAD~1` (or a mixed reset) in the call credited a file whose
+disk never changed, because a clean file's before was read from HEAD after the call moved it.
+Fixed: the snapshot records each tree's HEAD at PreToolUse and reads `<sha>:path`. Also fixed:
+duplicate POSTs when one changed file was unreadable (the `shasum` fallback hashed the list a
+second time; one hasher now), the 150-file skip silent (a stderr line now, counted before any
+per-file work), delivery's temporary directories left by a budget kill, a nested repository
+sending a file twice (deduplicated by path), a named path through a symlinked directory (resolved;
+one leaving the tree skipped), and the program behind `time -p`, a subshell, a `# comment` line
+and `\` continuations. Tests for each: resets soft and mixed and a commit in the call (nothing
+claimed; the commit is a miss), an unreadable file, the skip's stderr, the four program shapes,
+the symlinked directories. The script's header, the ADR and the README now say what is and
+isn't credited, a named ignored file the call makes included.
+
+### 2026-11-19 — The Bash credit's third review: the cap counts real changes (ADR-0032)
+
+`verifier`'s rev 3 check confirmed every rev 2 fix (resets and a commit in the call claim
+nothing, an unreadable file costs only its credit, the skip's stderr line, nested repositories,
+symlinked directories, the four program shapes) and hunted the new code without a find (an
+unborn and a detached HEAD, `git checkout other`, a link loop, a symlinked cwd, an outer tree
+tracking an inner one's file). One regression: the 150-file cap counted every file listed, not
+the files that changed, so 160 untouched untracked files hid a real edit and the stderr line
+said "161 files changed". Fixed: the cap counts a moved hash, an absent file that now exists, and
+a file listed only now, before any per-file git. Also: a new file's location is resolved again
+at PostToolUse, so a dangling link the call makes real can't credit a file outside the tree (and a
+new file at the top of the tree still is). Tests for both; the 151-change skip still says so.
+
+### 2026-11-19 — The Bash credit runs nothing a repository configures (ADR-0032, item 8)
+
+`verifier` verified rev 4's payload (the cap counting real changes, the PostToolUse
+re-resolve; no regressions; timing under budget). Then item 8, at the maintainer's word: the
+payload runs git before the permission prompt, in work trees a command merely names. Shown in a
+scratch repository first: a plain `git status` ran a configured clean filter (on a file touched
+since the last status) and `core.fsmonitor`; with the overrides set through `GIT_CONFIG_*`,
+neither ran, `cat-file --filters` returned the raw bytes, and `--no-optional-locks` left
+`.git/index` alone. Built: one wrapper (`gs`) for every git call in the Bash steps, a file with a
+filter attribute skipped, `--ignore-submodules=all`. Test: a repository with a trap on
+`core.fsmonitor` and a filter's clean, smudge and process, named by a `cat` and a `sed` from a cwd
+outside it: no trap ran, the index's mtime is unchanged, the plain file is credited with the
+right before and the filtered one isn't; the same test fails with the overrides removed. The
+150-file skip now says "files to compare" (a reset can list files whose disk never changed).
+
+### 2026-11-19 — The Bash credit: no lazy fetch, git 2.31 or newer, one timeout per hung geex (ADR-0032)
+
+`verifier`'s check of item 8 found two more ways a repository's code could run, both shown with
+a planted program: a partial clone's lazy fetch (its remote's `uploadpack`, from `git status`
+at PreToolUse when `core.autocrlf` reads a missing index blob, and from `cat-file --filters` at
+PostToolUse), and any git older than 2.31, which ignores `GIT_CONFIG_COUNT` (a 2.30.9 build ran
+the fsmonitor, the filters and the fetch). Fixed: `GIT_NO_LAZY_FETCH=1` on every git call, a
+tree with `extensions.partialClone` or a `remote.*.promisor` refused, and a `git version` check
+(below 2.31: no snapshot, no Bash credit, one stderr line). Also: the overrides exported once
+per tree (PostToolUse at 150 files ~670 ms warm here; `verifier` measured a median of 858 ms
+over five runs, still under the budget), and a geex that never answers skipped after
+one timeout. Tests: a partial clone with a trapped `uploadpack` at both steps (refused, nothing
+runs, nothing sent); a fake `git version` of 2.30.9 (no snapshot, the stderr line, nothing
+sent); a socket that accepts and never answers beside a live listener, 32 files in under 2.5 s,
+all 32 delivered to the live one. The version gate's and the hung-geex skip's tests fail with
+each removed.

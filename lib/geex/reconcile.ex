@@ -319,6 +319,10 @@ defmodule Geex.Reconcile do
 
   defp attributed(snapshot, _commands) do
     case List.last(snapshot.history).meta.actor do
+      {:agent, %{harness: harness, session: session, during: during} = who}
+      when is_binary(during) ->
+        " (credited while #{harness} session #{session} ran #{who[:program] || during})"
+
       {:agent, %{harness: harness, session: session}} ->
         " (attested: #{harness} session #{session})"
 

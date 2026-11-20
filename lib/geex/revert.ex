@@ -63,6 +63,40 @@ defmodule Geex.Revert do
     end
   end
 
+  @doc """
+  The lines a revert's commands change, in the text they apply to: 0-based, inclusive
+  `{first, last}` ranges, in order, ranges that touch or overlap merged. A span that ends at the
+  start of a line (taking back an inserted line) leaves that line out: nothing on it changes.
+  What the revert's preview marks before you say yes ([ADR-0033](../../doc/adr/0033-durable-ledger.md)'s
+  2026-11-18 amendment). Pure.
+
+      iex> {:ok, a} = Geex.Commands.Replace.parse(%{start_line: 5, start_col: 0, end_line: 6, end_col: 2, text: "x"})
+      iex> {:ok, b} = Geex.Commands.Replace.parse(%{start_line: 1, start_col: 0, end_line: 1, end_col: 0, text: "y"})
+      iex> {:ok, c} = Geex.Commands.Replace.parse(%{start_line: 7, start_col: 0, end_line: 7, end_col: 1, text: ""})
+      iex> Geex.Revert.lines([a, b, c])
+      [{1, 1}, {5, 7}]
+      iex> {:ok, inserted} = Geex.Commands.Replace.parse(%{start_line: 1, start_col: 0, end_line: 2, end_col: 0, text: ""})
+      iex> Geex.Revert.lines([inserted])
+      [{1, 1}]
+  """
+  @spec lines([struct()]) :: [{non_neg_integer(), non_neg_integer()}]
+  def lines(commands) do
+    commands
+    |> Enum.map(fn
+      %Replace{start_line: first, end_line: last, end_col: 0} when last > first ->
+        {first, last - 1}
+
+      %Replace{start_line: first, end_line: last} ->
+        {first, last}
+    end)
+    |> Enum.sort()
+    |> Enum.reduce([], fn
+      {first, last}, [{f, l} | rest] when first <= l + 1 -> [{f, max(l, last)} | rest]
+      range, acc -> [range | acc]
+    end)
+    |> Enum.reverse()
+  end
+
   defp writer(blame, line) do
     case Enum.at(blame, line) do
       {actor, group} when is_integer(group) -> {:ok, actor, group}
