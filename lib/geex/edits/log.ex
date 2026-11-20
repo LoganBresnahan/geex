@@ -160,10 +160,20 @@ defmodule Geex.Edits.Log do
     who = %{harness: harness, session: session, turn: a["turn"], tool_use: a["tool_use"]}
     who = if a["user_modified"] == true, do: Map.put(who, :user_modified, true), else: who
 
+    # A credit by time stays one: a damaged `during` (even null) reads as "unknown", never as
+    # absent, as the ledger reads it.
     who =
-      for key <- ["during", "program"], is_binary(a[key]), reduce: who do
-        who -> Map.put(who, String.to_existing_atom(key), a[key])
+      if Map.has_key?(a, "during") do
+        during = a["during"]
+        Map.put(who, :during, if(Geex.Attest.tool?(during), do: during, else: "unknown"))
+      else
+        who
       end
+
+    who =
+      if is_map_key(who, :during) and is_binary(a["program"]),
+        do: Map.put(who, :program, a["program"]),
+        else: who
 
     {:ok, {:agent, who}}
   end

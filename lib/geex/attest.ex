@@ -50,6 +50,7 @@ defmodule Geex.Attest do
           program: String.t() | nil
         }
 
+  @tool ~r/\A[A-Za-z][A-Za-z0-9_-]{0,31}\z/
   @hex ~r/\A[0-9a-f]{64}\z/
   @empty_sha256 :crypto.hash(:sha256, "") |> Base.encode16(case: :lower)
 
@@ -167,6 +168,20 @@ defmodule Geex.Attest do
   def while?(who), do: is_binary(who[:during])
 
   @doc """
+  Whether `value` is a tool name a credit by time may carry in `during`: a letter, then up to
+  31 letters, digits, `_` or `-`. Anything else in `during` is refused wherever it is read
+  (the intake, the spool), never read as absent: that would show the weaker claim as the
+  stronger.
+
+      iex> Geex.Attest.tool?("Bash")
+      true
+      iex> Enum.any?(["", "rm -rf /", 5, nil], &Geex.Attest.tool?/1)
+      false
+  """
+  @spec tool?(term()) :: boolean()
+  def tool?(value), do: is_binary(value) and value =~ @tool
+
+  @doc """
   Hand a parsed attestation to the buffer open on its path. Returns the buffer's answer
   (`:attested` / `:held` / `:ignored`) or `:not_open`. The payload spools `held` and `not_open`
   (ADR-0034): neither has been recorded yet.
@@ -186,7 +201,14 @@ defmodule Geex.Attest do
   end
 
   defp log(:attested = result, a) do
-    Logger.info("geex attest: #{a.path} attributed to #{a.harness} session #{a.session}")
+    Logger.info(
+      "geex attest: #{a.path} " <>
+        if(is_binary(a[:during]),
+          do: "credited while #{a.harness} session #{a.session} ran #{a[:program] || a.during}",
+          else: "attributed to #{a.harness} session #{a.session}"
+        )
+    )
+
     result
   end
 
@@ -210,13 +232,10 @@ defmodule Geex.Attest do
     end
   end
 
-  @tool ~r/\A[A-Za-z][A-Za-z0-9_-]{0,31}\z/
-
   defp optional_tool(msg, key) do
     case msg[key] do
       nil -> {:ok, nil}
-      value when is_binary(value) -> if value =~ @tool, do: {:ok, value}, else: tool_error(key)
-      _ -> tool_error(key)
+      value -> if tool?(value), do: {:ok, value}, else: tool_error(key)
     end
   end
 

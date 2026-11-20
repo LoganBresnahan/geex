@@ -138,7 +138,10 @@ defmodule Geex.Ledger.Spool do
            JSON.decode(line),
          # A created file's entry has no `before`: it was the empty text (ADR-0032).
          before when is_binary(before) <-
-           if(m["created"] == true, do: Geex.Ledger.Restore.sha256(""), else: m["before"]) do
+           if(m["created"] == true, do: Geex.Ledger.Restore.sha256(""), else: m["before"]),
+         # A garbled `during` drops the entry, as the intake refuses it: read as absent, it
+         # would credit authorship (ADR-0032's 2026-11-18 amendment).
+         true <- is_nil(m["during"]) or Geex.Attest.tool?(m["during"]) do
       [
         %{
           before: before,
@@ -148,7 +151,7 @@ defmodule Geex.Ledger.Spool do
           turn: string_or_nil(m["turn"]),
           tool_use: string_or_nil(m["tool_use"]),
           user_modified: m["user_modified"] == true,
-          during: string_or_nil(m["during"])
+          during: m["during"]
         }
       ]
     else

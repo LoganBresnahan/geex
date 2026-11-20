@@ -134,4 +134,72 @@ defmodule Geex.Loop.RevertPreviewTest do
     marked = Loop.revert_marks(on_cursor, [{1, 1}], 0, 4, gw, 20, theme)
     assert Screen.get_cell(marked, gw, 1).bg == theme.palette.selection
   end
+
+  # verifier-two's review: the frame wiring (only revert_marks/7 was tested) and the notices.
+  defp painted(state) do
+    {:noreply, _} = Loop.handle_info(:repaint, state)
+    Geex.Renderer.current()
+  end
+
+  # The background just after `word` on the painted screen.
+  defp bg_after(screen, word) do
+    {x, y} =
+      Enum.find_value(0..(screen.h - 1), fn y ->
+        row = Enum.map_join(0..(screen.w - 1), &Screen.get_cell(screen, &1, y).char)
+
+        case :binary.match(row, word) do
+          {at, _} -> {String.length(binary_part(row, 0, at)) + String.length(word), y}
+          :nomatch -> nil
+        end
+      end)
+
+    Screen.get_cell(screen, x, y).bg
+  end
+
+  test "the marks reach the painted frame while asking, and go with the answer", ctx do
+    # A theme with a colour for the selection (the terminal theme's is :default, as is its bg).
+    theme = Geex.Fixtures.birds()
+    sel = theme.palette.selection
+    asking = key(%{ctx.state | theme: theme}, {:alt, ?R})
+    screen = painted(asking)
+    assert bg_after(screen, "TWO") == sel
+    assert bg_after(screen, "FOUR") == sel
+    refute bg_after(screen, "three") == sel
+
+    screen = asking |> key({:key, :esc}) |> painted()
+    refute bg_after(screen, "TWO") == sel
+    refute bg_after(screen, "FOUR") == sel
+  end
+
+  test "Alt+D's notice for a held credit by time says while, never just the session", ctx do
+    path = Buffer.snapshot(ctx.pid).path
+    File.write!(path, "one\nTWO\nthree\nFOUR\nfive\n")
+
+    :held =
+      Buffer.attest(ctx.pid, %{
+        path: path,
+        before: Restore.sha256("one\nTWO\nthree\nFOUR\n"),
+        sha256: Restore.sha256("one\nTWO\nthree\nFOUR\nfive\n"),
+        harness: "claude-code",
+        session: "7ccbf3d1-aaaa",
+        turn: nil,
+        tool_use: "u2",
+        user_modified: false,
+        during: "Bash",
+        program: "tee"
+      })
+
+    state = key(ctx.state, {:alt, ?d})
+    assert state.notice =~ "(changed while claude-code/7ccbf3d1 ran tee)"
+  end
+
+  test "under the terminal theme (no colour for the selection) the marks are reverse video" do
+    theme = Geex.Theme.default()
+    assert {theme.palette.selection, theme.palette.mark} == {:default, [:reverse]}
+    {screen, _cursor, _h} = Loop.frame("a\nb", [], theme, {0, 0}, 20, 2, 0)
+    gw = Loop.gutter_width("a\nb")
+    marked = Loop.revert_marks(screen, [{1, 1}], 0, 2, gw, 20, theme)
+    assert :reverse in Screen.get_cell(marked, gw, 1).attrs
+    refute :reverse in Screen.get_cell(marked, gw, 0).attrs
+  end
 end

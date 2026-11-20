@@ -4964,8 +4964,14 @@ defmodule Geex.Loop do
         reduce: screen do
       acc ->
         case Screen.get_cell(acc, x, row) do
+          # The selection's colour, and its reverse video when the palette has none (ADR-0040 §1),
+          # as Paint marks a selection.
           %{bg: bg} = cell when bg in [pal.bg, pal.active_line_bg] ->
-            Screen.set_cell(acc, x, row, %{cell | bg: pal.selection})
+            Screen.set_cell(acc, x, row, %{
+              cell
+              | bg: pal.selection,
+                attrs: cell.attrs ++ pal.mark
+            })
 
           _ ->
             acc
@@ -6348,7 +6354,7 @@ defmodule Geex.Loop do
 
   defp credited(%{history: [_ | _] = history}) do
     case List.last(history).meta.actor do
-      {:agent, _} = actor -> " (" <> who(actor) <> ")"
+      {:agent, _} = actor -> " (" <> credit(actor) <> ")"
       _ -> ""
     end
   end

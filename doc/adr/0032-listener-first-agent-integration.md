@@ -731,3 +731,83 @@ The number comes from measuring `git status` on a large repository at build time
 - **Not checked live:** a real Claude Code session through captAInHook (it needs the
   PreToolUse registration), so whether the envelope's `cwd` follows a `cd` an earlier Bash call
   left is still open; the work-tree rule in step 1 covers both answers.
+
+**After the verifiers' review (2026-11-19, `verifier` on the payload, `verifier-two` on geex;
+these supersede the step 2 text and the bullets above where they differ):**
+- **New only when proved absent.** The snapshot records `absent` for a path `git status` named
+  as deleted and for each path the command names (a token with a `.` or `/`, against the cwd and
+  each `cd` / `git -C` directory) that doesn't exist at PreToolUse. PostToolUse claims `created`
+  only for those. A file found only by the second `git status` that HEAD doesn't have is
+  unknown and sends nothing: it may have sat inside an untracked directory git listed as one
+  entry, been ignored, or left the index. A file inside such a directory is unknown too.
+- **Before from the starting commit.** The snapshot records each tree's HEAD at PreToolUse; a
+  file clean then takes its before from that commit's blob as a checkout writes it (`git
+  cat-file --filters <sha>:path`), not the index, and not HEAD read afterwards (a `git reset` in
+  the call moves HEAD: rev 2 credited a file whose disk never changed). So an edit staged in the
+  same call (`sed … && git add`) is credited; `git rm --cached` and `git reset [--soft]` claim
+  nothing; an edit committed in the same call ends clean and is missed (diffing the two commits
+  could credit it later). A named path that doesn't exist yet counts as absent even when git
+  ignores it, so a file the call makes there is credited as new: only an unnamed ignored file
+  can't be.
+- **`git status --porcelain=v1 -z`**, so a path with a space is credited; a path holding a
+  newline or a tab is left out. A symlink is never hashed or credited.
+- **No hang on `~`:** only `~` and `~/…` name a home; any other `~…` (`lodash@~4.17.21`,
+  `@~2`, `~user`) names no directory, and the walk up to an existing directory stops at a path
+  with no slash.
+- **The program** is found past wrappers and their options (`sudo -u root sed` → `sed`, `nice -n
+  5 make` → `make`), from quoted words, over the whole command (a `cd` alone on the first line no
+  longer hides it); a call with no nameable program is still credited, with no `program`.
+- **The snapshot carries the session and the time**; PostToolUse refuses one from another
+  session or over an hour old. The home check compares resolved paths (`pwd -P`). The cwd's
+  tree is always first and never cut by the cap. Without `XDG_RUNTIME_DIR`, snapshots go beside
+  the first discovery directory whose parent exists (`<tmp>/geex-$USER/bash` on macOS).
+  `.snap.tmp.*` from a cut-short run are swept with old snapshots. Temporary files come from
+  `mktemp -d` and go on exit or a signal.
+- **One message per file:** one hasher, chosen once (a file it can't read costs only its own
+  credit, never a second pass), and messages deduplicated by path (a nested repository named
+  twice). A named path through a symlinked directory is resolved to where it lands, and one that
+  leaves the tree is skipped. Delivery's own temporary directory goes on a signal too.
+- **The program** also past `time -p` (each wrapper's options that take a value are its own),
+  a subshell's parentheses, a `# comment` line and `\` continuations.
+- **PostToolUse has a budget:** the after hashes in one `sha256sum` per work tree, the befores
+  joined in one pass, the live geex instances found once, delivery eight at a time, and at most
+  150 changed files per call (past it, nothing: a clean miss, said on stderr for captAInHook's
+  trail). It counts real changes only (a hash that moved, a file proved absent that now exists,
+  a file listed now that wasn't then), before any per-file git: rev 3 counted every listed file,
+  so untouched untracked files could hide a real edit. A new file's location is resolved again
+  at PostToolUse, so a link the call makes can't credit a file outside the tree. Measured with a
+  live listener:
+  50 files 230 ms, 150 about 600 ms, 200 804 ms (before the cap), against 729 ms and 3,017 ms
+  for 50 and 200 at ba6883f.
+- **Every place that names the writer says "while"**, now including the `Alt+D` fast-forward
+  notice ("caught up with the disk (changed while claude-code/1a2b3c4d ran sed)") and the log
+  lines ("credited while …"). The rejoin notice for a spooled chain says "ran Bash": the spool
+  never keeps `program`. A spool entry whose `during` isn't a tool name is dropped, as the
+  intake refuses one; a damaged `during` read back from geex's own ledger or edits log reads as
+  "unknown", never as absent.
+- **Nothing a repository configures runs** (the maintainer's word, 2026-11-19, on mod's
+  recommendation). git runs before the permission prompt, in work trees a command merely names,
+  so a booby-trapped `.git/config` could run code: shown live, `core.fsmonitor` on a plain
+  `git status` and a clean filter on a file touched since the last status (`git status` itself
+  runs it), and smudge filters on `git cat-file --filters`. Every git call the payload makes now
+  goes through one wrapper: `core.fsmonitor=false`, every filter driver the config names
+  (repository, global or system) emptied (`clean`, `smudge`, `process`, `required=false`), set
+  through git's `GIT_CONFIG_*` variables so a driver's name is never quoted into a command line
+  and any git it starts gets them too; `--no-optional-locks`, so `git status` doesn't rewrite
+  `.git/index`; `--ignore-submodules=all`. A file whose attributes name a filter (Git LFS, say)
+  is skipped, a miss: its real content can't be read without running the filter. A test sets
+  a trap on all four and checks that nothing runs and the index's mtime stays.
+  `verifier`'s check of that found two more ways in, both closed: a **partial clone** fetches a
+  missing object by running its remote's `uploadpack` (from `git status` at PreToolUse under
+  `core.autocrlf`, from `cat-file --filters` at PostToolUse), so every git call runs with
+  `GIT_NO_LAZY_FETCH=1` and a tree whose config has `extensions.partialClone` or a
+  `remote.*.promisor` is refused outright (gits older than that variable ignore it); and **git
+  older than 2.31** ignores `GIT_CONFIG_COUNT` (Ubuntu 20.04 ships 2.25, Debian 11 2.30), so the
+  payload checks `git version` first and below 2.31 takes no snapshot and credits no Bash change,
+  saying so on stderr. The overrides are exported once per tree, not rebuilt per call. A geex
+  that accepts a connection and never answers is skipped for the rest of the call after one
+  timeout (one hung geex cost 1 s per batch of eight: 40 files, 5.2 s). **Known limit, a miss:**
+  a hung geex together with about 100 or more changed files in one call still overruns
+  captAInHook's budget (the first batch's timeout lands after the hashing), and the kill loses
+  most of that call's credits unspooled (`verifier`: 150 files, 8 delivered). Probing each geex
+  in the background at the start of PostToolUse would close it; not built.

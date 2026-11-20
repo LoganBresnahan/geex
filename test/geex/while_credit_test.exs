@@ -160,6 +160,61 @@ defmodule Geex.WhileCreditTest do
     GenServer.stop(buf, :shutdown)
   end
 
+  test "the spool drops an entry whose during is garbled, as the intake refuses it" do
+    dir = Path.join(System.tmp_dir!(), "geex_while_garbled_#{Geex.Fixtures.uniq()}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+    ledger = Path.join(dir, "k.jsonl")
+    spool = Spool.file(ledger)
+
+    base = %{
+      "v" => 1,
+      "path" => "/f",
+      "before" => hex("a"),
+      "sha256" => hex("b"),
+      "harness" => "claude-code",
+      "session" => "s1"
+    }
+
+    lines =
+      for during <- [5, true, ["Bash"], %{"x" => 1}, "", "rm -rf /", "Bash"],
+          do: JSON.encode!(Map.put(base, "during", during))
+
+    File.write!(spool, Enum.join(lines, "\n") <> "\n")
+    assert [%{during: "Bash"}] = Spool.read(ledger)
+  end
+
+  test "a damaged during in geex's own files reads as unknown, never as absent" do
+    actor = {:agent, %{harness: "h", session: "s", during: "Bash", program: "sed"}}
+    line = Geex.Ledger.Codec.encode({:attest, 1, actor}, ~U[2026-11-19 10:00:00Z])
+
+    for bad <- ["5", "true", "null", ~s|""|, ~s|"rm -rf /"|] do
+      damaged = String.replace(line, ~s|"during":"Bash"|, ~s|"during":#{bad}|)
+      assert {:ok, {:attest, 1, {:agent, who}}} = Geex.Ledger.Codec.decode(String.trim(damaged))
+      assert who.during == "unknown", bad
+    end
+
+    who = Attest.who(attestation("a", "b", %{}))
+
+    row = %{
+      path: "/r/f.ex",
+      who: {:agent, who},
+      at: ~N[2026-11-19 10:00:00],
+      sha256: "h",
+      tool_use: "u1"
+    }
+
+    for bad <- ["7", "null"] do
+      damaged =
+        row
+        |> Log.encode()
+        |> String.trim()
+        |> String.replace(~s|"during":"Bash"|, ~s|"during":#{bad}|)
+
+      assert {:ok, %{who: {:agent, %{during: "unknown"}}}} = Log.decode(damaged), bad
+    end
+  end
+
   test "it survives the edits log" do
     who = Attest.who(attestation("a", "b", %{}))
 

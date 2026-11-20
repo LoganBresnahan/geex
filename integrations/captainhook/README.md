@@ -60,11 +60,24 @@ which can carry a token). A match proves the file changed while the call ran, no
 command did it, so geex says "while", never "by": `✎ claude-code/1a2b3c4d · while python3` on
 the status line, `(while Bash)` in the edits pane, a lighter `╎` in the gutter.
 
+It never runs anything a repository configures: every git call it makes turns off
+`core.fsmonitor`, empties the filter drivers and skips optional index writes, because it runs
+before the permission prompt, in repositories a command merely names. A file a filter driver
+handles (Git LFS) is therefore not credited, and a partial clone (which fetches missing objects
+by running its remote's program) isn't looked at all. It needs git 2.31 or newer; with an older
+git it credits no Bash changes and says so on stderr.
+
+A file clean before the call takes its before from the commit the call started at. A new file is
+credited only when the command names its path and it didn't exist before (even an ignored one).
+
 Not credited (the change stays `:external`): a background call (`run_in_background`), files
-outside a git work tree, ignored files, files inside an untracked directory git lists as one
-entry, a work tree that is your home directory, a work tree with more than 500 changed files.
-Snapshots live in `$XDG_RUNTIME_DIR/geex/bash/` (`0600`); one a denied call left is removed
-after an hour.
+outside a git work tree, a new file the command doesn't name (it can't be proved new: an
+ignored or generated file, one inside an untracked directory git lists as one entry), an edit
+the call also committed, symlinks, a work tree that is your home directory, a work tree with
+more than 500 changed files, a call that changes more than 150 files (it says so on stderr).
+Snapshots live in `$XDG_RUNTIME_DIR/geex/bash/` (`0600`; `<tmp>/geex-$USER/bash/` without
+`XDG_RUNTIME_DIR`), carry the session and the time, and are refused by another session or after
+an hour; one a denied call left is removed after an hour.
 
 ## When geex isn't running
 
@@ -81,7 +94,11 @@ Every tool call runs it. Measured against a live geex: ~3 ms for a call that isn
 PreToolUse runs before every tool call and holds it until it ends: ~1.3 ms for anything but
 Bash; for Bash, the snapshot, ~16 ms in a 400-file repository, ~60 ms in a 60,000-file one, and
 ~1.4 ms more for each changed file (measured 2026-11-19, Linux under WSL2). Cut short by
-`budgetMs`, it writes no snapshot: a missed credit, never a slow or blocked call.
+`budgetMs`, it writes no snapshot: a missed credit, never a slow or blocked call. PostToolUse
+for Bash: ~230 ms for 50 changed files and ~600-860 ms for 150 with a live geex; past 150 it
+sends nothing. One geex that accepts connections and never answers costs one 1 s timeout per
+call; with about 100 or more changed files as well, that can overrun `budgetMs`, and most of that
+call's credits are lost (a known limit: a miss, never a wrong claim).
 
 ## Check it
 
