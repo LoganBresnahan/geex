@@ -70,6 +70,11 @@ git it credits no Bash changes and says so on stderr.
 A file clean before the call takes its before from the commit the call started at. A new file is
 credited only when the command names its path and it didn't exist before (even an ignored one).
 
+The program's name is the first part of the command that does more than read (`pwd; sed …`
+reads "while sed"; `echo x > f.txt` is a writer). It is a label only: two rare shapes still name
+the wrong part (`echo x >&1.log`, whose write to "1.log" is missed, and redirections inside quoted
+text), and neither can make or lose a credit.
+
 Not credited (the change stays `:external`): a background call (`run_in_background`), files
 outside a git work tree, a new file the command doesn't name (it can't be proved new: an
 ignored or generated file, one inside an untracked directory git lists as one entry), an edit

@@ -509,15 +509,32 @@ bash_post() {
           else prog(ws) end;
         if (ws | length) == 0 then ""
         elif (ws[0] | test("^[A-Za-z_][A-Za-z0-9_]*=")) then prog(ws[1:])
+        elif ws[0] == "command" and ((ws[1] // "") | IN("-v", "-V")) then "command"
         elif (ws[0] | IN("env", "sudo", "doas", "command", "exec", "time", "nohup", "nice")) then opts(ws[0]; ws[1:])
         else ws[0] end;
-    ([$cmd | gsub("\\\\\\n"; " ") | splits("[;&|\\n]+")
+    ([$cmd | gsub("\\\\\\n"; " ")
+      # Redirections first, so no `&` in one splits a part: a copied descriptor (2>&1, >&2, <&0)
+      # goes, and &>, &>>, >& and >| read as a plain >.
+      | gsub("[0-9]*[<>]&[0-9-]+"; "") | gsub("&>>?"; ">") | gsub(">[&|]"; ">")
+      | splits("[;&|\\n]+")
       | gsub("^[\\s(]+"; "")
       | select(. != "" and (startswith("#") | not)
                and (test("^(cd|pushd|popd|export|set|unset|source|umask|true|\\.)(\\s|$)") | not))]
-     | first // "") as $part
-    | (prog([$part | scan("\"[^\"]*\"|\u0027[^\u0027]*\u0027|\\S+") | unq])
-       | split("/") | last // "") as $prog
+     ) as $parts
+    # A part that only reads (pwd, ls, a plain echo) is never the program when a later part does
+    # more; one that redirects into a file is a writer whatever its program.
+    | def readonly: IN("pwd", "ls", "true", "false", ":", "test", "[", "echo", "printf", "cat",
+        "head", "tail", "wc", "grep", "rg", "which", "type", "date", "sleep", "stat", "command");
+      # Bound first: a jq argument is a closure, run again on whatever `.` is where it is used.
+      def progof: [scan("\"[^\"]*\"|\u0027[^\u0027]*\u0027|\\S+") | unq] as $ws | prog($ws) | split("/") | last // "";
+      def writes: [scan(">>?\\s*([^\\s;&|]+)") | .[0] | unq
+                   | select((IN("/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty") | not)
+                            and (startswith("/dev/fd/") | not) and (startswith("&") | not))]
+                  | length > 0;
+    ([$parts[] | {p: progof, w: writes}]) as $cands
+    | (([$cands[] | select(.p != "" and ((.p | readonly | not) or .w))] | first)
+       // ([$cands[] | select(.p != "")] | first) // {p: ""}
+       | .p) as $prog
     | $p.tool_use_id,
       $e.sessionId,
       (if ($p.tool_input.run_in_background // false) == true then "background" else "foreground" end),
