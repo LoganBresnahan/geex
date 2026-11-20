@@ -184,12 +184,14 @@ runs the agent makes itself, tokens and wall time.
 
 **The language:** TypeScript; the contract is written for it, pinned to TypeScript 6.0.3.
 TypeScript's freshness fix has landed
-([pharos#13](https://github.com/LoganBresnahan/pharos-mcp/issues/13), pharos ADR-039). A Rust
-trial would need two things first:
-- [pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8) fixed. Until then
-  rust-analyzer's own diagnostics never reach pharos, so a Rust arm 3 would relay only
-  `cargo check` output, which is arm 2's checker plus latency.
-- A Rust version of the contract's checkers and line format.
+([pharos#13](https://github.com/LoganBresnahan/pharos-mcp/issues/13), pharos ADR-039). The
+Rust blockers are fixed on pharos main, not yet released (2026-11-20): rust-analyzer's own
+diagnostics now reach pharos
+([pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8)), a cold server is ready in
+about 2 s instead of a minute ([pharos#12](https://github.com/LoganBresnahan/pharos-mcp/issues/12)),
+and a stale `cargo check` result is no longer answered as fresh
+([pharos#30](https://github.com/LoganBresnahan/pharos-mcp/issues/30)). A Rust trial would still
+need a Rust version of the contract's checkers and line format.
 
 **What the verdict decides:** which hook agents get. If arm 3 clearly beats arm 2 (not merely
 arm 1), agents get the pharos hook. If the compiler hook ties or wins, the cheaper tool wins
@@ -201,8 +203,7 @@ pharos's navigation tools for agents nor what pharos would do for geex.
 
 | Step | Issue | Repo | What | Needs |
 |---|---|---|---|---|
-| 1 | [pharos#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7) | pharos | the trial: the three-arm run on `deepseek-v4-pro`, written up with the verdict. The harness is verified and on pharos's `trial/007` branch; the 90 runs wait on the maintainer's go | both hooks (done); pharos#8 if on Rust |
-| — | [pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8) | pharos | **bug:** rust-analyzer's own diagnostics never reach pharos (pull diagnostics advertised to servers it runs in push mode). Needed only if the trial runs on Rust | — |
+| 1 | [pharos#7](https://github.com/LoganBresnahan/pharos-mcp/issues/7) | pharos | the trial: the three-arm run on `deepseek-v4-pro`, written up with the verdict. The harness is verified and on pharos's `trial/007` branch; the 90 runs wait on the maintainer's go | both hooks (done) |
 
 Done:
 - [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3): documents re-synced from
@@ -212,6 +213,11 @@ Done:
 - [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6): arm 3, the `pharos
   diagnostics` CLI and its captAInHook payload (pharos ADR-040).
 - [captAInHook#4](https://github.com/LoganBresnahan/captAInHook/issues/4): arm 2, the compiler hook.
+- [pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8),
+  [#12](https://github.com/LoganBresnahan/pharos-mcp/issues/12),
+  [#30](https://github.com/LoganBresnahan/pharos-mcp/issues/30) and the real-server survey's
+  fixes: pharos answers for Rust, Go, Python and the other bundled languages, checked against
+  real servers in CI (on main, 2026-11-20; not yet released).
 
 **Parked until pharos's place is decided** (built only if pharos stays):
 
