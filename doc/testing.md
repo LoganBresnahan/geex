@@ -7521,3 +7521,14 @@ the `&` split `2>&1`), and `>|` or `&>` gave the file name or nothing. Redirecti
 normalised before the split (a copied descriptor dropped; `&>`, `&>>`, `>&`, `>|` read as `>`);
 an assignment-only part (`FOO=1; sed …`) no longer wins; a quoted `"/dev/null"`, `/dev/stdout`,
 `/dev/stderr`, `/dev/tty` or `/dev/fd/N` isn't a write; `command -v x` is a lookup, not `x`.
+
+### 2026-11-19 — Merged `bash-label` (466d4ff); deployed `0.7.0+466d4ff0.89a87236` (ADR-0041)
+
+At the maintainer's word: `bash-label` merged into main and pushed (with the live-run entry,
+afdbbe8), then `mix geex.deploy` after the ship bar on the merge (1862 tests + 62 properties + 215
+doctests green twice, `--warnings-as-errors --force` clean). install.sh kept `0.7.0+b31d68f9` as
+the previous version and removed 0.7.0; the payload link names the verified script (sha256
+8180e1e3…). Live, through captAInHook: this session's `cd <repo> && pwd; sed -i s/beta/BETA/
+notes.txt` against the installed geex (scratch `XDG_STATE_HOME`, the real `XDG_RUNTIME_DIR`)
+showed `╎` and `✎ claude-code/88820b29 · turn 70d8… · while sed` after `Alt+D` (it read "while
+pwd" before), geex.log "credited while … ran sed", a clean quit. Not checked: macOS.
