@@ -7609,3 +7609,118 @@ with the sort removed. The other tests added with BUG-24/25 compare sorted lists
 be reproduced here (ext4 hashes with a per-filesystem seed); geex-verifier checked instead with
 `Geex.Disk.ls` reversed and shuffled: unfixed, only this test failed in the whole suite; fixed, it
 passed under all ten orders. CI confirms on the push.
+
+### 2026-11-23 — Clickable output: links in the output pane, a click opens one, Alt+N steps them; BUG-26 (ADR-0042)
+
+Built on `clickable-output` from ADR-0042's amendment of the day (in place of ADR-0055, parked).
+`Geex.Loop.Resolver` finds where each finished output line points off the loop (one process per
+pane, one batch in flight, each path asked about once); `Geex.Loop.Output` keeps the answers by
+line number through trims; links draw underlined in the accent; a click on one opens it; `Alt+N`
+steps a `!` command's locations (the list started last), and a project search's by the same
+answers, so it no longer looks at the disk per line in the loop (BUG-26).
+
+Tests (`test/geex/loop/clickable_output_test.exs`, 12 + the resolver's doctests): two properties
+(a line has a link exactly when its answer names a file, through batches answered in any order,
+more lines and trims; `next_link/2` stops at the next linked line, wraps, skips none), the trim
+example, the resolver (answers in order, each path asked once; it ends with its owner; `stop/2`
+ends one held by a disk that never answers), and through the loop: only real files under the
+root are links (a clock, `localhost:5173`, a missing file are not) and their cells are underlined
+in the accent; the hint names Alt+N only while a line is a link; a click beside a link highlights,
+on it opens at line:col; a link whose file was deleted says "no such file here"; Enter before the
+answer still opens; Alt+N one stop per line with the wrap notice, then `q` and Alt+N searches the
+file; a `!` naming no file gives Alt+N back; a project search whose resolver calls lib/a.ex
+missing steps past it though the file is there (the loop doesn't look); a stalled disk: no links,
+keys and Enter still work, `q` kills the held resolver. `location_span/1`'s property (the span is
+exactly the location's text, either form, any indent) in text_test; the project-search and shell
+tests deliver the resolver's answers in their `ran/1`. `disk_test`'s module list gains
+resolver.ex. Properties also at 3,000 runs.
+
+Live (handle 1, tmux `geexdf`, a scratch project, `XDG_STATE_HOME` in scratch): a `!printf` of
+five lines drew `lib/a.ex:4:6` and `lib/b.ex(2,1)` underlined in the accent (SGR 4;96, the second
+on the highlighted row in reverse) and the clock, `localhost:5173` and `gone.ex:2` plain; an SGR
+mouse press on the first link opened `a.ex` at 4:6, the cursor on the `中`; Alt+N opened `b.ex`
+2:1, then "wrapped to the first location"; `Alt+>`, `q`, Alt+N said "nothing to search for (Alt+Q
+searches)"; a short `!echo lib/b.ex:3` showed "Enter opens · Alt+N next · ! again · q closes";
+`search-project dos` (grep, no git) drew `./lib/b.ex:2` as a link and Alt+N opened it with `dos`
+selected (2:4). The log had no warning or error; Ctrl-X left no VM.
+
+**Not tested:** a real stalled network mount (a stub that never returns stands in for it); a
+command printing tens of thousands of lines with locations (the one-batch-in-flight bound is
+tested in the pure property, not under a live flood); a mouse click in a terminal other than
+tmux; mix's multi-line messages (only the `└─` line links, by design); columns past the line's
+end or in other units (unchanged from Enter's behaviour).
+
+Suite: 1890 tests + 65 properties + 225 doctests, green twice in a row, then one failure in the
+third full run (output not kept) and five more runs green; 40 runs of the shell, project-search
+and clickable-output files failed once, in `shell_test`'s "`stop` picked in the palette" (exit
+137 for 143): logged as BUG-27, the stop's TERM racing its KILL under load, outside this branch.
+`mix compile --warnings-as-errors --force` clean.
+
+### 2026-11-23 — Clickable output, review fixes: one resolver for the loop, a gone result's file (ADR-0042)
+
+geex-verifier's review of bab7821 (diff 5c2472cc) failed two:
+
+- **F1 (must, a regression, live):** a project search, then a result's file deleted, then Alt+N,
+  Enter or a click opened an empty buffer for it ("the match isn't on line 2 here"), which a save
+  would write back. `open_result` trusted the resolver's answer with no look at the disk (the old
+  `result_target` had looked). Now it looks once for the file opened, as `open_at` does, and
+  says "no such file here"; the line still becomes Alt+N's stepping point. Test: Alt+N, Enter and
+  a click each give the notice, no buffer is opened, the deleted file has none; it fails with the
+  look removed.
+- **F2 (should, live on a FUSE disk whose lookups never answer):** a killed resolver's stat keeps
+  its dirty I/O scheduler until the disk answers, so one resolver per pane took one more per pane;
+  at ten the terminal's writes waited and the TUI froze (it recovered when the disk answered; no
+  process or port leaked). Now one resolver serves the loop's life: panes get ids, batches and
+  answers carry them, a new pane (or a closed one) announces its id and the resolver drops older
+  work between chunks. Tests: the resolver drops a held pane's later chunk and answers the new pane
+  with its id; through the loop, a stalled resolver serves eleven panes (opened, replaced, closed)
+  as one process, keys and Enter still working.
+
+Also from the review: the two failures in geex-verifier's loaded runs (load ~35 on 8 cores) were
+`frame_cost_test.exs`'s typing bound (188 and 199 ms against 150; ~46 ms unloaded on main and the
+branch alike): its comment now says what it measures today (~45 ms) and that an oversubscribed
+machine trips it. The one full-suite failure lost earlier may have been it. BUG-28 logged: keys
+typed during a stall arrive together, and Esc then a letter reads as Alt+letter (the parser's
+design, predating the branch). Everything else in geex-verifier's scope held: the loop live while
+a resolver is held, exact spans (tsc, mix `└─`, Go `./`, wide characters, a tab), no false links,
+BUG-26 traced at no disk call in the loop over 4,000 results, a 3M-line flood with mailboxes at 0,
+stale answers dropped after a search was replaced mid-batch.
+1892 tests + 65 properties + 225 doctests green twice; live via tmux, two `!` panes in a row
+through the one resolver (the second's `lib/b.ex:3:1` underlined, Alt+N opened it at 3:1), log
+clean.
+
+### 2026-11-23 — Clickable output, third pass: the mutants only the probes caught, pinned (ADR-0042)
+
+geex-verifier verified rev 2 (5ff08ea) on everything but the held full-suite runs: F2 live on its
+FUSE stub (12 stalled panes, one resolver, exactly one dirty I/O thread held, keys whole, links
+when the disk woke), F1 live and in a probe, and rev 2's new paths. Correction to the entry above:
+with F1's look, a project search's Alt+N makes one disk call per press (for the file it opens) and
+none per line passed over (geex-verifier traced 11 calls for 11 presses passing ~3,980 lines).
+
+Of its 28 mutants on rev 2, eight passed this suite (caught only by its probes); a test each now:
+answers for an older pane (r01) or a new pane keeping the old id (r09) never land on the pane
+shown; a new pane asks the disk again (r04); a dead resolver is dropped and the next pane starts
+another (r07); Alt+N while the command runs keeps the output as its list (m15); lines that came
+while a batch was out are sent when it is answered (m18); Enter on a result answered "no file"
+doesn't read it again in the loop (m22); a closed pane's remaining lines aren't asked about (r05).
+Docs: the ADR says what a resolver's death means for the pane shown; frame_cost's comment says
+"measured", not why; BUG-28 notes the tty reader waited too; BUG-27 notes it was seen at a light
+load and not reproduced, so its cause is open.
+Each of the eight new tests fails with its mutant applied (eight of eight caught, `lib/` restored
+after each). The slice's files (clickable_output, shell, project_search, text, disk) green three
+times, 76 tests + 5 properties + 10 doctests; the full suite ×2 waits for mod's window (pharos's
+timing-sensitive runs), as does geex-verifier's held run.
+Then, before the held runs (geex-verifier's note): the m18 and r05 tests gave the loop their
+runner batches by hand instead of resting on `sleep 0.5` splitting the output or on how `sed`'s
+writes are chunked; both still fail with their mutants, and the file is green ×3.
+
+### 2026-11-23 — Clickable output VERIFIED, merged (ADR-0042)
+
+geex-verifier on 121c19f, in mod's window: the full suite ×2 unloaded (1899 tests + 65 properties
++ 225 doctests, 0 failures), the readdir-order adversary ×2 (`Geex.Disk.ls` reversed, and
+shuffled), two runs alongside a second suite (load ~8–13), all green; under 8 CPU burners (load
+~14–15) two failures a run, both older than the branch: BUG-27 (it fails on main too under the
+same burners) and frame_cost's typing bound (157 and 167 ms against 150). Its nit N1, fixed before
+the merge: the m18 test's stopped `sleep` runner opened its port after the test had removed its
+root, printing "spawn: Could not cd" into the next test; `by_hand/1` now waits for the runner's
+DOWN. clickable_output_test green ×3 with no stray output.

@@ -7,9 +7,60 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-26 — One `Alt+N` over a project search's results can stat every result line in the key loop
+## BUG-28 — Keys typed while the screen was stalled arrive together, and Esc then a letter reads as Alt+letter
 
-- **Status:** open. Found 2026-11-23 by geex-mod, reviewing ADR-0042's proposed amendment of that
+- **Status:** open. Seen 2026-11-23 by geex-verifier, on a disk made to stall (a FUSE stub) with
+  the first build of clickable output: after the terminal's writes waited and then recovered,
+  the keys typed meanwhile were read in one go, and Esc followed by `t` ran `Alt+T`. Predates that
+  branch: any stall that lets input pile up (a loaded machine, a suspended terminal) does it.
+- **Why they piled up:** the terminal's reader (`Geex.TerminalIO`) was waiting for a dirty I/O
+  scheduler too, all ten held by stalled stats (geex-verifier), so nothing was read until one came
+  free.
+- **Cause (observed, the parser's design):** a terminal sends Alt+key as Esc then the key, so the
+  parser (`Geex.Input.Parser`) reads an Esc followed at once by a key in the same read as one
+  Alt chord; only an Esc alone at the end of a read (or after its timeout) is a plain Esc. Bytes
+  that arrive together after a stall look exactly like an Alt chord.
+- **Recommended fix:** none certain. The terminal gives no timing in the bytes themselves; the
+  Kitty keyboard protocol (ADR-0026's capability-gated extras) reports Esc and Alt as distinct
+  keys where the terminal supports it. Worth weighing only if it bites outside a stall.
+- **Ruled out:** a loss of bytes: every key arrived, in order.
+
+---
+
+## BUG-27 — Under load, stopping a `!` can KILL it before its TERM lands (exit 137, not 143)
+
+- **Status:** open. Seen 2026-11-23 while building clickable output: `shell_test.exs`'s "`stop`
+  picked in the palette stops it too" failed once in 40 runs of three test files (and one full
+  suite run failed once, its output not kept), expecting `{:exit, 143}` and getting
+  `{:exit, 137}`. Not caused by that branch: it doesn't touch `Geex.Shell`'s stop.
+- **Symptom:** `Ctrl-G` (or `stop`) on a `!` started a moment before, on a loaded machine, ends it
+  with KILL instead of TERM: the title says "exit 137", and the command gets no chance to clean up.
+- **Seen again** 2026-11-23 by geex-verifier at a LIGHT load (3.6; seed 814068, `+S 2:2`,
+  `--max-cases 2`), and not reproduced by replaying that seed ten times nor by 600 direct
+  `Shell` start/stop cycles (immediately, and after 50 ms; all 143). A load of 3.6 doesn't fit
+  the theory below, so it is unconfirmed: the cause is open.
+- **Frequent under CPU load** (geex-verifier, 2026-11-23, 8 CPU burners, load ~14–15): both full
+  runs failed it, and `shell_test.exs` alone failed it once in five runs on main 5e3f8b9 and
+  once in five on the clickable-output branch. So it is a loaded-machine failure as well as the
+  rarer light-load one.
+- **Suspected cause (from the code, unconfirmed):** `Geex.Shell.stop_group/2` sends
+  the TERM from a spawned process that starts `sh -c 'kill -s TERM -- -PID'`, and schedules the
+  KILL `@grace_ms` (2 s) after the stop. Starting that `sh` is the slow part on a loaded machine
+  (the comment above `stop_group/2` says so); when it takes longer than the grace period, the KILL
+  is sent first. 137 is 128 + 9, the KILL path.
+- **Recommended fix:** start the grace period once the TERM has been sent (the spawned process
+  reports back, then the runner schedules the KILL). Reproduce first: delay `signal/2`'s TERM by
+  more than 2 s in a test, which should give 137 every time.
+- **Ruled out:** the clickable-output branch's resolver (it never signals, and the failing test
+  never opens a link).
+
+---
+
+## BUG-26 — One `Alt+N` over a project search's results can stat every result line in the key loop  ✅ FIXED (2026-11-23)
+
+- **Status:** **FIXED** 2026-11-23 on the branch `clickable-output` (ADR-0042's amendment of that
+  date): a project search's result lines are resolved off the loop as they arrive, and `Alt+N`
+  steps by those answers alone. Was open. Found 2026-11-23 by geex-mod, reviewing ADR-0042's proposed amendment of that
   date (clickable output), which would have copied the pattern to `!` output. Not reproduced
   live: read from the code. In **0.7.0** and every build since ADR-0053's project search.
 - **Symptom (expected):** with a project search's results in the output pane, one `Alt+N` stats a

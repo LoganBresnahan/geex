@@ -65,13 +65,27 @@ defmodule Geex.Loop.ProjectSearchTest do
   defp search(state, query),
     do: state |> key({:alt, ?Q}) |> type(query) |> key({:key, :enter}) |> ran()
 
-  defp ran(%{shell: nil} = state), do: state
+  defp ran(%{shell: nil} = state), do: linked(state)
 
   defp ran(%{shell: %{pid: pid}} = state) do
     assert_receive {:geex_shell, ^pid, _} = msg, 10_000
     {:noreply, state} = Loop.handle_info(msg, state)
     ran(state)
   end
+
+  # Deliver the resolver's answers until every finished line is answered (ADR-0042's 2026-11-23
+  # amendment: the output's links are found off the loop).
+  defp linked(%{resolver: %{pid: pid}, output: %Output{} = out} = state) do
+    if Output.pending?(out) do
+      assert_receive {:geex_links, ^pid, _, _, _} = msg, 10_000
+      {:noreply, state} = Loop.handle_info(msg, state)
+      linked(state)
+    else
+      state
+    end
+  end
+
+  defp linked(state), do: state
 
   defp results(state),
     do: for(i <- 0..(Output.size(state.output) - 1)//1, do: Output.line(state.output, i))

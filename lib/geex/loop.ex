@@ -502,6 +502,13 @@ defmodule Geex.Loop do
       shell: nil,
       output: nil,
       last_shell: nil,
+      # Where the output pane's lines point (ADR-0042's 2026-11-23 amendment): the
+      # `Geex.Loop.Resolver`, `%{pid, ref}`, one for the loop's life (started with the first pane);
+      # `pane_seq` the id the last pane shown was given (each pane's answers carry it);
+      # `resolver_opts` passed to it (tests: a disk that stalls).
+      resolver: nil,
+      pane_seq: 0,
+      resolver_opts: [],
       # The selection a search made (a match, ADR-0053): while it is still the selection, a
       # plain move drops it instead of extending it.
       found: nil,
@@ -968,7 +975,16 @@ defmodule Geex.Loop do
       end
 
     want = if wanted, do: nil, else: tree.want
-    tree = %{tree | index: index, rows: rows, sel: sel, want: want, links: Map.delete(links, path)}
+
+    tree = %{
+      tree
+      | index: index,
+        rows: rows,
+        sel: sel,
+        want: want,
+        links: Map.delete(links, path)
+    }
+
     {:noreply, schedule_repaint(list_open_levels(%{state | tree: tree}))}
   end
 
@@ -1079,7 +1095,26 @@ defmodule Geex.Loop do
     Logger.warning("geex shell: the command's runner failed: #{inspect(reason)}")
     output = state.output && Output.finish(state.output, {:exit, -1}, now_ms())
     notice = "the command's runner failed (see #{Geex.log_file()})"
-    {:noreply, schedule_repaint(%{state | shell: nil, output: output, notice: notice})}
+    state = feed_resolver(%{state | shell: nil, output: output, notice: notice})
+    {:noreply, schedule_repaint(state)}
+  end
+
+  # Where a batch of the output pane's lines point (`Geex.Loop.Resolver`): kept with the lines,
+  # and the next batch sent. An answer from a pane since replaced or closed falls through to the
+  # catch-all below.
+  def handle_info(
+        {:geex_links, pid, id, first, answers},
+        %{resolver: %{pid: pid}, output: %Output{id: id} = out} = state
+      ) do
+    output = Output.put_links(out, first, answers)
+    {:noreply, schedule_repaint(feed_resolver(%{state | output: output}))}
+  end
+
+  # The resolver died: the pane's lines stay as they are, without links; the next pane starts a
+  # new one.
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{resolver: %{ref: ref}} = state) do
+    Logger.warning("geex shell: the output's link resolver failed: #{inspect(reason)}")
+    {:noreply, %{state | resolver: nil}}
   end
 
   # While a `!` runs, its title counts the seconds.
@@ -2758,11 +2793,24 @@ defmodule Geex.Loop do
     end
   end
 
-  # A press in the output pane focuses it and highlights the line pressed (ADR-0042).
+  # A press in the output pane focuses it and highlights the line pressed (ADR-0042); a press on
+  # a link opens it (ADR-0042's 2026-11-23 amendment). The rows have no drag, so the press is the
+  # click.
   defp output_press(state, rect, m) do
     out = state.output
-    out = if m.y > rect.y, do: Output.move(out, out.top + m.y - rect.y - 1 - out.sel), else: out
-    %{state | focus: :output, output: out}
+    i = Output.first_row(out) + m.y - rect.y - 1
+
+    case m.y > rect.y && Output.link_cols(out, i) do
+      {c0, c1} when m.x - rect.x >= c0 and m.x - rect.x < c1 ->
+        state = %{state | focus: :output}
+        if out.search, do: open_result(state, i), else: open_output_line(state, i)
+
+      _ ->
+        out =
+          if m.y > rect.y, do: Output.move(out, out.top + m.y - rect.y - 1 - out.sel), else: out
+
+        %{state | focus: :output, output: out}
+    end
   end
 
   # A press on the status line's "behind disk (Alt+D)": fast-forward. Not while a quit waits on a
@@ -3502,9 +3550,17 @@ defmodule Geex.Loop do
 
     hint =
       cond do
-        state.shell && state.shell.kind == :show -> " Ctrl-G stops "
-        focused? -> " Enter opens · ! again · q closes "
-        true -> " Alt+> "
+        state.shell && state.shell.kind == :show ->
+          " Ctrl-G stops "
+
+        focused? and Output.links?(out) ->
+          " Enter opens · #{key_name(state, :next_match)} next · ! again · q closes "
+
+        focused? ->
+          " Enter opens · ! again · q closes "
+
+        true ->
+          " Alt+> "
       end
 
     head = "── " <> Output.title(out, now_ms()) <> " "
@@ -3519,6 +3575,8 @@ defmodule Geex.Loop do
       })
       |> draw_band_handle({x, y, w}, Width.string(head), Geex.Text.length(hint), pal)
 
+    top = Output.first_row(out)
+
     out
     |> Output.rows(h - 1)
     |> Enum.with_index()
@@ -3531,7 +3589,21 @@ defmodule Geex.Loop do
       acc
       |> Screen.fill_rect(x, row, w, 1, %Cell{char: " ", fg: fg, bg: bg, attrs: attrs})
       |> Screen.draw_text(x, row, palette_clip(text, w), %Cell{fg: fg, bg: bg, attrs: attrs})
+      |> draw_output_link({x, row, w}, out, top + i, text, %Cell{bg: bg, attrs: attrs}, pal)
     end)
+  end
+
+  # A line's link (where the resolver found it points, ADR-0042's 2026-11-23 amendment),
+  # underlined in the accent over the row just drawn.
+  defp draw_output_link(screen, {x, row, w}, out, i, text, %Cell{} = base, pal) do
+    with %{at: at, len: len} <- Output.link(out, i),
+         {c0, _c1} when c0 < w <- Output.link_cols(out, i) do
+      link = text |> binary_part(at, len) |> palette_clip(w - c0)
+      attrs = Enum.uniq(base.attrs ++ [:underline])
+      Screen.draw_text(screen, x + c0, row, link, %Cell{base | fg: pal.accent, attrs: attrs})
+    else
+      _ -> screen
+    end
   end
 
   # The band's handle (ADR-0038 §6), on the edits pane's and the output pane's title row: drag
@@ -4439,11 +4511,51 @@ defmodule Geex.Loop do
     %{
       state
       | shell: %{pid: pid, ref: ref, kind: :show, stopping: false, tty: false},
-        output: Output.new(cmd, :show, now_ms()),
         last_shell: cmd,
-        focus: :output
+        focus: :output,
+        search: %{state.search | last: :output}
     }
+    |> put_output(Output.new(cmd, :show, now_ms()))
   end
+
+  # Show `out` in the output pane as a new pane, its id announced to the resolver so the work
+  # still queued for the old one is dropped (ADR-0042's 2026-11-23 amendment). One resolver
+  # serves every pane: a stalled disk holds one of its calls, never one per pane.
+  defp put_output(state, out) do
+    state = state |> new_pane() |> ensure_resolver()
+    feed_resolver(%{state | output: %{out | id: state.pane_seq}})
+  end
+
+  # A new pane id, announced: what the resolver has queued for an older pane is dropped. Closing
+  # the pane takes one too, so nothing is resolved for a pane no longer shown.
+  defp new_pane(state) do
+    id = state.pane_seq + 1
+    if state.resolver, do: Geex.Loop.Resolver.pane(state.resolver.pid, id)
+    %{state | pane_seq: id}
+  end
+
+  defp ensure_resolver(%{resolver: %{}} = state), do: state
+
+  defp ensure_resolver(state) do
+    {pid, ref} = Geex.Loop.Resolver.start(state.resolver_opts)
+    Geex.Loop.Resolver.pane(pid, state.pane_seq)
+    %{state | resolver: %{pid: pid, ref: ref}}
+  end
+
+  # Send the resolver the finished lines it hasn't seen, unless a batch is still out.
+  defp feed_resolver(%{output: %Output{} = out, resolver: %{pid: pid}} = state) do
+    case Output.take_unsent(out) do
+      {_out, _first, []} ->
+        state
+
+      {out, first, lines} ->
+        kind = if out.search, do: :search, else: :show
+        Geex.Loop.Resolver.resolve(pid, out.id, kind, file_root(), first, lines)
+        %{state | output: out}
+    end
+  end
+
+  defp feed_resolver(state), do: state
 
   defp run_pipe(%{shell: %{}} = state, _cmd), do: %{state | notice: @running}
 
@@ -4489,7 +4601,7 @@ defmodule Geex.Loop do
   end
 
   defp shell_said({:lines, lines, partial}, %{output: %Output{}} = state),
-    do: %{state | output: Output.add(state.output, lines, partial)}
+    do: feed_resolver(%{state | output: Output.add(state.output, lines, partial)})
 
   # The pane was closed while the command ran: its output goes nowhere.
   defp shell_said({:lines, _, _}, state), do: state
@@ -4528,7 +4640,7 @@ defmodule Geex.Loop do
         true -> state.notice
       end
 
-    %{state | shell: nil, output: output, notice: notice}
+    feed_resolver(%{state | shell: nil, output: output, notice: notice})
   end
 
   defp shell_said({:piped, status, out, err}, %{shell: shell} = state) do
@@ -4553,7 +4665,8 @@ defmodule Geex.Loop do
           |> Output.finish({:exit, status}, now_ms())
 
         notice = "| #{shell.cmd} failed (exit #{status}); the text is unchanged"
-        %{state | output: output, focus: :output, notice: notice}
+        search = %{state.search | last: :output}
+        put_output(%{state | focus: :output, notice: notice, search: search}, output)
 
       true ->
         replace_selection(state, shell, out)
@@ -4611,7 +4724,7 @@ defmodule Geex.Loop do
         schedule_repaint(open_result(state, out.sel))
 
       {:key, :enter} ->
-        schedule_repaint(open_location(state, Output.line(out, out.sel)))
+        schedule_repaint(open_output_line(state, out.sel))
 
       {:char, "!"} ->
         cond do
@@ -4633,7 +4746,24 @@ defmodule Geex.Loop do
 
   defp close_output(state) do
     state = if state.shell && state.shell.kind == :show, do: stop_shell(state), else: state
-    %{state | output: nil, focus: :editor}
+    %{new_pane(state) | output: nil, focus: :editor}
+  end
+
+  # Open line `i` of a `!` command's output (Enter, a click or Alt+N), which becomes the line
+  # Alt+N steps on from (ADR-0042's 2026-11-23 amendment). Where the resolver found it points,
+  # else (not answered yet, or naming no file from the root) as the line reads.
+  defp open_output_line(%{output: out} = state, i, wrapped? \\ false) do
+    state = %{state | output: %{out | sel: i, follow: false, at: i}}
+    state = put_in(state.search.last, :output)
+
+    case Output.link(out, i) do
+      %{full: full, path: path, line: line, col: col} ->
+        state = open_at(state, full, path, line, col)
+        if wrapped?, do: %{state | notice: "wrapped to the first location"}, else: state
+
+      nil ->
+        open_location(state, Output.line(out, i))
+    end
   end
 
   # Open the file a line of output names, at its line and column.
@@ -4645,21 +4775,29 @@ defmodule Geex.Loop do
         %{state | notice: "no path:line on this line"}
 
       {path, line, col} ->
-        with {:ok, full} <- FileOps.resolve(path, file_root()),
-             true <- Geex.Disk.regular?(full) do
-          # The cursor moves only once the file is shown: a failed open leaves the tab you were
-          # on (perhaps a preview, whose buffer's cursor it must not move) as it was.
-          case open_where_held(full, state) do
-            {:ok, _pid, state} ->
-              set_cursor({line - 1, (col || 1) - 1})
-              %{state | focus: :editor, goal: (col || 1) - 1, selection: nil}
-
-            {:error, reason, state} ->
-              %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
-          end
-        else
+        case FileOps.resolve(path, file_root()) do
+          {:ok, full} -> open_at(state, full, path, line, col)
           _ -> %{state | notice: "no such file here: #{path}"}
         end
+    end
+  end
+
+  # Open `full` (named `path`) at `line` and `col` (1-based, `col` nil for the line's start). One
+  # look at the disk, for the one file opened: a link's file may have gone since it was found.
+  defp open_at(state, full, path, line, col) do
+    if Geex.Disk.regular?(full) do
+      # The cursor moves only once the file is shown: a failed open leaves the tab you were on
+      # (perhaps a preview, whose buffer's cursor it must not move) as it was.
+      case open_where_held(full, state) do
+        {:ok, _pid, state} ->
+          set_cursor({line - 1, (col || 1) - 1})
+          %{state | focus: :editor, goal: (col || 1) - 1, selection: nil}
+
+        {:error, reason, state} ->
+          %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
+      end
+    else
+      %{state | notice: "no such file here: #{path}"}
     end
   end
 
@@ -6871,6 +7009,26 @@ defmodule Geex.Loop do
     end
   end
 
+  # A `!` command's locations (ADR-0042's 2026-11-23 amendment). While more may come (the command
+  # runs, or lines wait on the resolver), a press with none yet searches the file but keeps the
+  # output as what Alt+N steps; with none to come, the file's matches are Alt+N's again.
+  defp next_match(%{search: %{last: :output}} = state) do
+    case output_steps(state) do
+      {:step, out} ->
+        case Output.next_link(out, out.at) do
+          {i, wrapped?} -> open_output_line(state, i, wrapped?)
+          nil -> next_match(put_in(state.search.last, :file))
+        end
+
+      :later ->
+        state = next_match(put_in(state.search.last, :file))
+        put_in(state.search.last, :output)
+
+      :none ->
+        next_match(put_in(state.search.last, :file))
+    end
+  end
+
   defp next_match(%{search: %{last: :project}} = state) do
     if project_results?(state),
       do: next_result(state),
@@ -7252,11 +7410,11 @@ defmodule Geex.Loop do
         %{
           state
           | shell: %{pid: pid, ref: ref, kind: :show, stopping: false, tty: false},
-            output: out,
             focus: :output,
             notice: opts[:note] || state.notice,
             search: %{state.search | last: :project, project: project}
         }
+        |> put_output(out)
 
       {:error, why} ->
         %{state | notice: why}
@@ -7270,28 +7428,24 @@ defmodule Geex.Loop do
 
   defp project_results?(_state), do: false
 
+  # Whether Alt+N can step the output pane's locations now, later, or not at all.
+  defp output_steps(%{output: %Output{search: nil} = out} = state) do
+    cond do
+      Output.links?(out) -> {:step, out}
+      state.shell != nil or (state.resolver != nil and Output.pending?(out)) -> :later
+      true -> :none
+    end
+  end
+
+  defp output_steps(_state), do: :none
+
   # Alt+N: the next result line after the one last opened (or the pane's highlight), wrapping:
-  # one stop per line (Q13), lines that name no file passed over.
+  # one stop per line (Q13), lines that name no file passed over. The resolver's answers say
+  # which do (ADR-0042's 2026-11-23 amendment): no look at the disk here (BUG-26).
   defp next_result(%{output: out, search: %{project: project}} = state) do
-    n = Output.size(out)
-    # From the line last opened; before any, from the highlight when it was moved there, else
-    # from the top.
-    from =
-      cond do
-        project.at -> project.at
-        out.follow -> -1
-        true -> out.sel - 1
-      end
-
-    found =
-      Enum.find_value(1..max(n, 1)//1, fn k ->
-        i = Integer.mod(from + k, max(n, 1))
-        if result_target(Output.line(out, i)), do: i
-      end)
-
-    case found do
+    case Output.next_link(out, project.at) do
       nil -> %{state | notice: "no results to step through"}
-      i -> open_result(state, i, i <= from)
+      {i, wrapped?} -> open_result(state, i, wrapped?)
     end
   end
 
@@ -7299,11 +7453,13 @@ defmodule Geex.Loop do
   defp open_result(state, i, wrapped? \\ false) do
     out = state.output
 
-    case result_target(Output.line(out, i)) do
+    case result_link(out, i) do
       nil ->
         %{state | notice: "no path:line on this line"}
 
       {full, path, line} ->
+        # The line becomes the one Alt+N steps on from, whether or not its file opens, so a
+        # result whose file went is passed, not stuck on.
         state = %{state | output: %{out | sel: i, follow: false}}
 
         state =
@@ -7314,13 +7470,31 @@ defmodule Geex.Loop do
 
         state = Map.update!(state, :search, &Map.put(&1, :last, :project))
 
-        case open_where_held(full, state) do
-          {:ok, pid, state} ->
-            select_result(%{state | focus: :editor}, pid, line - 1, out.search.query, wrapped?)
+        # One look at the disk, for the one file opened: an answer's file may have gone since
+        # it was found, and opening it would make an empty buffer that a save writes back
+        # (geex-verifier's F1).
+        with true <- Geex.Disk.regular?(full),
+             {:ok, pid, state} <- open_where_held(full, state) do
+          select_result(%{state | focus: :editor}, pid, line - 1, out.search.query, wrapped?)
+        else
+          false ->
+            %{state | notice: "no such file here: #{path}"}
 
           {:error, reason, state} ->
             %{state | notice: "couldn't open #{path}: #{inspect(reason)}"}
         end
+    end
+  end
+
+  # The file result line `i` names and its line: as the resolver found it; for a line it hasn't
+  # answered yet (Enter or a click before the answer), read here, for that one line.
+  defp result_link(out, i) do
+    case Output.link(out, i) do
+      %{full: full, path: path, line: line} ->
+        {full, path, line}
+
+      nil ->
+        if Output.answered?(out, i), do: nil, else: result_target(Output.line(out, i))
     end
   end
 

@@ -936,7 +936,7 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    it: checks in ADR-0025's `config.toml` (its first build), the disk trigger in the first build
    (off unless a check asks), pharos in the first build as a capability, not a default.
 24. **Clickable output** ([adr/0042](adr/0042-shell-commands.md)'s amendment of 2026-11-23,
-   *accepted*; not started): run a checker with `!` and its output's locations are drawn as
+   *accepted*; **built 2026-11-23** on `clickable-output`, fixing BUG-26): run a checker with `!` and its output's locations are drawn as
    links, a click opens one, and `Alt+N` steps through them. Layer 1 made easier, in place of
    item 23 for now.
 
@@ -974,7 +974,9 @@ and outside git no symlink) and BUG-25 (dot folders missing outside git), both r
 maintainer, are **FIXED** (2026-11-22, on the `tree-links` branch: a symlinked folder is listed
 when opened, one level at a time, ADR-0034's amendment). BUG-26 (one `Alt+N` over a project
 search's results can stat every result line in the key loop; found 2026-11-23 reviewing item 24)
-is **open**, to be fixed with item 24.
+is **FIXED** (2026-11-23, with item 24: the result lines are resolved off the loop). BUG-27
+(under load, stopping a `!` can KILL it before its TERM lands; seen in a test) and BUG-28 (keys
+typed during a stall arrive together; Esc then a letter reads as Alt+letter) are **open**.
 
 ---
 
