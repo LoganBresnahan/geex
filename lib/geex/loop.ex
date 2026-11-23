@@ -539,7 +539,9 @@ defmodule Geex.Loop do
         top: 0,
         hold: nil,
         made: MapSet.new(),
-        want: nil
+        want: nil,
+        # Symlinked folders being listed now they're open (BUG-24): `%{path => {pid, monitor}}`.
+        links: %{}
       },
       # The file finder (Alt+F, `:files` minibuffer mode): the best paths for the typed query;
       # `matching` the search's `{pid, monitor}` until they arrive; `submit` when Enter came
@@ -901,6 +903,9 @@ defmodule Geex.Loop do
         %{tree: %{reading: {pid, ref}} = tree} = state
       ) do
     Process.demonitor(ref, [:flush])
+    # What was listed inside symlinked folders stays (their rows, the highlight) until listed
+    # again just below (BUG-24's review, F2).
+    index = Tree.carry(index, tree.index || %{}, tree.open)
     rows = Tree.rows(index, tree.open)
     wanted = tree.want && Enum.find_index(rows, &(&1.path == tree.want))
 
@@ -931,14 +936,40 @@ defmodule Geex.Loop do
     }
 
     # An open finder searches the new list; if Enter is waiting and no search is needed (a blank
-    # query), it opens the first file now.
-    state = refresh_matches(%{state | tree: tree})
+    # query), it opens the first file now. A symlinked folder you had open is listed again.
+    state = refresh_matches(%{state | tree: tree}) |> list_open_levels(true)
     state = if again, do: reload_tree(state), else: state
 
     if state.finder.submit and state.finder.matching == nil and
          state.minibuffer.mode == :files,
        do: {:noreply, submit_minibuffer(state)},
        else: {:noreply, schedule_repaint(state)}
+  end
+
+  # A level listed inside a symlinked folder (BUG-24), put in (`Tree.put_listed/3`: one level,
+  # built in the lister). The highlight stays on its row's path, or goes to what a file operation
+  # just made (`want`) once it shows.
+  def handle_info({:geex_tree_link, pid, path, level}, %{tree: %{links: links} = tree} = state)
+      when is_map_key(links, path) and elem(:erlang.map_get(path, links), 0) == pid do
+    {_pid, ref} = links[path]
+    Process.demonitor(ref, [:flush])
+    index = Tree.put_listed(tree.index || %{}, path, level)
+    rows = Tree.rows(index, tree.open)
+    wanted = tree.want && Enum.find_index(rows, &(&1.path == tree.want))
+
+    sel =
+      with nil <- wanted,
+           %{path: kept} <- Enum.at(tree.rows, tree.sel),
+           i when is_integer(i) <- Enum.find_index(rows, &(&1.path == kept)) do
+        i
+      else
+        i when is_integer(i) -> i
+        _ -> min(tree.sel, max(length(rows) - 1, 0))
+      end
+
+    want = if wanted, do: nil, else: tree.want
+    tree = %{tree | index: index, rows: rows, sel: sel, want: want, links: Map.delete(links, path)}
+    {:noreply, schedule_repaint(list_open_levels(%{state | tree: tree}))}
   end
 
   # The finder's search answered (`refresh_matches/1`); an answer for an older query falls
@@ -1062,7 +1093,9 @@ defmodule Geex.Loop do
       when is_map_key(ops, pid) do
     Process.demonitor(Map.fetch!(ops, pid), [:flush])
     state = %{state | file_ops: Map.delete(ops, pid)}
-    {:noreply, schedule_repaint(file_op_done(answer, state))}
+    # A linked folder isn't watched: what a file operation did inside an open one shows when its
+    # levels are listed again (one level each).
+    {:noreply, schedule_repaint(file_op_done(answer, state) |> list_open_levels(true))}
   end
 
   # A file operation's step died before answering: say so.
@@ -1074,10 +1107,37 @@ defmodule Geex.Loop do
     {:noreply, schedule_repaint(%{state | notice: notice})}
   end
 
+  # A symlinked folder's listing died without answering (BUG-24): it stays a folder not listed,
+  # and says so; opening it again tries again.
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{tree: %{links: links}} = state)
+      when map_size(links) > 0 and reason != :normal do
+    case Enum.find(links, fn {_path, {_pid, r}} -> r == ref end) do
+      {path, _} ->
+        state = put_in(state.tree.links, Map.delete(links, path))
+        {:noreply, schedule_repaint(say(state, "couldn't list #{path}/ (#{inspect(reason)})"))}
+
+      nil ->
+        down(ref, reason, state)
+    end
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state), do: down(ref, reason, state)
+
+  # Coalesced repaint — one per burst.
+  def handle_info(:repaint, state), do: {:noreply, repaint(%{state | repaint?: false})}
+
+  # A markdown preview's render (ADR-0043 §2, §3).
+  def handle_info({:geex_preview, buf, msg}, state) when is_map_key(state.previews, buf),
+    do: {:noreply, preview_rendered(state, buf, msg)}
+
+  def handle_info(_msg, state), do: {:noreply, state}
+
+  ## Internals
+
   # An install the settings view started died without answering, or a markdown preview's
   # process ended under its tabs (they keep their rows, and say it stopped, ADR-0043 §3); any
   # other `:DOWN` is nothing.
-  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+  defp down(ref, reason, state) do
     case Enum.find(state.installing, fn {_name, i} -> i.ref == ref end) do
       {name, _} ->
         state = %{state | installing: Map.delete(state.installing, name)}
@@ -1096,17 +1156,6 @@ defmodule Geex.Loop do
         end
     end
   end
-
-  # Coalesced repaint — one per burst.
-  def handle_info(:repaint, state), do: {:noreply, repaint(%{state | repaint?: false})}
-
-  # A markdown preview's render (ADR-0043 §2, §3).
-  def handle_info({:geex_preview, buf, msg}, state) when is_map_key(state.previews, buf),
-    do: {:noreply, preview_rendered(state, buf, msg)}
-
-  def handle_info(_msg, state), do: {:noreply, state}
-
-  ## Internals
 
   # A key the editor takes.
   defp io_event(event, state) do
@@ -3657,7 +3706,11 @@ defmodule Geex.Loop do
         mark = if row.dir?, do: if(row.open?, do: "▾ ", else: "▸ "), else: "  "
 
         text =
-          String.duplicate("  ", row.depth) <> mark <> row.name <> if(row.dir?, do: "/", else: "")
+          String.duplicate("  ", row.depth) <>
+            mark <>
+            row.name <>
+            if(row.dir?, do: "/", else: "") <>
+            if(row[:link?], do: " ↗", else: "")
 
         acc
         |> Screen.fill_rect(0, y, inner, 1, %Cell{char: " ", fg: fg, bg: bg, attrs: attrs})
@@ -4037,10 +4090,46 @@ defmodule Geex.Loop do
   # The read also hands the watcher the directories it found, so new files there are seen. The
   # directories made here that still exist are listed too, empty or not.
   defp read_tree(root, made, loop) do
-    files = Tree.list(root)
+    {files, links} = Tree.list_all(root)
     Tree.Watcher.watch(root, Tree.Watcher.dirs_of(files), loop)
     made = Enum.filter(made, &Geex.Disk.dir?(Path.join(root, &1)))
-    {Finder.pack(files), Tree.put_dirs(Tree.index(files), made)}
+    {Finder.pack(files), files |> Tree.index() |> Tree.put_links(links) |> Tree.put_dirs(made)}
+  end
+
+  # A folder inside a symlinked folder's territory (BUG-24) is listed one level at a time, when it
+  # is opened, in a process of its own: a link can point anywhere, somewhere huge or slow. One
+  # listing per folder at a time; its answer is `{:geex_tree_link, …}`, the level ready to put in
+  # (built in the process, never on the loop: ADR-0035). It starts for a folder not listed yet,
+  # or, after a reload, to list again one listed before; for nothing else.
+  defp list_level(%{tree: %{index: index} = tree} = state, path) when is_map(index) do
+    with true <- Tree.unlisted?(index, path) or Tree.listed_level?(index, path),
+         false <- Map.has_key?(tree.links, path),
+         root when is_binary(root) <- safe_start().root do
+      loop = self()
+
+      reader =
+        spawn_monitor(fn ->
+          send(loop, {:geex_tree_link, self(), path, Tree.list_level(root, path)})
+        end)
+
+      put_in(state.tree.links[path], reader)
+    else
+      _ -> state
+    end
+  end
+
+  defp list_level(state, _path), do: state
+
+  # The open folders not listed yet: listed (a level that just arrived can hold one, after a
+  # rename or a reload). With `again?` (after a reload), the open levels listed before are
+  # listed again too, to stay current; their rows stay on screen meanwhile (`Tree.carry/2`).
+  defp list_open_levels(%{tree: tree} = state, again? \\ false) do
+    index = tree.index || %{}
+
+    tree.open
+    |> Enum.sort()
+    |> Enum.filter(&(Tree.unlisted?(index, &1) or (again? and Tree.listed_level?(index, &1))))
+    |> Enum.reduce(state, &list_level(&2, &1))
   end
 
   # Search the files for the finder's query (Alt+F), in a process of its own: the list can be
@@ -4611,7 +4700,9 @@ defmodule Geex.Loop do
 
   defp set_open(%{tree: tree} = state, dir, open?) do
     open = if open?, do: MapSet.put(tree.open, dir), else: MapSet.delete(tree.open, dir)
-    %{state | tree: %{tree | open: open, rows: Tree.rows(tree.index || %{}, open)}}
+    state = %{state | tree: %{tree | open: open, rows: Tree.rows(tree.index || %{}, open)}}
+    # Opened: listed, or listed again if it was (what it held may have changed while closed: N1).
+    if open?, do: list_level(state, dir), else: state
   end
 
   # Keys while the edits pane has focus: move, Enter, back to the editor. The minibuffer, the

@@ -964,7 +964,10 @@ branch: the stop is bounded at 10 s). BUG-22 (one file that hung stalled every f
 and could leave no key working; BUG-21's follow-up) is **FIXED** (2026-11-18, on the `raw-files`
 branch: the user's files go through `Geex.Disk`, without OTP's file server, and a FIFO is never
 opened). BUG-23 (`search-project` crashed the loop through a link to a name past Latin-1; found in
-BUG-22's review) is **FIXED** on the same branch.
+BUG-22's review) is **FIXED** on the same branch. BUG-24 (symlinked folders never in the tree,
+and outside git no symlink) and BUG-25 (dot folders missing outside git), both reported by the
+maintainer, are **FIXED** (2026-11-22, on the `tree-links` branch: a symlinked folder is listed
+when opened, one level at a time, ADR-0034's amendment).
 
 ---
 

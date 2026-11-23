@@ -7532,3 +7532,65 @@ the previous version and removed 0.7.0; the payload link names the verified scri
 notes.txt` against the installed geex (scratch `XDG_STATE_HOME`, the real `XDG_RUNTIME_DIR`)
 showed `╎` and `✎ claude-code/88820b29 · turn 70d8… · while sed` after `Alt+D` (it read "while
 pwd" before), geex.log "credited while … ran sed", a clean quit. Not checked: macOS.
+
+### 2026-11-22 — BUG-24, BUG-25: symlinks and dot folders in the tree (ADR-0034)
+
+On the branch `tree-links`, the maintainer's report and choices (ADR-0034's amendment): a dot
+folder is listed and watched like any other, never `.git`, `.hg` or `.svn`; a symlink to a file is
+a file; a symlink to a folder is a folder marked `↗`, listed when opened in a process of its own,
+a link inside it a link again (no loop can run away), a reload listing the open ones again; a
+dangling link left out. Reproduced first in a scratch repository, git mode and walk mode (the
+table in bugs.md). Tests: `Geex.Tree` in both modes (a linked file, a linked folder inside the
+root and one outside it, a dangling link, a link inside a linked folder back to the root; dot
+folders and the three version control ones); the index and rows (`put_links/2`, `put_listed/3`,
+`unlisted_link?/1`, a listed link still marked); the watcher (a dot folder watched, `.git` and a
+link back up not); through the loop (a linked folder unlisted until Enter, listed on its answer,
+not listed twice, listed again after a reload; the painted tree's `linked/ ↗` and `.config/`).
+1868 tests + 62 properties + 218 doctests green twice; `mix compile --warnings-as-errors --force`
+clean. Live in a tmux pty
+(the branch under `mix run`, a scratch `XDG_STATE_HOME`), on a home-like folder outside git: the
+tree showed `.aws/ ↗` (a link to a folder elsewhere), `.config/` and a linked file; Enter on
+`.aws/` listed its `config` and it stayed marked `↗`; `.config/app/conf.toml` opened down;
+Enter on the linked file opened it; no `terminating` in the log. Not tested: a linked folder on a
+slow mount (it lists in its own process, the loop never waits), macOS.
+
+### 2026-11-22 — BUG-24's review: a linked folder listed one level at a time (ADR-0034)
+
+geex-verifier's review of the `tree-links` patch (4d202bdb) passed the ship bar, the git and walk
+modes, the watcher, a link loop opened three deep, a dying listing, the `:DOWN` refactor and a
+live run (mouse, `d`, `r`, Ctrl-O through a link, Alt+F), and failed three: F1, a folder made
+inside a linked folder (`mkdir .aws/foo`, or a new file's ancestors) broke every later read of
+the tree (`put_dir` reached into `:link`: BadMapError in the reader); F2, a reload hid an open
+linked folder's rows and moved the highlight off them (to another row, where Enter or `d` would
+act); F3, the loop indexed a linked folder's whole listing (670 ms for a link to `/usr`'s 104k
+files, again after each reload). With the maintainer's choice, a linked folder is now listed one
+level at a time (`Tree.list_level/2`, the level built in the lister: F3 is one directory); a
+folder in it is `:dir` until opened; `put_dir` stops at a folder not listed yet (F1); a reload
+carries the listed levels into the fresh index and lists the open ones again (`Tree.carry/2`,
+F2); `want` is honoured when a level lands. Tests: the level listing (a `:dir`, a link back to
+the root, no `.git`), `put_listed/3` merging a re-listing without losing what's open below,
+`put_dirs` stopping at `:link` and `:dir`, `carry/2`; through the loop, one level then the next,
+F1 (a made folder under a link, then a reload, then a new file shows), F2 (the highlight on a file
+inside an open link survives a reload and its re-listing), and `want`. The F1 and F2 tests fail
+with each fix undone. The watcher's doc comments and BUG-24's fix description corrected. 1874
+tests + 62 properties + 219 doctests green twice; `mix compile --warnings-as-errors --force` clean.
+
+### 2026-11-22 — BUG-24's second review: carried along the open paths only (ADR-0034)
+
+geex-verifier's check of rev 2 (6e9ac513) confirmed F1–F3 fixed (made folders three deep under a
+`:link` and a `:dir`, three open levels keeping the highlight through a reload and its
+re-listings, 4 ms in the loop for a 5,000-entry level, `want`, rename and delete with levels
+open, a child listing in flight while its parent re-lists) and failed two new ones, both from
+`Tree.carry/2`: N1, a closed linked folder reopened after a reload showed its old listing
+(`carry` kept closed levels, and opening listed only unlisted ones); N2, `carry` rebuilt the whole
+fresh index on every reload, links or not (150–300 ms at 1M files: an O(N) cost in the loop the
+branch had added). Now `Tree.carry/3` walks only the open paths (a reload with nothing open
+returns the fresh index itself, the same term), a closed level goes back to not listed, opening a
+listed level lists it again, a file operation lists the open levels again (a `mkdir` inside an
+open linked folder showed only at some later reload), and a re-listing drops what was listed below
+a folder whose kind changed on disk (it kept a `:dir`'s listing under a new link, without its ↗).
+Tests: `carry/3` (open kept, closed back to `:link`, `:erts_debug.same/2` for nothing open, a link
+gone or a plain folder not carried), the kind change, and through the loop: reopening relists,
+and a file operation's answer relists. ADR-0034's costs now name `search-project` too; the roadmap
+says one level at a time. 1877 tests + 62 properties + 219 doctests green twice;
+`mix compile --warnings-as-errors --force` clean.

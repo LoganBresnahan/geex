@@ -1,6 +1,7 @@
 # ADR-0034: Panes, the file tree, the edits pane, and holding open buffers
 
-- **Status:** Accepted 2026-10-15 (open decisions A, F–K taken as recommended). **Built**
+- **Status:** Accepted 2026-10-15 (open decisions A, F–K taken as recommended). **Amended**
+  2026-11-22: dot folders and symlinks in the tree (BUG-24, BUG-25). **Built**
   2026-10-15: the hold (1), more than one buffer (2), the edits pane with the layout and `Alt+O`
   (3), the file tree (4), "edited by you" (5). **Amended** 2026-10-16: the tree has no cap, and
   is read in a process of its own. **Keys amended** 2026-10-17 by
@@ -519,3 +520,37 @@ writer, so the fallback stays the existing merge.
 `lib/geex/ledger/spool.ex` (the chain rule); `integrations/captainhook/geex-attest.sh` (what counts
 as taken); `lib/geex/view.ex`, `lib/geex/rect.ex`, `lib/geex/session.ex`; `lib/geex/loop.ex`,
 `lib/geex/loop/keymap.ex`.
+
+## Amendment — 2026-11-22: dot folders and symlinks in the tree (BUG-24, BUG-25)
+
+The maintainer, 2026-11-22: "symlinked files and/or folders don't show in geex", and dot folders
+may not either. Both reproduced: outside a git work tree the walk skipped every dot folder and
+every symlink (the "skips dot-directories and symlinks" above), and inside one a symlink to a
+folder was dropped (git lists a link as one entry, and the tree kept only regular files). Decided
+with the maintainer:
+
+- **Dot folders are listed like any other**, outside a work tree too, and watched; never a
+  version control folder (`.git`, `.hg`, `.svn`). Inside a work tree, git's rules still decide
+  (an ignored dot folder stays out).
+- **A symlink to a file is a file**, inside a work tree or out.
+- **A symlink to a folder is a folder listed when it is opened, one level at a time** (the
+  maintainer's choices; the second after geex-verifier's review measured a whole-subtree listing:
+  a link to `/usr` walked 104k files in 3.7 s, and one to `/mnt/c` would walk the drive). It can
+  point anywhere, somewhere huge or slow (`~/.aws -> /mnt/c/…` under WSL), or back at an
+  ancestor. In the index it is `:link` until opened; opening it lists what is directly in it, in
+  a process of its own that builds the level ready to put in (`Geex.Tree.list_level/2`,
+  ADR-0035): a file, a link (`:link` again, never followed on its own, so no loop can run away)
+  or a real folder (`:dir`, listed the same way when opened). A link out of the project is
+  followed when opened too. It is drawn `name/ ↗`, before and after it is listed. A reload keeps
+  the open levels on screen, the highlight with them (`Geex.Tree.carry/3`, along the open paths
+  only, so a reload costs what is open, never the tree's size), and lists them again; a closed
+  level goes back to not listed, and opening a listed one lists it again (what it held may have
+  changed). A file operation lists the open levels again (any file operation, wherever it was;
+  one level each, nothing at all with no link open), since a linked folder isn't watched. A
+  folder made inside a level not listed yet waits for it (it never broke
+  a read again: the review's F1). A link that names nothing is left out.
+- **Costs:** the fuzzy finder (`Alt+F`) doesn't see inside a linked folder (its files aren't in
+  the tree's list), and neither does `search-project` (outside git its `grep -r` skips every link,
+  a linked file the tree shows included; `git grep` doesn't follow links); a linked folder isn't
+  watched (a change made inside it from outside geex shows at the next reload or reopen); the
+  watcher never follows a link either, so a link back up can't loop there.

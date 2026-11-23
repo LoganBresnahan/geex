@@ -7,6 +7,57 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-25 — Dot folders are missing from the tree outside a git work tree  ✅ FIXED (2026-11-22)
+
+- **Status:** **FIXED** 2026-11-22 on the branch `tree-links` (ADR-0034's amendment of that date):
+  dot folders listed and watched, never `.git`, `.hg` or `.svn`. Reported by the maintainer
+  2026-11-22; by design since ADR-0034 §5 (the tree's first build), then unwanted. In **0.7.0** and
+  every build before the fix.
+- **Symptom:** a folder whose name starts with a dot (`.github/`, `.config/`, `.aws/`) isn't in
+  the tree when geex's root isn't inside a git work tree. Dotfiles (`.gitignore`) show. Inside a
+  git work tree they show, unless git ignores them.
+- **Verified cause:** `Geex.Tree.entries/2` (the walk used when `git ls-files` fails) drops every
+  directory whose name starts with `.` ("skipping dot-directories" in the module doc), and
+  `Geex.Tree.Watcher.new_dirs/2` doesn't watch them either. Reproduced 2026-11-22: a scratch
+  directory listed `.gitignore`, `a.txt`, `real_dir/r.txt`, without `.github/ci.yml` or
+  `.hidden_untracked/h.txt`; with `.git` present, both were listed.
+- **Recommended fix:** show dot folders in the walk, except a version control directory (`.git`,
+  `.hg`, `.svn`), and watch them too; ADR-0034 §5 amended. A dot folder can be large (`~/.cache`,
+  `~/.npm` under a home-like root), so whether its contents are listed up front or when opened is
+  the maintainer's call, with BUG-24's symlinked folders.
+- **Ruled out:** git mode: tracked and untracked-but-not-ignored dot folders are listed; an
+  ignored one (`.ignored/` in `.gitignore`) isn't, which is git's rule, not this bug.
+
+---
+
+## BUG-24 — Symlinked folders never show in the tree; outside git, no symlink does  ✅ FIXED (2026-11-22)
+
+- **Status:** **FIXED** 2026-11-22 on the branch `tree-links` (ADR-0034's amendment of that date):
+  a link to a file is a file; a link to a folder is a folder marked `↗`, listed when opened (the
+  maintainer's choice), a link inside it a link again. Reported by the maintainer 2026-11-22. In
+  **0.7.0** and every build before the fix, since the tree's first (ADR-0034 §5).
+- **Symptom:** a symlink to a folder (`link_to_dir -> real_dir`, `~/.aws -> /mnt/c/…`) is missing
+  from the tree, inside a git work tree or not. Outside a git work tree a symlink to a *file* is
+  missing too (inside one it shows).
+- **Verified cause:** inside a work tree, `git ls-files` lists a symlink as one entry (git stores
+  the link, not what it points to), and `Geex.Tree.git_files/1` keeps only entries that are
+  regular files (`Geex.Disk.regular?/1`, which follows the link): a link to a file passes, a link
+  to a folder doesn't, and nothing ever lists what's inside it. Outside one, `Geex.Tree.entries/2`
+  reads each entry with `lstat` and keeps only `:regular` and `:directory`, so every link
+  (`:symlink`) is dropped: "skips … symlinks (no loops)" in the module doc. Reproduced 2026-11-22:
+  git mode kept `link_to_file.txt` and `link_outside_file.txt` but not `link_to_dir`,
+  `link_outside_dir` or an untracked `untracked_link_dir`; the walk kept none of the four.
+- **Fix, as built:** a link to a file is a file; a link to a folder is a folder marked `↗`, listed
+  when it is opened and one level at a time (the maintainer's choices, the second after
+  geex-verifier's review found a whole-subtree listing walked `/usr`'s 104k files and would walk
+  `/mnt/c` over WSL): a folder inside it is listed when opened, a link inside it is a link again,
+  so nothing is followed on its own and no loop can run away. A reload keeps the open levels on
+  screen and lists them again. ADR-0034 §5 amended.
+- **Ruled out:** `Geex.Disk.regular?/1` itself: it follows links, so a linked file is kept in git
+  mode as before BUG-22's change.
+
+---
+
 ## BUG-23 — `search-project` crashed the loop through a link to a name past Latin-1  ✅ FIXED (2026-11-18)
 
 - **Status:** **FIXED** 2026-11-18 on the branch `raw-files`, found by mod-verify's review of
