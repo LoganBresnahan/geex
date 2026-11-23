@@ -251,8 +251,9 @@ defmodule Geex.Tree.Watcher do
     case Geex.Disk.ls(dir) do
       {:ok, names} ->
         # A real folder only: a symlinked one is listed when opened and not watched (BUG-24), so
-        # a link back to an ancestor can't loop here.
-        for name <- names,
+        # a link back to an ancestor can't loop here. Sorted: the directory's own order is the
+        # filesystem's (ext4 hashes it), and the @max_dirs cut must not depend on it.
+        for name <- Enum.sort(names),
             name not in ~w(.git .hg .svn),
             path = Path.join(dir, name),
             match?({:ok, %{type: :directory}}, Geex.Disk.lstat(path)),

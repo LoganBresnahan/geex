@@ -150,6 +150,24 @@ defmodule Geex.Tree.WatcherTest do
     refute_received {:started, _, _}
   end
 
+  # CI caught new_dirs/2 in the filesystem's own order (ext4 hashes it): each level is sorted, so
+  # the order, and the @max_dirs cut, never depend on the disk.
+  test "new_dirs/2 lists each level sorted, whatever order the folders were made in", %{
+    root: root
+  } do
+    names = Enum.shuffle(~w(zeta .dot alpha Mid beta _under 9num))
+    for n <- names, do: File.mkdir_p!(Path.join([root, "top", n, "inner"]))
+
+    found =
+      Watcher.new_dirs(root, [Path.join(root, "top")]) |> Enum.map(&Path.relative_to(&1, root))
+
+    level1 = Enum.filter(found, &(length(Path.split(&1)) == 2))
+    level2 = Enum.filter(found, &(length(Path.split(&1)) == 3))
+    assert level1 == Enum.sort(level1)
+    assert level2 == Enum.sort(level2)
+    assert length(level1) == length(names)
+  end
+
   test "watch/4 is a no-op when no watcher runs" do
     assert Watcher.watch(:no_such_tree_watcher, "/x", ["."], self()) == :ok
   end
