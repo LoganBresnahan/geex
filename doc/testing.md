@@ -7594,3 +7594,18 @@ gone or a plain folder not carried), the kind change, and through the loop: reop
 and a file operation's answer relists. ADR-0034's costs now name `search-project` too; the roadmap
 says one level at a time. 1877 tests + 62 properties + 219 doctests green twice;
 `mix compile --warnings-as-errors --force` clean.
+
+### 2026-11-23 — CI red on the tree-links merge: the watcher's folders in the disk's order (ADR-0034)
+
+CI on main failed one test after 6eded10 was pushed (geex-mod's report): watcher_test expected
+`["new", "new/.hidden", "new/a", "new/a/b"]` and the runner gave `new/a` before `new/.hidden`. The
+same set: `Watcher.new_dirs/2` kept each level in `Geex.Disk.ls` order, which is the filesystem's
+(ext4 hashes it); before BUG-25's fix `.hidden` was skipped and the level held one folder, so the
+order never showed. A test bug the branch brought in, passing here by luck. Now `subdirs/1` sorts
+each level, so the order, and the `@max_dirs` cut past the cap, never depend on the disk. Test:
+folders made in a shuffled order come back sorted per level; it fails three runs out of three
+with the sort removed. The other tests added with BUG-24/25 compare sorted lists, maps, rows in
+`Tree.rows/2`'s own sorted order, or rows looked up by path (checked). The runner's order can't
+be reproduced here (ext4 hashes with a per-filesystem seed); geex-verifier checked instead with
+`Geex.Disk.ls` reversed and shuffled: unfixed, only this test failed in the whole suite; fixed, it
+passed under all ten orders. CI confirms on the push.
