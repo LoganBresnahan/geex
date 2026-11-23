@@ -150,18 +150,37 @@ defmodule Geex.Shell.Text do
   """
   @spec location(String.t()) :: {String.t(), pos_integer(), pos_integer() | nil} | nil
   def location(line) do
+    case location_span(line) do
+      nil -> nil
+      {_at, _len, location} -> location
+    end
+  end
+
+  @doc """
+  `location/1` with where it is in the line: `{at, len, {path, line, col}}`, `at` and `len` in
+  bytes. The span is what the output pane draws as a link (ADR-0042's 2026-11-23 amendment):
+  `path:line[:col]`, or `path(line[,col])` without the `: error` after it.
+
+      iex> Geex.Shell.Text.location_span("  lib/a.ex:12:3: warning")
+      {2, 13, {"lib/a.ex", 12, 3}}
+      iex> Geex.Shell.Text.location_span("src/a.ts(3,5): error TS2322")
+      {0, 13, {"src/a.ts", 3, 5}}
+      iex> Geex.Shell.Text.location_span("nothing here")
+      nil
+  """
+  @spec location_span(String.t()) ::
+          {non_neg_integer(), pos_integer(), {String.t(), pos_integer(), pos_integer() | nil}}
+          | nil
+  def location_span(line) do
     [colon_location(line), paren_location(line)]
     |> Enum.reject(&is_nil/1)
     |> Enum.min_by(&elem(&1, 0), fn -> nil end)
-    |> case do
-      nil -> nil
-      {_at, location} -> location
-    end
   end
 
   @path ~S"((?:~|\.{1,2})?/?[\w.\-+@]+(?:/[\w.\-+@]+)*)"
 
-  # `path:line[:col]`, the first that isn't a URL's `host:port`, with where it starts.
+  # `path:line[:col]`, the first that isn't a URL's `host:port`, with where it starts and its
+  # length.
   defp colon_location(line) do
     Regex.compile!("(?<![\\w./~-])" <> @path <> ~S":(\d+)(?::(\d+))?")
     |> Regex.scan(line, return: :index)
@@ -171,11 +190,12 @@ defmodule Geex.Shell.Text do
 
       if url?(line, whole) or path in [".", ".."],
         do: nil,
-        else: {at, {path, String.to_integer(l), col_of(col)}}
+        else: {at, len, {path, String.to_integer(l), col_of(col)}}
     end)
   end
 
-  # `path(line[,col]): error …`, tsc's and MSBuild's form, with where it starts.
+  # `path(line[,col]): error …`, tsc's and MSBuild's form, with where it starts and how long its
+  # `path(line[,col])` is.
   defp paren_location(line) do
     re =
       Regex.compile!(
@@ -186,7 +206,13 @@ defmodule Geex.Shell.Text do
     case Regex.run(re, line, return: :index) do
       [{at, _len} | groups] ->
         [path, l | col] = Enum.map(groups, &part(line, &1))
-        if path in [".", ".."], do: nil, else: {at, {path, String.to_integer(l), col_of(col)}}
+        # The span ends at the `)`, after the last number read.
+        {n_at, n_len} = groups |> Enum.reject(&(&1 == {-1, 0})) |> List.last()
+        len = n_at + n_len + 1 - at
+
+        if path in [".", ".."],
+          do: nil,
+          else: {at, len, {path, String.to_integer(l), col_of(col)}}
 
       nil ->
         nil

@@ -7609,3 +7609,49 @@ with the sort removed. The other tests added with BUG-24/25 compare sorted lists
 be reproduced here (ext4 hashes with a per-filesystem seed); geex-verifier checked instead with
 `Geex.Disk.ls` reversed and shuffled: unfixed, only this test failed in the whole suite; fixed, it
 passed under all ten orders. CI confirms on the push.
+
+### 2026-11-23 — Clickable output: links in the output pane, a click opens one, Alt+N steps them; BUG-26 (ADR-0042)
+
+Built on `clickable-output` from ADR-0042's amendment of the day (in place of ADR-0055, parked).
+`Geex.Loop.Resolver` finds where each finished output line points off the loop (one process per
+pane, one batch in flight, each path asked about once); `Geex.Loop.Output` keeps the answers by
+line number through trims; links draw underlined in the accent; a click on one opens it; `Alt+N`
+steps a `!` command's locations (the list started last), and a project search's by the same
+answers, so it no longer looks at the disk per line in the loop (BUG-26).
+
+Tests (`test/geex/loop/clickable_output_test.exs`, 12 + the resolver's doctests): two properties
+(a line has a link exactly when its answer names a file, through batches answered in any order,
+more lines and trims; `next_link/2` stops at the next linked line, wraps, skips none), the trim
+example, the resolver (answers in order, each path asked once; it ends with its owner; `stop/2`
+ends one held by a disk that never answers), and through the loop: only real files under the
+root are links (a clock, `localhost:5173`, a missing file are not) and their cells are underlined
+in the accent; the hint names Alt+N only while a line is a link; a click beside a link highlights,
+on it opens at line:col; a link whose file was deleted says "no such file here"; Enter before the
+answer still opens; Alt+N one stop per line with the wrap notice, then `q` and Alt+N searches the
+file; a `!` naming no file gives Alt+N back; a project search whose resolver calls lib/a.ex
+missing steps past it though the file is there (the loop doesn't look); a stalled disk: no links,
+keys and Enter still work, `q` kills the held resolver. `location_span/1`'s property (the span is
+exactly the location's text, either form, any indent) in text_test; the project-search and shell
+tests deliver the resolver's answers in their `ran/1`. `disk_test`'s module list gains
+resolver.ex. Properties also at 3,000 runs.
+
+Live (handle 1, tmux `geexdf`, a scratch project, `XDG_STATE_HOME` in scratch): a `!printf` of
+five lines drew `lib/a.ex:4:6` and `lib/b.ex(2,1)` underlined in the accent (SGR 4;96, the second
+on the highlighted row in reverse) and the clock, `localhost:5173` and `gone.ex:2` plain; an SGR
+mouse press on the first link opened `a.ex` at 4:6, the cursor on the `中`; Alt+N opened `b.ex`
+2:1, then "wrapped to the first location"; `Alt+>`, `q`, Alt+N said "nothing to search for (Alt+Q
+searches)"; a short `!echo lib/b.ex:3` showed "Enter opens · Alt+N next · ! again · q closes";
+`search-project dos` (grep, no git) drew `./lib/b.ex:2` as a link and Alt+N opened it with `dos`
+selected (2:4). The log had no warning or error; Ctrl-X left no VM.
+
+**Not tested:** a real stalled network mount (a stub that never returns stands in for it); a
+command printing tens of thousands of lines with locations (the one-batch-in-flight bound is
+tested in the pure property, not under a live flood); a mouse click in a terminal other than
+tmux; mix's multi-line messages (only the `└─` line links, by design); columns past the line's
+end or in other units (unchanged from Enter's behaviour).
+
+Suite: 1890 tests + 65 properties + 225 doctests, green twice in a row, then one failure in the
+third full run (output not kept) and five more runs green; 40 runs of the shell, project-search
+and clickable-output files failed once, in `shell_test`'s "`stop` picked in the palette" (exit
+137 for 143): logged as BUG-27, the stop's TERM racing its KILL under load, outside this branch.
+`mix compile --warnings-as-errors --force` clean.

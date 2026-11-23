@@ -1,7 +1,7 @@
 # ADR-0042: Shell commands from the minibuffer
 
 - **Status:** Accepted 2026-10-19 (the maintainer's ask, relayed by the coordinator session,
-  which also passed on the maintainer's choice of `!` to run a command again). Built the same day. **Amended 2026-11-09 (recorded 2026-11-10):** the output pane's title row is the band's handle. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+<` / `Alt+>` reach the output pane, not `Alt+P`. **Amended 2026-11-12 by [ADR-0053](0053-search.md):** the output pane also holds a project search's results (`Alt+Shift+Q`), `Alt+N` stepping them. **Amended 2026-11-13:** `!!` after a restart runs the newest kept `!` line. **Amended 2026-11-13:** Enter opens tsc's `path(line,col): error` too. **Amended 2026-11-23** (accepted, not built): locations drawn as links, a click opens one, `Alt+N` steps them (in place of [ADR-0055](0055-checks-on-save.md), parked).
+  which also passed on the maintainer's choice of `!` to run a command again). Built the same day. **Amended 2026-11-09 (recorded 2026-11-10):** the output pane's title row is the band's handle. **Amended 2026-11-12 by [ADR-0051](0051-panes-on-alt-angle-brackets-digits-free.md):** `Alt+<` / `Alt+>` reach the output pane, not `Alt+P`. **Amended 2026-11-12 by [ADR-0053](0053-search.md):** the output pane also holds a project search's results (`Alt+Shift+Q`), `Alt+N` stepping them. **Amended 2026-11-13:** `!!` after a restart runs the newest kept `!` line. **Amended 2026-11-13:** Enter opens tsc's `path(line,col): error` too. **Amended 2026-11-23** (accepted, built the same day on `clickable-output`): locations drawn as links, a click opens one, `Alt+N` steps them (in place of [ADR-0055](0055-checks-on-save.md), parked).
 - **Date:** 2026-10-19
 - **Relates to:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the minibuffer and its typed
   verbs), [ADR-0035](0035-the-loop-never-waits.md) (slow work runs off the key loop),
@@ -143,7 +143,8 @@ a location.
 
 ## Amendment (2026-11-23): locations drawn as links, a click opens one, `Alt+N` steps them
 
-**Status:** accepted 2026-11-23 (the maintainer's ask; reviewed by geex-mod); not built. It also amends
+**Status:** accepted 2026-11-23 (the maintainer's ask; reviewed by geex-mod); built the same day
+on the branch `clickable-output` (see "As built" below). It also amends
 [ADR-0039](0039-mouse.md) (a click in the output pane) and [ADR-0053](0053-search.md) (which
 list `Alt+N` steps).
 
@@ -219,10 +220,31 @@ clickable. Half of it is here: Enter on a highlighted line opens the `path:line[
   maps to a line and a column, and the column becomes a grapheme position as Enter already does
   it (5).
 
+**As built (2026-11-23).**
+
+- `Geex.Loop.Resolver`: one process per pane (`spawn_monitor`, monitoring the loop, so it ends
+  with it), started by `put_output/2` and killed when the pane closes or a new one replaces it; an
+  answer from an old one falls through `handle_info`'s catch-all. It asks `Geex.Disk.regular?/1`
+  about each path once per pane, and answers every 200 lines.
+- `Geex.Loop.Output` numbers lines from the first ever added (`dropped`), so a trim never shifts
+  an answer onto the wrong line, and keeps one batch in flight (`take_unsent/1`): what waits on a
+  stalled resolver is at most the pane's lines, never the command's whole output. `next_link/2`
+  (pure, a property) is the stepping both `Alt+N`s share.
+- `Geex.Shell.Text.location_span/1` (a property: the span is exactly the location's text, in
+  either form) feeds the resolver; `location/1` is it without the span.
+- Enter on a line the resolver hasn't answered still opens it by reading the line, as before (one
+  look at the disk, for the file opened); a click lands only on a drawn link, so on an answered
+  line. Every open looks once at the disk, so a link whose file went says "no such file here".
+- `Alt+N` with no link yet while more may come (the command runs, or lines wait on the resolver)
+  searches the file but keeps the output as the list `Alt+N` steps; with none to come it gives
+  `Alt+N` back to the file's matches.
+
 ## See
 
 `lib/geex/shell.ex`, `lib/geex/shell/text.ex`, `lib/geex/loop/output.ex`,
 `lib/geex/minibuffer/recall.ex`, `lib/geex/loop.ex` (`run_shell/2`, `run_pipe/2`, `shell_said/2`,
-`apply_output_key/2`, `draw_output_pane/3`), `lib/geex/loop/verbs.ex`;
-`test/geex/shell_test.exs`, `test/geex/loop/shell_test.exs`; [testing.md](../testing.md)
+`apply_output_key/2`, `draw_output_pane/3`, `output_press/3`, `open_output_line/3`), `lib/geex/loop/verbs.ex`,
+`lib/geex/loop/resolver.ex`;
+`test/geex/shell_test.exs`, `test/geex/loop/shell_test.exs`, `test/geex/loop/clickable_output_test.exs`,
+`test/geex/shell/text_test.exs`; [testing.md](../testing.md)
 2026-10-19.

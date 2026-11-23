@@ -178,7 +178,7 @@ defmodule Geex.DiskTest do
     @modules ~w(
       lib/geex/buffer.ex lib/geex/reconcile.ex lib/geex/session.ex lib/geex/loop.ex
       lib/geex/loop/file_ops.ex lib/geex/tree.ex lib/geex/tree/watcher.ex
-      lib/geex/markdown/preview.ex lib/geex/search/project.ex
+      lib/geex/markdown/preview.ex lib/geex/search/project.ex lib/geex/loop/resolver.ex
     )
 
     test "make no call through the file server: Geex.Disk's instead" do

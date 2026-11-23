@@ -7,9 +7,32 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
-## BUG-26 — One `Alt+N` over a project search's results can stat every result line in the key loop
+## BUG-27 — Under load, stopping a `!` can KILL it before its TERM lands (exit 137, not 143)
 
-- **Status:** open. Found 2026-11-23 by geex-mod, reviewing ADR-0042's proposed amendment of that
+- **Status:** open. Seen 2026-11-23 while building clickable output: `shell_test.exs`'s "`stop`
+  picked in the palette stops it too" failed once in 40 runs of three test files (and one full
+  suite run failed once, its output not kept), expecting `{:exit, 143}` and getting
+  `{:exit, 137}`. Not caused by that branch: it doesn't touch `Geex.Shell`'s stop.
+- **Symptom:** `Ctrl-G` (or `stop`) on a `!` started a moment before, on a loaded machine, ends it
+  with KILL instead of TERM: the title says "exit 137", and the command gets no chance to clean up.
+- **Likely cause (from the code, not yet reproduced on purpose):** `Geex.Shell.stop_group/2` sends
+  the TERM from a spawned process that starts `sh -c 'kill -s TERM -- -PID'`, and schedules the
+  KILL `@grace_ms` (2 s) after the stop. Starting that `sh` is the slow part on a loaded machine
+  (the comment above `stop_group/2` says so); when it takes longer than the grace period, the KILL
+  is sent first. 137 is 128 + 9, the KILL path.
+- **Recommended fix:** start the grace period once the TERM has been sent (the spawned process
+  reports back, then the runner schedules the KILL). Reproduce first: delay `signal/2`'s TERM by
+  more than 2 s in a test, which should give 137 every time.
+- **Ruled out:** the clickable-output branch's resolver (it never signals, and the failing test
+  never opens a link).
+
+---
+
+## BUG-26 — One `Alt+N` over a project search's results can stat every result line in the key loop  ✅ FIXED (2026-11-23)
+
+- **Status:** **FIXED** 2026-11-23 on the branch `clickable-output` (ADR-0042's amendment of that
+  date): a project search's result lines are resolved off the loop as they arrive, and `Alt+N`
+  steps by those answers alone. Was open. Found 2026-11-23 by geex-mod, reviewing ADR-0042's proposed amendment of that
   date (clickable output), which would have copied the pattern to `!` output. Not reproduced
   live: read from the code. In **0.7.0** and every build since ADR-0053's project search.
 - **Symptom (expected):** with a project search's results in the output pane, one `Alt+N` stats a

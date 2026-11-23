@@ -4,7 +4,7 @@ defmodule Geex.Shell.TextTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  import Geex.Shell.Text, only: [location: 1]
+  import Geex.Shell.Text, only: [location: 1, location_span: 1]
 
   defp segment, do: string([?a..?z, ?0..?9, ?_], min_length: 1, max_length: 8)
 
@@ -65,6 +65,31 @@ defmodule Geex.Shell.TextTest do
             ) do
         pos = if c, do: "#{l},#{c}", else: "#{l}"
         assert location("#{indent}#{p}(#{pos}): #{sev} TS1234: some text") == {p, l, c}
+      end
+    end
+
+    # ADR-0042's 2026-11-23 amendment: the span is what the output pane draws as a link.
+    property "the span is exactly the location's text, in either form, at any indent" do
+      check all(
+              p <- path(),
+              l <- positive_integer(),
+              c <- one_of([constant(nil), positive_integer()]),
+              paren? <- boolean(),
+              indent <- string([?\s], max_length: 4),
+              tail <- member_of([": error TS1: x", ": warning: y"])
+            ) do
+        loc =
+          cond do
+            paren? and c -> "#{p}(#{l},#{c})"
+            paren? -> "#{p}(#{l})"
+            c -> "#{p}:#{l}:#{c}"
+            true -> "#{p}:#{l}"
+          end
+
+        line = indent <> loc <> tail
+        assert {at, len, found} = location_span(line)
+        assert binary_part(line, at, len) == loc
+        assert found == location(line) and found == {p, l, c}
       end
     end
 

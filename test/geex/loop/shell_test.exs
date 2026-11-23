@@ -45,13 +45,27 @@ defmodule Geex.Loop.ShellTest do
   end
 
   # Deliver the runner's messages until the command has ended.
-  defp ran(%{shell: nil} = state), do: state
+  defp ran(%{shell: nil} = state), do: linked(state)
 
   defp ran(%{shell: %{pid: pid}} = state) do
     assert_receive {:geex_shell, ^pid, _} = msg, 10_000
     {:noreply, state} = Loop.handle_info(msg, state)
     ran(state)
   end
+
+  # Deliver the resolver's answers until every finished line is answered (ADR-0042's 2026-11-23
+  # amendment: the output's links are found off the loop).
+  defp linked(%{resolver: %{pid: pid}, output: %Output{} = out} = state) do
+    if Output.pending?(out) do
+      assert_receive {:geex_links, ^pid, _, _} = msg, 10_000
+      {:noreply, state} = Loop.handle_info(msg, state)
+      linked(state)
+    else
+      state
+    end
+  end
+
+  defp linked(state), do: state
 
   describe "parsing" do
     test "! and | keep the command as typed; !! is the last again; bare ones are unknown" do
