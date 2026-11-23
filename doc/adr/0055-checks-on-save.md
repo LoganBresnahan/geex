@@ -2,7 +2,10 @@
 
 - **Status:** Accepted 2026-11-18 (drafted at the maintainer's ask, reviewed by mod against
   stack.md and the trial contract, accepted with the recommended answers to its five questions);
-  not built
+  not built. **Parked 2026-11-23** (the maintainer): nothing of it is built, and nothing will be
+  while it is parked. Less invasive first: the user runs a checker with `!` and its output's
+  locations are clickable ([ADR-0042](0042-shell-commands.md)'s amendment of that date). See
+  "Parked 2026-11-23" below.
 - **Date:** 2026-11-18
 - **Amends:** [ADR-0021](0021-capability-connections.md) (diagnostics become a contract with more
   than one adapter), [ADR-0010](0010-disk-truth-lsp-v05.md) (checks run on the saved text),
@@ -59,6 +62,9 @@ overlay knows which ran.
 - **`disk`** (off unless a check asks for it): a file geex holds changed on disk and reconcile's
   quiet period is over, as when an agent writes it. The hash is the one reconcile read. This is
   the agentic case: the human sees what an agent's write broke, without the agent's own hook.
+  The run starts no sooner than 2 s after the newest write the trigger saw, so the files that
+  started it are outside §5's 2 s margin and only writes during the run come back unsure (the
+  `save` trigger needs no wait: the saved file is held and goes by its hash).
   An open buffer holds its text when the disk changes (ADR-0034): until it is fast-forwarded,
   the marks describe text it doesn't show, so they are drawn stale beside its "behind" notice,
   and fresh once the fast-forward brings the checked text in.
@@ -73,8 +79,11 @@ project root, the way `Geex.Shell` runs `!`: its own process group, no terminal,
 ```
 
 and `{files}` and `{root}` in the command expand to the same, shell-quoted, for programs that take
-arguments and ignore stdin (`pharos diagnostics --json {files}`). **A check never writes the
-user's files.** A formatter is not a check (see Alternatives).
+arguments and ignore stdin (`pharos diagnostics --json {files}`). **A check is meant to read,
+not write:** the command is the user's, so geex can't stop it writing, but anything it writes
+besides its own build output (`mix compile`'s `_build`) reaches geex like any outside change,
+recorded `:external` by reconcile (ADR-0034), never as the human's or a check's edit. A
+formatter is not a check (see Alternatives).
 
 **4. Output, in one of three forms the check declares:**
 
@@ -94,7 +103,11 @@ user's files.** A formatter is not a check (see Alternatives).
   `info`, `note`, `hint`).
 
 Positions become graphemes at this edge, pure and property-tested (invariant 5). A position past
-the line's end lands at its end; past the file's end, on its last line.
+the line's end lands at its end; past the file's end, on its last line. The conversion needs the
+line's text, so it happens only for a file geex holds. For one it doesn't (a project check names
+files that aren't open), the position is kept as the check gave it (line, column and the
+column's unit) and becomes graphemes when the file is opened; until then `problems` lists it by
+its line (2026-11-23).
 
 **5. What a result means.**
 
@@ -130,11 +143,25 @@ the line's end lands at its end; past the file's end, on its last line.
 - **One run per check and project.** A new trigger stops the run under way and starts again
   (ADR-0035, as a new search does). A run is stopped at its time limit (120 s unless the check
   says) and is then failed.
-- **Hashes decide freshness.** geex keeps the sha256 each file had when the run started. A file
-  whose disk changed during the run gets its result drawn as unsure.
+- **Versions decide freshness.** geex keeps the version each file had when the run started:
+  for a file geex holds, the sha256 of its synced text (the disk as geex last read it, which is
+  what a check reads, unsaved edits or not); for one it doesn't, its modification time and
+  size, read with `Geex.Disk` (BUG-22) in `Geex.Checks`, off the loop (ADR-0035: the count grows
+  with what a project check reports), once at the run's start and once at its end. A file whose
+  version changed during the run gets its result drawn as unsure, in the gutter and in
+  `problems` alike (2026-11-23). Time and size miss a rewrite that keeps the size within one
+  tick of the modification time (git's "racy clean" case), and geex reads modification times
+  to the second (`:file.read_file_info` has no finer field, whatever the filesystem stamps), so
+  the margin is 2 s: that one second of resolution, and FAT/exFAT's 2 s stamps. As git does, a
+  file whose modification time isn't older than the run's start by at least 2 s gets its result
+  drawn unsure too. Shrinking the margin needs a finer stat than geex has, not a faster
+  filesystem.
 
 **6. The overlay.** Per file: the set of diagnostics (a grapheme range, severity, code, source,
-message), the hash they were made for, and the check's status. **It is display data, like the
+message), the version they were made for (§5: the hash, or the time and size of a file geex
+doesn't hold), and the check's status. Every file a check reported on has a set, open or not;
+the gutter and `problems` look a file up in it when they draw, so nothing marks a closed file and
+nothing has to visit it when its problems go away. **It is display data, like the
 highlight overlay and the blame marks:** never text, never a command, never in the history or
 the ledger, so the shared path, replay and the cassette are untouched. It lives in its own
 process (a `Geex.Checks` owning the runs and the sets), and the loop draws what it says.
@@ -144,7 +171,16 @@ process (a `Geex.Checks` owning the runs and the sets), and the loop draws what 
   (`Geex.Edit.Footprint`), so a problem stays on its line when lines are added above it, and are
   drawn dim: they describe the saved file (ADR-0010).
 - **Stale:** the disk no longer has the set's hash (an agent's write, an outside change), or the
-  last run failed. Drawn dim until a run brings a new set.
+  last run failed. Drawn dim until a run brings a new set. For a file geex doesn't hold, stale
+  when its time or size no longer match the set's: `problems` reads them again (off the loop)
+  each time it lists, and opening the file compares them before its marks are drawn. The set is
+  adopted under the opened text's hash only when the time and size read both before and after
+  the text match the set's (and §5's 2 s rule didn't make it unsure); otherwise it is stale. Stale marks are dimmed, never dropped: a change
+  may have fixed the problem or made a new one, and only a run can say which.
+- **Not watched:** a closed file changed by an outside command (`!npm run lint --fix`) keeps
+  its set, drawn stale once read again, until the next run of the check (a `project` run
+  replaces every file's set). Re-running on every change to any project file would mean watching
+  every file's contents and running the check on each outside write; it isn't done.
 - **Unsure:** pharos's `unsure`, or a hash that moved during the run. Drawn in their own way,
   **never as clean** (the promise recorded on geex#2).
 - A result for a hash older than the set's is dropped.
@@ -228,8 +264,9 @@ never an edit, a key or a save. Its process holds nothing the loop waits on.
   version needs its list before its results can clear anything.
 - The invariants: no buffer change, so 1 to 3 are untouched; check output is piped, never the tty
   (4); positions become graphemes at the edge (5); attribution isn't touched (6); no LLM, the
-  user's own commands (7); nothing listens (8). Checks read none of the user's files themselves;
-  the hashes come from text geex already holds.
+  user's own commands (7); nothing listens (8). Checks read none of the user's files' contents
+  themselves: the hashes come from text geex already holds, and a file it doesn't hold is only
+  stat-ed (its time and size, through `Geex.Disk`).
 
 ## Alternatives considered
 
@@ -256,7 +293,9 @@ never an edit, a key or a save. Its process holds nothing the loop waits on.
 ## Decided 2026-11-18 (the maintainer took the recommended answers)
 
 1. **Where checks live:** ADR-0025's `config.toml`, its first build being only the `[[checks]]`
-   section and the TOML dependency it already decided on (ADR-0025's amendment of this date).
+   section and the TOML dependency it already decided on (ADR-0025's amendment of this date),
+   read with the [`toml`](https://hex.pm/packages/toml) package (bitwalker/toml-elixir; chosen
+   2026-11-19, the comparison in that amendment).
    TOML takes hand-written shell commands without escaping and allows comments; a third file
    beside `settings.json` had no plan behind it.
 2. **The `disk` trigger:** in the first build, off unless a check asks for it. It is the agentic
@@ -269,6 +308,117 @@ never an edit, a key or a save. Its process holds nothing the loop waits on.
    unsure state are built anyway, and nothing runs pharos unless the user's config names it.
    stack.md's owner adds the geex → pharos row (status "built" once this ships); the MCP row stays
    parked for definitions, references and hover.
+
+## Decided 2026-11-19, for the build (the maintainer; reviewed in part 2026-11-23, then parked)
+
+Reviewed on 2026-11-23: item 3 (the switch governs only geex's own runs; a typed `check` is
+always shown; its marks stay dim while the switch is off), item 2's keys, the wording of §3 and
+§5–§6, and item 6 (files geex doesn't hold). Item 5's defaults were not confirmed before the
+ADR was parked.
+
+1. **A fourth format, `elixir`,** for `mix compile`: its warnings and errors span several lines
+   (the message, a code excerpt, then `└─ lib/w.ex:2:9: W.f/1`), which `lines` can't read. geex
+   itself is one of the first checks (`mix compile --all-warnings` on its own repository), with
+   the `incomplete` pattern of §5 for a compile error.
+2. **Keys:** `Alt+3` runs `check` (the current file's checks, now) and `Alt+4` shows `problems`
+   (both free since ADR-0051; `Alt+5` stays kept for multiple cursors). Both are named commands
+   in the bindings table (ADR-0047), so they can be moved like any other. ADR-0051 had left
+   `Alt+3` and `Alt+4` to the user; the maintainer agreed on 2026-11-23 to amend it, but with
+   this ADR parked the amendment wasn't made, and the keys stay the user's.
+3. **A switch in `Alt+Y`:** a General setting, "Run checks on save" (`run_checks` in
+   `settings.json`, ADR-0040 §7), **off by default** (the maintainer, 2026-11-20): configured
+   checks run on their own only once it is turned on. **The switch governs only the runs geex
+   starts on its own** (the maintainer, 2026-11-23). Off, no check runs on a save or a change on
+   disk, and turning it off stops any run under way and clears every check's marks;
+   `config.toml` is untouched, so turning it on runs what is configured. **The typed `check` (and `Alt+3`) runs
+   whether it is on or off, and its results are drawn as any run's are**: the marks, the status
+   line's message and `problems`. A deliberate run is always shown. With the switch off, nothing
+   runs again on a save, so those marks follow §6: dim after an edit, stale once the saved file's
+   hash moves, until the next typed `check`. No notice points at the
+   switch when checks are configured and it is off: the setting is found in `Alt+Y` (the
+   maintainer, 2026-11-23).
+4. **Global, not per project.** The `Alt+Y` settings are geex's one file; checks are already per
+   project in `config.toml` (each names its projects), which is where one project goes quiet. A
+   session-only `checks-pause` for the current project is a possible later addition, not built.
+5. **Defaults the maintainer agreed to, to review tomorrow:**
+   - `projects` names directories: a check applies to a file saved under one and runs there; a
+     check naming no project does nothing (never global by accident).
+   - `match` reads like `.gitignore`: a pattern without a `/` matches a file's name at any depth;
+     one with a `/` matches from the project's root.
+   - A tsc whose version has no syntactic list makes every run of that check incomplete (it only
+     adds marks), with a notice once saying why. The installed tsc here is 6.0.3, the one list the
+     trial contract carries.
+   - Severity colours come from the theme when it has them, else red, yellow and blue (the ANSI
+     colours under the terminal theme); no catalog theme changes in the first build.
+   - `config.toml` is read again when it changes; a malformed one gives one notice and loads no
+     checks until it is fixed, never a crash. The `run_checks` setting is untouched by it.
+   - A `projects` entry may start with `~`, which is expanded to the home directory.
+   - pharos's `json` form is tested against recorded `pharos diagnostics --json` output; a live
+     pharos run only if the installed one works.
+   - **Build order:** slice 1, the config, the runner, the `tsc`, `elixir` and `lines` formats,
+     the overlay, the gutter, the status line, `check` and `problems`, on save, with the `Alt+Y`
+     switch; slice 2, the `disk` trigger, the `json` form (pharos), polish. Each slice reviewed
+     before the next.
+6. **Files geex doesn't hold** (the maintainer, 2026-11-23): a `project` check reports on files
+   that aren't open. Their sets are kept like any other, tagged with the file's time and size
+   instead of a hash, drawn stale when those move and unsure when they moved during the run, and
+   their positions become graphemes when the file is opened (§4, §5, §6). geex still never reads
+   their contents for a check, and doesn't watch them between runs.
+
+## Parked 2026-11-23
+
+The maintainer, reviewing the build decisions: handling each checker's quirks in geex (tsc's
+syntactic codes, rustc going quiet after an error, `mix compile`'s multi-line messages) is the
+part they don't want. Two roads were weighed that day, then both set aside for something less
+invasive:
+
+- **pharos as the only source** (only the `json` form; pharos absorbs each language's
+  quirks). Set aside for now, on facts mod and verifier-two gathered from pharos main 4fc68f2,
+  its v0.3.x tags and live runs:
+  - pharos reports only the files it is asked about: no `workspace/diagnostic`, none planned.
+    What an edit broke in a closed file, the main thing tsc and `mix compile` give, can't be
+    shown.
+  - Elixir, geex's own language, isn't usable through it today (next-ls): a clean file is never
+    published, so it answers unsure after the full timeout; a first ask after an edit compiles
+    nothing; after a fix the first answer is usually the old set, marked `carried_over`; and
+    next-ls is archived (pharos#53 proposes Expert). When next-ls does publish, its set matches
+    `mix compile --all-warnings` exactly.
+  - geex's runs would act on the agent's session: a re-sync starts rust-analyzer's cargo check
+    (the target-dir lock), a short timeout restarts ruby-lsp, and a language server keeps the
+    environment of whichever session started it, so a run without the project's mise env breaks
+    Elixir for every session sharing the daemon.
+  - pharos's side was filed: pharos#59 (next-ls clean files, the first ask), #60 (the stale
+    `carried_over` after an edit), #61 (a missing file waits out the timeout), #62 (a server keeps
+    its starter's env). #60–#62 are going into pharos 0.4.0; #59 waits for the Expert switch.
+- **Only the `json` form, with small scripts** printing it for project checks: no language
+  knowledge in geex, but the quirks move into scripts, and §5–§6's machinery stays.
+
+**What replaces it for now:** layer 1, made easier. The user runs their checker with `!`; the
+output pane draws each line's location as a link, a click opens it, and `Alt+N` steps through
+them ([ADR-0042](0042-shell-commands.md)'s amendment of 2026-11-23). Nothing runs on its own,
+and nothing marks the code.
+
+**If it comes back,** the text above is where it stood: reviewed by geex-mod through the racy-clean
+rule (§5) and the files geex doesn't hold (item 6). The `json` form's safety rules from that
+review, for any future call of `pharos diagnostics`:
+
+1. Ask `pharos --version` first (the shim answers without its runtime) and require 0.3.5 or
+   later (paths with spaces, pharos#16). An older pharos runs an MCP server and can wait
+   forever: stdin from `/dev/null`, a kill timeout, and a run whose output has no `{"files": …}`
+   is failed (exit 0 with nothing printed happens).
+2. Run it in the project's directory with the project's full environment (mise's included), so it
+   joins the agent's daemon and servers (stack.md rule 7) and never starts a server the agent
+   can't use (pharos#62).
+3. Budget: files × (timeout + 10 s) within the run's limit; the CLI answers files in order, so send
+   the saved file, never the project, and never a file that's gone (it waits out the timeout,
+   pharos#61).
+4. No version or hash in the output: hash each file before and after the run.
+5. `failed` with exit 0 (no server, an unserved type) is "this check can't answer", never clean;
+   exit 1 is a failed run. An `unsure` answer can carry real diagnostics: draw them unsure.
+6. Keep pharos's default timeout (a short one restarts ruby-lsp).
+
+The `Alt+3`/`Alt+4` keys, ADR-0025's config layer and the geex → pharos row in stack.md wait
+with it.
 
 ## See
 

@@ -7,6 +7,30 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-26 — One `Alt+N` over a project search's results can stat every result line in the key loop
+
+- **Status:** open. Found 2026-11-23 by geex-mod, reviewing ADR-0042's proposed amendment of that
+  date (clickable output), which would have copied the pattern to `!` output. Not reproduced
+  live: read from the code. In **0.7.0** and every build since ADR-0053's project search.
+- **Symptom (expected):** with a project search's results in the output pane, one `Alt+N` stats a
+  file for each line it passes, in the key loop; on a disk that stalls (a network mount), one stat
+  that never returns leaves no key working, against ADR-0035.
+- **Verified cause (code reading):** `next_result/1` (`lib/geex/loop.ex`, "Alt+N: the next result
+  line") tries up to every line of the pane, calling `result_target/1` on each, and
+  `result_target/1` calls `Geex.Disk.regular?/1` for each reading of the line until one is a file.
+  `Geex.Disk` keeps a hung call off OTP's file server, but a `:raw` call that hangs still holds the
+  process that made it (its moduledoc), here the loop. So one keypress costs up to (lines × readings)
+  stats in the loop, unbounded on a stalled mount.
+- **Recommended fix:** resolve each output line's location off the loop as the lines arrive, the
+  tree's reader the model (ADR-0035), so `Alt+N`, Enter and a click are lookups. ADR-0042's
+  2026-11-23 amendment (proposed) decides that for `!` output and project search alike; the
+  clickable-output build fixes this with it.
+- **Ruled out:** Enter's `open_location/2` and opening a result also stat in the loop, but once per
+  keypress for the one file opened, as opening any file does; not this bug's growth with the
+  output's length.
+
+---
+
 ## BUG-25 — Dot folders are missing from the tree outside a git work tree  ✅ FIXED (2026-11-22)
 
 - **Status:** **FIXED** 2026-11-22 on the branch `tree-links` (ADR-0034's amendment of that date):

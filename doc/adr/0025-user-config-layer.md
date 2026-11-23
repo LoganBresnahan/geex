@@ -126,3 +126,27 @@ command, so it is code in §4's sense: **checks come only from the global file.*
 (`.geex.toml`, §3) never carries them, so opening a cloned repository runs nothing. Theme
 selection by name, grammar and extension paths and the `GEEX_*` projection stay for their own
 consumers (`Alt+Y` already selects themes, ADR-0040).
+
+**The TOML dependency: [`toml`](https://hex.pm/packages/toml)** (bitwalker/toml-elixir, `~> 0.7`;
+the maintainer's choice, 2026-11-19). Weighed on Hex that day:
+
+| | `toml` | `toml_elixir` | `tomerl` |
+|---|---|---|---|
+| Downloads (all time / last week) | 7.9M / 82k | 57k / 3k | 432k / 3.7k |
+| Last release | 0.7.0, 2022-10 | 3.3.0, 2026-10 | 0.5.0, 2021-06 |
+| License | Apache-2.0 | MIT | BSD-3 |
+| Dependencies | none | none | none |
+
+- **Why `toml`:** by far the most used TOML library in Elixir, so the best exercised; Apache-2.0
+  like geex; no dependencies of its own; it only decodes, which is all geex needs (geex never
+  writes `config.toml`: the file it writes is `settings.json`, ADR-0040 §7). Its last release is
+  from 2022, which isn't a worry: the TOML spec has been frozen at 1.0 since 2021.
+- **Not `toml_elixir`:** maintained, but young and far less used; its extras (writing TOML,
+  decoding into structs) are ones geex doesn't need. **Not `tomerl`:** older and less used than
+  `toml`, with nothing it adds here.
+- **Parked with ADR-0055 (2026-11-23):** checks were this layer's first consumer; with them
+  parked, the layer waits for a consumer again, and the choice of `toml` stands for when one
+  comes.
+- **When it lands:** pinned in `mix.lock`; a test reads what checks use (an array of tables,
+  `[[checks]]`; single-quoted literal strings for shell commands; comments), so a parser that
+  got one wrong fails the build, not a check; and the release's trim (ADR-0041) keeps it.

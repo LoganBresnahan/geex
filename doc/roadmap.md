@@ -361,8 +361,8 @@ Orthogonal to the AI-layer staging above — this is the *"build the world well"
 **Pending (each gated on its named consumer):**
 - **The hand-edited user config** — `~/.config/geex/config.toml`
   ([adr/0025](adr/0025-user-config-layer.md), *Accepted*, unbuilt), read over the `settings.json`
-  that `Alt+Y` writes (ADR-0040 §7). Its first consumer is decided: checks on save (item 23 of
-  the command-surface track, ADR-0055), the global file's `[[checks]]` only. Choosing a theme and installing grammars and themes no longer
+  that `Alt+Y` writes (ADR-0040 §7). Its first consumer was to be checks on save (item 23 of
+  the command-surface track, ADR-0055), parked 2026-11-23, so it waits for a consumer again. Choosing a theme and installing grammars and themes no longer
   wait on it (`Alt+Y`, `geex install`, ADR-0040); a grammar from your own path (`[grammars] lang =
   "path.wasm"`, ADR-0023) still does. So do extension paths (`[extensions]`, ADR-0025 §4), which
   wait on extensions themselves (ADR-0009).
@@ -924,7 +924,8 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    - The minibuffer's path tab-completion (item 4's remaining `Completion` abstraction) is a
      separate list; the ADR can decide whether the two share one.
 23. **Checks on save** ([adr/0055](adr/0055-checks-on-save.md), *accepted* 2026-11-18, the
-   maintainer's direction; not started): a save runs the user's own check commands
+   maintainer's direction; **parked 2026-11-23**, nothing built: less invasive first, item 24;
+   pharos as the only source was weighed and set aside for now, see ADR-0055's "Parked"): a save runs the user's own check commands
    (tsc, `mix compile`) off the key loop, and their diagnostics mark the code: the line number
    coloured and a glyph in the gutter, the message on the status line, `problems` in the output
    pane stepped with `Alt+N`. Vim's and Emacs's second layer (ALE, flymake), on top of the `!`
@@ -934,6 +935,10 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    language-server client (tier 2) would feed the same overlay later (item 22). Decided with
    it: checks in ADR-0025's `config.toml` (its first build), the disk trigger in the first build
    (off unless a check asks), pharos in the first build as a capability, not a default.
+24. **Clickable output** ([adr/0042](adr/0042-shell-commands.md)'s amendment of 2026-11-23,
+   *accepted*; not started): run a checker with `!` and its output's locations are drawn as
+   links, a click opens one, and `Alt+N` steps through them. Layer 1 made easier, in place of
+   item 23 for now.
 
 **Bugs shelf:** [bugs.md](bugs.md) — BUG-1 (renderer atomicity) and BUG-2 (highlighter two-pass
 tail flicker) are both **FIXED** (2026-06-09), and BUG-3 (Ctrl-C/Z/\\ and Ctrl-S/Q taken by the
@@ -967,7 +972,9 @@ opened). BUG-23 (`search-project` crashed the loop through a link to a name past
 BUG-22's review) is **FIXED** on the same branch. BUG-24 (symlinked folders never in the tree,
 and outside git no symlink) and BUG-25 (dot folders missing outside git), both reported by the
 maintainer, are **FIXED** (2026-11-22, on the `tree-links` branch: a symlinked folder is listed
-when opened, one level at a time, ADR-0034's amendment).
+when opened, one level at a time, ADR-0034's amendment). BUG-26 (one `Alt+N` over a project
+search's results can stat every result line in the key loop; found 2026-11-23 reviewing item 24)
+is **open**, to be fixed with item 24.
 
 ---
 

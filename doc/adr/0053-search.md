@@ -6,6 +6,9 @@
   slices on `search`, merged the same day, released in 0.7.0; amended twice more that day (a
   result goes to the pane that has its file; the maintainer's answers to the open questions).
   **Amended 2026-11-13:** `replace`, `replace-all` and `save-all`
+  **Amended 2026-11-23 by [ADR-0042](0042-shell-commands.md)'s amendment of that date** (accepted,
+  not built): `Alt+N` also steps a `!` command's locations, the list started last winning; a
+  project search's result lines are resolved off the loop (BUG-26).
 - **Date:** 2026-11-12
 - **Amends:** [ADR-0028](0028-editor-shell-and-minibuffer.md) (the minibuffer's search mode,
   "incremental search is the next mode"), [ADR-0042](0042-shell-commands.md) (the output pane
