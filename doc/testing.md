@@ -7713,3 +7713,14 @@ timing-sensitive runs), as does geex-verifier's held run.
 Then, before the held runs (geex-verifier's note): the m18 and r05 tests gave the loop their
 runner batches by hand instead of resting on `sleep 0.5` splitting the output or on how `sed`'s
 writes are chunked; both still fail with their mutants, and the file is green ×3.
+
+### 2026-11-23 — Clickable output VERIFIED, merged (ADR-0042)
+
+geex-verifier on 121c19f, in mod's window: the full suite ×2 unloaded (1899 tests + 65 properties
++ 225 doctests, 0 failures), the readdir-order adversary ×2 (`Geex.Disk.ls` reversed, and
+shuffled), two runs alongside a second suite (load ~8–13), all green; under 8 CPU burners (load
+~14–15) two failures a run, both older than the branch: BUG-27 (it fails on main too under the
+same burners) and frame_cost's typing bound (157 and 167 ms against 150). Its nit N1, fixed before
+the merge: the m18 test's stopped `sleep` runner opened its port after the test had removed its
+root, printing "spawn: Could not cd" into the next test; `by_hand/1` now waits for the runner's
+DOWN. clickable_output_test green ×3 with no stray output.

@@ -664,10 +664,14 @@ defmodule Geex.Loop.ClickableOutputTest do
     end
 
     # A `!` whose runner's messages the test gives itself: the real runner (a `sleep`) is stopped,
-    # and the loop takes this process as the runner.
+    # and gone, before the loop takes this process as the runner. Waiting for it keeps it from
+    # opening its port after the test removed the root (geex-verifier's N1: "spawn: Could not cd"
+    # printed into the next test); under BUG-27 its KILL comes 2 s after the stop.
     defp by_hand(state) do
       state = typed(state, "!sleep 30")
-      Geex.Shell.stop(state.shell.pid)
+      %{pid: pid, ref: ref} = state.shell
+      Geex.Shell.stop(pid)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}, 5_000
       %{state | shell: %{state.shell | pid: self()}}
     end
 

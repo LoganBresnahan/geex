@@ -39,6 +39,10 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
   `--max-cases 2`), and not reproduced by replaying that seed ten times nor by 600 direct
   `Shell` start/stop cycles (immediately, and after 50 ms; all 143). A load of 3.6 doesn't fit
   the theory below, so it is unconfirmed: the cause is open.
+- **Frequent under CPU load** (geex-verifier, 2026-11-23, 8 CPU burners, load ~14–15): both full
+  runs failed it, and `shell_test.exs` alone failed it once in five runs on main 5e3f8b9 and
+  once in five on the clickable-output branch. So it is a loaded-machine failure as well as the
+  rarer light-load one.
 - **Suspected cause (from the code, unconfirmed):** `Geex.Shell.stop_group/2` sends
   the TERM from a spawned process that starts `sh -c 'kill -s TERM -- -PID'`, and schedules the
   KILL `@grace_ms` (2 s) after the stop. Starting that `sh` is the slow part on a loaded machine
