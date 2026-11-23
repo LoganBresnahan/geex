@@ -614,7 +614,10 @@ defmodule Geex.Loop.ClickableOutputTest do
     test "lines that came while a batch was out are sent when it is answered", %{root: root} do
       gate = start_supervised!({Agent, fn -> :shut end})
       state = editing(root, "notes.txt", fresh(regular?: gated(gate)))
-      state = typed(state, "!echo lib/a.ex:1; sleep 0.5; echo lib/b.ex:2") |> ran_only()
+      # The runner's batches are given by hand, so their split doesn't rest on timing.
+      state = by_hand(state) |> said({:lines, ["lib/a.ex:1"], ""})
+      assert state.output.sent == 1
+      state = said(state, {:lines, ["lib/b.ex:2"], ""}) |> said({:exit, 0})
       assert Output.size(state.output) == 2
       # Only the first line went out; the second waits for its answer.
       assert state.output.sent == 1
@@ -646,8 +649,10 @@ defmodule Geex.Loop.ClickableOutputTest do
       gate = start_supervised!({Agent, fn -> :shut end})
       calls = start_supervised!({Agent, fn -> 0 end}, id: :calls)
       state = editing(root, "notes.txt", fresh(regular?: gated(gate, calls)))
-      # 400 distinct paths: two chunks, the first held at its first path.
-      state = typed(state, "!seq 1 400 | sed 's|.*|lib/f&.ex:1|'") |> ran_only()
+      # 400 distinct paths in one batch, given by hand: two chunks, the first held at its first
+      # path.
+      lines = for n <- 1..400, do: "lib/f#{n}.ex:1"
+      state = by_hand(state) |> said({:lines, lines, ""}) |> said({:exit, 0})
       %{pid: pid} = state.resolver
       wait_until(fn -> Agent.get(calls, & &1) == 1 end)
 
@@ -656,6 +661,19 @@ defmodule Geex.Loop.ClickableOutputTest do
       Agent.update(gate, fn _ -> :open end)
       wait_until(fn -> idle?(pid) end)
       assert Agent.get(calls, & &1) == 200
+    end
+
+    # A `!` whose runner's messages the test gives itself: the real runner (a `sleep`) is stopped,
+    # and the loop takes this process as the runner.
+    defp by_hand(state) do
+      state = typed(state, "!sleep 30")
+      Geex.Shell.stop(state.shell.pid)
+      %{state | shell: %{state.shell | pid: self()}}
+    end
+
+    defp said(state, msg) do
+      {:noreply, state} = Loop.handle_info({:geex_shell, self(), msg}, state)
+      state
     end
 
     defp idle?(pid) do

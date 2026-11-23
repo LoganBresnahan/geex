@@ -7710,3 +7710,6 @@ Each of the eight new tests fails with its mutant applied (eight of eight caught
 after each). The slice's files (clickable_output, shell, project_search, text, disk) green three
 times, 76 tests + 5 properties + 10 doctests; the full suite ×2 waits for mod's window (pharos's
 timing-sensitive runs), as does geex-verifier's held run.
+Then, before the held runs (geex-verifier's note): the m18 and r05 tests gave the loop their
+runner batches by hand instead of resting on `sleep 0.5` splitting the output or on how `sed`'s
+writes are chunked; both still fail with their mutants, and the file is green ×3.
