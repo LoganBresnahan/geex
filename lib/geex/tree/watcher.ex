@@ -6,7 +6,8 @@ defmodule Geex.Tree.Watcher do
 
   Each read of the tree (`Geex.Loop`'s reader process) hands over the directories that hold the
   files it listed, with `watch/4`. This process watches those, the root, and each one's
-  immediate subdirectories but dot-directories, **without** recursion: an ignored tree like
+  immediate subdirectories (a dot folder too, never `.git`, `.hg`, `.svn` or a symlinked one,
+  BUG-24/25), **without** recursion: an ignored tree like
   `_build/`, `deps/` or `.git/` is never descended into, while a new directory beside the files
   is seen as soon as it is made. A create, delete or move there sends the loop
   `{:geex_tree_changed, root}` once, `delay_ms` after the first event of a burst; the loop reads
@@ -161,8 +162,9 @@ defmodule Geex.Tree.Watcher do
   defp made_dir(state, _path), do: state
 
   @doc false
-  # `dirs` and every directory under them, level by level, but dot-directories and what git
-  # ignores under `root`; at most @max_dirs.
+  # `dirs` and every directory under them, level by level, but version control's own folders
+  # (`.git`, `.hg`, `.svn`; a dot folder is watched like any other, BUG-25) and what git ignores
+  # under `root`; at most @max_dirs.
   @spec new_dirs(String.t(), [String.t()]) :: [String.t()]
   def new_dirs(root, dirs), do: new_dirs(root, dirs, [])
 
@@ -171,7 +173,7 @@ defmodule Geex.Tree.Watcher do
   defp new_dirs(root, level, acc) do
     level =
       level
-      |> Enum.reject(&String.starts_with?(Path.basename(&1), "."))
+      |> Enum.reject(&(Path.basename(&1) in ~w(.git .hg .svn)))
       |> Enum.filter(&Geex.Disk.dir?/1)
       |> not_ignored(root)
 
@@ -228,7 +230,8 @@ defmodule Geex.Tree.Watcher do
   end
 
   # The directories to watch, absolute and existing: the root, each that holds a listed file,
-  # and each one's immediate subdirectories but dot-directories.
+  # and each one's immediate subdirectories, a dot folder too, never a version control folder or
+  # a symlinked one (`subdirs/1`).
   defp watch_dirs(root, rel_dirs) do
     root = Path.expand(root)
     held = Enum.uniq([root | Enum.map(rel_dirs, &Path.expand(&1, root))])
@@ -247,10 +250,12 @@ defmodule Geex.Tree.Watcher do
   defp subdirs(dir) do
     case Geex.Disk.ls(dir) do
       {:ok, names} ->
+        # A real folder only: a symlinked one is listed when opened and not watched (BUG-24), so
+        # a link back to an ancestor can't loop here.
         for name <- names,
-            not String.starts_with?(name, "."),
+            name not in ~w(.git .hg .svn),
             path = Path.join(dir, name),
-            Geex.Disk.dir?(path),
+            match?({:ok, %{type: :directory}}, Geex.Disk.lstat(path)),
             do: path
 
       {:error, _} ->

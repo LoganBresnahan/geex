@@ -122,10 +122,16 @@ defmodule Geex.Tree.WatcherTest do
        %{root: root} do
     {_, 0} = System.cmd("git", ["init", "-q", root])
     File.write!(Path.join(root, ".gitignore"), "/new/out/\n")
-    for d <- ["new/a/b", "new/out/deep", "new/.hidden"], do: File.mkdir_p!(Path.join(root, d))
 
+    for d <- ["new/a/b", "new/out/deep", "new/.hidden", "new/.git/objects"],
+        do: File.mkdir_p!(Path.join(root, d))
+
+    # A symlinked folder is never watched, so a link back up can't loop (BUG-24).
+    File.ln_s!(root, Path.join(root, "new/a/up"))
+
+    # A dot folder is watched like any other (BUG-25); version control's own isn't.
     assert Watcher.new_dirs(root, [Path.join(root, "new")]) ==
-             Enum.map(["new", "new/a", "new/a/b"], &Path.join(root, &1))
+             Enum.map(["new", "new/.hidden", "new/a", "new/a/b"], &Path.join(root, &1))
 
     w = start(start_worker: stub(self()), delay_ms: 20)
     Watcher.watch(w, root, ["."], self())

@@ -21,13 +21,138 @@ defmodule Geex.TreeTest do
 
   defp git(dir, args), do: {_, 0} = System.cmd("git", ["-C", dir | args], stderr_to_stdout: true)
 
-  test "outside a repository: a walk that skips dot-directories", %{dir: dir} do
+  # BUG-25: a dot folder is listed like any other; version control's own folders never are.
+  test "outside a repository: dot folders listed, but never .git, .hg or .svn", %{dir: dir} do
     put(dir, "b.txt")
     put(dir, "lib/a.ex")
     put(dir, ".hidden/secret")
+    put(dir, ".config/app/x.toml")
     put(dir, ".env")
+    for vcs <- ~w(.git .hg .svn), do: put(dir, vcs <> "/inner")
 
-    assert Tree.list(dir) == [".env", "b.txt", "lib/a.ex"]
+    assert Tree.list(dir) == [".config/app/x.toml", ".env", ".hidden/secret", "b.txt", "lib/a.ex"]
+  end
+
+  # BUG-24: a link to a file is a file; a link to a folder is a folder not listed until opened;
+  # a link that names nothing is left out. Inside a work tree and outside one alike.
+  for mode <- [:walk, :git] do
+    test "#{mode}: symlinks — a file, a folder (inside the root and outside it), a dangling one",
+         %{dir: dir} do
+      outside = Path.join(Path.dirname(dir), "outside_#{Geex.Fixtures.uniq()}")
+      put(outside, "o.txt")
+      on_exit(fn -> File.rm_rf(outside) end)
+      put(dir, "a.txt")
+      put(dir, "real/r.txt")
+      File.ln_s!(Path.join(dir, "a.txt"), Path.join(dir, "link_file.txt"))
+      File.ln_s!(Path.join(dir, "real"), Path.join(dir, "link_dir"))
+      File.ln_s!(outside, Path.join(dir, ".aws"))
+      File.ln_s!(Path.join(dir, "nowhere"), Path.join(dir, "dangling"))
+
+      if unquote(mode) == :git do
+        git(dir, ["init", "-q"])
+        git(dir, ["add", "."])
+        git(dir, ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "t"])
+      end
+
+      assert Tree.list_all(dir) ==
+               {["a.txt", "link_file.txt", "real/r.txt"], [".aws", "link_dir"]}
+
+      # Opened, a linked folder is listed one level: a folder in it is :dir (listed when opened),
+      # a link in it a link again (never followed), a version control folder never.
+      File.ln_s!(dir, Path.join(outside, "back_to_root"))
+      File.mkdir_p!(Path.join(outside, "sub/deeper"))
+      File.write!(Path.join(outside, "sub/deeper/far.txt"), "f")
+      File.mkdir_p!(Path.join(outside, ".git"))
+
+      assert Tree.list_level(dir, ".aws") ==
+               %{"o.txt" => :file, "back_to_root" => :link, "sub" => :dir}
+
+      assert Tree.list_level(dir, ".aws/sub") == %{"deeper" => :dir}
+    end
+  end
+
+  test "the index and rows: a linked folder is a folder, its rows a level at a time", %{dir: _dir} do
+    index = Tree.index(["a.txt"]) |> Tree.put_links(["docs"])
+    rows = Tree.rows(index, MapSet.new(["docs"]))
+
+    assert [%{path: "docs", dir?: true, open?: true, link?: true}, %{path: "a.txt", link?: false}] =
+             rows
+
+    assert Tree.unlisted?(index, "docs")
+    listed = Tree.put_listed(index, "docs", %{"x.md" => :file, "more" => :link, "sub" => :dir})
+    refute Tree.unlisted?(listed, "docs")
+    assert Tree.listed_level?(listed, "docs")
+    assert Tree.unlisted?(listed, "docs/sub")
+    rows = Tree.rows(listed, MapSet.new(["docs", "docs/sub"]))
+
+    assert Enum.map(rows, &{&1.path, &1.dir?, &1.link?}) ==
+             [
+               {"docs", true, true},
+               {"docs/more", true, true},
+               {"docs/sub", true, false},
+               {"docs/x.md", false, false},
+               {"a.txt", false, false}
+             ]
+
+    # A path not listed this way is left alone.
+    assert Tree.put_listed(listed, "a.txt", %{"y" => :file}) == listed
+    assert Tree.put_listed(listed, "a.txt/x", %{"y" => :file}) == listed
+    assert Tree.put_listed(listed, "nowhere", %{"y" => :file}) == listed
+  end
+
+  # verifier's review, F1: a folder made inside a folder not listed yet stops there, and reads.
+  test "put_dirs stops at a folder not listed yet (a link, or a folder in one)" do
+    index = Tree.index(["a.txt"]) |> Tree.put_links(["linked"])
+    assert Tree.put_dirs(index, ["linked/newdir", "linked/a/b"]) == index
+
+    listed = Tree.put_listed(index, "linked", %{"sub" => :dir})
+    assert Tree.put_dirs(listed, ["linked/sub/new"]) == listed
+    # Inside a listed level, a made folder is put in as usual.
+    assert Tree.put_dirs(listed, ["linked/made"])["linked"]["made"] == %{}
+  end
+
+  # verifier's review, F2, then N1/N2: a reload's fresh index keeps the OPEN listed levels only.
+  test "carry keeps the open listed levels, along the open paths only" do
+    old =
+      Tree.index(["a.txt"])
+      |> Tree.put_links(["linked", "closed"])
+      |> Tree.put_listed("linked", %{"sub" => :dir, "f.txt" => :file})
+      |> Tree.put_listed("linked/sub", %{"g.txt" => :file})
+      |> Tree.put_listed("closed", %{"c.txt" => :file})
+
+    fresh = Tree.index(["a.txt", "new.txt"]) |> Tree.put_links(["linked", "closed"])
+    carried = Tree.carry(fresh, old, MapSet.new(["linked", "linked/sub"]))
+    assert carried["linked"] == old["linked"]
+    assert carried["new.txt"] == :file
+    # Closed: back to not listed, so opening it lists it fresh (N1).
+    assert carried["closed"] == :link
+
+    # Nothing open: the fresh index itself comes back, not a copy (N2: no work in proportion to
+    # the tree's size on a reload).
+    big = Tree.index(for i <- 1..2_000, do: "d#{rem(i, 40)}/f#{i}.txt")
+    assert :erts_debug.same(Tree.carry(big, old, MapSet.new()), big)
+    # A link gone, or a plain folder now, isn't carried.
+    assert Tree.carry(Tree.index(["a.txt"]), old, MapSet.new(["linked"])) == Tree.index(["a.txt"])
+    plain = Tree.index(["linked/real.txt"])
+    assert Tree.carry(plain, old, MapSet.new(["linked"])) == plain
+  end
+
+  # verifier's review, Q11: a child whose kind changed on disk starts again unlisted.
+  test "re-listing drops what was listed below a folder that became a link, or a link that became a folder" do
+    index =
+      Tree.index(["a.txt"])
+      |> Tree.put_links(["linked"])
+      |> Tree.put_listed("linked", %{"sub" => :dir, "ln" => :link})
+      |> Tree.put_listed("linked/sub", %{"x" => :file})
+      |> Tree.put_listed("linked/ln", %{"y" => :file})
+
+    relisted = Tree.put_listed(index, "linked", %{"sub" => :link, "ln" => :dir})
+    assert relisted["linked"]["sub"] == :link
+    assert relisted["linked"]["ln"] == :dir
+    # Unchanged kinds keep their listings.
+    same = Tree.put_listed(index, "linked", %{"sub" => :dir, "ln" => :link})
+    assert same["linked"]["sub"] == index["linked"]["sub"]
+    assert same["linked"]["ln"] == index["linked"]["ln"]
   end
 
   test "in a work tree: what git lists — tracked, untracked, not ignored, not deleted",
