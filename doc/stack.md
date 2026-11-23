@@ -8,9 +8,11 @@ LLM in the middle.
 **pharos's diagnostics hook is on trial.** geex and captAInHook are core. The trial decides
 whether agents get pharos's post-edit diagnostics hook or a plain compiler hook (see
 [The pharos trial](#the-pharos-trial)). Whether pharos itself stays is the maintainer's call,
-weighing what it does for agents beyond the hook (its navigation tools) and what it would do
-for geex. Nothing else in the stack depends on it: every rule below holds with pharos gone,
-and geex runs without it (rule 8).
+weighing what it does for agents beyond the hook (its navigation tools). For geex it is
+decided: **geex's integration with pharos is parked** (the maintainer, 2026-11-23). geex runs a
+project's own checks in its output pane instead, each `file:line` there to become a link to
+the line (geex ADR-0042's amendment of 2026-11-23, proposed). Nothing else in the stack
+depends on pharos: every rule below holds with pharos gone, and geex runs without it (rule 8).
 
 This doc is the shared reference for how they connect. Each repo keeps its own decisions in
 its own ADRs; a change to a contract *between* the tools is agreed here first, then lands in
@@ -35,9 +37,10 @@ the repos. The other two repos link here.
    own writers; geex saves; pharos reads what is saved; geex's reconcile notices the rest
    (geex ADR-0010, ADR-0032, ADR-0034). So each tool must notice a write on disk: pharos
    re-syncs every document it holds open with the disk on each question (pharos ADR-038,
-   [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3)), and must still tell a
-   server that doesn't watch the disk about changes to files it never opened
-   ([pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10)).
+   [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3)), and tells a server
+   that doesn't watch the disk about changes to files it never opened, from its own scan of
+   the tree ([pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10), pharos
+   ADR-043; on pharos main, not yet released).
 2. **Messages carry questions, answers and claims.** "Where is this defined" and its answer;
    "these diagnostics changed"; "agent X wrote this file, from hash A to hash B" (an
    attestation). Never file content as a side channel.
@@ -61,8 +64,8 @@ the repos. The other two repos link here.
    ([pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5)). No side protocol,
    no LSP passthrough.
 7. **One pool of language servers.** pharos runs one daemon per version (pharos ADR-034).
-   An agent's session and geex's session join the same daemon and share the same warm
-   servers: one index, one cold start.
+   Every session joins the same daemon and shares the same warm servers: one index, one cold
+   start. (Agents' sessions today; geex's too, should its integration be unparked.)
 8. **Fail open across the seams.** A missing or slow peer costs a feature, never an edit or a
    tool call. geex runs without pharos; a hook payload that fails says nothing; an
    attestation that doesn't match changes nothing.
@@ -74,7 +77,7 @@ the repos. The other two repos link here.
 ```
  Claude Code ──stdio──► pharos shim ─┐
                                       ├─unix socket─► pharos daemon ─► rust-analyzer, gopls, pyright…
- geex ────────stdio──► pharos shim ─┘       (one per version; servers shared)
+ geex ╌╌╌parked╌╌╌╌╌╌► pharos shim ─┘       (one per version; servers shared)
    ▲
    └── POST /attest (loopback) ◄── geex-attest payload ◄── captAInHook ◄── Claude Code hooks
                                    pharos-diagnostics payload ──► pharos (post-edit check)
@@ -83,13 +86,13 @@ the repos. The other two repos link here.
 | From | To | Over | Carries | Status |
 |---|---|---|---|---|
 | agent (Claude Code) | pharos | MCP, stdio → shared daemon | code questions; previews; `apply_workspace_edit` | built |
-| geex | pharos | MCP, stdio → shared daemon | definition, references, hover | parked until pharos's place is decided: [geex#2](https://github.com/LoganBresnahan/geex/issues/2) |
-| geex | pharos | the `pharos diagnostics --json` CLI → shared daemon | diagnostics after a save, as one of the user's own checks (geex ADR-0055 §9); runs only if the user's config names it | accepted, not built (geex ADR-0055) |
-| pharos | geex | MCP notifications (resource subscriptions) | "diagnostics for this file changed" | [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) |
+| geex | pharos | MCP, stdio → shared daemon | definition, references, hover | parked (the maintainer, 2026-11-23): [geex#2](https://github.com/LoganBresnahan/geex/issues/2) |
+| geex | pharos | the `pharos diagnostics --json` CLI → shared daemon | diagnostics after a save, as one of the user's own checks (geex ADR-0055 §9); runs only if the user's config names it | parked with geex ADR-0055 (the maintainer, 2026-11-23); geex runs a project's checks in its output pane instead (geex ADR-0042, links proposed in its amendment of 2026-11-23) |
+| pharos | geex | MCP notifications (resource subscriptions) | "diagnostics for this file changed" | parked with [geex#2](https://github.com/LoganBresnahan/geex/issues/2): [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) |
 | captAInHook | geex | the `geex-attest.sh` payload → loopback `POST /attest` | who wrote a file, by hash | built for Write/Edit/MultiEdit/NotebookEdit; Bash changes credited "while": built and live ([geex#3](https://github.com/LoganBresnahan/geex/issues/3), geex ADR-0032; its `pre-tool-use` event registered 2026-11-19); pharos writes: [geex#1](https://github.com/LoganBresnahan/geex/issues/1) |
 | captAInHook | pharos | a payload → `pharos diagnostics` CLI | the touched files' diagnostics, back to the agent | built for the trial (pharos ADR-040, [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6)); in use only if the trial picks it |
 | agent | geex | geex's MCP server | the frozen edit/view tools | built, frozen (ADR-0032); rarely the right door |
-| everyone | everyone | the disk | content | built (pharos re-syncs open documents, ADR-038); servers that don't watch the disk: [pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10) |
+| everyone | everyone | the disk | content | built (pharos re-syncs open documents, ADR-038); servers that don't watch the disk are told of changes from pharos's scan: on pharos main, not yet released ([pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10)) |
 
 Which repo ships a payload: the tool that *consumes* the event. geex ships `geex-attest.sh`
 (it consumes attestations); pharos ships its diagnostics payload
@@ -120,20 +123,27 @@ ADR-0019 and its 2026-11-18 addendum,
    block at Stop (its ADR-0016). A payload that blocks must stop blocking on its own, since the
    host never caps the loop, and must not register fail-closed.
 6. pharos sees the new file on the next question: it re-syncs what it holds open (pharos
-   ADR-038). A server that doesn't watch the disk still misses changes to files pharos never
-   opened ([pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10)).
+   ADR-038). From pharos main (not yet released), a server that doesn't watch the disk also
+   hears about changes to files pharos never opened, from pharos's scan of the tree
+   ([pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10), pharos ADR-043).
 
 ### The human path (no LLM)
 
-This is the shape *if pharos stays*. Until then the human has geex's own search
-(`search`, `search-project`, `search-all`), which covers most of "where is this used".
+**Parked** (the maintainer, 2026-11-23; geex ADR-0055's "Parked 2026-11-23"). The human has
+geex's own search (`search`, `search-project`, `search-all`), which covers most of "where is
+this used", and runs a project's checks (`tsc`, `mix compile`) with `!` in geex's output pane
+(geex ADR-0042), where each `file:line` becomes a link to the line (proposed: ADR-0042's
+amendment of 2026-11-23). Making pharos the only source of geex's diagnostics was weighed and
+set aside: it answers only the files it is asked about, and Elixir through next-ls can't serve
+it yet (pharos #59–#62). What follows is the shape the integration would take if it is picked
+up again.
 
 - **Where is this defined / who uses it:** geex asks pharos, off the key loop (ADR-0035), and
   lists the answers in the output pane, stepped with Alt+N.
 - **Diagnostics after a save:** geex saves; pharos's server sees the new file; geex shows
   gutter marks, a count and a list. First by asking after the save, later by subscription.
-  geex ADR-0055 decides the asking: `pharos diagnostics --json` runs as one of the user's own
-  checks on save, next to `tsc` or `mix compile`, into one diagnostics overlay.
+  geex ADR-0055 (parked) worked out the asking: `pharos diagnostics --json` runs as one of the
+  user's own checks on save, next to `tsc` or `mix compile`, into one diagnostics overlay.
   Marks dim while the buffer has unsaved changes: answers are about the saved file
   (geex ADR-0010). pharos says when it isn't sure (ADR-038): `pharos.carried_over` marks an
   answer that may describe older text, and `pharos.not_reported` names servers that didn't
@@ -218,16 +228,19 @@ Done:
   [#30](https://github.com/LoganBresnahan/pharos-mcp/issues/30) and the real-server survey's
   fixes: pharos answers for Rust, Go, Python and the other bundled languages, checked against
   real servers in CI (on main, 2026-11-20; not yet released).
+- [pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10): servers that don't
+  watch the disk (gopls, pyright, jdtls and others) are told of changes to files pharos never
+  opened, from its own scan of the tree (pharos ADR-043; on main, not yet released).
 
-**Parked until pharos's place is decided** (built only if pharos stays):
+**Parked**: geex's side by the maintainer's word (2026-11-23, geex ADR-0055's "Parked
+2026-11-23"); the rest until pharos's place for agents is decided:
 
 | Issue | Repo | What | Needs |
 |---|---|---|---|
-| [geex#2](https://github.com/LoganBresnahan/geex/issues/2) | geex | geex as an MCP client of pharos: definition, references, hover (diagnostics come through geex ADR-0055's pharos check) | an ADR or amendments to 0008/0010/0021 |
-| [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) | pharos | push diagnostics through MCP resource subscriptions | an MCP client in geex (geex#2) that subscribes; until then geex ADR-0055 asks after each save |
+| [geex#2](https://github.com/LoganBresnahan/geex/issues/2) | geex | geex as an MCP client of pharos: definition, references, hover (diagnostics would have come through geex ADR-0055's pharos check, parked with it) | the maintainer unparking geex's pharos integration; then an ADR or amendments to 0008/0010/0021 |
+| [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) | pharos | push diagnostics through MCP resource subscriptions | an MCP client in geex (geex#2) that subscribes |
 | [pharos#4](https://github.com/LoganBresnahan/pharos-mcp/issues/4) | pharos | `apply_workspace_edit` reports each written file's path + before/after sha256 | — |
 | [geex#1](https://github.com/LoganBresnahan/geex/issues/1) | geex | `geex-attest.sh` credits pharos's multi-file writes | pharos#4 |
-| [pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10) | pharos | servers that don't watch the disk (gopls, pyright) never see changes to files pharos hasn't opened; typescript-language-server watches on its own, so a TypeScript trial doesn't need it; rust-analyzer unverified | — |
 
 pharos#4 and geex#1 are one feature (attributing pharos's writes): build them together or not
 at all. captAInHook builds nothing for it (see "Decided against").
