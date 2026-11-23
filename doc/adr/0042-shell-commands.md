@@ -231,7 +231,8 @@ clickable. Half of it is here: Enter on a highlighted line opens the `path:line[
   process's stat keeps its dirty I/O scheduler until the disk answers, so per-pane resolvers took
   one more of the VM's ten with each pane, and at ten the terminal's writes waited and the screen
   froze. One resolver holds one at most; panes opened meanwhile get their links when the disk
-  answers.
+  answers. If the resolver dies, the loop drops it with a warning in the log: the pane shown gets
+  no more links (its lines still open by Enter), and the next pane starts a new resolver.
 - `Geex.Loop.Output` numbers lines from the first ever added (`dropped`), so a trim never shifts
   an answer onto the wrong line, and keeps one batch in flight (`take_unsent/1`): what waits on a
   stalled resolver is at most the pane's lines, never the command's whole output. `next_link/2`

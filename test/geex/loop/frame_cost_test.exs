@@ -2,9 +2,9 @@ defmodule Geex.Loop.FrameCostTest do
   # The regression guard for ADR-0035's frame rule: a frame costs what the screen shows, not what
   # the file holds. A highlighted ~400 KB Elixir file (loop.ex three times over) is painted
   # through the loop's own handle_info/2, from the middle of the file. Before the windowed paint
-  # one such frame took over a second; it took about 10 ms then, and about 45 ms by 2026-11-23
-  # (the file is loop.ex, which has grown), so the bound below is loose enough for a loaded
-  # machine and still far under the old cost. On an oversubscribed one (a load of ~30 on 8
+  # one such frame took over a second; it took about 10 ms then, and measured about 45 ms here on
+  # 2026-11-23, so the bound below is loose enough for a loaded machine and still far under the
+  # old cost. On an oversubscribed one (a load of ~30 on 8
   # cores, geex-verifier's probe) typing measured 188–199 ms and tripped it: the machine, not a
   # regression. Uses the global Session and Renderer, so not async.
   use ExUnit.Case, async: false

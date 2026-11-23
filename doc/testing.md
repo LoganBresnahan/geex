@@ -7688,3 +7688,25 @@ stale answers dropped after a search was replaced mid-batch.
 1892 tests + 65 properties + 225 doctests green twice; live via tmux, two `!` panes in a row
 through the one resolver (the second's `lib/b.ex:3:1` underlined, Alt+N opened it at 3:1), log
 clean.
+
+### 2026-11-23 — Clickable output, third pass: the mutants only the probes caught, pinned (ADR-0042)
+
+geex-verifier verified rev 2 (5ff08ea) on everything but the held full-suite runs: F2 live on its
+FUSE stub (12 stalled panes, one resolver, exactly one dirty I/O thread held, keys whole, links
+when the disk woke), F1 live and in a probe, and rev 2's new paths. Correction to the entry above:
+with F1's look, a project search's Alt+N makes one disk call per press (for the file it opens) and
+none per line passed over (geex-verifier traced 11 calls for 11 presses passing ~3,980 lines).
+
+Of its 28 mutants on rev 2, eight passed this suite (caught only by its probes); a test each now:
+answers for an older pane (r01) or a new pane keeping the old id (r09) never land on the pane
+shown; a new pane asks the disk again (r04); a dead resolver is dropped and the next pane starts
+another (r07); Alt+N while the command runs keeps the output as its list (m15); lines that came
+while a batch was out are sent when it is answered (m18); Enter on a result answered "no file"
+doesn't read it again in the loop (m22); a closed pane's remaining lines aren't asked about (r05).
+Docs: the ADR says what a resolver's death means for the pane shown; frame_cost's comment says
+"measured", not why; BUG-28 notes the tty reader waited too; BUG-27 notes it was seen at a light
+load and not reproduced, so its cause is open.
+Each of the eight new tests fails with its mutant applied (eight of eight caught, `lib/` restored
+after each). The slice's files (clickable_output, shell, project_search, text, disk) green three
+times, 76 tests + 5 properties + 10 doctests; the full suite ×2 waits for mod's window (pharos's
+timing-sensitive runs), as does geex-verifier's held run.

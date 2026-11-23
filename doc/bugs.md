@@ -13,6 +13,9 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
   the first build of clickable output: after the terminal's writes waited and then recovered,
   the keys typed meanwhile were read in one go, and Esc followed by `t` ran `Alt+T`. Predates that
   branch: any stall that lets input pile up (a loaded machine, a suspended terminal) does it.
+- **Why they piled up:** the terminal's reader (`Geex.TerminalIO`) was waiting for a dirty I/O
+  scheduler too, all ten held by stalled stats (geex-verifier), so nothing was read until one came
+  free.
 - **Cause (observed, the parser's design):** a terminal sends Alt+key as Esc then the key, so the
   parser (`Geex.Input.Parser`) reads an Esc followed at once by a key in the same read as one
   Alt chord; only an Esc alone at the end of a read (or after its timeout) is a plain Esc. Bytes
@@ -32,7 +35,11 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
   `{:exit, 137}`. Not caused by that branch: it doesn't touch `Geex.Shell`'s stop.
 - **Symptom:** `Ctrl-G` (or `stop`) on a `!` started a moment before, on a loaded machine, ends it
   with KILL instead of TERM: the title says "exit 137", and the command gets no chance to clean up.
-- **Likely cause (from the code, not yet reproduced on purpose):** `Geex.Shell.stop_group/2` sends
+- **Seen again** 2026-11-23 by geex-verifier at a LIGHT load (3.6; seed 814068, `+S 2:2`,
+  `--max-cases 2`), and not reproduced by replaying that seed ten times nor by 600 direct
+  `Shell` start/stop cycles (immediately, and after 50 ms; all 143). A load of 3.6 doesn't fit
+  the theory below, so it is unconfirmed: the cause is open.
+- **Suspected cause (from the code, unconfirmed):** `Geex.Shell.stop_group/2` sends
   the TERM from a spawned process that starts `sh -c 'kill -s TERM -- -PID'`, and schedules the
   KILL `@grace_ms` (2 s) after the stop. Starting that `sh` is the slow part on a loaded machine
   (the comment above `stop_group/2` says so); when it takes longer than the grace period, the KILL

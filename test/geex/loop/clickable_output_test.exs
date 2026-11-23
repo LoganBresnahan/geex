@@ -533,4 +533,144 @@ defmodule Geex.Loop.ClickableOutputTest do
       assert Geex.BufferSupervisor.whereis(Path.join(root, "lib/b.ex")) == :error
     end
   end
+
+  # geex-verifier's mutants on rev 2 that only its probes caught: each test below fails with its
+  # mutant (named in the comment).
+  describe "the one resolver, pinned" do
+    defp gated(gate, counter \\ nil) do
+      fn full ->
+        if counter, do: Agent.update(counter, &(&1 + 1))
+        wait_open(gate)
+        Geex.Disk.regular?(full)
+      end
+    end
+
+    defp fresh(opts),
+      do: %{
+        Loop.new_state(120, 30)
+        | tree_shown: false,
+          edits_shown: false,
+          resolver_opts: opts
+      }
+
+    # r01 (answers for any pane accepted), r09 (a new pane keeps the old id).
+    test "an answer for an older pane never lands on the pane shown", %{root: root} do
+      state = editing(root, "notes.txt") |> typed("!echo lib/a.ex:2") |> ran()
+      %{pid: pid} = state.resolver
+      old = state.output.id
+      stale = Output.link(state.output, 0)
+      assert stale
+
+      state = typed(state, "!echo x; echo y") |> ran()
+      assert state.output.id > old and state.resolver.pid == pid
+
+      {:noreply, state} = Loop.handle_info({:geex_links, pid, old, 0, [stale, stale]}, state)
+      refute Output.links?(state.output)
+    end
+
+    # r04: what the resolver learnt about the disk kept across panes.
+    test "a new pane asks the disk again", %{root: root} do
+      state = editing(root, "notes.txt") |> typed("!echo lib/b.ex:1") |> ran()
+      assert Output.link(state.output, 0)
+      File.rm!(Path.join(root, "lib/b.ex"))
+      File.write!(Path.join(root, "lib/new.ex"), "x\n")
+      state = typed(state, "!echo lib/b.ex:2; echo lib/new.ex:1") |> ran()
+      assert Output.link(state.output, 0) == nil
+      assert Output.link(state.output, 1).path == "lib/new.ex"
+    end
+
+    # r07: the resolver's death ignored, so the session never had links again.
+    @tag capture_log: true
+    test "a dead resolver is dropped, and the next pane starts another", %{root: root} do
+      state = editing(root, "notes.txt") |> typed("!echo lib/a.ex:2") |> ran()
+      %{pid: pid, ref: ref} = state.resolver
+      Process.exit(pid, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^pid, :killed} = down, 5_000
+      {:noreply, state} = Loop.handle_info(down, state)
+      assert state.resolver == nil
+
+      state = typed(state, "!echo lib/b.ex:1") |> ran()
+      assert state.resolver.pid != pid
+      assert Output.link(state.output, 0).path == "lib/b.ex"
+    end
+
+    # m15: Alt+N's `:later` branch removed.
+    test "Alt+N while the command runs searches the file but keeps the output as its list",
+         %{root: root} do
+      state = editing(root, "notes.txt")
+      state = %{state | search: %{state.search | query: "find"}}
+      state = typed(state, "!sleep 1; echo lib/a.ex:2")
+      assert state.shell
+      state = %{state | focus: :editor} |> key({:alt, ?n})
+      assert state.search.last == :output
+      assert state.selection != nil and shown() == "notes.txt"
+
+      ran(state) |> key({:alt, ?n})
+      assert shown() == "a.ex" and cursor() == {1, 0}
+    end
+
+    # m18: no new batch sent when an answer comes, so lines that arrived while a batch was out
+    # never got links.
+    test "lines that came while a batch was out are sent when it is answered", %{root: root} do
+      gate = start_supervised!({Agent, fn -> :shut end})
+      state = editing(root, "notes.txt", fresh(regular?: gated(gate)))
+      state = typed(state, "!echo lib/a.ex:1; sleep 0.5; echo lib/b.ex:2") |> ran_only()
+      assert Output.size(state.output) == 2
+      # Only the first line went out; the second waits for its answer.
+      assert state.output.sent == 1
+      Agent.update(gate, fn _ -> :open end)
+      state = linked(state)
+      assert Output.link(state.output, 0).path == "lib/a.ex"
+      assert Output.link(state.output, 1).path == "lib/b.ex"
+    end
+
+    # m22: Enter on a search line the resolver answered "no file" read it again in the loop.
+    test "Enter on a result answered as no file doesn't read it again", %{root: root} do
+      {_, 0} = System.cmd("git", ["-C", root, "init", "-q"])
+      {_, 0} = System.cmd("git", ["-C", root, "add", "-A"])
+      not_a = fn full -> not String.ends_with?(full, "/lib/a.ex") and Geex.Disk.regular?(full) end
+      state = editing(root, "notes.txt", fresh(regular?: not_a))
+      File.write!(Path.join(root, "lib/a.ex"), "one\ndos\n")
+      {_, 0} = System.cmd("git", ["-C", root, "add", "-A"])
+      state = state |> key({:alt, ?Q}) |> type("dos") |> key({:key, :enter}) |> ran()
+      i = Enum.find(0..1, &(Output.line(state.output, &1) =~ "lib/a.ex"))
+      assert Output.answered?(state.output, i) and Output.link(state.output, i) == nil
+
+      state = %{state | focus: :output, output: %{state.output | sel: i}} |> key({:key, :enter})
+      assert state.notice == "no path:line on this line"
+      assert shown() == "notes.txt"
+    end
+
+    # r05: closing the pane announced no new one, so the resolver finished its queued work.
+    test "a closed pane's remaining lines aren't asked about", %{root: root} do
+      gate = start_supervised!({Agent, fn -> :shut end})
+      calls = start_supervised!({Agent, fn -> 0 end}, id: :calls)
+      state = editing(root, "notes.txt", fresh(regular?: gated(gate, calls)))
+      # 400 distinct paths: two chunks, the first held at its first path.
+      state = typed(state, "!seq 1 400 | sed 's|.*|lib/f&.ex:1|'") |> ran_only()
+      %{pid: pid} = state.resolver
+      wait_until(fn -> Agent.get(calls, & &1) == 1 end)
+
+      state = key(state, {:char, "q"})
+      assert state.output == nil
+      Agent.update(gate, fn _ -> :open end)
+      wait_until(fn -> idle?(pid) end)
+      assert Agent.get(calls, & &1) == 200
+    end
+
+    defp idle?(pid) do
+      match?(
+        [status: :waiting, message_queue_len: 0],
+        Process.info(pid, [:status, :message_queue_len])
+      )
+    end
+
+    defp wait_until(f, n \\ 500) do
+      cond do
+        f.() -> :ok
+        n == 0 -> flunk("timed out")
+        true -> Process.sleep(10) && wait_until(f, n - 1)
+      end
+    end
+  end
 end
