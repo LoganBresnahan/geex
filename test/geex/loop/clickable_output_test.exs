@@ -69,7 +69,7 @@ defmodule Geex.Loop.ClickableOutputTest do
 
   defp linked(%{resolver: %{pid: pid}, output: %Output{} = out} = state) do
     if Output.pending?(out) do
-      assert_receive {:geex_links, ^pid, _, _} = msg, 10_000
+      assert_receive {:geex_links, ^pid, _, _, _} = msg, 10_000
       {:noreply, state} = Loop.handle_info(msg, state)
       linked(state)
     else
@@ -215,7 +215,8 @@ defmodule Geex.Loop.ClickableOutputTest do
     test "answers in order, asking about each path once", %{root: root} do
       me = self()
       file? = fn full -> send(me, {:asked, full}) && Geex.Disk.regular?(full) end
-      {pid, ref} = Resolver.start(:show, root, regular?: file?)
+      {pid, ref} = Resolver.start(regular?: file?)
+      Resolver.pane(pid, 3)
 
       lines = [
         "lib/a.ex:2: x",
@@ -225,8 +226,8 @@ defmodule Geex.Loop.ClickableOutputTest do
         "lib/b.ex(2,1): error"
       ]
 
-      Resolver.resolve(pid, 7, lines)
-      assert_receive {:geex_links, ^pid, 7, answers}, 5_000
+      Resolver.resolve(pid, 3, :show, root, 7, lines)
+      assert_receive {:geex_links, ^pid, 3, 7, answers}, 5_000
 
       assert [
                %{path: "lib/a.ex", line: 2, col: nil},
@@ -244,17 +245,53 @@ defmodule Geex.Loop.ClickableOutputTest do
     test "it ends with its owner, and stop/2 ends one held by a disk that never answers",
          %{root: root} do
       owner = spawn(fn -> Process.sleep(:infinity) end)
-      {pid, _ref} = Resolver.start(:show, root, owner: owner)
+      {pid, _ref} = Resolver.start(owner: owner)
       ref = Process.monitor(pid)
       Process.exit(owner, :kill)
       assert_receive {:DOWN, ^ref, :process, ^pid, _}, 5_000
 
       stalled = fn _ -> Process.sleep(:infinity) end
-      {pid, ref} = Resolver.start(:show, root, regular?: stalled)
-      Resolver.resolve(pid, 0, ["lib/a.ex:1"])
+      {pid, ref} = Resolver.start(regular?: stalled)
+      Resolver.resolve(pid, 0, :show, root, 0, ["lib/a.ex:1"])
       watch = Process.monitor(pid)
       Resolver.stop(pid, ref)
       assert_receive {:DOWN, ^watch, :process, ^pid, :killed}, 5_000
+    end
+
+    # A newer pane drops what is queued for an older one, between chunks, and is answered with
+    # its own id; an older pane's batch sent late is never answered.
+    test "a newer pane drops the older pane's work", %{root: root} do
+      gate = start_supervised!({Agent, fn -> :shut end})
+
+      me = self()
+
+      file? = fn full ->
+        send(me, :at_gate)
+        wait_open(gate)
+        Geex.Disk.regular?(full)
+      end
+
+      {pid, ref} = Resolver.start(regular?: file?)
+      Resolver.pane(pid, 1)
+      # 400 lines: two chunks; the first is held at the gate before pane 2 is announced.
+      Resolver.resolve(pid, 1, :show, root, 0, List.duplicate("lib/a.ex:1", 400))
+      assert_receive :at_gate, 5_000
+      Resolver.pane(pid, 2)
+      Resolver.resolve(pid, 2, :show, root, 0, ["lib/b.ex:2"])
+      Resolver.resolve(pid, 1, :show, root, 400, ["lib/a.ex:1"])
+      Agent.update(gate, fn _ -> :open end)
+
+      # The chunk already under way answers (the loop drops it by its id); the rest of pane 1's
+      # work does not.
+      assert_receive {:geex_links, ^pid, 1, 0, first}, 5_000
+      assert length(first) == 200
+      assert_receive {:geex_links, ^pid, 2, 0, [%{path: "lib/b.ex", line: 2}]}, 5_000
+      refute_receive {:geex_links, ^pid, 1, _, _}, 200
+      Resolver.stop(pid, ref)
+    end
+
+    defp wait_open(gate) do
+      if Agent.get(gate, & &1) == :open, do: :ok, else: Process.sleep(5) && wait_open(gate)
     end
 
     defp receive_asked do
@@ -423,7 +460,10 @@ defmodule Geex.Loop.ClickableOutputTest do
   end
 
   describe "a disk that stalls" do
-    test "the loop keeps working, no line is a link, and q stops the held resolver",
+    # geex-verifier's F2: a stat that never returns holds its process's dirty I/O scheduler even
+    # after the process is killed, so one resolver per pane took one more per pane until the
+    # terminal's writes waited. One resolver for the loop's life holds one at most.
+    test "the loop keeps working, no line is a link, and every pane shares the one held resolver",
          %{root: root} do
       stalled = fn _ -> Process.sleep(:infinity) end
 
@@ -440,19 +480,57 @@ defmodule Geex.Loop.ClickableOutputTest do
         |> ran_only()
 
       %{pid: pid} = state.resolver
-      watch = Process.monitor(pid)
-
       assert Output.pending?(state.output)
       refute Output.links?(state.output)
-      refute_receive {:geex_links, ^pid, _, _}, 100
+      refute_receive {:geex_links, ^pid, _, _, _}, 100
 
       # Keys still work: move the highlight, Enter still opens by reading the line itself.
       state = key(state, {:cmd, :up}) |> key({:key, :enter})
       assert shown() == "a.ex" and cursor() == {1, 0}
 
-      state = key(state, {:alt, ?>}) |> key({:char, "q"})
-      assert state.output == nil and state.resolver == nil
-      assert_receive {:DOWN, ^watch, :process, ^pid, :killed}, 5_000
+      # Ten more panes, closed or replaced: still the one resolver, and no other started.
+      before = length(Process.list())
+
+      state =
+        Enum.reduce(1..10, state, fn n, state ->
+          state = typed(state, "!echo lib/a.ex:#{n}") |> ran_only()
+          assert state.resolver.pid == pid
+          if rem(n, 2) == 0, do: key(state, {:alt, ?>}) |> key({:char, "q"}), else: state
+        end)
+
+      assert state.resolver.pid == pid and Process.alive?(pid)
+      assert length(Process.list()) <= before + 2
+    end
+  end
+
+  describe "a stale answer in a project search" do
+    # geex-verifier's F1: the resolver's answer said the file was there; it was deleted after.
+    # Opening it made an empty buffer that a save would write back.
+    test "Alt+N, Enter and a click on a result whose file went say so and open nothing",
+         %{root: root} do
+      {_, 0} = System.cmd("git", ["-C", root, "init", "-q"])
+      {_, 0} = System.cmd("git", ["-C", root, "add", "-A"])
+      state = editing(root, "notes.txt")
+      state = state |> key({:alt, ?Q}) |> type("dos") |> key({:key, :enter}) |> ran()
+      assert Output.link(state.output, 0).path == "lib/b.ex"
+
+      File.rm!(Path.join(root, "lib/b.ex"))
+      buffers = length(Session.buffers())
+
+      state = key(state, {:alt, ?n})
+      assert state.notice == "no such file here: lib/b.ex"
+      assert state.focus == :output
+      state = key(state, {:key, :enter})
+      assert state.notice == "no such file here: lib/b.ex"
+
+      state = repaint(state)
+      {x, y} = drawn_at(Renderer.current(), "lib/b.ex:2")
+      state = click(state, x, y)
+      assert state.notice == "no such file here: lib/b.ex"
+
+      assert length(Session.buffers()) == buffers
+      assert shown() == "notes.txt"
+      assert Geex.BufferSupervisor.whereis(Path.join(root, "lib/b.ex")) == :error
     end
   end
 end

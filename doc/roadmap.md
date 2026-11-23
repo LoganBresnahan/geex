@@ -975,7 +975,8 @@ maintainer, are **FIXED** (2026-11-22, on the `tree-links` branch: a symlinked f
 when opened, one level at a time, ADR-0034's amendment). BUG-26 (one `Alt+N` over a project
 search's results can stat every result line in the key loop; found 2026-11-23 reviewing item 24)
 is **FIXED** (2026-11-23, with item 24: the result lines are resolved off the loop). BUG-27
-(under load, stopping a `!` can KILL it before its TERM lands; seen in a test) is **open**.
+(under load, stopping a `!` can KILL it before its TERM lands; seen in a test) and BUG-28 (keys
+typed during a stall arrive together; Esc then a letter reads as Alt+letter) are **open**.
 
 ---
 

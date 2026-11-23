@@ -7655,3 +7655,36 @@ third full run (output not kept) and five more runs green; 40 runs of the shell,
 and clickable-output files failed once, in `shell_test`'s "`stop` picked in the palette" (exit
 137 for 143): logged as BUG-27, the stop's TERM racing its KILL under load, outside this branch.
 `mix compile --warnings-as-errors --force` clean.
+
+### 2026-11-23 — Clickable output, review fixes: one resolver for the loop, a gone result's file (ADR-0042)
+
+geex-verifier's review of bab7821 (diff 5c2472cc) failed two:
+
+- **F1 (must, a regression, live):** a project search, then a result's file deleted, then Alt+N,
+  Enter or a click opened an empty buffer for it ("the match isn't on line 2 here"), which a save
+  would write back. `open_result` trusted the resolver's answer with no look at the disk (the old
+  `result_target` had looked). Now it looks once for the file opened, as `open_at` does, and
+  says "no such file here"; the line still becomes Alt+N's stepping point. Test: Alt+N, Enter and
+  a click each give the notice, no buffer is opened, the deleted file has none; it fails with the
+  look removed.
+- **F2 (should, live on a FUSE disk whose lookups never answer):** a killed resolver's stat keeps
+  its dirty I/O scheduler until the disk answers, so one resolver per pane took one more per pane;
+  at ten the terminal's writes waited and the TUI froze (it recovered when the disk answered; no
+  process or port leaked). Now one resolver serves the loop's life: panes get ids, batches and
+  answers carry them, a new pane (or a closed one) announces its id and the resolver drops older
+  work between chunks. Tests: the resolver drops a held pane's later chunk and answers the new pane
+  with its id; through the loop, a stalled resolver serves eleven panes (opened, replaced, closed)
+  as one process, keys and Enter still working.
+
+Also from the review: the two failures in geex-verifier's loaded runs (load ~35 on 8 cores) were
+`frame_cost_test.exs`'s typing bound (188 and 199 ms against 150; ~46 ms unloaded on main and the
+branch alike): its comment now says what it measures today (~45 ms) and that an oversubscribed
+machine trips it. The one full-suite failure lost earlier may have been it. BUG-28 logged: keys
+typed during a stall arrive together, and Esc then a letter reads as Alt+letter (the parser's
+design, predating the branch). Everything else in geex-verifier's scope held: the loop live while
+a resolver is held, exact spans (tsc, mix `└─`, Go `./`, wide characters, a tab), no false links,
+BUG-26 traced at no disk call in the loop over 4,000 results, a 3M-line flood with mailboxes at 0,
+stale answers dropped after a search was replaced mid-batch.
+1892 tests + 65 properties + 225 doctests green twice; live via tmux, two `!` panes in a row
+through the one resolver (the second's `lib/b.ex:3:1` underlined, Alt+N opened it at 3:1), log
+clean.

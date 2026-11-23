@@ -43,6 +43,8 @@ defmodule Geex.Loop.Output do
             # `answered` how many, counted from the first, went to the resolver and came back;
             # `links` the answers that name a file, by number; `at` the line `Alt+N` (or Enter, or
             # a click) last opened, nil before any.
+            # `id` the pane's id, given by the loop: the resolver's answers carry it.
+            id: 0,
             dropped: 0,
             sent: 0,
             answered: 0,
@@ -65,6 +67,7 @@ defmodule Geex.Loop.Output do
           max: pos_integer(),
           search: %{query: String.t(), mode: :search_project | :search_all} | nil,
           capped: boolean(),
+          id: non_neg_integer(),
           dropped: non_neg_integer(),
           sent: non_neg_integer(),
           answered: non_neg_integer(),

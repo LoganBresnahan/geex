@@ -77,7 +77,7 @@ defmodule Geex.Loop.ProjectSearchTest do
   # amendment: the output's links are found off the loop).
   defp linked(%{resolver: %{pid: pid}, output: %Output{} = out} = state) do
     if Output.pending?(out) do
-      assert_receive {:geex_links, ^pid, _, _} = msg, 10_000
+      assert_receive {:geex_links, ^pid, _, _, _} = msg, 10_000
       {:noreply, state} = Loop.handle_info(msg, state)
       linked(state)
     else

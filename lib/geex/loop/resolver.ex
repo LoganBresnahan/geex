@@ -3,12 +3,23 @@ defmodule Geex.Loop.Resolver do
   Where each line of the output pane points, found off the key loop
   ([ADR-0042](../../../doc/adr/0042-shell-commands.md)'s 2026-11-23 amendment, [ADR-0035](../../../doc/adr/0035-the-loop-never-waits.md)).
 
-  One process per output pane, started with it and stopped with it. The loop sends it batches of
-  finished lines (`resolve/3`); it reads each line's location and asks the disk whether it names a
-  regular file under the root, then answers `{:geex_links, pid, first, answers}`, one answer per
-  line in order: a `t:Geex.Loop.Output.link/0`, or nil. A stat that never returns (a stalled
-  network disk) holds this process, never the loop: the loop draws, opens and steps by the
-  answers alone, and a line not answered yet is simply not a link.
+  **One process for the loop's life**, not one per pane. The loop sends it batches of finished
+  lines (`resolve/6`), each tagged with the pane they came from; it reads each line's location
+  and asks the disk whether it names a regular file under the root, then answers
+  `{:geex_links, pid, pane, first, answers}`, one answer per line in order: a
+  `t:Geex.Loop.Output.link/0`, or nil. The loop keeps only answers for the pane it shows.
+
+  Why one: a stat that never returns (a stalled network disk) holds its process, and a killed
+  process still holds one of the VM's dirty I/O schedulers until the call returns (10 by
+  default). One resolver per pane, each killed and replaced, took one more with every pane, and
+  with all ten held the terminal's own writes waited (geex-verifier's FUSE probe, 2026-11-23).
+  With one resolver, a stalled disk holds one scheduler at most; the panes opened meanwhile get
+  their links when the disk answers, and nothing else waits: the loop draws, opens and steps by
+  the answers alone, and a line not answered yet is simply not a link.
+
+  A new pane is announced (`pane/2`) before its first batch: work still queued for an older pane
+  is dropped between chunks, and what was learnt about the disk is forgotten (a file may have
+  come or gone since).
 
   - **`:show`** (a `!`, or a `|`'s stderr): the first location the line names, read as Enter
     reads it (`Geex.Shell.Text.location_span/1`).
@@ -27,30 +38,43 @@ defmodule Geex.Loop.Resolver do
 
   @type kind :: :show | :search
 
-  # Answers go back every this many lines, so a long batch shows its links as it goes.
+  # Answers go back every this many lines, so a long batch shows its links as it goes, and a new
+  # pane is noticed between chunks.
   @chunk 200
   # Paths remembered per pane before the memory starts again.
   @memory 10_000
 
   @doc """
-  Start a resolver for a pane of `kind` under `root`, answering `owner` (default the caller):
-  `{pid, monitor}`. `:regular?` replaces `Geex.Disk.regular?/1` (tests: a disk that stalls).
+  Start the resolver, answering `owner` (default the caller): `{pid, monitor}`. `:regular?`
+  replaces `Geex.Disk.regular?/1` (tests: a disk that stalls).
   """
-  @spec start(kind(), String.t(), keyword()) :: {pid(), reference()}
-  def start(kind, root, opts \\ []) when kind in [:show, :search] do
+  @spec start(keyword()) :: {pid(), reference()}
+  def start(opts \\ []) do
     owner = Keyword.get(opts, :owner, self())
     regular? = Keyword.get(opts, :regular?, &Geex.Disk.regular?/1)
-    spawn_monitor(fn -> init(kind, root, owner, regular?) end)
+    spawn_monitor(fn -> init(owner, regular?) end)
   end
 
-  @doc "Ask where `lines`, numbered from `first`, point."
-  @spec resolve(pid(), non_neg_integer(), [String.t()]) :: :ok
-  def resolve(pid, first, lines) do
-    send(pid, {:resolve, first, lines})
+  @doc "Pane `id` is the one shown from now on (ids only grow): older panes' work is dropped."
+  @spec pane(pid(), non_neg_integer()) :: :ok
+  def pane(pid, id) do
+    send(pid, {:pane, id})
     :ok
   end
 
-  @doc "Stop it now; any answer still on its way is the caller's to ignore."
+  @doc "Ask where `lines` of pane `id` (a `kind` pane under `root`), numbered from `first`, point."
+  @spec resolve(pid(), non_neg_integer(), kind(), String.t(), non_neg_integer(), [String.t()]) ::
+          :ok
+  def resolve(pid, id, kind, root, first, lines) when kind in [:show, :search] do
+    send(pid, {:resolve, id, kind, root, first, lines})
+    :ok
+  end
+
+  @doc """
+  Stop it now; any answer still on its way is the caller's to ignore. A process held by a disk
+  that never answers ends at once, but the call holding it keeps its dirty I/O scheduler until
+  the disk answers.
+  """
   @spec stop(pid(), reference()) :: :ok
   def stop(pid, ref) do
     Process.demonitor(ref, [:flush])
@@ -101,25 +125,19 @@ defmodule Geex.Loop.Resolver do
     end)
   end
 
-  defp init(kind, root, owner, regular?) do
+  defp init(owner, regular?) do
     Process.monitor(owner)
-    loop(%{kind: kind, root: root, owner: owner, regular?: regular?, known: %{}})
+    loop(%{owner: owner, regular?: regular?, pane: -1, known: %{}})
   end
 
   defp loop(st) do
     receive do
-      {:resolve, first, lines} ->
-        st =
-          lines
-          |> Enum.chunk_every(@chunk)
-          |> Enum.reduce({st, first}, fn chunk, {st, n} ->
-            {answers, st} = Enum.map_reduce(chunk, st, &answer/2)
-            send(st.owner, {:geex_links, self(), n, answers})
-            {st, n + length(chunk)}
-          end)
-          |> elem(0)
+      {:pane, id} ->
+        loop(shown(st, id))
 
-        loop(st)
+      {:resolve, id, kind, root, first, lines} ->
+        st = shown(st, id)
+        loop(if id == st.pane, do: batch(st, {id, kind, root}, first, lines), else: st)
 
       {:DOWN, _ref, :process, owner, _reason} when owner == st.owner ->
         :ok
@@ -129,12 +147,40 @@ defmodule Geex.Loop.Resolver do
     end
   end
 
+  # A batch, a chunk at a time; between chunks a newer pane ends it.
+  defp batch(st, _job, _first, []), do: st
+
+  defp batch(st, {id, kind, root} = job, first, lines) do
+    st = newer_panes(st)
+
+    if st.pane == id do
+      {chunk, rest} = Enum.split(lines, @chunk)
+      {answers, st} = Enum.map_reduce(chunk, st, &answer(&1, kind, root, &2))
+      send(st.owner, {:geex_links, self(), id, first, answers})
+      batch(st, job, first + length(chunk), rest)
+    else
+      st
+    end
+  end
+
+  defp newer_panes(st) do
+    receive do
+      {:pane, id} -> newer_panes(shown(st, id))
+    after
+      0 -> st
+    end
+  end
+
+  # A newer pane: what was learnt about the disk is forgotten.
+  defp shown(st, id) when id > st.pane, do: %{st | pane: id, known: %{}}
+  defp shown(st, _id), do: st
+
   # One line's answer, asking the disk about each path once.
-  defp answer(line, st) do
+  defp answer(line, kind, root, st) do
     st = if map_size(st.known) > @memory, do: %{st | known: %{}}, else: st
 
-    Enum.reduce_while(readings(st.kind, line), {nil, st}, fn {at, len, path, l, col}, {_, st} ->
-      case FileOps.resolve(path, st.root) do
+    Enum.reduce_while(readings(kind, line), {nil, st}, fn {at, len, path, l, col}, {_, st} ->
+      case FileOps.resolve(path, root) do
         {:ok, full} ->
           {file?, st} = known(st, full)
 

@@ -222,10 +222,16 @@ clickable. Half of it is here: Enter on a highlighted line opens the `path:line[
 
 **As built (2026-11-23).**
 
-- `Geex.Loop.Resolver`: one process per pane (`spawn_monitor`, monitoring the loop, so it ends
-  with it), started by `put_output/2` and killed when the pane closes or a new one replaces it; an
-  answer from an old one falls through `handle_info`'s catch-all. It asks `Geex.Disk.regular?/1`
-  about each path once per pane, and answers every 200 lines.
+- `Geex.Loop.Resolver`: **one process for the loop's life** (`spawn_monitor`, monitoring the
+  loop, so it ends with it), started with the first pane. Each pane gets an id (`pane_seq`); its
+  batches and answers carry it, a new pane (or closing one) announces a new id, and the resolver
+  drops work queued for an older pane between its 200-line chunks. The loop keeps only answers
+  for the pane it shows. It asks `Geex.Disk.regular?/1` about each path once per pane. Not one
+  per pane: geex-verifier's FUSE probe (a disk whose lookups never answer) showed a killed
+  process's stat keeps its dirty I/O scheduler until the disk answers, so per-pane resolvers took
+  one more of the VM's ten with each pane, and at ten the terminal's writes waited and the screen
+  froze. One resolver holds one at most; panes opened meanwhile get their links when the disk
+  answers.
 - `Geex.Loop.Output` numbers lines from the first ever added (`dropped`), so a trim never shifts
   an answer onto the wrong line, and keeps one batch in flight (`take_unsent/1`): what waits on a
   stalled resolver is at most the pane's lines, never the command's whole output. `next_link/2`
@@ -234,7 +240,10 @@ clickable. Half of it is here: Enter on a highlighted line opens the `path:line[
   either form) feeds the resolver; `location/1` is it without the span.
 - Enter on a line the resolver hasn't answered still opens it by reading the line, as before (one
   look at the disk, for the file opened); a click lands only on a drawn link, so on an answered
-  line. Every open looks once at the disk, so a link whose file went says "no such file here".
+  line. Every open, a `!` line's or a project search result's, looks once at the disk, so a link
+  whose file went says "no such file here" and opens nothing (a result opened unchecked made an
+  empty buffer that a save would write back: geex-verifier's F1). The line still becomes the one
+  `Alt+N` steps on from, so a gone file is passed, not stuck on.
 - `Alt+N` with no link yet while more may come (the command runs, or lines wait on the resolver)
   searches the file but keeps the output as the list `Alt+N` steps; with none to come it gives
   `Alt+N` back to the file's matches.

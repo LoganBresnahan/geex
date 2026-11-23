@@ -7,6 +7,23 @@ cause, the recommended fix, and what was ruled out. When one is fixed, move it t
 
 ---
 
+## BUG-28 — Keys typed while the screen was stalled arrive together, and Esc then a letter reads as Alt+letter
+
+- **Status:** open. Seen 2026-11-23 by geex-verifier, on a disk made to stall (a FUSE stub) with
+  the first build of clickable output: after the terminal's writes waited and then recovered,
+  the keys typed meanwhile were read in one go, and Esc followed by `t` ran `Alt+T`. Predates that
+  branch: any stall that lets input pile up (a loaded machine, a suspended terminal) does it.
+- **Cause (observed, the parser's design):** a terminal sends Alt+key as Esc then the key, so the
+  parser (`Geex.Input.Parser`) reads an Esc followed at once by a key in the same read as one
+  Alt chord; only an Esc alone at the end of a read (or after its timeout) is a plain Esc. Bytes
+  that arrive together after a stall look exactly like an Alt chord.
+- **Recommended fix:** none certain. The terminal gives no timing in the bytes themselves; the
+  Kitty keyboard protocol (ADR-0026's capability-gated extras) reports Esc and Alt as distinct
+  keys where the terminal supports it. Worth weighing only if it bites outside a stall.
+- **Ruled out:** a loss of bytes: every key arrived, in order.
+
+---
+
 ## BUG-27 — Under load, stopping a `!` can KILL it before its TERM lands (exit 137, not 143)
 
 - **Status:** open. Seen 2026-11-23 while building clickable output: `shell_test.exs`'s "`stop`
