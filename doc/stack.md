@@ -11,7 +11,7 @@ whether agents get pharos's post-edit diagnostics hook or a plain compiler hook 
 weighing what it does for agents beyond the hook (its navigation tools). For geex it is
 decided: **geex's integration with pharos is parked** (the maintainer, 2026-11-23). geex runs a
 project's own checks in its output pane instead, each `file:line` there a link to the line
-(geex ADR-0042's amendment of 2026-11-23; built, on main, not yet released). Nothing else in the
+(geex ADR-0042's amendment of 2026-11-23; released in geex 0.8.0). Nothing else in the
 stack depends on pharos: every rule below holds with pharos gone, and geex runs without it
 (rule 8).
 
@@ -88,7 +88,7 @@ the repos. The other two repos link here.
 |---|---|---|---|---|
 | agent (Claude Code) | pharos | MCP, stdio → shared daemon | code questions; previews; `apply_workspace_edit` | built |
 | geex | pharos | MCP, stdio → shared daemon | definition, references, hover | parked (the maintainer, 2026-11-23); [geex#2](https://github.com/LoganBresnahan/geex/issues/2) closed as not planned |
-| geex | pharos | the `pharos diagnostics --json` CLI → shared daemon | diagnostics after a save, as one of the user's own checks (geex ADR-0055 §9); runs only if the user's config names it | parked with geex ADR-0055 (the maintainer, 2026-11-23); geex runs a project's checks in its output pane instead (geex ADR-0042, links built in its amendment of 2026-11-23; on main, not yet released) |
+| geex | pharos | the `pharos diagnostics --json` CLI → shared daemon | diagnostics after a save, as one of the user's own checks (geex ADR-0055 §9); runs only if the user's config names it | parked with geex ADR-0055 (the maintainer, 2026-11-23); geex runs a project's checks in its output pane instead (geex ADR-0042, links built in its amendment of 2026-11-23; released in geex 0.8.0) |
 | pharos | geex | MCP notifications (resource subscriptions) | "diagnostics for this file changed" | parked with [geex#2](https://github.com/LoganBresnahan/geex/issues/2): [pharos#5](https://github.com/LoganBresnahan/pharos-mcp/issues/5) |
 | captAInHook | geex | the `geex-attest.sh` payload → loopback `POST /attest` | who wrote a file, by hash | built for Write/Edit/MultiEdit/NotebookEdit; Bash changes credited "while": built and live ([geex#3](https://github.com/LoganBresnahan/geex/issues/3), geex ADR-0032; its `pre-tool-use` event registered 2026-11-19); pharos writes: [geex#1](https://github.com/LoganBresnahan/geex/issues/1) |
 | captAInHook | pharos | a payload → `pharos diagnostics` CLI | the touched files' diagnostics, back to the agent | built for the trial (pharos ADR-040, [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6)); in use only if the trial picks it |
@@ -134,7 +134,7 @@ ADR-0019 and its 2026-11-18 addendum,
 geex's own search (`search`, `search-project`, `search-all`), which covers most of "where is
 this used", and runs a project's checks (`tsc`, `mix compile`) with `!` in geex's output pane
 (geex ADR-0042), where each `file:line` is a link to the line (ADR-0042's amendment of
-2026-11-23; built, on main, not yet released). Making pharos the only source of geex's
+2026-11-23; released in geex 0.8.0). Making pharos the only source of geex's
 diagnostics was weighed and set aside: it answers only the files it is asked about, and Elixir
 through next-ls can't serve it yet (pharos #59–#62). What follows is the shape the integration
 would take if it is picked up again.

@@ -7761,3 +7761,43 @@ tree_sitter_wasm clean at its pin);
 `GEEX_PROPERTY_RUNS=10000 mix test --only property` green (65 properties, seed 633683, 262 s,
 geex-verifier). Not yet: the local `GEEX_RELEASE=1` build and `rel/smoke.sh --version 0.8.0`
 (after the commit, before the tag), the v0.8.0 tag's release run and post-release smoke.
+
+### 2026-11-23 — 0.8.0 published, smoke green; the maintainer's install (ADR-0041)
+
+At the maintainer's word ("do it", to geex-mod), geex-mod ran the release the entry above
+prepared: committed c49d824, tagged `v0.8.0` ("geex 0.8.0") on it, and pushed main and the tag.
+
+- **Before the tag.** The entry above's local `GEEX_RELEASE=1` build can't run here: a release
+  build enforces the native-library check, which only `rel/build-runtime.sh`'s OTP passes, and
+  this machine's OTP (mise's, erts 16.1) needs glibc 2.38 and links libtinfo, libz, libstdc++ and
+  libcrypto (`Mix.Tasks.Geex.Deploy`'s moduledoc says as much). In its place: a plain
+  `MIX_ENV=prod mix release` of c49d824 (`0.8.0+c49d8246.89a87236`: the trim enforced, the native
+  check a note) and `rel/smoke.sh` on it, every check green (the install and its version, the
+  payload's link, an unknown option exits 2, `geex install json` from the catalog, `geex
+  highlight`, a `!` command's output and `q`, `!vim` refused, the file in tmux and Ctrl-X, no
+  watcher left by a SIGKILL, `self prune`, the uninstall). Two leftovers had to be cleared first,
+  both from building twice by hand, not from the release: `_build/prod/rel/geex` held earlier
+  releases' `start.script` (the trim expects one; `mix geex.deploy` removes the directory), and
+  `_build/prod/lib/geex/ebin/geex.app` kept `vsn "0.8.0"` from the refused `GEEX_RELEASE=1`
+  compile, so install.sh read the wrong version.
+- **The release.** The release run (45321655101, 16m02s) built all four targets, published six
+  assets, and its smoke jobs installed the release from the public URL and ran it on
+  ubuntu-22.04, ubuntu-24.04, ubuntu-22.04-arm, ubuntu-24.04-arm, macos-15 and macos-15-intel,
+  all green; `ci` on c49d824 green (45321650737). `v0.8.0` is the latest release, and its notes
+  link `CHANGELOG.md` at the tag (the file is there).
+- **The maintainer's install**, at their word: `geex self update` installed 0.8.0 from the
+  release (`versions/0.8.0`; `previous` is `0.7.0+466d4ff0.89a87236`; `0.7.0+b31d68f9` pruned; the
+  payload's link moved to 0.8.0's `integrations/captainhook/geex-attest.sh`). Live, through a
+  private tmux socket with a scratch `XDG_STATE_HOME` and a scratch repository: `geex --version`
+  says `geex 0.8.0`, `--frob` exits 2, `geex highlight` colours JSON; `geex a.txt` shows the file,
+  and typing then Ctrl-O saved it; `!printf "a.txt:3\n"` drew `a.txt:3` underlined in the output
+  pane, and `Alt+N` moved the cursor to 3:1; the discovery file was there while it ran and gone
+  after Ctrl-X; the log says embedded mode, with no `terminating` line and no crash dump; `geex
+  notes.txt` (holding `IO.puts("x")`) opened it without printing `x`; a bare `geex` shows the
+  tree and a scratch buffer; after Ctrl-X the shell's prompt is back (the cursor shown, the
+  alternate screen off) and takes a command.
+
+Not checked: a mouse click on a link in the installed program; an agent's edits credited by the
+payload in a real Claude Code session on 0.8.0 (live on 0.7.0+466d4ff0, and the attestation code
+and payload are unchanged since 466d4ff); the arm and macOS installs beyond the release's smoke
+jobs.
