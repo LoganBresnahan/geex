@@ -41,7 +41,7 @@ the repos. The other two repos link here.
    [pharos#3](https://github.com/LoganBresnahan/pharos-mcp/issues/3)), and tells a server
    that doesn't watch the disk about changes to files it never opened, from its own scan of
    the tree ([pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10), pharos
-   ADR-043; on pharos main, not yet released).
+   ADR-043; released in pharos 0.4.0).
 2. **Messages carry questions, answers and claims.** "Where is this defined" and its answer;
    "these diagnostics changed"; "agent X wrote this file, from hash A to hash B" (an
    attestation). Never file content as a side channel.
@@ -93,7 +93,7 @@ the repos. The other two repos link here.
 | captAInHook | geex | the `geex-attest.sh` payload → loopback `POST /attest` | who wrote a file, by hash | built for Write/Edit/MultiEdit/NotebookEdit; Bash changes credited "while": built and live ([geex#3](https://github.com/LoganBresnahan/geex/issues/3), geex ADR-0032; its `pre-tool-use` event registered 2026-11-19); pharos writes: [geex#1](https://github.com/LoganBresnahan/geex/issues/1) |
 | captAInHook | pharos | a payload → `pharos diagnostics` CLI | the touched files' diagnostics, back to the agent | built for the trial (pharos ADR-040, [pharos#6](https://github.com/LoganBresnahan/pharos-mcp/issues/6)); in use only if the trial picks it |
 | agent | geex | geex's MCP server | the frozen edit/view tools | built, frozen (ADR-0032); rarely the right door |
-| everyone | everyone | the disk | content | built (pharos re-syncs open documents, ADR-038); servers that don't watch the disk are told of changes from pharos's scan: on pharos main, not yet released ([pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10)) |
+| everyone | everyone | the disk | content | built (pharos re-syncs open documents, ADR-038); servers that don't watch the disk are told of changes from pharos's scan: released in pharos 0.4.0 ([pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10)) |
 
 Which repo ships a payload: the tool that *consumes* the event. geex ships `geex-attest.sh`
 (it consumes attestations); pharos ships its diagnostics payload
@@ -124,7 +124,7 @@ ADR-0019 and its 2026-11-18 addendum,
    block at Stop (its ADR-0016). A payload that blocks must stop blocking on its own, since the
    host never caps the loop, and must not register fail-closed.
 6. pharos sees the new file on the next question: it re-syncs what it holds open (pharos
-   ADR-038). From pharos main (not yet released), a server that doesn't watch the disk also
+   ADR-038). From pharos 0.4.0, a server that doesn't watch the disk also
    hears about changes to files pharos never opened, from pharos's scan of the tree
    ([pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10), pharos ADR-043).
 
@@ -196,7 +196,7 @@ runs the agent makes itself, tokens and wall time.
 **The language:** TypeScript; the contract is written for it, pinned to TypeScript 6.0.3.
 TypeScript's freshness fix has landed
 ([pharos#13](https://github.com/LoganBresnahan/pharos-mcp/issues/13), pharos ADR-039). The
-Rust blockers are fixed on pharos main, not yet released (2026-11-20): rust-analyzer's own
+Rust blockers are fixed in pharos 0.4.0 (released 2026-11-23): rust-analyzer's own
 diagnostics now reach pharos
 ([pharos#8](https://github.com/LoganBresnahan/pharos-mcp/issues/8)), a cold server is ready in
 about 2 s instead of a minute ([pharos#12](https://github.com/LoganBresnahan/pharos-mcp/issues/12)),
@@ -228,10 +228,10 @@ Done:
   [#12](https://github.com/LoganBresnahan/pharos-mcp/issues/12),
   [#30](https://github.com/LoganBresnahan/pharos-mcp/issues/30) and the real-server survey's
   fixes: pharos answers for Rust, Go, Python and the other bundled languages, checked against
-  real servers in CI (on main, 2026-11-20; not yet released).
+  real servers in CI (released in pharos 0.4.0, 2026-11-23).
 - [pharos#10](https://github.com/LoganBresnahan/pharos-mcp/issues/10): servers that don't
   watch the disk (gopls, pyright, jdtls and others) are told of changes to files pharos never
-  opened, from its own scan of the tree (pharos ADR-043; on main, not yet released).
+  opened, from its own scan of the tree (pharos ADR-043; released in pharos 0.4.0).
 
 **Parked**: geex's side by the maintainer's word (2026-11-23, geex ADR-0055's "Parked
 2026-11-23"); the rest until pharos's place for agents is decided:
