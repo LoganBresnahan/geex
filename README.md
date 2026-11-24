@@ -7,7 +7,7 @@ bring-your-own.
 
 It is early, terminal-only, and built for one machine at a time. [doc/README.md](doc/README.md)
 maps the design; [doc/vision.md](doc/vision.md) is the north star; [doc/roadmap.md](doc/roadmap.md)
-says what's built and what's next.
+says what's built and what's next; [CHANGELOG.md](CHANGELOG.md) says what each release changed.
 
 ## Building
 
@@ -53,8 +53,9 @@ geex highlight FILE     # print FILE highlighted, with no editor
 geex --help             # every command
 ```
 
-In the editor, `Ctrl-X` quits. `Alt+Y` opens the settings: languages, themes, every key, and
-general options such as the mouse.
+In the editor, `Ctrl-X` quits (`Ctrl-Q` and `Ctrl-C` too); with unsaved edits, the first quit
+names the files and the second leaves. `Alt+Y` opens the settings: languages, themes, every key,
+and general options such as the mouse.
 
 Files are made, deleted and renamed from the editor. `Alt+M` opens the command line:
 
@@ -73,14 +74,38 @@ The command line also runs shell commands, in the project root:
 |sort                   # pipe the selection through a command and replace it (Alt+Z undoes it)
 ```
 
-In the output pane, Enter on a `path:line` opens the file there, `!` runs the command again and
-`q` closes the pane; `Ctrl-G` stops a command that's running. The command runs without a terminal,
-so a full-screen program (vim, top, ssh) belongs in a terminal split instead. Up and Down in the
-command line bring back what you entered before.
+In the output pane, a `path:line` (or tsc's `path(line,col)`) that names a file is drawn as a
+link: a click on it, or Enter on its line, opens the file there, and `Alt+N` steps through them.
+`!` runs the command again and `q` closes the pane; `Ctrl-G` stops a command that's running. The
+command runs without a terminal, so a full-screen program (vim, top, ssh) belongs in a terminal
+split instead. Up and Down in the command line bring back what you entered before.
 
 Paths are from the project root; an absolute path (`/…`, `~/…`) goes anywhere. In the file tree
 (`Alt+T` shows it, `Alt+<` moves into it), `a` adds a file or directory where the highlight is,
 `d` deletes the highlighted entry (a directory only when it's empty), and `r` renames it.
+
+`Alt+Q` searches the file, selecting the match as you type; `Alt+Shift+Q` searches the project
+(`git grep`, or `grep -r` outside git) into the output pane; `Alt+N` goes to the next match, or
+opens the next result. Then, in the command line:
+
+```text
+replace TEXT            # replace the file search's matches in this file, after a y/n
+replace-all TEXT        # replace the project search's matches in every file it listed, after a y/n
+save-all                # write every file with unsaved changes (replace-all leaves them unsaved)
+```
+
+Each replace is one undo step per file.
+
+## With an agent
+
+Agents edit files the way they always do. When a file geex has open changes on disk, geex marks
+it "behind disk" and leaves your text as it is; `Alt+D`, a click on the mark, or a save takes the
+change into that file's undo history beside your own edits, marked as made outside geex, merged
+with any unsaved edits of yours. With the captAInHook payload registered, each change is credited
+to the agent that made it, each agent session in a colour of its own in the gutter and the edits
+pane; registered on `pre-tool-use` too, a change made by an agent's shell command is credited
+"changed while" that command ran. See
+[doc/install.md](doc/install.md#captainhook-who-wrote-that).
 
 ## Languages and themes
 

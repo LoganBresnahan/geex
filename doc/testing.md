@@ -7724,3 +7724,40 @@ same burners) and frame_cost's typing bound (157 and 167 ms against 150). Its ni
 the merge: the m18 test's stopped `sleep` runner opened its port after the test had removed its
 root, printing "spawn: Could not cd" into the next test; `by_hand/1` now waits for the runner's
 DOWN. clickable_output_test green ×3 with no stray output.
+
+### 2026-11-23 — 0.8.0 (ADR-0041)
+
+At the maintainer's word ("yes 0.8.0", relayed by geex-mod): `@version` 0.8.0, from main at
+6a78b64 with tree_sitter_wasm at the pinned 89a8723. Since 0.7.0:
+- the output pane's locations drawn as links, a click opening one, `Alt+N` stepping them, all
+  resolved off the key loop (item 24, ADR-0042's 2026-11-23 amendment, fixing BUG-26); Enter on
+  tsc's `path(line,col): error` (ADR-0042's 2026-11-13 amendment);
+- `replace`, `replace-all` and `save-all`, one undo step per file (ADR-0053's amendment);
+- each agent session in its own colour; an agent's Bash changes credited "while", and every revert
+  showing what it takes back (ADR-0032's and ADR-0033's amendments);
+- symlinks and dot folders in the file tree, a linked folder listed one level at a time (BUG-24,
+  BUG-25, ADR-0034's amendment);
+- a save off the key loop, a quit waiting for it and naming unsaved edits; the first quit warns
+  and the second leaves; closing the terminal lets a save finish (ADR-0035's amendments, ADR-0036,
+  BUG-20); a stop that hangs on a disk bounded at 10 s (BUG-21); the user's files without OTP's
+  file server, a FIFO never opened (BUG-22);
+- Home and End the top and the bottom, the motion cluster and Delete in the minibuffer (ADR-0049);
+- BUG-16, BUG-18, BUG-19 and BUG-23 fixed too.
+Open and shipped as they are: BUG-27 (stopping a `!` under load can KILL before TERM) and BUG-28
+(keys typed during a stall; Esc then a letter as Alt+letter), kept in bugs.md (no GitHub issues,
+the maintainer's call).
+With it, at the maintainer's ask: a new `CHANGELOG.md` (0.8.0 in full, headline sections back to
+0.3.0 with its patch releases, and a note that the v0.1.0 and v0.2.0 tags hold the catalog), the
+README brought up to date (quitting with unsaved edits, the output pane's links, search and
+replace, "With an agent", the changelog), release.yml's notes linking the changelog at the tag,
+and ADR-0041's amendment (each release commit writes its changelog section); and, at the
+maintainer's yes, CLAUDE.md's docs discipline: a user-visible change adds its line under the
+changelog's `## Unreleased` heading as it lands.
+Before the tag: 1899 tests + 65 properties + 225 doctests green twice on 6a78b64 with the bump
+(geex-verifier, seeds 870335 and 85231, in mod's window), `mix compile --warnings-as-errors
+--force` clean in dev and test (geex-verifier, and here); shipshape clean (geex-verifier: the ADR
+index in sync, links resolving, the invariant greps, `deps.unlock --check-unused`,
+tree_sitter_wasm clean at its pin);
+`GEEX_PROPERTY_RUNS=10000 mix test --only property` green (65 properties, seed 633683, 262 s,
+geex-verifier). Not yet: the local `GEEX_RELEASE=1` build and `rel/smoke.sh --version 0.8.0`
+(after the commit, before the tag), the v0.8.0 tag's release run and post-release smoke.

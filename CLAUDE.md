@@ -177,6 +177,11 @@ inject a stub via `Geex.Reconcile`'s `:start_watcher` option.
   was *not* tested. Append-only; never rewrite past entries.
 - **What's next → [doc/roadmap.md](doc/roadmap.md).** Update the item (and
   "Where we are") in the commit that lands it.
+- **What changed for users → [CHANGELOG.md](CHANGELOG.md).** A user-visible change
+  adds a line under the `## Unreleased` heading above the newest release (starting
+  it if there isn't one) in the commit that lands it; the release commit renames
+  that heading to the version and its date, `## X.Y.Z — YYYY-MM-DD` (ADR-0041's
+  2026-11-23 amendment).
 - **Bugs found but not fixed → [doc/bugs.md](doc/bugs.md)**, with the verified
   root cause; when fixed, move the verification to testing.md.
 - **[doc/notes.md](doc/notes.md)** is design-space exploration and brain-dumps

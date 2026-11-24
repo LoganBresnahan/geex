@@ -4,7 +4,8 @@
   Burrito leaves geex (and pharos), and geex is the first to ship this way. pharos copies the
   recipe, so §8 states it apart from geex. Built and shipped as 0.3.0. Before the tag, the
   release dry run was green on all three targets, and the darwin-arm64 tarball passed
-  `rel/smoke.sh` on the maintainer's M1.
+  `rel/smoke.sh` on the maintainer's M1. **Amended 2026-11-23:** each release commit writes its
+  section of `CHANGELOG.md`, which the release notes link to.
 - **Date:** 2026-10-19
 - **Supersedes:** [ADR-0036](0036-installed-binary.md) §1 (the Burrito wrap), §4 (`mix geex.deploy`)
   and §6 (the Burrito fork). §2 and §3 (the work done inside `Application.start/2`, the orderly
@@ -315,9 +316,22 @@ macos-15, and smoke.yml drops macos-14 (macos-15 was already there). No macOS de
 pinned, so from 0.4.0 the Apple silicon build may need macOS 15, as the Intel build (on
 macos-15-intel) already may; the maintainer chose that over pinning 14 (2026-11-06).
 
+**Amended 2026-11-23 (0.8.0): each release says what changed, in CHANGELOG.md.** The maintainer
+asked for a changelog with the 0.8.0 release; there was none. `CHANGELOG.md`, at the repository's
+root, has a section per release, newest first, written for someone using geex rather than
+building it: what was added and what was fixed, each with the ADR or BUG behind it. Each release
+commit writes its own section (the 0.8.0 commit wrote 0.8.0's in full, and short headline
+sections for 0.7.0 back to 0.3.0, patch releases folded into their minor, and a note that the
+v0.1.0 and v0.2.0 tags hold the catalog, not geex). The release notes `release.yml` publishes
+link to the file at the tag ("What's new"), so they stay one static line. From then on a
+release's section builds up between releases: a user-visible change adds its line under an
+`## Unreleased` heading above the newest release in the commit that lands it, starting the
+heading if there isn't one, and the release commit renames that heading to the version and its
+date, `## X.Y.Z — YYYY-MM-DD` (CLAUDE.md's docs discipline, at the maintainer's word).
+
 ## See
 
-- `rel/build-runtime.sh`, `rel/launcher.sh.eex`, `install.sh`
+- `rel/build-runtime.sh`, `rel/launcher.sh.eex`, `install.sh`, `CHANGELOG.md`
 - `Mix.Tasks.Geex.Deploy` (`trim_release/1`, `package/1`, `native_problems/2`)
 - `Geex.CLI` (`standalone?/0`, `highlight/1`)
 - `.github/workflows/`

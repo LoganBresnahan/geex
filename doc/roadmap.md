@@ -12,8 +12,8 @@ undo, replay, collab, provenance, MCP export, and the dogfood loop all fall out 
 
 ## Where we are
 
-**Current (2026-11-18):** 1808 tests + 62 properties + 212 doctests green, `--warnings-as-errors`
-clean; 0.7.0 is the latest release. **2026-10-18:** geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14); shell commands run from the minibuffer (`!`, `!!`, `|`, item 15); both ship in 0.3.4. From 0.3.5 the captAInHook payload ships in each release, linked at `~/.local/share/geex/integrations/geex-attest.sh` (ADR-0041's amendment). **2026-11-06:** a read-only markdown preview (item 16, [adr/0043](adr/0043-markdown-preview.md)): `Alt+Shift+P` opens a markdown file's rendered preview beside it, re-rendered when the file on disk changes; it needs the `markdown_inline` companion grammar, published in `catalog-v3`. Merged to main after the maintainer's look and released in 0.4.0; 1314 tests + 116 doctests green. **2026-11-09:** property tests with StreamData (item 17, [adr/0044](adr/0044-property-tests-with-stream-data.md)): slice 1 moved six seeded loops over to generated, shrinking cases; slice 2 covered the attestation path and found and fixed BUG-8 (an attestation missed a group's undone hunks); slice 3 covered addressing and the parse round-trip; a verify pass completed BUG-8's fix and strengthened three properties, and found BUG-9, fixed the same day; 1313 tests + 19 properties + 118 doctests green. Later that day, on the branch `editor-comfort`: the maintainer's editor-comfort list (item 18): typing over a selection, `[+]` that follows the text, the output pane's handle, a final newline on save, a scrolling tab bar, `Alt+Y`'s Commands tab, the tab size (fixing BUG-10), resizing from the keyboard, and the last session brought back; 1370 tests + 22 properties + 130 doctests green; merged to main after geex-d3's verify and the maintainer's OK. Then the typing assists (item 19, [adr/0045](adr/0045-typing-assists.md)): pairs closed as you type them (VS Code's rule for stepping over), Enter keeping the indent, an "Indent with" setting, bracketed paste, and BUG-11 (input deaf after a byte that isn't UTF-8) fixed; 1418 tests + 27 properties + 143 doctests green, merged after three geex-d3 passes. All three items released in 0.5.0. **2026-11-11:** keys you can move (item 20,
+**Current (2026-11-23):** 1899 tests + 65 properties + 225 doctests green, `--warnings-as-errors`
+clean; 0.8.0 is the latest release. **2026-10-18:** geex and `tree_sitter_wasm` are Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). In flight: geex ships bare, with grammars and themes from a catalog (item 12 of the command-surface track, [adr/0040](adr/0040-bare-geex-and-the-catalog.md)). geex installs as a local binary: `mix geex.deploy` builds it with Burrito and links `~/.local/bin/geex` ([adr/0036](adr/0036-installed-binary.md)). **2026-10-19:** Burrito is gone; a release is a tarball per target with its own OTP, installed by `install.sh` (`curl … | sh`), and `mix geex.deploy` installs a local build the same way (item 13, [adr/0041](adr/0041-release-without-burrito.md)). Later that day: files are created, deleted and renamed from the TUI, by typed verbs and the tree's `a`/`d`/`r` (item 14); shell commands run from the minibuffer (`!`, `!!`, `|`, item 15); both ship in 0.3.4. From 0.3.5 the captAInHook payload ships in each release, linked at `~/.local/share/geex/integrations/geex-attest.sh` (ADR-0041's amendment). **2026-11-06:** a read-only markdown preview (item 16, [adr/0043](adr/0043-markdown-preview.md)): `Alt+Shift+P` opens a markdown file's rendered preview beside it, re-rendered when the file on disk changes; it needs the `markdown_inline` companion grammar, published in `catalog-v3`. Merged to main after the maintainer's look and released in 0.4.0; 1314 tests + 116 doctests green. **2026-11-09:** property tests with StreamData (item 17, [adr/0044](adr/0044-property-tests-with-stream-data.md)): slice 1 moved six seeded loops over to generated, shrinking cases; slice 2 covered the attestation path and found and fixed BUG-8 (an attestation missed a group's undone hunks); slice 3 covered addressing and the parse round-trip; a verify pass completed BUG-8's fix and strengthened three properties, and found BUG-9, fixed the same day; 1313 tests + 19 properties + 118 doctests green. Later that day, on the branch `editor-comfort`: the maintainer's editor-comfort list (item 18): typing over a selection, `[+]` that follows the text, the output pane's handle, a final newline on save, a scrolling tab bar, `Alt+Y`'s Commands tab, the tab size (fixing BUG-10), resizing from the keyboard, and the last session brought back; 1370 tests + 22 properties + 130 doctests green; merged to main after geex-d3's verify and the maintainer's OK. Then the typing assists (item 19, [adr/0045](adr/0045-typing-assists.md)): pairs closed as you type them (VS Code's rule for stepping over), Enter keeping the indent, an "Indent with" setting, bracketed paste, and BUG-11 (input deaf after a byte that isn't UTF-8) fixed; 1418 tests + 27 properties + 143 doctests green, merged after three geex-d3 passes. All three items released in 0.5.0. **2026-11-11:** keys you can move (item 20,
 [adr/0047](adr/0047-every-key-runs-a-named-command.md)), merged after three mod-verify passes: `Alt+Shift+W/A/S/D`
 stop resizing, and every key runs a named command from one table of bindings, typed in `Alt+M`.
 Then the palette ranks a good name match, then the key the query names, then the loose matches
@@ -48,7 +48,14 @@ warns and the second leaves, and closing the terminal lets a save finish
 ([adr/0036](adr/0036-installed-binary.md)); a stop that hangs on a disk ends within 10 s (BUG-21);
 the user's files go through `Geex.Disk`, without OTP's file server, and a FIFO is never opened
 (BUG-22); BUG-16, BUG-18, BUG-19, BUG-20 and BUG-23 are fixed; each of these branches merged
-after mod-verify's review. Nothing since the 0.7.0 tag is released yet. Since the
+after mod-verify's review. **2026-11-19 to 2026-11-23:** an agent's Bash changes credited "while"
+and every revert showing what it takes back ([adr/0032](adr/0032-listener-first-agent-integration.md)'s
+and [adr/0033](adr/0033-durable-ledger.md)'s amendments); symlinks and dot folders in the file tree,
+a linked folder listed one level at a time (BUG-24, BUG-25,
+[adr/0034](adr/0034-panes-tree-edits-hold.md)'s amendment); checks on save
+([adr/0055](adr/0055-checks-on-save.md)) parked, and in its place the output pane's locations drawn
+as links, a click opening one and `Alt+N` stepping them, resolved off the key loop (item 24,
+[adr/0042](adr/0042-shell-commands.md)'s amendment, fixing BUG-26), each merged after review. Everything since the 0.7.0 tag is released in 0.8.0. Since the
 narrative below: the interactive TUI loop, highlighting, selection + clipboard, undo/redo, the
 minibuffer's typed verbs, grid mode (human + agent halves) and the command palette all shipped.
 **Direction changed on 2026-10-14 ([adr/0032](adr/0032-listener-first-agent-integration.md)):**
@@ -651,7 +658,15 @@ design in [adr/0028](adr/0028-editor-shell-and-minibuffer.md) (shell + parity),
    the next match or result), command names of more than one word hyphenated with an argument
    after a space (ADR-0047's amendment: `search-all needle`, `select-all`), `!!` after a restart
    (ADR-0042's amendment), and the fix for BUG-17 (a long line with an emoji before an invalid
-   byte froze every key, in 0.6.0).
+   byte froze every key, in 0.6.0). **0.8.0** ships the output pane's clickable locations (item
+   24, ADR-0042's 2026-11-23 amendment: links drawn, a click opens one, `Alt+N` steps them; Enter
+   on tsc's `path(line,col)` too), `replace`, `replace-all` and `save-all` (ADR-0053's amendment),
+   each agent session in its own colour and an agent's Bash changes credited "while" (ADR-0032's
+   amendments), every revert showing what it takes back (ADR-0033's amendment), symlinks and dot
+   folders in the file tree (ADR-0034's amendment), a save off the key loop with quit waiting for
+   it, the first quit warning and the second leaving (ADR-0035's amendments), Home and End the top
+   and the bottom (ADR-0049), and the fixes for BUG-16 and BUG-18 to BUG-26. Each release's changes
+   are in [CHANGELOG.md](../CHANGELOG.md) from 0.8.0 (ADR-0041's amendment).
    1. **Goal:** depend on Burrito less, then not at all. Until then, the patched fork
       (`LoganBresnahan/burrito`, fork-only, never upstream) is the stopgap.
    2. **Approach:** plain release tarballs per target, built in GitHub Actions.
@@ -977,6 +992,7 @@ search's results can stat every result line in the key loop; found 2026-11-23 re
 is **FIXED** (2026-11-23, with item 24: the result lines are resolved off the loop). BUG-27
 (under load, stopping a `!` can KILL it before its TERM lands; seen in a test) and BUG-28 (keys
 typed during a stall arrive together; Esc then a letter reads as Alt+letter) are **open**.
+BUG-16 and BUG-18 to BUG-26, fixed since the 0.7.0 tag, are released in 0.8.0.
 
 ---
 

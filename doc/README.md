@@ -11,6 +11,7 @@ If you read one thing, read **[vision.md](vision.md)**.
 |---|---|---|
 | **[vision.md](vision.md)** | The north star — what geex is & is not, the one shared path, the world-vs-brain boundary | First. Always. |
 | **[roadmap.md](roadmap.md)** | Staged plan, v0.1 → v0.5 → beyond (editor core + AI layer) | You want to know what's next / what ships when |
+| **[../CHANGELOG.md](../CHANGELOG.md)** | What each release changed, for someone using geex: added and fixed, with the ADR or BUG behind each ([adr/0041](adr/0041-release-without-burrito.md)'s 2026-11-23 amendment) | You're upgrading, or want to know which release has a feature or a fix |
 | **[mcp-ai-integration.md](mcp-ai-integration.md)** | The detailed AI-layer design: the two directions, transport layers, the MCP server, security, the extension/capability model, testing & dogfooding | You're building or changing the AI layer |
 | **[stack.md](stack.md)** | How geex, pharos and captAInHook work together: each one's role, the rules between them, the connections, the cross-repo work in order | You're changing anything that crosses into pharos or captAInHook |
 | **[stack-trial-hooks.md](stack-trial-hooks.md)** | The pharos trial's contract: the setup every run shares, and the one behaviour the compiler hook and pharos's hook both follow | You're building or running either hook, or the trial |
